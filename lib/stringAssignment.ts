@@ -16,7 +16,8 @@
  *      (`planMicroBranches`, lib/permit/utils/branching.ts: per-model max,
  *      balanced sizes, plane-contiguous walk). The studio used to chunk micros
  *      by `modulesPerString` too (14 on an IQ8+, over its 13 max) while E-1
- *      drew 11/11/10 (Ray, 2026-09-25).
+ *      drew 11/11/10 (Ray, 2026-09-25). Each sub-system is planned with its
+ *      OWN micro, as E-1 plans a hybrid.
  *   4. Assign each panel a per-module device based on topology:
  *        - 'string'    → no per-module device (none)
  *        - 'optimizer' → one optimizer under every module
@@ -31,6 +32,8 @@
 
 import type { PlacedPanel } from '@/types';
 import { planMicroBranches, microMaxPerBranch, type BranchPlanPanel } from '@/lib/permit/utils/branching';
+import { classifyPanel, type SubSystemPanel } from '@/lib/permit/utils/subSystems';
+import { SUB_SYSTEM_KEYS, type SubSystemKey } from '@/lib/system/subSystemEquipment';
 
 export type Topology = 'string' | 'optimizer' | 'micro';
 export type PanelDeviceType = 'optimizer' | 'micro' | 'none';
@@ -82,8 +85,30 @@ export interface StringAssignmentResult {
   deviceType: PanelDeviceType;
   deviceCount: number;       // total optimizers / micros across the system
   modulesPerDevice: number;
-  /** MICRO only — the manufacturer's max micros per AC branch the groups obey. */
+  /** MICRO only — the manufacturer's max micros per AC branch the groups obey
+   *  (on a hybrid planned with different micros, the largest of the subs'). */
   maxPerBranch?: number;
+  /** MICRO only — the micro each sub-system's branches were planned with, in
+   *  roof > ground > fence order (one entry on a single-type design). */
+  microPlans?: MicroSubPlan[];
+}
+
+/** A micro model as the branch planner is given it. */
+export interface MicroPick {
+  id?: string;
+  model?: string | null;
+  manufacturer?: string | null;
+}
+
+/** One sub-system's micro branch plan basis. */
+export interface MicroSubPlan {
+  key: SubSystemKey;
+  id?: string;
+  model: string | null;
+  manufacturer: string | null;
+  maxPerBranch: number;
+  /** Panels in this sub = micros in it (one per module). */
+  panelCount: number;
 }
 
 export interface AssignStringsOptions {
@@ -98,6 +123,12 @@ export interface AssignStringsOptions {
    *  Enphase micros. Falls back to `microModelId`. */
   microModel?: string | null;
   microManufacturer?: string | null;
+  /** MICRO — each sub-system's OWN micro. On a hybrid the plan set plans every
+   *  sub with that sub's recorded inverter (conductorAuthority → one
+   *  planMicroBranches per sub), so 24 fence panels on an IQ8A are 8/8/8 on E-1
+   *  and must not be 12/12 here because the roof runs IQ8+. A key with no
+   *  entry falls back to microModel / microManufacturer. */
+  microBySubSystem?: Partial<Record<SubSystemKey, MicroPick>>;
   /** Manual string-painting overrides: panelId → stringIndex. Applied on top of
    *  the auto serpentine assignment, so the installer can hand-tune any panel. */
   overrides?: Record<string, number>;
@@ -275,6 +306,12 @@ export function branchPlanPanelsOf(panels: PlacedPanel[]): BranchPlanPanel[] {
  * ceil(N / per-model max), balanced sizes, plane-contiguous serpentine walk.
  * Manual paint overrides and `modulesPerString` do not apply — the plan set
  * cannot draw a hand-painted branch, so the studio does not offer one.
+ *
+ * Each sub-system is planned with ITS OWN micro (`microBySubSystem`), as
+ * conductorAuthority plans E-1 / PV-2B: one planMicroBranches per sub, branch
+ * numbers running on roof > ground > fence. With one micro for every sub this
+ * is exactly planMicroBranches' own sub fence over the whole array, so a
+ * single-micro design plans byte-identically to before.
  */
 function assignMicroBranches(
   panels: PlacedPanel[],
@@ -282,15 +319,54 @@ function assignMicroBranches(
   modulesPerDevice: number,
   deviceModelId: string | undefined,
 ): StringAssignmentResult {
-  const model = opts.microModel ?? opts.microModelId ?? null;
-  const manufacturer = opts.microManufacturer ?? null;
-  const plan = planMicroBranches(branchPlanPanelsOf(panels), model, manufacturer);
+  const flat = {
+    id: deviceModelId,
+    model: opts.microModel ?? opts.microModelId ?? null,
+    manufacturer: opts.microManufacturer ?? null,
+  };
+  const microFor = (key: SubSystemKey) => {
+    const m = opts.microBySubSystem?.[key];
+    return m
+      ? { id: m.id ?? flat.id, model: m.model ?? m.id ?? null, manufacturer: m.manufacturer ?? null }
+      : flat;
+  };
+
+  // Partition the PERMIT projection, not the raw panels — planMicroBranches
+  // and conductorAuthority classify the panelPositions payload, which carries
+  // systemType only.
+  const planPanels = branchPlanPanelsOf(panels);
+  const bySub: Record<SubSystemKey, BranchPlanPanel[]> = { roof: [], ground: [], fence: [] };
+  for (const p of planPanels) bySub[classifyPanel(p as unknown as SubSystemPanel)].push(p);
+  const present = SUB_SYSTEM_KEYS.filter(k => bySub[k].length > 0);
+
+  const assign = new Map<string, number>();
+  const sizes: number[] = [];
+  const microPlans: MicroSubPlan[] = [];
+  const modelOfPanel = new Map<string, string | undefined>();
+  const planSub = (key: SubSystemKey, subPanels: BranchPlanPanel[]) => {
+    const m = microFor(key);
+    const plan = planMicroBranches(subPanels, m.model, m.manufacturer);
+    const offset = sizes.length;
+    plan.assign.forEach((bi, id) => { assign.set(id, bi + offset); modelOfPanel.set(id, m.id); });
+    sizes.push(...plan.sizes);
+    microPlans.push({
+      key, id: m.id, model: m.model, manufacturer: m.manufacturer,
+      maxPerBranch: microMaxPerBranch(m.model, m.manufacturer),
+      panelCount: subPanels.length,
+    });
+  };
+  if (present.length <= 1) {
+    // Single-type design: the one call E-1's single-system path makes.
+    planSub(present[0] ?? 'roof', planPanels);
+  } else {
+    for (const key of present) planSub(key, bySub[key]);
+  }
 
   const byPanelId: Record<string, PanelStringMeta> = {};
   const positions = new Map<number, number>();
   const planeOfBranch = new Map<number, string>();
   for (const p of panels) {
-    const bi = plan.assign.get(String(p.id));
+    const bi = assign.get(String(p.id));
     if (bi == null) continue;
     const pos = (positions.get(bi) ?? 0) + 1;
     positions.set(bi, pos);
@@ -303,10 +379,10 @@ function assignMicroBranches(
       positionInString: pos,
       color: stringColor(bi),
       deviceType: 'micro',
-      deviceModelId,
+      deviceModelId: modelOfPanel.get(String(p.id)) ?? deviceModelId,
     };
   }
-  const strings: StringSummary[] = plan.sizes.map((size, bi) => ({
+  const strings: StringSummary[] = sizes.map((size, bi) => ({
     stringIndex: bi,
     stringId: `str-${bi}`,
     label: `Branch ${bi + 1}`,
@@ -322,6 +398,7 @@ function assignMicroBranches(
     deviceType: 'micro',
     deviceCount: panels.length ? Math.ceil(panels.length / modulesPerDevice) : 0,
     modulesPerDevice,
-    maxPerBranch: microMaxPerBranch(model, manufacturer),
+    maxPerBranch: Math.max(...microPlans.map(s => s.maxPerBranch)),
+    microPlans,
   };
 }

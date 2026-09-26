@@ -16,7 +16,7 @@ import {
 // builder + stamp partitioner live in the design→engineering module so the
 // split is testable outside the component.
 import { buildDesignElectricalBlock, presentDesignSubSystemKeys, resolveDesignMicro, resolveStudioMicros } from '@/lib/system/designToEngineering';
-import { toSubSystemKey } from '@/lib/system/subSystemEquipment';
+import { toSubSystemKey, type SubSystemKey } from '@/lib/system/subSystemEquipment';
 import { enrichRoofPlaneWithLECS, longestEdgeBearing } from '@/lib/roofGeometry';
 import { enrichRoofPlaneWith3DFrame } from '@/lib/surfaceGeometry3D';
 import { isHandModelledFace } from '@/lib/3d/laneA';
@@ -825,18 +825,30 @@ export default function DesignStudio({ project, onSave }: Props) {
   // Wave 4A: distinct sub-system keys stamped on the placed panels (membership
   // authority §1.1), fixed roof > ground > fence order. >1 keys = hybrid design
   // — equipment picks then carry a per-sub scope to the canonical store.
-  const presentSubSystemKeys = useMemo(() => presentDesignSubSystemKeys(panels as any), [panels]);
+  // Keyed on the key LIST, not the panels array, so the identity only changes
+  // when a sub appears or goes: resolveStudioMicros hydrates engineering_config
+  // (ensureSubSystemShape warns on a degenerate map) and must not re-run on
+  // every panel edit.
+  const presentSubSystemKeysSig = useMemo(() => presentDesignSubSystemKeys(panels as any).join(','), [panels]);
+  const presentSubSystemKeys = useMemo(
+    () => (presentSubSystemKeysSig ? presentSubSystemKeysSig.split(',') : []) as SubSystemKey[],
+    [presentSubSystemKeysSig],
+  );
   // The micro(s) the branches are PLANNED with — per sub, the micro ENGINEERING
-  // recorded (engineering_config fleet → its §1.1 map → selected_equipment's
-  // mirror), else the studio's micro pick, else the catalogue default. E-1 and
-  // PV-2B plan with the engineered micro, per sub on a hybrid; planning with the
-  // studio's own pick painted an IQ8M job's 34 panels 12/11/11 against E-1's
-  // 9/9/8/8 (Ray, 2026-09-25).
+  // recorded (engineering_config as the engineering page hydrates it: fleet → its
+  // §1.1 map → selected_equipment's mirror), else the studio's micro pick, else
+  // the catalogue default. E-1 and PV-2B plan with the engineered micro, per sub
+  // on a hybrid; planning with the studio's own pick painted an IQ8M job's 34
+  // panels 12/11/11 against E-1's 9/9/8/8 (Ray, 2026-09-25).
   const studioMicros = useMemo(
     () => resolveStudioMicros(
       presentSubSystemKeys.length > 0 ? presentSubSystemKeys : [toSubSystemKey(project.systemType)],
       selectedInverter,
-      { engineeringConfig: project.engineeringConfig, selectedEquipmentSubSystems: project.selectedEquipmentSubSystems },
+      {
+        engineeringConfig: project.engineeringConfig,
+        selectedEquipmentSubSystems: project.selectedEquipmentSubSystems,
+        cadSystemType: project.systemType,
+      },
     ),
     [presentSubSystemKeys, project.systemType, selectedInverter, project.engineeringConfig, project.selectedEquipmentSubSystems],
   );

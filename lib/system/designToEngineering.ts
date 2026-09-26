@@ -13,8 +13,10 @@
 import type { DesignElectrical } from '@/types';
 import type { StringConfig } from '@/lib/system-state';
 import { STRING_INVERTERS, MICROINVERTERS } from '@/lib/equipment-db';
-import { SUB_SYSTEM_KEYS, isSubSystemKey, type SubSystemKey } from '@/lib/system/subSystemEquipment';
-import { classifyPanel, type SubSystemPanel } from '@/lib/permit/utils/subSystems';
+import {
+  SUB_SYSTEM_KEYS, isSubSystemKey, ensureSubSystemShape, type SubSystemKey, type LegacyScalarConfig,
+} from '@/lib/system/subSystemEquipment';
+import { classifyPanel, effectiveInverterSubKey, type SubSystemPanel } from '@/lib/permit/utils/subSystems';
 
 export interface DesignEngineeringHandoff {
   inverterType: 'string' | 'micro' | 'optimizer';
@@ -456,11 +458,11 @@ export function designToPermitInverters(
 }
 
 /**
- * The MICROINVERTER a design plans its AC branches with and records as
- * `microModelId`: the studio's selected inverter when it IS a catalogue micro,
- * otherwise the catalogue default. The studio's pick defaults to a SolarEdge
- * string inverter, which must never become a micro design's model (Ray,
- * 2026-09-25).
+ * The MICROINVERTER a design records as `microModelId`: the studio's selected
+ * inverter when it IS a catalogue micro, otherwise the catalogue default. The
+ * studio's pick defaults to a SolarEdge string inverter, which must never
+ * become a micro design's model (Ray, 2026-09-25). Branches are PLANNED with
+ * resolveStudioMicros below, which puts the engineered micro first.
  */
 export function resolveDesignMicro(
   selected?: { id?: string | null } | null,
@@ -468,4 +470,161 @@ export function resolveDesignMicro(
   const byId = selected?.id ? MICROINVERTERS.find(m => m.id === selected.id) : undefined;
   const pick = byId ?? MICROINVERTERS[0];
   return { id: pick?.id, model: pick?.model ?? null, manufacturer: pick?.manufacturer ?? null };
+}
+
+// ── The micro the studio PLANS its branches with (Ray, 2026-09-25) ──────────
+// The studio planned and labelled micro branches with resolveDesignMicro(its own
+// inverter pick) — IQ8+ at 13/branch unless that pick was a micro — while E-1
+// and PV-2B plan with the ENGINEERED micro, per sub on a hybrid
+// (conductorAuthority → resolveEquipmentBySubSystem). A job engineered on IQ8M
+// (11/branch) painted 34 panels 12/11/11 in the studio and printed 9/9/8/8 on
+// E-1; 24 fence panels on an engineered IQ8A painted 12/12 against 8/8/8.
+//
+// Branch planning ONLY. Nothing below feeds designElectricalToEngineering or
+// designToPermitInverters: the design block still records resolveDesignMicro,
+// so the engineering seed and the permit backfill see exactly what they did.
+
+/** Where the micro a studio sub plans with came from. */
+export type StudioMicroSource = 'engineering' | 'design-pick' | 'catalogue-default';
+
+export interface StudioMicro {
+  key: SubSystemKey;
+  id: string | undefined;
+  model: string | null;
+  manufacturer: string | null;
+  source: StudioMicroSource;
+}
+
+/** The project records an engineered micro lives in, as the project API returns them. */
+export interface EngineeredMicroSources {
+  /** projects.engineering_config (Project.engineeringConfig) — its fleet and §1.1 map. */
+  engineeringConfig?: unknown;
+  /** projects.selected_equipment.subSystems (Project.selectedEquipmentSubSystems). */
+  selectedEquipmentSubSystems?: unknown;
+  /** The project's systemType — the engineering page's `cadSystemType` for the
+   *  hydration below (it passes p.systemType ?? layout.systemType). */
+  cadSystemType?: unknown;
+}
+
+const isCatalogueMicroId = (id: unknown): id is string =>
+  typeof id === 'string' && MICROINVERTERS.some(m => m.id === id);
+
+const asRecord = (v: unknown): Record<string, unknown> | undefined =>
+  v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : undefined;
+
+function mapMicroId(map: unknown, key: SubSystemKey): string | undefined {
+  const id = asRecord(asRecord(map)?.[key])?.inverterId;
+  return isCatalogueMicroId(id) ? id : undefined;
+}
+
+/**
+ * engineering_config as the engineering page HOLDS it when it plans E-1: every
+ * load boundary runs ensureSubSystemShape(raw, { cadSystemType, presentKeys })
+ * (app/engineering/page.tsx hydration), and the page posts the result — its
+ * fleet as system.inverters, its map as project.subSystems. On a hybrid with no
+ * stored map, or a degenerate single 'migration' entry, that fills a map entry
+ * for every present sub from inverters[0], and resolveEquipmentBySubSystem
+ * plans a sub with no tagged fleet on it. Reading the RAW row, the studio
+ * planned that sub with the catalogue default while E-1 printed the fleet's
+ * micro. It also stamps an untagged inverter with the config's systemType
+ * (never its strings' majority tag), which is the tag E-1 then reads.
+ * Undefined / empty configs pass through, as the page leaves them.
+ */
+function hydratedEngineeringConfig(
+  src: EngineeredMicroSources | null | undefined,
+  presentKeys: readonly SubSystemKey[],
+): Record<string, unknown> | undefined {
+  const raw = asRecord(src?.engineeringConfig);
+  if (!raw || Object.keys(raw).length === 0) return raw;
+  try {
+    return asRecord(ensureSubSystemShape(raw as unknown as LegacyScalarConfig, {
+      cadSystemType: typeof src?.cadSystemType === 'string' ? src.cadSystemType : null,
+      presentKeys: [...presentKeys],
+    }));
+  } catch {
+    // A malformed stored row must not take the studio down with it — the raw
+    // row still answers what it can.
+    return raw;
+  }
+}
+
+/** engineeredMicroId over an already-hydrated config. */
+function engineeredMicroIdIn(
+  cfg: Record<string, unknown> | undefined,
+  selectedEquipmentSubSystems: unknown,
+  key: SubSystemKey,
+  hybrid: boolean,
+): string | undefined {
+  const rawFleet = cfg?.inverters;
+  const fleet: unknown[] = Array.isArray(rawFleet) ? rawFleet : [];
+  for (const raw of fleet) {
+    const inv = asRecord(raw);
+    if (!inv) continue;
+    if (hybrid) {
+      const tagView = {
+        subSystemKey: inv.subSystemKey,
+        strings: Array.isArray(inv.strings) ? inv.strings as Array<{ subSystemKey?: unknown }> : [],
+      };
+      // No fallback, as resolveEquipmentBySubSystem: an inverter with no per-sub
+      // signal is not claimed by every sub. Hydration has tagged every one.
+      if (effectiveInverterSubKey(tagView) !== key) continue;
+    }
+    const id = inv.inverterId;
+    if (isCatalogueMicroId(id)) return id;
+  }
+  return mapMicroId(cfg?.subSystems, key) ?? mapMicroId(selectedEquipmentSubSystems, key);
+}
+
+/**
+ * The micro ENGINEERING recorded for one sub-system, read from engineering_config
+ * as the engineering page hydrates it (hydratedEngineeringConfig), in the plan
+ * set's order (resolveEquipmentBySubSystem):
+ *   1. the engineered fleet, engineering_config.inverters — the whole fleet on a
+ *      single-type design (E-1's single-system path reads inverters[0]); on a
+ *      hybrid only the inverters tagged to THIS sub;
+ *   2. engineering_config.subSystems[key].inverterId — the §1.1 map, which owns
+ *      the choice when a stale fleet is discarded, and which the page posts as
+ *      project.subSystems;
+ *   3. selected_equipment.subSystems[key].inverterId — its mirror.
+ * Only a catalogue MICRO counts: a string inverter engineered on a sub is not a
+ * micro for it. Undefined when engineering has recorded none.
+ */
+export function engineeredMicroId(
+  src: EngineeredMicroSources | null | undefined,
+  key: SubSystemKey,
+  presentKeys: readonly SubSystemKey[],
+): string | undefined {
+  return engineeredMicroIdIn(
+    hydratedEngineeringConfig(src, presentKeys), src?.selectedEquipmentSubSystems, key, presentKeys.length > 1,
+  );
+}
+
+/**
+ * The micro each present sub-system's branches are planned with: the ENGINEERED
+ * micro (engineeredMicroId), else the studio's pick when it IS a catalogue
+ * micro, else the catalogue default — with the source, so the studio can say
+ * "catalogue default" instead of passing it off as the engineered value.
+ * `keys` in roof > ground > fence order; an empty list plans a roof.
+ */
+export function resolveStudioMicros(
+  keys: readonly SubSystemKey[],
+  selected?: { id?: string | null } | null,
+  src?: EngineeredMicroSources | null,
+): StudioMicro[] {
+  const list: readonly SubSystemKey[] = keys.length > 0 ? keys : ['roof'];
+  const pick = selected?.id ? MICROINVERTERS.find(m => m.id === selected.id) : undefined;
+  // Hydrate ONCE for every sub — ensureSubSystemShape warns on a degenerate map.
+  const cfg = hydratedEngineeringConfig(src, list);
+  return list.map((key): StudioMicro => {
+    const engId = engineeredMicroIdIn(cfg, src?.selectedEquipmentSubSystems, key, list.length > 1);
+    const eng = engId ? MICROINVERTERS.find(m => m.id === engId) : undefined;
+    const m = eng ?? pick ?? MICROINVERTERS[0];
+    return {
+      key,
+      id: m?.id,
+      model: m?.model ?? null,
+      manufacturer: m?.manufacturer ?? null,
+      source: eng ? 'engineering' : pick ? 'design-pick' : 'catalogue-default',
+    };
+  });
 }
