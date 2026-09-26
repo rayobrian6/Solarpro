@@ -53,10 +53,21 @@ const MODEL  = read('lib', 'design', 'siteDesignModel.ts');
 function autosaveDeps(): string {
   const open = STUDIO.indexOf('}, [panels, roofPlanes, placedObstructions,');
   expect(open, 'the autosave dependency array moved — this guard is blind').toBeGreaterThan(-1);
-  const close = STUDIO.indexOf('saveLayoutToDB]', open);
-  expect(close, 'the autosave effect no longer depends on its own save function')
-    .toBeGreaterThan(open);
-  return STUDIO.slice(open, close + 'saveLayoutToDB]'.length);
+  // 🚨 THE ARRAY IS LOCATED STRUCTURALLY, BY ITS OWN BRACKET.
+  //
+  // A second version anchored the end on the literal `saveLayoutToDB]`, because that
+  // was the last member at the time. It then broke when `saveLayoutToDB` was
+  // correctly REMOVED from the array — it is a `useCallback` over nine values, so
+  // while it was a dependency the debounce restarted on its identity churning rather
+  // than on the design changing, which could starve the save indefinitely. See
+  // tests/autosaveCannotBeStarved.test.ts.
+  //
+  // So this is the SECOND time this helper's end anchor was a member name, and the
+  // second time a correct change destroyed it. Anchoring on the closing bracket
+  // cannot rot that way: the array ends where the array ends.
+  const close = STUDIO.indexOf(']', open);
+  expect(close, 'the dependency array is unterminated').toBeGreaterThan(open);
+  return STUDIO.slice(open, close + 1);
 }
 
 describe('the disposition really is persisted — so a save is worth scheduling', () => {

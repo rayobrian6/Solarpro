@@ -1063,6 +1063,42 @@ export default function DesignStudio({ project, onSave }: Props) {
    *  first save that succeeds. */
   const lastRefusalRef = useRef<string | null>(null);
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  /**
+   * 🚨 HOW LONG THE AUTOSAVE MAY EVER HOLD YOUR WORK.
+   *
+   * The autosave is a 3-second trailing debounce: every dependency change clears
+   * the pending timer and starts a new one. That coalesces a burst of edits, which
+   * is right — but with no ceiling it means a dependency changing faster than the
+   * delay makes the save NEVER happen, and nothing said how long a design could sit
+   * unwritten.
+   *
+   * Observed once in a browser run, and recorded as not reproducible on demand:
+   * geometry reached the 3D engine at t=109.9 s, the save three seconds later
+   * carried 0 panels, and no further POST followed in the next 45 seconds.
+   *
+   * So the debounce may still defer — but never past this deadline, measured from
+   * the FIRST change in the pending burst. Long enough that ordinary typing and
+   * dragging still coalesce; short enough that "unsaved" has a bound.
+   */
+  const AUTOSAVE_MAX_DEFER_MS = 15_000;
+  const autosaveDeadlineRef = useRef<number | null>(null);
+
+  /**
+   * 🚨 THE SAVE FUNCTION, REACHED BY REF SO ITS IDENTITY IS NOT A TRIGGER.
+   *
+   * `saveLayoutToDB` is a `useCallback` over nine values — `stringAssignment`,
+   * `panels`, `topology`, `modulesPerString`, `rackingId`, `selectedPanel`,
+   * `selectedInverter`, `stringOverrides`, `designMicro`. While it was a dependency
+   * of the autosave effect, ANY of those re-creating it restarted the debounce,
+   * which has nothing to do with whether the design changed. That is the starvation
+   * mechanism, and it is removed rather than diagnosed.
+   *
+   * The ref is re-pointed by an effect below, beside the callback's own
+   * declaration — the same pattern this file already uses for `requestDeletion`
+   * and `runShadeAnalysis`, and for the same reason.
+   */
+  const saveLayoutToDBRef = useRef<((panelList: PlacedPanel[]) => void) | null>(null);
   // 🚨 The E2E bridge's `requestDelete` calls through this rather than closing
   // over `requestDeletion`, which is declared much further down the file. It is
   // re-pointed by an effect that sits beside that declaration.
@@ -1444,15 +1480,37 @@ export default function DesignStudio({ project, onSave }: Props) {
     }
   }, [project.id, project.systemType, buildDesignElectrical, site.persistencePayload, site.pendingDestructive, site.clearPendingDestructive]);
 
+  // Re-point the ref the autosave calls through. Declared beside the callback so
+  // the two cannot drift, and written on every identity change so the effect
+  // always invokes the CURRENT save rather than a frozen one.
+  useEffect(() => { saveLayoutToDBRef.current = saveLayoutToDB; }, [saveLayoutToDB]);
+
   // Trigger auto-save 3 seconds after panels OR roof geometry change — but
   // NEVER before the DB restore resolves (see restoreStateRef above; the timer
   // checks at FIRE time so a restore finishing inside the 3s window isn't lost).
   useEffect(() => {
     if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+
+    // 🚨 THE DEADLINE IS SET BY THE FIRST CHANGE IN THE BURST AND SURVIVES THE REST.
+    // Resetting it alongside the debounce would not be a deadline at all.
+    if (autosaveDeadlineRef.current === null) {
+      autosaveDeadlineRef.current = Date.now() + AUTOSAVE_MAX_DEFER_MS;
+    }
+    // Defer by the usual 3 s, or by whatever is left of the deadline if that is
+    // sooner. `Math.max(0, …)` because an overdue deadline must fire now, not in the
+    // past — a negative delay is not an error to setTimeout, it just loses the
+    // clamp's intent.
+    const remaining = autosaveDeadlineRef.current - Date.now();
+    const delay = Math.max(0, Math.min(3000, remaining));
+
     autoSaveTimerRef.current = setTimeout(() => {
       if (restoreStateRef.current !== 'done') return;
-      saveLayoutToDB(panels);
-    }, 3000);
+      // 🚨 CLEARED BEFORE THE SAVE, so the next burst starts its own clock. Left in
+      // place, the first deadline would stay in the past for ever and every later
+      // change would save immediately — the debounce gone, a POST per keystroke.
+      autosaveDeadlineRef.current = null;
+      saveLayoutToDBRef.current?.(panels);
+    }, delay);
     return () => {
       if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
     };
@@ -1502,7 +1560,11 @@ export default function DesignStudio({ project, onSave }: Props) {
   //
   // `archivesSignature` signs the disposition too, which is exactly why this
   // looked finished — the same trap the note above describes for the ledger.
-  }, [panels, roofPlanes, placedObstructions, measurements, fenceLine, fenceHeight, tilt, azimuth, rowSpacing, groundHeight, bifacialOptimized, site.deletionLedger, site.nativeDisposition, saveLayoutToDB]);
+  }, [panels, roofPlanes, placedObstructions, measurements, fenceLine, fenceHeight, tilt, azimuth, rowSpacing, groundHeight, bifacialOptimized, site.deletionLedger, site.nativeDisposition]);
+  // 🚨 `saveLayoutToDB` IS DELIBERATELY ABSENT. It is a useCallback over nine
+  // values, so while it was listed here the debounce restarted whenever its
+  // identity churned — which is not a design change. The effect reaches it
+  // through `saveLayoutToDBRef` instead, so only real edits reset the clock.
 
   // Save on page exit using sendBeacon (reliable even during unload)
   useEffect(() => {
