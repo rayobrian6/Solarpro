@@ -75,12 +75,24 @@ mutation-proved and regression-green):
 | — (own audit) | Chimney keep-out uses the clearance-aware authority on all three paths |
 | Thumbtack/Angi failure corpus | Contractor-performance metrics stopped claiming a confident 0%; `first_contact_at` got its first writer |
 | — (own audit) | **Hand-placed obstructions reach the plan set** |
+| Aurora/OpenSolar — aim-and-click placement | **🚨 GHOST MODULE PREVIEW** — a module follows the cursor, pre-oriented to the face beneath it, through the SAME snapper the commit calls. The top-ranked open item, and Ray's word was that it is contractual. `63f010dd` |
+| — (own audit, found while building it) | A tree within **4.0 m** of a module took the module's click in any direction, and the branch then cleared the selection — modules near a tree were unselectable, unmovable, undeletable. Pick priority is now conditioned on the armed tool. `63f010dd` |
+| Aurora — "help, the name, the way out, same place every mode" | **ESC now closes the dialogs too** — and does not leak through to disarm the 3D tool behind them. A grammar with exceptions is not a grammar. `a56c96b7` |
+| — (own audit) | **The design history is reachable.** Snapshots had been written on every save for months; nothing in the product could reach one, so a bad save had no way back. `ed694bd0` |
+| — (own audit) | Wire-gauge dropdown annotates each option with the voltage drop it would cause, from the same authority the conduit schedule prints. `81f24c71` |
+| — (own audit) | Survey readiness reaches the crew BEFORE the truck leaves. `b8b6cd7f` |
 
-**BACKLOGGED** — multi-option proposals on one link; homeowner permit card;
-handoff gates; survey readiness on-device; offline capture queue; conductor
-dropdown annotated with resulting voltage drop; navigable violations;
-revert-to-inherited; org hierarchy. Each carries files, proof and risk in its
-lane's matrix.
+**BACKLOGGED** — multi-option proposals on one link; homeowner permit card (needs a
+permits table first); handoff gates; offline capture queue; navigable violations;
+revert-to-inherited; org hierarchy. Each carries files, proof and risk in its lane's
+matrix.
+
+🚨 **TWO ENTRIES LEFT THIS LIST BY SHIPPING, and the list had not noticed** —
+"survey readiness on-device" (`b8b6cd7f`) and "conductor dropdown annotated with
+resulting voltage drop" (`81f24c71`). A backlog that still claims a shipped feature is
+the same failure this page exists to make visible, one column over: it makes the
+campaign look less finished than it is, and the next pass would have re-proposed work
+already done. Checked the rest of the list against the log; these were the only two.
 
 **REJECTED, with reasons recorded rather than dropped** — per-option prices in
 `data_json` without re-running the canonical builder (second pricing authority);
