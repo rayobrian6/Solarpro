@@ -68,6 +68,9 @@ import {
   IL_SHINES_PROGRAM_YEAR,
   IL_SHINES_CUSTOMER_OWNED_ADDER,
 } from '../incentives/illinoisShines';
+// The SAME state-incentive authority the two React proposal pages call. Imported
+// here so the server-rendered document and the web page cannot disagree.
+import { calculateIncentives } from '../incentives/stateIncentives';
 import {
   resolveDefaultFencePanelSpec,
   getPanelDegradationRate,
@@ -640,9 +643,29 @@ export function buildCanonicalProposal(
 
   assertTruth(effectiveFinal >= 0, `effectiveFinal is negative: ${effectiveFinal}`, warnings);
 
-  // Financing
-  const financeAprDecimal  = ((input.loanApr ?? 7.99) / 100);
-  const financeTermYears   = input.loanTermYears ?? 25;
+  // ── Financing — NO INVENTED LENDER TERMS ────────────────────────────────────
+  // 🚨 THIS USED TO READ `?? 7.99` / `?? 25`.
+  //
+  // `input.loanApr` and `input.loanTermYears` come from the pricing config, and
+  // NOTHING in the repo ever writes them: `rowToPricingConfig` (lib/db/pricing.ts)
+  // does not map loan_apr / loan_term_years, the pricing route's DEFAULT_CONFIG
+  // does not carry them, and there is no admin field or API parameter for them.
+  // So the fallbacks were not a fallback — they were the resting state, and every
+  // financed proposal announced a 25-yr loan at 7.99% APR that no lender had
+  // quoted and no installer could change, under the words "Subject to lender
+  // approval".
+  //
+  // WHY SUPPRESS RATHER THAN DEFAULT: the alternative is nullable `loan_apr` /
+  // `loan_term_years` / `purchase_mode` columns plus an admin field, which is the
+  // real long-term fix and needs a migration. Until a lender term is actually on
+  // file, showing none is honest and showing an invented one is not — the same
+  // ruling the ITC path already follows for an absent credit.
+  const hasLenderTerms =
+    typeof input.loanApr === 'number' && isFinite(input.loanApr) && input.loanApr > 0 &&
+    typeof input.loanTermYears === 'number' && isFinite(input.loanTermYears) && input.loanTermYears > 0;
+
+  const financeAprDecimal  = hasLenderTerms ? (input.loanApr as number) / 100 : 0;
+  const financeTermYears   = hasLenderTerms ? (input.loanTermYears as number) : 0;
   const financeMonthlyRate = financeAprDecimal / 12;
   const financeTermMonths  = financeTermYears * 12;
   const financeMonthlyPayment = effectiveFinal > 0 && financeMonthlyRate > 0
@@ -732,13 +755,72 @@ export function buildCanonicalProposal(
 
   // ── Canonical Incentives Block (SPEC §2) ─────────────────────────────────
   // When incentives_enabled=false: ALL values zeroed, state_incentives=[].
-  // State incentives also gated by areStateIncentivesEnabled().
+  //
+  // 🚨 `state_incentives` HAD NO WRITER AND `areStateIncentivesEnabled` WAS
+  // IMPORTED BUT NEVER CALLED. The comment below the array said "populated
+  // below" and nothing below it ever did. The consequence was two documents
+  // disagreeing about the same project: in Arizona the web proposal page showed
+  // "Arizona Solar Tax Credit $1,000" and a cash total (it calls
+  // calculateIncentives itself), while the server-rendered document said
+  // "State & Local Incentives — Ask Us" and left the $1,000 out of Total
+  // Potential Value. Same project, same day, two answers.
+  //
+  // The repair is not a second calculator: it is the SAME calculateIncentives
+  // call the two React pages already make, moved here so ONE authority feeds
+  // both surfaces.
+  const stateIncentivesEnabled = areStateIncentivesEnabled();
+
+  // Cash-only state incentives (tax credits, rebates, performance payments) are
+  // the ones that carry a dollar value into `total_incentives`. Non-cash
+  // benefits (property/sales tax exemptions) and REC contracts are real but are
+  // NOT subtracted from the system price, and the REC contract's one true
+  // number is truth25yr.srec_income_25yr — see the srec/trec exclusion below.
+  const CASH_STATE_INCENTIVE_TYPES = new Set([
+    'state_tax_credit', 'state_rebate', 'utility_rebate', 'performance_payment',
+  ]);
+
+  let stateIncentiveRows: CanonicalIncentives['state_incentives'] = [];
+  let stateCashTotal = 0;
+  if (stateIncentivesEnabled && input.stateCode) {
+    try {
+      const _calc = calculateIncentives(
+        input.stateCode.toUpperCase().trim().slice(0, 2),
+        effectiveFinal,
+        resolvedSystemSizeKw,
+        annualKwh,
+        !input.isCommercial,
+        input.systemType,
+      );
+      stateIncentiveRows = _calc.state.map(s => ({
+        name:            s.incentiveName,
+        type:            s.type,
+        // 🚨 NEVER a dollar value for srec/trec. calculateIncentives derives a
+        // generic $/kWh REC estimate; truth25yr.srec_income_25yr is the real
+        // program-year contract value. Both on one proposal was a ~$3,400
+        // disagreement about the same REC contract.
+        estimated_value: (s.type === 'srec' || s.type === 'trec') ? 0 : s.calculatedValue,
+        description:     s.notes ?? s.description ?? '',
+      }));
+      stateCashTotal = _calc.state.reduce(
+        (sum, s) => sum + (CASH_STATE_INCENTIVE_TYPES.has(s.type) ? s.calculatedValue : 0),
+        0,
+      );
+    } catch (err) {
+      // A missing/unknown state must never break a proposal build.
+      warnings.push(`state incentive lookup failed for "${input.stateCode}": ${(err as Error)?.message ?? 'unknown'}`);
+    }
+  }
+
   const incentivesBlock: CanonicalIncentives = {
     itc_percent:        itcRate,
     itc_value:          itcAmount,
-    state_incentives:   [],   // populated below only when state incentives are globally on
-    total_incentives:   itcAmount,
+    state_incentives:   stateIncentiveRows,
+    total_incentives:   itcAmount + stateCashTotal,
     incentives_enabled: itcGloballyEnabled,
+    state_incentives_enabled: stateIncentivesEnabled,
+    // The §25D-repeal disclosure, from the authority — not "Federal incentives
+    // may apply".
+    compliance_message: getIncentivesComplianceMessage(),
   };
 
   // ─── STEP 5: TRUTH25YR ──────────────────────────────────────────────────────
@@ -774,8 +856,10 @@ export function buildCanonicalProposal(
     panelDegradation:     PANEL_DEGRADATION,
   }), fixedMonthlyCharge * 12, escalationRate);
 
-  // Finance-basis projection (for financing cost comparison only)
-  const proj25Finance = input.purchaseMode === 'finance' ? applyFixedCharges(calculate25yrProjection({
+  // Finance-basis projection (for financing cost comparison only).
+  // Requires real lender terms — with none on file financeTotal is 0, and a
+  // 25-yr "financed cost" of $0 is not a comparison, it is a wrong number.
+  const proj25Finance = (input.purchaseMode === 'finance' && hasLenderTerms) ? applyFixedCharges(calculate25yrProjection({
     annualProductionKwh:  annualKwh,
     annualUsageKwh:       input.annualUsageKwh,
     retailRate:           resolvedRate,
@@ -848,6 +932,7 @@ export function buildCanonicalProposal(
     financeApr:           financeAprDecimal,
     financeTermYears,
     financeTermMonths,
+    lenderTermsOnFile:    hasLenderTerms,
     annualEnergyValue,
     year1BillWithoutSolar,
     year1BillWithSolar,

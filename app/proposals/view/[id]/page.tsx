@@ -2,6 +2,7 @@
 import React, { useEffect, useState, Suspense } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import type { Proposal } from '@/types';
+import { hydrateProposalFromRow, parseProposalDataJson } from '@/lib/proposal/hydrateProposalFromRow';
 import {
   Sun, Zap, DollarSign, Leaf, TrendingUp, Shield,
   Star, Phone, Mail, MapPin, Calendar, Award,
@@ -45,6 +46,7 @@ import {
   getSection48eRate,
   getSection48eSafeHarborDeadline,
 } from '@/lib/incentivesConfig';
+import { isSection48eOfferable, formatSection48eDeadline } from '@/lib/incentives/section48eOffer';
 import { useToast } from "@/components/ui/Toast";
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -113,19 +115,16 @@ function ProposalViewInner() {
           setLoading(false);
           return;
         }
-        const dataJson = typeof raw.data_json === 'string' ? JSON.parse(raw.data_json) : (raw.data_json || {});
-        const proposal: Proposal = {
-          id: raw.id,
-          projectId: raw.project_id,
-          title: raw.title || raw.name || 'Solar Proposal',
-          status: raw.status || 'sent',
-          createdAt: raw.created_at,
-          updatedAt: raw.updated_at,
-          project: dataJson.project || null,
-          ...dataJson,
-          // v48.3: DB utility rate from server-side lookup (top-level on raw, not in dataJson)
-          dbUtilityRate: (raw.dbUtilityRate as number | null | undefined) ?? null,
-        };
+        // The mapping — including which of `raw.status` and `data_json.status`
+        // wins, and whether this proposal is already signed — is a pure function
+        // in lib/proposal/hydrateProposalFromRow.ts. It moved out of this
+        // callback because both defects it fixes (status clobbered by the
+        // data_json spread; signed state never seeded) are ordering/omission
+        // bugs that no type check can see, and a test cannot reach them inside a
+        // 2,500-line client component's fetch handler.
+        const dataJson = parseProposalDataJson(raw);
+        const { proposal, signed: signedFlag, signerName: loadedSignerName } =
+          hydrateProposalFromRow(raw);
         console.log('[ProposalView] Loaded proposal data:', {
           proposalId: raw.id,
           hasProjectSnapshot: !!dataJson.project,
@@ -137,6 +136,16 @@ function ProposalViewInner() {
           systemSizeKw: dataJson.project?.layout?.systemSizeKw ?? 0,
         });
         setProposal(proposal);
+
+        // 🚨 A HOMEOWNER WHO SIGNED SAW "Sign & Accept" AGAIN, AND SIGNING AGAIN
+        // WAS REFUSED. Nothing used to seed this state from the loaded row, so a
+        // returning signer saw no banner, no signer name and no date — and got a
+        // hard "Proposal has already been signed." if they retyped their name.
+        // See lib/proposal/hydrateProposalFromRow.ts for the three signals.
+        if (signedFlag) {
+          setAccepted(true);
+          setSignerName(loadedSignerName);
+        }
 
         if (dataJson.pricingSnapshot) {
           setPricingCfg(dataJson.pricingSnapshot);
@@ -516,6 +525,15 @@ function PublicProposalView({
   const financeMonthlyPayment      = cp.financial.solarPaymentMonthly;
   const financeTermYears           = cp.financial.financeTermYears;
   const financeTermMonths          = cp.financial.financeTermMonths;
+  // 🚨 THE APR AND THE MONTHLY PAYMENT ARE SUPPRESSED WHEN NO LENDER QUOTED THEM.
+  // `pricingCfg.loanApr` / `loanTermYears` have NO writer anywhere in the repo —
+  // no column, no admin field, no API parameter — so the old `?? 7.99` / `?? 25`
+  // reads below were not fallbacks, they were the resting state, and this page
+  // told every financed homeowner "25-yr loan at 7.99% APR … Subject to lender
+  // approval" about a loan no lender had quoted. Read the canonical flag; never
+  // read pricingCfg.loanApr again on this page.
+  const lenderTermsOnFile          = cp.financial.lenderTermsOnFile;
+  const financeAprPct              = cp.financial.financeApr * 100;
   const solar_payment_monthly      = cp.financial.solarPaymentMonthly;
   const remaining_utility_monthly  = cp.financial.utilityBillMonthly;
   const total_energy_cost_monthly  = cp.financial.totalMonthlyCost;
@@ -894,7 +912,11 @@ function PublicProposalView({
                     <div className="text-xs text-slate-500 mt-0.5">
                       {/* This value is the SYSTEM PRICE (cash basis) — calling it the
                           "25-yr loan" implied it was the financed total ($137k, not $59k). */}
-                      {purchaseMode === 'finance' ? `System price, financed over ${financeTermYears} yrs` : 'One-time cost'} — you own the energy
+                      {purchaseMode === 'finance'
+                        ? (lenderTermsOnFile
+                            ? `System price, financed over ${financeTermYears} yrs`
+                            : 'System price (cash basis) — no lender terms on file')
+                        : 'One-time cost'} — you own the energy
                     </div>
                   </div>
                 </div>
@@ -1021,7 +1043,14 @@ function PublicProposalView({
                   <div className="text-3xl font-black" style={{ color: primaryColor }}>
                     ${solar_payment_monthly > 0 ? solar_payment_monthly.toLocaleString() : '\u2014'}/mo
                   </div>
-                  <div className="text-xs text-slate-500 mt-1">{financeTermYears}-yr loan at {((pricingCfg?.loanApr ?? 7.99)).toFixed(2)}% APR</div>
+                  {lenderTermsOnFile ? (
+                    <div className="text-xs text-slate-500 mt-1">{financeTermYears}-yr loan at {financeAprPct.toFixed(2)}% APR</div>
+                  ) : (
+                    <div className="text-xs text-amber-400/80 mt-1">
+                      No lender terms on file — ask your installer for a financed quote.
+                      The figures below are the cash basis.
+                    </div>
+                  )}
 
                   {/* Section 2: Monthly cost breakdown — factual, not misleading */}
                   {solar_payment_monthly > 0 && avgMonthlyBillBefore > 0 ? (
@@ -1072,21 +1101,24 @@ function PublicProposalView({
                   ))}
                 </div>
               </div>
-              {/* Loan term comparison table — shows 10/15/25-yr payments side by side */}
-              {effectiveFinal > 0 && purchaseMode === 'finance' ? (
+              {/* Loan term comparison table — shows 10/15/25-yr payments side by side.
+                  Requires real lender terms: every cell here is (effectiveFinal, APR,
+                  term) and with an invented APR the whole table is three invented
+                  payments and three invented totals. */}
+              {effectiveFinal > 0 && purchaseMode === 'finance' && lenderTermsOnFile ? (
                 <div className="mt-3 rounded-xl border border-slate-700/50 overflow-hidden">
                   <div className="px-3 py-2 bg-slate-800/60 border-b border-slate-700/40">
                     <span className="text-xs font-semibold text-slate-300">Loan Term Comparison</span>
-                    <span className="text-xs text-slate-500 ml-2">at {((pricingCfg?.loanApr ?? 7.99)).toFixed(2)}% APR</span>
+                    <span className="text-xs text-slate-500 ml-2">at {financeAprPct.toFixed(2)}% APR</span>
                   </div>
                   <div className="grid grid-cols-3 divide-x divide-slate-700/40">
                     {([10, 15, 25] as const).map(termYears => {
-                      const _r = ((pricingCfg?.loanApr ?? 7.99) / 100) / 12;
+                      const _r = (financeAprPct / 100) / 12;
                       const _n = termYears * 12;
                       const _monthly = effectiveFinal > 0 && _r > 0
                         ? Math.round(effectiveFinal * (_r * Math.pow(1 + _r, _n)) / (Math.pow(1 + _r, _n) - 1))
                         : 0;
-                      const _isCurrent = termYears === (pricingCfg?.loanTermYears ?? 25);
+                      const _isCurrent = termYears === financeTermYears;
                       return (
                         <div key={termYears} className={`px-3 py-2.5 text-center ${_isCurrent ? 'bg-amber-500/10' : ''}`}>
                           <div className={`text-[10px] font-semibold mb-1 ${_isCurrent ? 'text-amber-400' : 'text-slate-500'}`}>
@@ -1230,8 +1262,23 @@ function PublicProposalView({
           </div>
         ) : null}
 
-        {/* §48E Lease/PPA Banner — v47.260 */}
-        {isSection48eEnabled() ? (
+        {/* ── §48E Lease/PPA Banner ────────────────────────────────────────────
+            🚨 IT WAS GATED ON TWO FROZEN `true` LITERALS AND NOTHING ELSE.
+            `isSection48eEnabled()` reads `incentives_enabled && allow_section48e`
+            from GLOBAL_INCENTIVES_CONFIG — both hardcoded true — so every
+            homeowner on every share link, cash or loan, any state, was urged to
+            "Act Before July 4, 2026" for a deadline that has passed, and
+            promised a 30% federal tax credit passed through via a lease or PPA
+            this product cannot model or quote. That was the last path by which a
+            30% federal credit reached a residential homeowner's proposal, and it
+            arrived as PROSE, which is why the numeric ITC guards never caught it.
+
+            `isSection48eOfferable` requires a genuine lease/PPA finance type AND
+            an unexpired safe-harbor deadline. No lease/PPA product exists in this
+            codebase (`purchaseMode` is only 'finance' | 'cash'), so today this is
+            false everywhere and the banner does not render — which is the honest
+            state. See lib/incentives/section48eOffer.ts. */}
+        {isSection48eOfferable({ financeType: (proj as any)?.financeType }) ? (
           <div className="proposal-sec card p-5 border border-amber-500/30 bg-amber-500/5" data-block-id="section48e-banner">
             <div className="flex items-start gap-3">
               <div className="mt-0.5 flex-shrink-0">
@@ -1241,7 +1288,7 @@ function PublicProposalView({
               </div>
               <div className="flex-1">
                 <h3 className="text-sm font-black text-white mb-1">
-                  $0-Down Lease &amp; PPA Options Available — Act Before July 4, 2026
+                  $0-Down Lease &amp; PPA Options Available — Act Before {formatSection48eDeadline()}
                 </h3>
                 <p className="text-xs text-slate-300 leading-relaxed mb-3">
                   Under federal §48E, solar companies that own the system can still claim
@@ -1271,7 +1318,7 @@ function PublicProposalView({
                 <div className="flex items-center gap-2 p-2 rounded-lg bg-red-500/10 border border-red-500/20">
                   <span className="text-xs font-black text-red-400">⚡ Deadline:</span>
                   <span className="text-xs text-slate-300">
-                    Construction must begin by <span className="font-bold text-white">July 4, 2026</span> for the
+                    Construction must begin by <span className="font-bold text-white">{formatSection48eDeadline()}</span> for the
                     full {getSection48eRate()}% §48E credit — ask your installer to lock in your savings now.
                   </span>
                 </div>
@@ -1832,9 +1879,9 @@ function PublicProposalView({
                   value: energyOffset > 0 ? `~${energyOffset}% of annual usage` : 'Not calculated',
                   note: 'Estimated annual production vs. usage',
                 },
-                ...(purchaseMode === 'finance' ? [{
+                ...(purchaseMode === 'finance' && lenderTermsOnFile ? [{
                   label: 'Loan Terms',
-                  value: `${financeTermYears} yr @ ${((pricingCfg?.loanApr ?? 7.99)).toFixed(2)}% APR`,
+                  value: `${financeTermYears} yr @ ${financeAprPct.toFixed(2)}% APR`,
                   note: 'Subject to lender approval',
                 }] : []),
                 {
@@ -1911,7 +1958,15 @@ function PublicProposalView({
                 <div className="text-xs text-slate-400 mt-1">{resolvedPanelWattage}W per panel</div>
               ) : null}
               <div className="text-xs text-emerald-400 mt-2 flex items-center gap-1">
-                <CheckCircle size={10} /> 25-yr product warranty
+                {/* 🚨 "25-yr product warranty" WAS UNCONDITIONAL, with a green
+                    check beside it, on the document the homeowner is SIGNING —
+                    including for modules whose real product warranty is 12 years,
+                    and when no panel is selected at all (beneath the placeholder
+                    "High-efficiency solar panels"). Read the snapshot; only claim
+                    a term when one is known, exactly as the inverter card does. */}
+                <CheckCircle size={10} /> {(proj as any)?.selectedPanel?.warranty
+                  ? `${(proj as any).selectedPanel.warranty}-yr product warranty`
+                  : 'Manufacturer warranty'}
               </div>
             </div>
 
@@ -1962,7 +2017,10 @@ function PublicProposalView({
                 <div className="text-xs text-slate-400 mt-1">{equipment.racking.tiltRange}</div>
               ) : null}
               <div className="text-xs text-emerald-400 mt-2 flex items-center gap-1">
-                <CheckCircle size={10} /> {equipment.racking?.warranty || '25-yr structural warranty'}
+                {/* Same defect: the `|| '25-yr structural warranty'` fallback
+                    asserted a 25-year structural term for racking nobody had
+                    specified. No term on file means no term claimed. */}
+                <CheckCircle size={10} /> {equipment.racking?.warranty || 'Manufacturer warranty'}
               </div>
             </div>
           </div>

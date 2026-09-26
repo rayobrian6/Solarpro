@@ -134,6 +134,51 @@ describe('🚨 the read layer cannot hand a repealed rate downstream', () => {
         .not.toMatch(/hypothetical future bill/);
     }
   });
+
+  // ── The UI around the arithmetic ────────────────────────────────────────────
+  // 🚨 THE NUMBERS WERE FIXED AND THE SCREEN STILL PROMISED THE CREDIT.
+  //
+  // Everything above proves no residential ITC DOLLAR reaches a quote, and it
+  // held: three adversarial passes could not break it. The damage had moved to
+  // the surface. The proposals toolbar carried a green "✓ ITC: On" badge, and
+  // pressing it opened a dialog asserting the homeowner gets "a 30% Investment
+  // Tax Credit" worth "~30% of net cost".
+  //
+  // A rep can promise $9,000 on a $30,000 system on the strength of a badge, and
+  // because flipping the toggle changed NOTHING in the rendered document
+  // (itcRate 0, itcAmount $0, netCost = gross), the claim was undiscoverable
+  // from the screen. A guard on the arithmetic alone does not cover a sales
+  // conversation.
+  //
+  // The stripped-source scan and the rest of the surface work (the customer
+  // card, the §48E prose banner, the warranty claims) live in
+  // tests/proposalUiMakesNoUnbackedClaim.test.ts,
+  // tests/cashFlowCardAnnouncesNoAbsentCredit.component.test.tsx and
+  // tests/section48eBannerIsNotAFrozenTrue.test.ts. These two assertions are
+  // kept HERE, on the raw source, because this is the file a future reader opens
+  // when they ask "is the repealed credit really gone?".
+  it('🚨 the proposals page no longer shows an "ITC: On" badge', () => {
+    // Raw source, comments included, DELIBERATELY: the removal is documented in
+    // a comment that has to name the label, so this must be the one assertion
+    // that tolerates it — and it does, because the comment writes the label
+    // inside double quotes ("ITC: On") while the JSX rendered it bare.
+    const raw = readFileSync(join(ROOT, 'app', 'proposals', 'page.tsx'), 'utf8');
+    expect(raw, 'the rep still sees a two-state ITC toggle for a repealed credit')
+      .not.toMatch(/>\s*ITC:\s*On\b/);
+  });
+
+  it('🚨 no surface in the proposal flow promises a "30% Investment Tax Credit"', () => {
+    for (const f of [
+      ['app', 'proposals', 'page.tsx'],
+      ['app', 'proposals', 'view', '[id]', 'page.tsx'],
+      ['components', 'proposal', 'CashFlowStoryCard.tsx'],
+      ['lib', 'proposal', 'renderProposalHTML.ts'],
+    ] as const) {
+      const src = stripComments(readFileSync(join(ROOT, ...f), 'utf8'));
+      expect(src, `${f.join('/')} still promises a 30% Investment Tax Credit`)
+        .not.toContain('30% Investment Tax Credit');
+    }
+  });
 });
 
 describe('the arithmetic that reaches the customer', () => {

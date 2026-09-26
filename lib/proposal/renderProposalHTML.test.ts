@@ -323,10 +323,22 @@ describe('renderProposalHTML()', () => {
   });
 
   it('shows ITC amount when itcRate > 0', () => {
+    // 🚨 THIS FIXTURE USED TO SAY `itcRate: 0.30`, AND THAT IS WHY THE RENDERER
+    // BUG SURVIVED REVIEW.
+    //
+    // `CanonicalFinancial.itcRate` is a PERCENT — its own doc comment says
+    // "Federal ITC rate (%)", and buildCanonicalProposal assigns 30, never 0.30.
+    // The renderer formatted it as `fmtPct(f.itcRate * 100)`, so a decimal
+    // fixture made the assertion pass while the shipped value of 30 would have
+    // printed "3000%". A test written against the wrong unit is not coverage: it
+    // pins the defect in place and fails when the defect is fixed.
+    //
+    // (The `financeApr` row four lines below it in the renderer IS a decimal,
+    // which is what made the mistake look right to everyone who read it.)
     const cpWithItc = makeCP({
       financial: {
         ...makeCP().financial,
-        itcRate: 0.30,
+        itcRate: 30,
         itcAmount: 8400,
         netCost: 19600,
       },
@@ -334,6 +346,8 @@ describe('renderProposalHTML()', () => {
     const html = renderProposalHTML(cpWithItc, makeProposal());
     expect(html).toContain('8,400');   // ITC dollar amount
     expect(html).toContain('30%');     // ITC rate display
+    expect(html, 'the rate is being multiplied by 100 a second time')
+      .not.toContain('3000%');
   });
 
   it('does not show ITC section when itcRate is 0', () => {

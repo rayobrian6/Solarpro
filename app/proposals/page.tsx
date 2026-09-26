@@ -58,9 +58,11 @@ import {
   GLOBAL_INCENTIVES_CONFIG,
   getIncentivesComplianceMessage,
   getIncentivesDebugLabel,
+  isItcEnabled,
   isSection48eEnabled,
   getSection48eRate,
 } from '@/lib/incentivesConfig';
+import { isSection48eOfferable, formatSection48eDeadline } from '@/lib/incentives/section48eOffer';
 import { UtilityRateGraph } from '@/components/proposal/UtilityRateGraph';
 import { UtilityCostProjectionChart } from '@/components/proposal/UtilityCostProjectionChart';
 
@@ -1559,6 +1561,16 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
   const financeMonthlyPayment = cp.financial.solarPaymentMonthly;
   const avgMonthlyBillBefore  = cp.financial.currentMonthlyBill;
   const financeUnderBill      = financeMonthlyPayment > 0 && financeMonthlyPayment <= avgMonthlyBillBefore * 1.10;
+  // 🚨 THE APR AND THE MONTHLY PAYMENT ARE SUPPRESSED WHEN NO LENDER QUOTED THEM.
+  // `pricingCfg.loanApr` / `loanTermYears` have NO writer anywhere in the repo —
+  // `rowToPricingConfig` does not map loan_apr/loan_term_years, DEFAULT_CONFIG does
+  // not carry them, and there is no admin field. The old `?? 7.99` / `?? 25` reads
+  // on this page were therefore the resting state, not a fallback: every financed
+  // proposal quoted "25-yr loan at 7.99% APR … Subject to lender approval" for a
+  // loan nobody had quoted and no installer could correct. Read the canonical flag;
+  // never read pricingCfg.loanApr again on this page.
+  const lenderTermsOnFile     = cp.financial.lenderTermsOnFile;
+  const financeAprPct         = cp.financial.financeApr * 100;
 
 
   // Energy savings only — from canonical pipeline
@@ -1764,14 +1776,43 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
             </div>
           ) : null}
           <button onClick={() => window.print()} className="btn-secondary btn-sm hidden md:flex"><Printer size={13} /> Print</button>
-          {/* ITC toggle — right in toolbar so it works from any navigation path */}
-          <button
-            onClick={() => handleToggleNoItc(!noItc)}
-            title={noItc ? 'ITC hidden — click to show' : 'ITC shown — click to hide'}
-            className={`btn-sm hidden md:flex items-center gap-1.5 font-medium transition-all ${noItc ? 'btn-ghost text-red-400 hover:text-red-300' : 'btn-ghost text-emerald-400 hover:text-emerald-300'}`}
-          >
-            <span className="text-xs">{noItc ? <><XCircle size={11} className="inline -mt-px mr-0.5" /> ITC: Off</> : <><CheckCircle size={11} className="inline -mt-px mr-0.5" /> ITC: On</>}</span>
-          </button>
+          {/* ── ITC control ──────────────────────────────────────────────────────
+              🚨 THIS WAS A TWO-STATE TOGGLE FOR A CREDIT THAT CANNOT EXIST.
+              Every rep saw a green "ITC: On" badge here, and pressing it opened a
+              dialog asserting the homeowner gets a 30% Investment Tax Credit worth
+              ~30% of net cost. Both claims are false for EVERY residential
+              proposal: §25D was repealed by P.L. 119-21 for expenditures after
+              2025-12-31, so the rendered document carries itcRate 0, itcAmount $0
+              and netCost = gross. A rep could verbally promise a $9,000 credit on
+              a $30,000 system on the strength of this badge, and flipping it
+              changed nothing in the document — so the lie was undiscoverable from
+              the screen.
+
+              The per-project `noItc` suppressor is still wired into the pipeline
+              (buildCanonicalProposal reads it) and still matters when §25D or a
+              commercial §48E credit is genuinely live. It just must not be
+              presented as an on/off state while the authority says the credit does
+              not exist. When the authority says it is off, this is a STATEMENT,
+              not a control. */}
+          {isItcEnabled() ? (
+            <button
+              onClick={() => handleToggleNoItc(!noItc)}
+              title={noItc ? 'Federal credit hidden — click to show' : 'Federal credit shown — click to hide'}
+              className={`btn-sm hidden md:flex items-center gap-1.5 font-medium transition-all ${noItc ? 'btn-ghost text-red-400 hover:text-red-300' : 'btn-ghost text-emerald-400 hover:text-emerald-300'}`}
+            >
+              <span className="text-xs">{noItc
+                ? <><XCircle size={11} className="inline -mt-px mr-0.5" /> Federal credit: hidden</>
+                : <><CheckCircle size={11} className="inline -mt-px mr-0.5" /> Federal credit: shown</>}</span>
+            </button>
+          ) : (
+            <span
+              className="btn-sm hidden md:flex items-center gap-1.5 text-xs text-slate-500 cursor-default"
+              title="P.L. 119-21 repealed the residential credit for expenditures after 2025-12-31. There is nothing to toggle."
+            >
+              <Info size={11} className="inline -mt-px mr-0.5" />
+              Federal residential ITC: repealed (P.L. 119-21)
+            </span>
+          )}
           <button onClick={() => setShowOverrides((v: boolean) => !v)} className="btn-ghost btn-sm hidden md:flex text-slate-500 hover:text-slate-300" title="Sales Rep Controls">
             <Settings size={13} />
           </button>
@@ -1779,29 +1820,41 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
       </div>
 
 
-      {/* QW-8: ITC Toggle Confirmation Modal */}
-      {showItcConfirm ? (
+      {/* ── Suppress-federal-credit confirmation ─────────────────────────────
+          🚨 THE PROSE THAT USED TO BE HERE QUOTED A HARD 30%: "The 30%
+          Investment Tax Credit is a significant financial benefit for the
+          homeowner" and "Removing ITC will increase the net cost by ~30%".
+          Neither number came from the proposal — the document it described
+          carries itcAmount $0 — and both were shown on every residential
+          project. Deleted, not softened: a hardcoded rate in customer-facing
+          copy is the exact defect class that survived the numeric repairs.
+
+          The dialog is reachable only when the authority says a federal credit
+          is live, and it now describes what it actually does (suppress display
+          of whatever credit the canonical pipeline computed) without naming a
+          rate. */}
+      {isItcEnabled() && showItcConfirm ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
           <div className="bg-slate-800 border border-slate-600 rounded-2xl p-6 max-w-md mx-4 shadow-2xl">
-            <h3 className="text-lg font-bold text-white mb-2">Remove Federal ITC?</h3>
-            <p className="text-sm text-slate-300 mb-1">
-              The 30% Investment Tax Credit is a significant financial benefit for the homeowner.
-            </p>
-            <p className="text-sm text-red-400 font-medium mb-4">
-              Removing ITC will increase the net cost by ~30% and may reduce close rate.
+            <h3 className="text-lg font-bold text-white mb-2">Hide the federal credit on this proposal?</h3>
+            <p className="text-sm text-slate-300 mb-4">
+              The federal credit line will be removed from this proposal and the net
+              cost will rise by the credit amount the pipeline computed for this
+              project. Use this when the client has no federal tax liability to
+              offset.
             </p>
             <div className="flex gap-3 justify-end">
               <button
                 onClick={() => setShowItcConfirm(false)}
                 className="px-4 py-2 rounded-lg bg-slate-700 text-slate-300 text-sm font-medium hover:bg-slate-600"
               >
-                Keep ITC
+                Keep it
               </button>
               <button
                 onClick={confirmItcToggle}
                 className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-medium hover:bg-red-500"
               >
-                Remove ITC
+                Hide it
               </button>
             </div>
           </div>
@@ -1942,7 +1995,11 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
                     </div>
                     <div className="text-xs text-slate-500 mt-0.5">
                       {/* Mirrors view page: cash-basis price, not the financed total. */}
-                      {purchaseMode === 'finance' ? `System price, financed over ${financeTermYears} yrs` : 'One-time cost'} — you own the energy
+                      {purchaseMode === 'finance'
+                        ? (lenderTermsOnFile
+                            ? `System price, financed over ${financeTermYears} yrs`
+                            : 'System price (cash basis) — no lender terms on file')
+                        : 'One-time cost'} — you own the energy
                     </div>
                   </div>
                 </div>
@@ -2072,7 +2129,14 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
                   <div className="text-3xl font-black" style={{ color: primaryColor }}>
                     ${solar_payment_monthly > 0 ? solar_payment_monthly.toLocaleString() : '\u2014'}/mo
                   </div>
-                  <div className="text-xs text-slate-500 mt-1">{financeTermYears}-yr loan at {((pricingCfg?.loanApr ?? 7.99)).toFixed(2)}% APR</div>
+                  {lenderTermsOnFile ? (
+                    <div className="text-xs text-slate-500 mt-1">{financeTermYears}-yr loan at {financeAprPct.toFixed(2)}% APR</div>
+                  ) : (
+                    <div className="text-xs text-amber-400/80 mt-1">
+                      No lender terms on file — nothing in this product records an APR
+                      or term, so no payment is quoted. The figures below are the cash basis.
+                    </div>
+                  )}
 
                   {/* Section 2: Monthly cost breakdown — factual, not misleading */}
                   {solar_payment_monthly > 0 && avgMonthlyBillBefore > 0 ? (
@@ -2123,21 +2187,24 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
                   ))}
                 </div>
               </div>
-              {/* Loan term comparison table — shows 10/15/25-yr payments side by side */}
-              {effectiveFinal > 0 && purchaseMode === 'finance' ? (
+              {/* Loan term comparison table — shows 10/15/25-yr payments side by side.
+                  Requires real lender terms: every cell is (effectiveFinal, APR, term),
+                  so with an invented APR the table is three invented payments and three
+                  invented totals. */}
+              {effectiveFinal > 0 && purchaseMode === 'finance' && lenderTermsOnFile ? (
                 <div className="mt-3 rounded-xl border border-slate-700/50 overflow-hidden">
                   <div className="px-3 py-2 bg-slate-800/60 border-b border-slate-700/40">
                     <span className="text-xs font-semibold text-slate-300">Loan Term Comparison</span>
-                    <span className="text-xs text-slate-500 ml-2">at {((pricingCfg?.loanApr ?? 7.99)).toFixed(2)}% APR</span>
+                    <span className="text-xs text-slate-500 ml-2">at {financeAprPct.toFixed(2)}% APR</span>
                   </div>
                   <div className="grid grid-cols-3 divide-x divide-slate-700/40">
                     {([10, 15, 25] as const).map(termYears => {
-                      const _r = ((pricingCfg?.loanApr ?? 7.99) / 100) / 12;
+                      const _r = (financeAprPct / 100) / 12;
                       const _n = termYears * 12;
                       const _monthly = effectiveFinal > 0 && _r > 0
                         ? Math.round(effectiveFinal * (_r * Math.pow(1 + _r, _n)) / (Math.pow(1 + _r, _n) - 1))
                         : 0;
-                      const _isCurrent = termYears === (pricingCfg?.loanTermYears ?? 25);
+                      const _isCurrent = termYears === financeTermYears;
                       return (
                         <div key={termYears} className={`px-3 py-2.5 text-center ${_isCurrent ? 'bg-amber-500/10' : ''}`}>
                           <div className={`text-[10px] font-semibold mb-1 ${_isCurrent ? 'text-amber-400' : 'text-slate-500'}`}>
@@ -2241,9 +2308,30 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
                     <div className="text-xs font-bold flex-shrink-0 text-blue-400 text-right">
                       {inc.type === 'property_tax_exemption' || inc.type === 'sales_tax_exemption'
                         ? 'Exempt'
-                        : inc.calculatedValue > 0
-                          ? `~$${Math.round(inc.calculatedValue).toLocaleString()}`
-                          : 'Eligible'}
+                        // 🚨 ONE SREC NUMBER, AND IT IS THE CANONICAL ONE.
+                        // This card printed `inc.calculatedValue` — the incentive
+                        // catalog's generic $/kWh REC estimate — while the SREC
+                        // section on the SAME screen printed
+                        // cp.policy.srecSummary, which quotes
+                        // truth25yr.srec_income_25yr (program-year REC price ×
+                        // this system's contracted production, 50%-upfront
+                        // schedule). On one Illinois proposal that was "$20,400"
+                        // in the SREC section and "~$16,970" here: a ~$3,400
+                        // disagreement about the same REC contract in the same
+                        // document. The Download button screenshots this DOM, so
+                        // it shipped in the PDF the rep emailed, and the
+                        // canonical figure also drives the 25-yr headline and
+                        // break-even year — so the smaller card made the payback
+                        // look unsupported.
+                        // The homeowner share view already resolved this the same
+                        // way; this page had not.
+                        : (inc.type === 'srec' || inc.type === 'trec') && (cp.truth25yr.srec_income_25yr ?? 0) > 0
+                          ? `~$${Math.round(cp.truth25yr.srec_income_25yr).toLocaleString()} contract`
+                          : (inc.type === 'srec' || inc.type === 'trec')
+                            ? 'See REC contract'
+                            : inc.calculatedValue > 0
+                              ? `~$${Math.round(inc.calculatedValue).toLocaleString()}`
+                              : 'Eligible'}
                     </div>
                   </div>
                 </div>
@@ -2252,8 +2340,14 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
           </div>
         ) : null}
 
-        {/* §48E Lease/PPA Banner — v47.260 */}
-        {isSection48eEnabled() ? (
+        {/* ── §48E Lease/PPA Banner ────────────────────────────────────────────
+            Same defect as the homeowner share view: gated on `isSection48eEnabled()`
+            alone, which is two frozen `true` literals in GLOBAL_INCENTIVES_CONFIG
+            and nothing about this project, this product or today's date. A rep who
+            reads this banner repeats it to the customer, so the installer-facing
+            copy is a customer-facing claim one step removed.
+            See lib/incentives/section48eOffer.ts for the three conditions. */}
+        {isSection48eOfferable({ financeType: (proj as any)?.financeType }) ? (
           <div className="proposal-sec card p-5 border border-amber-500/30 bg-amber-500/5" data-block-id="section48e-banner">
             <div className="flex items-start gap-3">
               <div className="mt-0.5 flex-shrink-0">
@@ -2263,7 +2357,7 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
               </div>
               <div className="flex-1">
                 <h3 className="text-sm font-black text-white mb-1">
-                  $0-Down Lease &amp; PPA Options Available — Act Before July 4, 2026
+                  $0-Down Lease &amp; PPA Options Available — Act Before {formatSection48eDeadline()}
                 </h3>
                 <p className="text-xs text-slate-300 leading-relaxed mb-3">
                   Under federal §48E, solar companies that own the system can still claim
@@ -2283,7 +2377,7 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
                 <div className="flex items-center gap-2 p-2 rounded-lg bg-red-500/10 border border-red-500/20">
                   <span className="text-xs font-black text-red-400"><Zap size={11} className="inline -mt-px mr-0.5" /> Deadline:</span>
                   <span className="text-xs text-slate-300">
-                    Construction must begin by <span className="font-bold text-white">July 4, 2026</span> for full {getSection48eRate()}% §48E credit.
+                    Construction must begin by <span className="font-bold text-white">{formatSection48eDeadline()}</span> for full {getSection48eRate()}% §48E credit.
                   </span>
                 </div>
               </div>
@@ -2823,9 +2917,9 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
                   value: energyOffset > 0 ? `~${energyOffset}% of annual usage` : 'Not calculated',
                   note: 'Estimated annual production vs. usage',
                 },
-                ...(purchaseMode === 'finance' ? [{
+                ...(purchaseMode === 'finance' && lenderTermsOnFile ? [{
                   label: 'Loan Terms',
-                  value: `${financeTermYears} yr @ ${((pricingCfg?.loanApr ?? 7.99)).toFixed(2)}% APR`,
+                  value: `${financeTermYears} yr @ ${financeAprPct.toFixed(2)}% APR`,
                   note: 'Subject to lender approval',
                 }] : []),
                 {
@@ -2902,7 +2996,14 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
                 <div className="text-xs text-slate-400 mt-1">{resolvedPanelWattage}W per panel</div>
               ) : null}
               <div className="text-xs text-emerald-400 mt-2 flex items-center gap-1">
-                <CheckCircle size={10} /> 25-yr product warranty
+                {/* 🚨 "25-yr product warranty" WAS UNCONDITIONAL — asserted with a
+                    green check for modules whose real product warranty is 12 years,
+                    and when no panel is selected at all (beneath the placeholder
+                    "High-efficiency solar panels"). Read the snapshot; only claim a
+                    term when one is known, exactly as the inverter card does. */}
+                <CheckCircle size={10} /> {(proj as any)?.selectedPanel?.warranty
+                  ? `${(proj as any).selectedPanel.warranty}-yr product warranty`
+                  : 'Manufacturer warranty'}
               </div>
             </div>
 
@@ -2951,7 +3052,9 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
                 <div className="text-xs text-slate-400 mt-1">{equipment.racking.tiltRange}</div>
               ) : null}
               <div className="text-xs text-emerald-400 mt-2 flex items-center gap-1">
-                <CheckCircle size={10} /> {equipment.racking?.warranty || '25-yr structural warranty'}
+                {/* Same defect: the `|| '25-yr structural warranty'` fallback asserted
+                    a 25-year structural term for racking nobody had specified. */}
+                <CheckCircle size={10} /> {equipment.racking?.warranty || 'Manufacturer warranty'}
               </div>
             </div>
           </div>

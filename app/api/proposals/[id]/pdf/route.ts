@@ -23,6 +23,7 @@ import { getDbReady, isValidUUID, handleRouteDbError } from '@/lib/db-neon';
 import { buildCanonicalProposal } from '@/lib/proposal/buildCanonicalProposal';
 import { resolveActualAnnualBill, resolveMonthlyUsageHistory } from '@/lib/proposal/resolveActualBill';
 import { renderProposalHTML, ProposalBranding } from '@/lib/proposal/renderProposalHTML';
+import { resolveProposalSystemType } from '@/lib/proposalSystemType';
 import { generatePdfFromHtml } from '@/lib/pdf/generatePdf';
 import type { Proposal } from '@/types';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
@@ -59,7 +60,10 @@ async function loadProposal(id: string, req: NextRequest): Promise<Proposal | nu
     id:              row.id         as string,
     projectId:       row.project_id as string,
     project:         snapshotProject,
-    status:          (dataJson.status as Proposal['status']) || 'draft',
+    // The `status` COLUMN is the authority — see rowToProposal in
+    // app/api/proposals/route.ts. Reading data_json.status alone reported a
+    // signed contract as 'draft'.
+    status:          (row.status as Proposal['status']) ?? (dataJson.status as Proposal['status']) ?? 'draft',
     title:           (dataJson.title as string) || (row.name as string) || 'Solar Proposal',
     preparedBy:      (dataJson.preparedBy as string) || 'SolarPro Design Team',
     preparedDate:    (dataJson.preparedDate as string) || (row.created_at as string),
@@ -163,8 +167,32 @@ async function handleRequest(req: NextRequest, context: RouteContext): Promise<N
         : layoutSystemSizeKw > 0 ? Math.ceil(layoutSystemSizeKw / 0.44) : 0;
       const _extractState = (addr?: string) => { if (!addr) return ''; const m = addr.match(/\b([A-Z]{2})\s+\d{5}/i) || addr.match(/,\s*([A-Z]{2})\s*$/i); return m ? m[1].toUpperCase() : ''; };
       const projectStateCode = ((proj as any).stateCode || client?.state || _extractState((proj as any).address || client?.address || '') || '').toUpperCase().trim().slice(0, 2);
-      const systemType = (proj as any).systemType || 'roof';
+      // 🚨 `(proj as any).systemType || 'roof'` LABELLED FENCE AND GROUND JOBS
+      // "Roof Mount" AND PRICED THEM AT THE ROOF $/W.
+      //
+      // `projects.system_type` is frequently null — the mount type lives on the
+      // panels — and both React proposal pages have always resolved it through
+      // resolveProposalSystemType (panels → layout.systemType → project.systemType
+      // → project-name hint). This route used the raw column, so a fence/ground/
+      // carport project with a null column was priced at the roof rate, degraded
+      // at the roof rate for 25 years, and labelled Roof Mount in the PDF.
+      //
+      // It also broke the system SIZE: buildCanonicalProposal injects the default
+      // Sol Fence module when systemType is 'fence' and no panel is selected, so a
+      // fence project mis-resolved as 'roof' got wattage 0 and a different system
+      // size from the page. One resolver, one answer.
+      const systemType = resolveProposalSystemType({
+        panels:           layout?.panels,
+        layoutSystemType: layout?.systemType,
+        projSystemType:   (proj as any).systemType,
+        projectName:      (proj as any).name,
+      });
       const isCommercial = pricingCfg.isCommercial ?? false;
+      // `pricing_config.purchase_mode` has NO writer (rowToPricingConfig does not
+      // map it), so this always resolved 'finance' and rendered loan rows for a
+      // cash buyer. It is kept as the read, but the renderer now branches on
+      // purchase mode AND on whether real lender terms exist — with none on file
+      // the finance rows are suppressed rather than invented.
       const purchaseMode: 'finance' | 'cash' = pricingCfg.purchaseMode === 'cash' ? 'cash' : 'finance';
 
       cp = buildCanonicalProposal({

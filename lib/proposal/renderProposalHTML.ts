@@ -15,6 +15,22 @@
 
 import type { CanonicalProposal } from './canonicalProposal';
 import type { Proposal } from '@/types';
+// The SAME resolution chain both React proposal pages use. `project.systemType`
+// alone labelled a fence/ground/carport job "Roof Mount" whenever that column
+// was null — which is the common case, since the panels carry the mount type.
+import { resolveProposalSystemType } from '@/lib/proposalSystemType';
+
+/** Human label for a resolved system type. */
+function systemTypeLabel(t: string): string {
+  const map: Record<string, string> = {
+    roof:    'Roof Mount',
+    ground:  'Ground Mount',
+    fence:   'Solar Fence',
+    carport: 'Solar Carport',
+    hybrid:  'Hybrid (multiple mount types)',
+  };
+  return map[String(t).toLowerCase()] ?? t;
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -426,6 +442,12 @@ function pageFinancial(cp: CanonicalProposal): string {
   const f = cp.financial;
   const deltaSign = f.ownershipDeltaMonthly >= 0 ? '+' : '';
   const itcEnabled = f.itcRate > 0;
+  // 🚨 THE FINANCE ROWS NEED BOTH: a finance purchase AND real lender terms.
+  // A cash buyer's PDF used to carry a 25-yr 7.99% loan payment (purchase_mode
+  // has no writer, so this route always resolved 'finance'), and the APR itself
+  // was invented (loan_apr has no writer either). Two independent conditions,
+  // both required — see CanonicalFinancial.lenderTermsOnFile.
+  const showFinanceRows = cp._meta.purchaseMode === 'finance' && f.lenderTermsOnFile;
 
   // Monthly comparison bars
   const compareMax = Math.max(f.currentMonthlyBill, f.totalMonthlyCost, 1);
@@ -469,13 +491,20 @@ function pageFinancial(cp: CanonicalProposal): string {
         <div class="sec-hdr">Investment Details</div>
         <table class="info-table">
           <tr><td>Gross System Cost</td><td>${fmt$(f.gross_system_cost)}</td></tr>
-          ${itcEnabled ? `<tr><td>Federal ITC (${fmtPct(f.itcRate * 100)})</td><td style="color:#16a34a">-${fmt$(f.itcAmount)}</td></tr>` : ''}
+          ${itcEnabled ? `<tr><td>Federal ITC (${fmtPct(f.itcRate)})</td><td style="color:#16a34a">-${fmt$(f.itcAmount)}</td></tr>` : ''}
           <tr><td>Net System Cost</td><td><strong>${fmt$(f.netCost)}</strong></td></tr>
+          ${showFinanceRows ? `
           <tr><td>Monthly Solar Payment</td><td>${fmt$(f.solarPaymentMonthly)}/mo</td></tr>
-          <tr><td>Finance APR</td><td>${(f.financeApr * 100).toFixed(2)}% / ${f.financeTermYears} yr</td></tr>
+          <tr><td>Finance APR</td><td>${(f.financeApr * 100).toFixed(2)}% / ${f.financeTermYears} yr</td></tr>` : ''}
           <tr><td>Remaining Utility</td><td>${fmt$(f.utilityBillMonthly)}/mo</td></tr>
           <tr><td>Total Monthly Cost</td><td><strong>${fmt$(f.totalMonthlyCost)}/mo</strong></td></tr>
         </table>
+        ${cp._meta.purchaseMode === 'finance' && !f.lenderTermsOnFile ? `
+        <div class="note" style="margin-top:6px;">
+          Financing: no lender terms are on file for this proposal, so no APR, monthly
+          payment or loan comparison is shown. The figures above are the cash basis.
+          Ask your installer for a financed quote from their lender.
+        </div>` : ''}
       </div>
     </div>
 
@@ -591,7 +620,11 @@ function page25YrProjection(cp: CanonicalProposal): string {
           <tr><td>Utility Rate (Year 1)</td><td>${(cp.utility.rate * 100).toFixed(2)}¢/kWh</td></tr>
           <tr><td>Rate Escalation</td><td>${(cp.utility.escalationRate * 100).toFixed(1)}%/yr</td></tr>
           <tr><td>Panel Degradation</td><td>0.5%/yr (industry standard)</td></tr>
-          <tr><td>Finance Term</td><td>${cp.financial.financeTermYears} years @ ${(cp.financial.financeApr * 100).toFixed(2)}%</td></tr>
+          ${cp._meta.purchaseMode !== 'finance'
+            ? `<tr><td>Purchase</td><td>Cash — no financing</td></tr>`
+            : cp.financial.lenderTermsOnFile
+              ? `<tr><td>Finance Term</td><td>${cp.financial.financeTermYears} years @ ${(cp.financial.financeApr * 100).toFixed(2)}%</td></tr>`
+              : `<tr><td>Finance Term</td><td>Not quoted — no lender terms on file</td></tr>`}
           <tr><td>NEM / Export Policy</td><td>${cp.utility.netMeteringType ?? 'Net Metering'}</td></tr>
         </table>
       </div>
@@ -620,6 +653,11 @@ function pageIncentives(cp: CanonicalProposal): string {
   const inc = cp.incentives;
   const f = cp.financial;
   const showItc = f.itcRate > 0;
+  // `total_incentives` = ITC + state cash. The summary table lists the ITC on its
+  // own row, so the state row must be the state-only remainder — adding
+  // total_incentives beside itcAmount counted the federal credit twice, and the
+  // "Total Potential Value" row did exactly that.
+  const stateCashOnly = Math.max(0, inc.total_incentives - f.itcAmount);
 
   return `<div class="page">
     <div class="page-title">Incentives & Tax Credits</div>
@@ -629,24 +667,45 @@ function pageIncentives(cp: CanonicalProposal): string {
       <div class="highlight-box green">
         <div class="highlight-box-title">Federal Investment Tax Credit (ITC)</div>
         <div class="highlight-box-val">${fmt$(f.itcAmount)}</div>
-        <div class="highlight-box-sub">${fmtPct(f.itcRate * 100)} of system cost (${fmt$(f.gross_system_cost)}).
+        <div class="highlight-box-sub">${fmtPct(f.itcRate)} of system cost (${fmt$(f.gross_system_cost)}).
           Applied as a direct credit against your federal income tax liability in the year of installation.
           Consult your tax advisor for eligibility.</div>
       </div>` : `
       <div class="highlight-box blue">
         <div class="highlight-box-title">Federal ITC</div>
         <div class="highlight-box-val">Not Included</div>
-        <div class="highlight-box-sub">Ask your installer about current ITC eligibility. Federal incentives may apply — consult your tax professional.</div>
+        <div class="highlight-box-sub">${inc.compliance_message}</div>
       </div>`}
 
-      <div class="highlight-box ${cp.policy.srecAvailable ? 'green' : ''}">
-        <div class="highlight-box-title">State & Local Incentives</div>
-        <div class="highlight-box-val">${inc.total_incentives > 0 ? fmt$(inc.total_incentives) : 'Ask Us'}</div>
+      <div class="highlight-box ${(inc.state_incentives.length > 0 || cp.policy.srecAvailable) ? 'green' : ''}">
+        <div class="highlight-box-title">State &amp; Local Incentives</div>
+        <div class="highlight-box-val">${inc.total_incentives > 0 ? fmt$(inc.total_incentives) : (inc.state_incentives.length > 0 ? 'See below' : 'Ask Us')}</div>
         <div class="highlight-box-sub">
           ${cp.policy.policyMessage ?? 'State and local incentives vary. Contact us to learn what programs are available in your area.'}
         </div>
       </div>
     </div>
+
+    ${inc.state_incentives.length > 0 ? `
+    <div class="sec-hdr">State &amp; Local Programs</div>
+    <table class="equip-table" style="margin-bottom:12px;">
+      <thead><tr><th>Program</th><th>Type</th><th>Estimated Value</th></tr></thead>
+      <tbody>
+        ${inc.state_incentives.map(s => `<tr>
+          <td>${s.name}${s.description ? `<div style="font-size:7.5px;color:#64748b;">${s.description}</div>` : ''}</td>
+          <td>${s.type.replace(/_/g, ' ')}</td>
+          <td${s.estimated_value > 0 ? ' style="color:#16a34a;font-weight:700;"' : ''}>${
+            s.estimated_value > 0
+              ? fmt$(s.estimated_value)
+              : (s.type === 'srec' || s.type === 'trec')
+                ? 'See SREC contract below'
+                : (s.type === 'property_tax_exemption' || s.type === 'sales_tax_exemption')
+                  ? 'Exempt'
+                  : 'Eligible'
+          }</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>` : ''}
 
     ${cp.policy.srecAvailable ? `
     <div class="sec-hdr">SREC Program</div>
@@ -735,10 +794,10 @@ function pageIncentives(cp: CanonicalProposal): string {
     <table class="equip-table">
       <thead><tr><th>Incentive</th><th>Type</th><th>Amount</th><th>Timing</th></tr></thead>
       <tbody>
-        ${showItc ? `<tr><td>Federal ITC (${fmtPct(f.itcRate * 100)})</td><td>Tax Credit</td><td style="color:#16a34a;font-weight:700;">${fmt$(f.itcAmount)}</td><td>Year 1 tax filing</td></tr>` : ''}
-        ${inc.total_incentives > 0 ? `<tr><td>State Incentive</td><td>Varies</td><td style="color:#16a34a;font-weight:700;">${fmt$(inc.total_incentives)}</td><td>Varies</td></tr>` : ''}
+        ${showItc ? `<tr><td>Federal ITC (${fmtPct(f.itcRate)})</td><td>Tax Credit</td><td style="color:#16a34a;font-weight:700;">${fmt$(f.itcAmount)}</td><td>Year 1 tax filing</td></tr>` : ''}
+        ${stateCashOnly > 0 ? `<tr><td>State Incentives</td><td>Varies</td><td style="color:#16a34a;font-weight:700;">${fmt$(stateCashOnly)}</td><td>Varies</td></tr>` : ''}
         ${cp.policy.srecAvailable ? `<tr><td>SREC Income</td><td>REC Contract</td><td style="color:#16a34a;font-weight:700;">${cp.truth25yr.srec_income_25yr > 0 ? fmt$(cp.truth25yr.srec_income_25yr) : 'Market Rate'}</td><td>${(cp.truth25yr.yearlyFlow?.[0]?.srec_income ?? 0) > 0 ? '~50% upfront + 6 yrs' : 'Annual'}</td></tr>` : ''}
-        <tr style="background:#f0fdf4;font-weight:900;"><td>Total Potential Value</td><td></td><td style="color:#16a34a;">${fmt$(f.itcAmount + inc.total_incentives + (cp.truth25yr.srec_income_25yr ?? 0))}</td><td></td></tr>
+        <tr style="background:#f0fdf4;font-weight:900;"><td>Total Potential Value</td><td></td><td style="color:#16a34a;">${fmt$(inc.total_incentives + (cp.truth25yr.srec_income_25yr ?? 0))}</td><td></td></tr>
       </tbody>
     </table>
 
@@ -796,7 +855,12 @@ function pageEquipment(cp: CanonicalProposal, p: Proposal): string {
           <tr><td>Total DC Power</td><td>${fmtKw(cp.panel.systemSizeKw)}</td></tr>
           <tr><td>Annual Production</td><td>${fmtKwh(cp.production.annualKwh)}</td></tr>
           <tr><td>Energy Offset</td><td>${fmtPct(cp.offset.percentage)}</td></tr>
-          <tr><td>System Type</td><td>${project?.systemType ?? 'Roof Mount'}</td></tr>
+          <tr><td>System Type</td><td>${systemTypeLabel(resolveProposalSystemType({
+            panels:           (layout as any)?.panels,
+            layoutSystemType: (layout as any)?.systemType,
+            projSystemType:   (project as any)?.systemType,
+            projectName:      (project as any)?.name,
+          }))}</td></tr>
           ${(layout as any)?.mountType ? `<tr><td>Mount Type</td><td>${(layout as any).mountType}</td></tr>` : ''}
           ${(layout as any)?.tiltAngle != null ? `<tr><td>Tilt Angle</td><td>${(layout as any).tiltAngle}°</td></tr>` : ''}
         </table>

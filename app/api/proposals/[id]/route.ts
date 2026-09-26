@@ -184,10 +184,17 @@ export async function PUT(req: NextRequest, context: RouteContext) {
     const currentData = (existing[0].data_json as Record<string, unknown>) || {};
     const updatedDataJson = JSON.stringify({ ...currentData, ...body });
 
+    // Same rule as PATCH below: the `status` COLUMN is the authority, so a
+    // writer that only merged `data_json.status` would silently do nothing now
+    // that rowToProposal reads the column. No caller in the website PUTs a
+    // status today; this exists so one cannot reintroduce the split.
+    const nextStatus = typeof body.status === 'string' ? body.status : null;
+
     const rows = await sql`
       UPDATE proposals
       SET data_json = ${updatedDataJson}::jsonb,
           name = COALESCE(${(body.title as string) ?? null}, name),
+          status = COALESCE(${nextStatus}, status),
           updated_at = NOW()
       WHERE id = ${id}
       RETURNING *
@@ -511,14 +518,42 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
     const currentData = (currentRow.data_json as Record<string, unknown>) || {};
     const updatedDataJson = JSON.stringify({ ...currentData, ...body });
 
+    // 🚨 THE STATUS COLUMN IS WRITTEN TOO, NOT ONLY data_json.
+    //
+    // This generic merge was the installer-side status writer and it only ever
+    // touched `data_json.status`, while the homeowner-side paths above write the
+    // `status` COLUMN. Two homes for one fact: a signed contract read 'accepted'
+    // in the column and 'draft' in the json, and the Proposals list believed the
+    // json. Now that the list reads the column (see rowToProposal in
+    // app/api/proposals/route.ts), this writer has to move with it or an
+    // installer's own rename-and-restatus would silently do nothing.
+    //
+    // `COALESCE` so a PATCH that does not mention status leaves it alone —
+    // the same shape used for `name` on the line below.
+    //
+    // `.catch()` to the json-only write: `body.status` is caller-supplied (capped
+    // at 50 chars, not value-checked), and there is no CREATE TABLE for
+    // `proposals` anywhere in the repo, so a CHECK constraint on the column
+    // cannot be ruled out. Degrading to the statement that shipped before beats
+    // turning a display bug into a 500 on rename.
+    const nextStatus = typeof body.status === 'string' ? body.status : null;
+
     const rows = await sql`
+      UPDATE proposals
+      SET data_json = ${updatedDataJson}::jsonb,
+          name = COALESCE(${(body.title as string) ?? null}, name),
+          status = COALESCE(${nextStatus}, status),
+          updated_at = NOW()
+      WHERE id = ${id}
+      RETURNING *
+    `.catch(() => sql`
       UPDATE proposals
       SET data_json = ${updatedDataJson}::jsonb,
           name = COALESCE(${(body.title as string) ?? null}, name),
           updated_at = NOW()
       WHERE id = ${id}
       RETURNING *
-    `;
+    `);
 
     return NextResponse.json({ success: true, data: rows[0] });
   } catch (err: unknown) {

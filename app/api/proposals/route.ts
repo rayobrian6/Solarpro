@@ -25,7 +25,21 @@ function rowToProposal(row: Record<string, unknown>, project?: import('@/types')
     projectId:       row.project_id as string,
     // Prefer snapshot project (immutable) over live project (may have drifted)
     project:         snapshotProject ?? project,
-    status:          (dj.status as Proposal['status']) || 'draft',
+    // 🚨 THE COLUMN IS THE AUTHORITY. THIS READ data_json.status ONLY.
+    //
+    // A homeowner signs; app/api/proposals/[id]/route.ts sets the `status`
+    // COLUMN to 'accepted', stamps signed_at, and emails the installer — and the
+    // installer's Proposals list still said "Draft", because this mapper read
+    // `data_json.status`, which the signing path never touches. The status filter
+    // and the pill counts agreed with the wrong value, so filtering by Signed
+    // returned an empty list although contracts had been executed. The installer
+    // would then try to fix it by hand and get a 409 saying the status is frozen.
+    // A homeowner merely OPENING the share link had the same effect for 'viewed'.
+    //
+    // `data_json.status` stays as a fallback only for rows that predate the
+    // column. `archivedAt` correctly lives in data_json and is read below —
+    // filing is a fact about the installer's list, not about the agreement.
+    status:          (row.status as Proposal['status']) ?? (dj.status as Proposal['status']) ?? 'draft',
     title:           (dj.title as string) || (row.name as string) || 'Solar Proposal',
     preparedBy:      (dj.preparedBy as string) || 'SolarPro Design Team',
     preparedDate:    (dj.preparedDate as string) || (row.created_at as string),
@@ -184,7 +198,27 @@ export async function POST(req: NextRequest) {
       stateCode: snapshotStateCode, // v48.36: explicit state code for ICA/PTO lookup
     });
 
+    // The `status` COLUMN is written at birth, not only data_json.status. The
+    // column is what every status writer and reader now agrees on, so a new row
+    // must not be born relying on whatever default the column happens to carry.
+    //
+    // `.catch()` to the original column list: there is no CREATE TABLE for
+    // `proposals` anywhere in the repo, so a CHECK constraint that does not list
+    // 'draft' cannot be ruled out. `rowToProposal` falls back to
+    // `data_json.status` when the column is null, so degrading here still reads
+    // back correctly — it must not fail proposal CREATION.
     const rows = await sql`
+      INSERT INTO proposals (user_id, project_id, name, share_token, status, data_json)
+      VALUES (
+        ${user.id},
+        ${projectId},
+        ${proposalName},
+        ${shareToken},
+        'draft',
+        ${dataJson}::jsonb
+      )
+      RETURNING *
+    `.catch(() => sql`
       INSERT INTO proposals (user_id, project_id, name, share_token, data_json)
       VALUES (
         ${user.id},
@@ -194,7 +228,7 @@ export async function POST(req: NextRequest) {
         ${dataJson}::jsonb
       )
       RETURNING *
-    `;
+    `);
 
     // Update project status to proposal
     await sql`

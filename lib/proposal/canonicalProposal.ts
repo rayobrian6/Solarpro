@@ -272,6 +272,22 @@ export interface CanonicalIncentives {
    * Reflects GLOBAL_INCENTIVES_CONFIG.incentives_enabled.
    */
   incentives_enabled: boolean;
+  /**
+   * Whether state incentives are globally enabled (areStateIncentivesEnabled()).
+   * When false, `state_incentives` is [] regardless of what the state catalog holds.
+   */
+  state_incentives_enabled: boolean;
+  /**
+   * The authoritative incentives disclosure for this proposal, from
+   * getIncentivesComplianceMessage().
+   *
+   * 🚨 IT CARRIES THE §25D REPEAL. The server-rendered document used to tell a
+   * residential homeowner "Federal incentives may apply" while the codebase's
+   * own accurate P.L. 119-21 disclosure sat behind an import that was never
+   * called. A document that hedges where the code is certain is worse than one
+   * that says nothing.
+   */
+  compliance_message: string;
 }
 
 export interface CanonicalFinancial {
@@ -304,12 +320,31 @@ export interface CanonicalFinancial {
    * Positive = initial monthly increase. Negative = immediate savings.
    */
   ownershipDeltaMonthly: number;
-  /** Finance APR as decimal (e.g. 0.0799 for 7.99%) */
+  /** Finance APR as decimal (e.g. 0.0799 for 7.99%). 0 when no lender terms are on file. */
   financeApr: number;
-  /** Finance term in years */
+  /** Finance term in years. 0 when no lender terms are on file. */
   financeTermYears: number;
-  /** Finance term in months */
+  /** Finance term in months. 0 when no lender terms are on file. */
   financeTermMonths: number;
+  /**
+   * 🚨 WHETHER A REAL LENDER TERM EXISTS AT ALL.
+   *
+   * `loanApr` / `loanTermYears` are read off the pricing config and NOTHING in
+   * the repo ever writes them — there is no column, no field and no API
+   * parameter. The pipeline used to default them to 7.99% / 25 yr, so every
+   * financed proposal quoted a monthly payment invented by the codebase and
+   * labelled it "Subject to lender approval". On shipped defaults that is
+   * $226/mo on a $29,280 system; a real dealer product at 5.99% is $189 and at
+   * 9.99% is $266, so the number the homeowner read could be ±20% out with no
+   * way for the installer to correct it.
+   *
+   * When false: financeApr, financeTermYears, financeTermMonths and
+   * solarPaymentMonthly are all 0, and every surface must SUPPRESS the APR
+   * line, the monthly payment and the term-comparison table — exactly as the
+   * ITC path already suppresses an absent credit. Inventing a lender rate is
+   * worse than showing none.
+   */
+  lenderTermsOnFile: boolean;
   /**
    * Year 1 utility bill total WITHOUT solar (annualUsageKwh x rate x escalation year 0).
    * Used for truth-driven financial comparison display.

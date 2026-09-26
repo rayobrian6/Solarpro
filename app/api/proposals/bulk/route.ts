@@ -105,12 +105,14 @@ export async function POST(req: NextRequest) {
       // The response names the rows whose status was preserved so the client can
       // paint what actually changed instead of assuming.
       //
-      // 🚨 OPEN, and deliberately not fixed from here: `rowToProposal` does not
-      // map `archivedAt` and `Proposal` (types/index.ts) has no field for it, so
-      // an archived executed contract still appears in the active list after a
-      // reload — it genuinely is still 'accepted'. Surfacing `archivedAt` there
-      // is the follow-up. Erasing the contract status to make the row vanish is
-      // what this change exists to stop.
+      // CLOSED (was the open follow-up recorded here): `rowToProposal` now maps
+      // `archivedAt`, so an archived executed contract can be filtered out of the
+      // active list while genuinely remaining 'accepted'. Erasing the contract
+      // status to make the row vanish is still what this branch exists to stop.
+      //
+      // `status` is also written to the COLUMN for non-issued rows, because
+      // rowToProposal now treats the column as the authority — see the status
+      // branch below and app/api/proposals/route.ts.
       const archivedAtJson       = JSON.stringify(new Date().toISOString());
       const archivedIds: string[]         = [];
       const statusPreservedIds: string[]  = [];
@@ -137,7 +139,27 @@ export async function POST(req: NextRequest) {
               WHERE id = ${id} AND user_id = ${user.id}
               RETURNING id
             `
+          // The `status` COLUMN is written alongside the json, for the same
+          // reason as the status branch below: rowToProposal reads the column,
+          // so archiving a draft had to move the column or the row would keep
+          // reading 'draft' and never show as archived.
+          //
+          // `.catch()` to the json-only write, matching the `signed_at` idiom
+          // used for the guard query above: there is no CREATE TABLE for
+          // `proposals` anywhere in the repo, so a CHECK constraint on `status`
+          // that does not list 'archived' cannot be ruled out. If one exists this
+          // degrades to the exact statement that shipped before, rather than
+          // 500-ing an installer's bulk archive.
           : await sql`
+              UPDATE proposals
+              SET status     = 'archived',
+                  data_json  = jsonb_set(
+                    jsonb_set(data_json, '{archivedAt}', ${archivedAtJson}::jsonb),
+                    '{status}', '"archived"'),
+                  updated_at = NOW()
+              WHERE id = ${id} AND user_id = ${user.id}
+              RETURNING id
+            `.catch(() => sql`
               UPDATE proposals
               SET data_json  = jsonb_set(
                     jsonb_set(data_json, '{archivedAt}', ${archivedAtJson}::jsonb),
@@ -145,7 +167,7 @@ export async function POST(req: NextRequest) {
                   updated_at = NOW()
               WHERE id = ${id} AND user_id = ${user.id}
               RETURNING id
-            `;
+            `);
         if ((result as unknown[]).length > 0) {
           archivedIds.push(id);
           if (issued) statusPreservedIds.push(id);
@@ -195,14 +217,33 @@ export async function POST(req: NextRequest) {
           continue;
         }
 
+        // 🚨 THE COLUMN TOO, NOT ONLY data_json.
+        // This wrote `data_json.status` alone, while the homeowner-side signing
+        // and view paths write the `status` COLUMN. `rowToProposal`
+        // (app/api/proposals/route.ts) now reads the column as the authority, so
+        // a bulk restatus that touched only the json would appear to succeed and
+        // change nothing on the installer's list. Both are written until the
+        // legacy json field can be retired.
+        //
+        // `.catch()` to the json-only write: `status` is caller-supplied from the
+        // allowlist above, and there is no CREATE TABLE for `proposals` in the
+        // repo, so a narrower CHECK constraint on the column cannot be ruled out.
+        // Degrading to the statement that shipped before beats 500-ing the batch.
         const result = await sql`
+          UPDATE proposals
+          SET status = ${status},
+              data_json = jsonb_set(data_json, '{status}', ${safeStatus}::jsonb),
+              updated_at = NOW()
+          WHERE id = ${id} AND user_id = ${user.id}
+          RETURNING id
+        `.catch(() => sql`
           UPDATE proposals
           SET data_json = jsonb_set(data_json, '{status}', ${safeStatus}::jsonb),
               updated_at = NOW()
           WHERE id = ${id} AND user_id = ${user.id}
           RETURNING id
-        `;
-        if (result.length > 0) updatedIds.push(id);
+        `);
+        if ((result as unknown[]).length > 0) updatedIds.push(id);
       }
       return NextResponse.json({
         success: true,
