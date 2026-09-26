@@ -19,25 +19,21 @@ import {
   selectSmallestConduit as necSelectSmallestConduit,
   conduitTotalAreaIn2 as necConduitTotalAreaIn2,
 } from '@/lib/nec/chapter9';
+import { NEC_310_16_COPPER_75C } from '@/lib/nec/ampacity';
 
-// NEC 310.16 75°C Ampacity Table
+// 🚨 DERIVED FROM THE ONE NEC TABLE, not a third transcription of it.
+// This file's sizing loop uses the legacy un-prefixed aught spellings ('1/0 AWG'),
+// so those keys are kept - but their VALUES come from lib/nec/ampacity.ts. A third
+// hand-typed copy is how the 90 °C column came to disagree with itself at #1 AWG.
+// 250 kcmil is not in NEC_AWG_ORDER and stays local.
 const AMPACITY_TABLE_75C: Record<string, number> = {
-  '#14 AWG': 20,
-  '#12 AWG': 25,
-  '#10 AWG': 35,
-  '#8 AWG': 50,
-  '#6 AWG': 65,
-  '#4 AWG': 85,
-  '#3 AWG': 100,
-  '#2 AWG': 115,
-  '#1 AWG': 130,
-  '1/0 AWG': 150,
-  '2/0 AWG': 175,
-  '3/0 AWG': 200,
-  '4/0 AWG': 230,
+  ...NEC_310_16_COPPER_75C,
+  '1/0 AWG': NEC_310_16_COPPER_75C['#1/0 AWG'],
+  '2/0 AWG': NEC_310_16_COPPER_75C['#2/0 AWG'],
+  '3/0 AWG': NEC_310_16_COPPER_75C['#3/0 AWG'],
+  '4/0 AWG': NEC_310_16_COPPER_75C['#4/0 AWG'],
   '250 kcmil': 255,
 };
-
 // Standard OCPD ratings — single-sourced from lib/electrical/stdSizes.ts (P0-5c)
 
 // Conductor area in square inches (NEC Ch.9 Table 5)

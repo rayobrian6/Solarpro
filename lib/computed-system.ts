@@ -25,6 +25,7 @@ import {
   RacewayType,
   currentCarryingCountOf,
 } from './segment-schedule';
+import { NEC_310_16_COPPER_75C, NEC_310_16_COPPER_90C } from '@/lib/nec/ampacity';
 
 import { buildSegments } from './segment-builder';
 import { InterconnectionType, type SegmentBuilderInput } from './segment-model';
@@ -577,42 +578,13 @@ export interface ComputedSystemInput {
 
 // ─── NEC Tables ──────────────────────────────────────────────────────────────
 
-// NEC 310.16 — Conductor ampacity at 75°C (copper, THWN-2)
-// Table 310.16, 75°C column — corrected per NEC 2023
-// NOTE: Previous values were from the 60°C column (incorrect for THWN-2)
-const AMPACITY_TABLE_75C: Record<string, number> = {
-  '#14 AWG': 20,  // NEC 310.16 Table, 75°C col — THWN-2 rated 75°C (or 90°C dry)
-  '#12 AWG': 25,
-  '#10 AWG': 35,
-  '#8 AWG':  50,
-  '#6 AWG':  65,
-  '#4 AWG':  85,
-  '#3 AWG':  100,
-  '#2 AWG':  115,
-  '#1 AWG':  130,
-  '#1/0 AWG': 150,
-  '#2/0 AWG': 175,
-  '#3/0 AWG': 200,
-  '#4/0 AWG': 230,
-};
-
-// NEC 310.16 — Conductor ampacity at 90°C (copper, USE-2/PV Wire)
-const AMPACITY_TABLE_90C: Record<string, number> = {
-  '#14 AWG': 25,
-  '#12 AWG': 30,
-  '#10 AWG': 40,
-  '#8 AWG':  55,
-  '#6 AWG':  75,
-  '#4 AWG':  95,
-  '#3 AWG':  115,
-  '#2 AWG':  130,
-  '#1 AWG':  145,
-  '#1/0 AWG': 170,
-  '#2/0 AWG': 195,
-  '#3/0 AWG': 225,
-  '#4/0 AWG': 260,
-};
-
+// 🚨 NEC 310.16 LIVES IN ONE PLACE NOW. These were module-private literals here
+// AND in lib/segment-schedule.ts, and the two copies DISAGREED at #1 AWG (145 here,
+// 150 there). The wrong copy was the one that selected the installed conductor; this
+// one only printed the derivation on E-1 - so the sheet published arithmetic proving
+// a choice a different number had made. See lib/nec/ampacity.ts.
+const AMPACITY_TABLE_75C = NEC_310_16_COPPER_75C;
+const AMPACITY_TABLE_90C = NEC_310_16_COPPER_90C;
 // AWG order from smallest to largest
 const AWG_ORDER = [
   '#14 AWG', '#12 AWG', '#10 AWG', '#8 AWG', '#6 AWG',

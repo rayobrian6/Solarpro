@@ -15,6 +15,7 @@
 // ============================================================
 
 import { nextStandardOcpd } from './electrical/stdSizes';
+import { NEC_310_16_COPPER_75C, NEC_310_16_COPPER_90C } from '@/lib/nec/ampacity';
 import {
   normalizeConduitType as necNormalizeConduitType,
   conductorAreaIn2 as necConductorAreaIn2,
@@ -285,22 +286,21 @@ function getEGCGauge(ocpdAmps: number): string {
   return '#2 AWG';
 }
 
-// NEC 310.16 — 75°C ampacity table
-const AMPACITY_75C: Record<string, number> = {
-  '#14 AWG': 20, '#12 AWG': 25, '#10 AWG': 35, '#8 AWG': 50,
-  '#6 AWG': 65, '#4 AWG': 85, '#3 AWG': 100, '#2 AWG': 115,
-  '#1 AWG': 130, '#1/0 AWG': 150, '#2/0 AWG': 175,
-  '#3/0 AWG': 200, '#4/0 AWG': 230,
-};
-
-// NEC 310.16 — 90°C ampacity table (for USE-2/PV Wire DC)
-const AMPACITY_90C: Record<string, number> = {
-  '#14 AWG': 25, '#12 AWG': 30, '#10 AWG': 40, '#8 AWG': 55,
-  '#6 AWG': 75, '#4 AWG': 95, '#3 AWG': 115, '#2 AWG': 130,
-  '#1 AWG': 150, '#1/0 AWG': 170, '#2/0 AWG': 195,
-  '#3/0 AWG': 225, '#4/0 AWG': 260,
-};
-
+// 🚨 NEC 310.16 LIVES IN ONE PLACE NOW - AND THIS FILE IS WHY.
+//
+// These were module-private literals here and in lib/computed-system.ts, and the two
+// 90 °C copies DISAGREED at #1 AWG: 150 here, 145 there. 145 is correct; 150 is
+// 1/0's 75 °C value, one row down and one column left in the printed table.
+//
+// The copy in THIS file is the one that selects the installed conductor - `autoSizeGauge`
+// below returns the first gauge clearing 125 % of the continuous current, and
+// `buildSegmentSchedule` back-populates that callout onto every run segment, which is
+// what PV-4B and E-1 print. computed-system's copy only printed the DERIVATION on E-1.
+// So one number chose the wire and a different number was published as the arithmetic
+// proving the choice, and on a hot-ambient feeder the sheet graded its own conductor
+// FAIL. See lib/nec/ampacity.ts.
+const AMPACITY_75C = NEC_310_16_COPPER_75C;
+const AMPACITY_90C = NEC_310_16_COPPER_90C;
 const AWG_ORDER = [
   '#14 AWG', '#12 AWG', '#10 AWG', '#8 AWG', '#6 AWG', '#4 AWG',
   '#3 AWG', '#2 AWG', '#1 AWG', '#1/0 AWG', '#2/0 AWG', '#3/0 AWG', '#4/0 AWG',
@@ -418,7 +418,11 @@ function calcVoltageDrop(
 
 // ─── Auto-size wire gauge ─────────────────────────────────────────────────────
 
-function autoSizeGauge(
+// 🚨 EXPORTED because this is the function that CHOOSES the installed conductor.
+// It was module-private, so the only way to reach it from a test was through a full
+// segment schedule - and when its ampacity table disagreed with the one E-1 prints,
+// no test could see it. tests/necAmpacityIsSingleSourced.test.ts calls it directly.
+export function autoSizeGauge(
   continuousCurrent: number,
   ambientC: number,
   currentCarryingCount: number,
