@@ -140,16 +140,18 @@ const LEDGER: LedgerEntry[] = [
     field: 'groundArea',
     consumedBy: null,
     why:
-      'OPEN QUESTION, not a settled reason. Verified: it is React state in ' +
-      'DesignStudio alone, drawn on the 2D canvas, passed as `area` to the ' +
+      'OPEN ON PRODUCT INTENT ONLY — the facts are settled. Verified: React state ' +
+      'in DesignStudio alone, drawn on the 2D canvas, passed as `area` to the ' +
       'auto-layout call, referenced ZERO times in the 3D engine, absent from the ' +
       'persistence payload and from the Layout type (which carries only the derived ' +
       'number groundAreaMeters2), and read by no output. So it is session-only: ' +
-      'draw a boundary, save, reload, and it is gone while the panels it produced ' +
-      'remain. Whether that is correct depends on whether the 2D ground path is ' +
-      'still the live one and on whether the GROUND ARRAY PLAN sheet draws a ' +
-      'boundary or derives extents from the modules — neither of which I ' +
-      'established, so this is recorded rather than judged.',
+      'draw a boundary, save, reload, and the boundary is gone while the panels it ' +
+      'produced remain, so Auto Layout cannot be re-run without redrawing it. ' +
+      'AND THE PATH IS LIVE: `show3D` defaults to true but there is a toggle, so a ' +
+      'person can switch to the 2D canvas and draw one — this is not dead legacy ' +
+      'code. What remains is a product call, plus a practical constraint: ' +
+      'persisting it needs a column of its own, the way `fenceLine` (the identical ' +
+      'lat/lng-array shape) has one, and that means a migration.',
   },
 ];
 

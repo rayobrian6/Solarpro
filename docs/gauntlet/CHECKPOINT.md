@@ -159,11 +159,9 @@ Two red herrings resolved rather than attributed:
 1. **Move-vertex and the history panel on a real roof** — NEEDS-RAY R5 says what to
    try. Handles cannot be picked under software WebGL, so first real-browser use is
    the first end-to-end exercise of the gesture.
-2. **`/api/production` should STATE the version it was based on**, not only return
-   the new one. The self-conflict is fixed (the studio adopts what comes back), but
-   that route still writes the layouts row with no precondition, so a genuine
-   two-tab conflict on that path is last-write-wins. Needs the route and the client
-   changed together, and the route is held by a worker.
+2. ~~`/api/production` should state the version it was based on~~ — **DONE**
+   (`542de4a6`). Both callers send it and the route hands it to the writer on BOTH
+   paths, including the wholesale-spread path a top-level field never reached.
 3. **Full e2e suite against the now-working harness.** The local-PostgreSQL bridge
    was disarmed by the hot reloader all along, so several specs had never run. Held:
    a worker currently owns the dev-server/playwright path.
@@ -174,21 +172,23 @@ Two red herrings resolved rather than attributed:
    is Ray's.
 6. **`tests/laneAAcquisitionOrdering.test.tsx`'s post-commit case is vacuous** and now
    says so. If it should prove something today it needs a different formulation.
-7. **The autosave's 3-second debounce RESTARTS on every state change**, so a design
-   can be held in memory and never written while state churns. Observed once
-   (geometry reached the engine at t=109.9 s; the save 3 s later carried 0 panels and
-   no further POST followed in 45 s) and NOT reproducible on demand. The spec can no
-   longer blame persistence for it, but the product question is open: a debounce that
-   can be starved indefinitely is not a debounce.
+7. ~~The autosave's debounce restarts on every state change~~ — **DONE**
+   (`3c02c432`). The churn source was `saveLayoutToDB` itself sitting in the
+   dependency array while being a `useCallback` over nine values; it is reached by ref
+   now, and `AUTOSAVE_MAX_DEFER_MS = 15_000` bounds how long work is held, measured
+   from the FIRST change in a burst.
 8. **`reactStrictMode: true` runs every restore TWICE in dev**, and the second
    `hydrateFromStored` replaces the active bundle. Harmless in production, but it will
    bite any future browser test that places geometry early — it already cost one.
-9. **The drawn ground-array boundary (`groundArea`) is session-only.** Verified: React
-   state in DesignStudio alone, zero references in the 3D engine, absent from the
-   persistence payload and from every output. Whether that is correct depends on
-   whether the 2D ground path is still live and on whether the GROUND ARRAY PLAN sheet
-   draws a boundary or derives extents from the modules. In the output-consistency
-   ledger as an OPEN QUESTION rather than a verdict.
+9. **The drawn ground-array boundary (`groundArea`) is session-only, and the path IS
+   live.** Verified: React state in DesignStudio alone, zero references in the 3D
+   engine, absent from the persistence payload and from every output — and `show3D`
+   defaults to true but there is a **user toggle**, so a person can switch to the 2D
+   canvas and draw one. Not dead legacy code. Draw a boundary, save, reload, and the
+   boundary is gone while its panels remain, so Auto Layout cannot be re-run without
+   redrawing it. What is left is a product call plus a constraint: persisting it needs
+   a column of its own, the way `fenceLine` (the identical lat/lng-array shape) has
+   one — so it needs a migration, which is Ray's. In the output-consistency ledger.
 10. **Seven `components/design/*` components have no importer** (`DesignHeader`,
    `DesignSidebar`, `DesignToolbar`, `ProductionPanel`, `RoofEditPanel`,
    `ShadeAnalysisPanel`, `ViewOptionsMenu`) — an extraction from the 7,700-line
