@@ -40,7 +40,8 @@ import { isValidStage } from '@/lib/operations/pipeline';
 import { generateTasksForStage } from '@/lib/operations/generateTasksForStage';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 import { syncHomeownerStage } from '@/lib/homeownerStageSync';
-import { writeMicroStage, type MicroStage } from '@/lib/microStage';
+import { writeMicroStage } from '@/lib/microStage';
+import { microStageForPipelineStage } from '@/lib/operations/pipelineMicroStage';
 
 export async function POST(req: NextRequest) {
   try {
@@ -236,43 +237,12 @@ export async function POST(req: NextRequest) {
     // ── Write micro stage (non-fatal, fire-and-forget) ────────────────────────
     // Maps DEAL_TRANSITIONS newStage values to the corresponding micro stage.
     // Only fires for forward-moving, meaningful pipeline events.
-    const PIPELINE_STAGE_TO_MICRO: Partial<Record<string, MicroStage>> = {
-      site_assessment:  'survey_scheduled',
-      design_complete:  'layout_completed',
-      proposal_sent:    'proposal_sent',
-      contract_signed:  'contract_signed',
-      engineering:      'engineering_started',
-      permit_submitted: 'permit_submitted',
-      permit_approved:  'permit_approved',
-      install_scheduled:'install_scheduled',
-      installation:     'install_started',
-      /**
-       * 🚨 `inspection` DELIBERATELY MAPS TO NOTHING. It used to map to
-       * `inspection_passed`.
-       *
-       * Every other entry records something that HAS happened on entering the
-       * stage: entering `installation` means the install started, entering
-       * `pto` means PTO was submitted. Entering `inspection` means an
-       * inspection is PENDING — it does not mean it passed, and roughly the
-       * whole point of an inspection is that it can fail.
-       *
-       * `writeMicroStage` also forward-syncs `homeowner_stage`, and the
-       * homeowner portal renders micro-stages as milestones. So the moment this
-       * route is wired up — which is the recommended next step, since it
-       * currently has ZERO callers — every project entering inspection would
-       * have told its homeowner the inspection had passed. That is a lie the
-       * customer acts on, and it would have arrived as a side effect of fixing
-       * something else.
-       *
-       * There is no `inspection_scheduled` in the 34-value vocabulary, and
-       * inventing one is a vocabulary decision rather than a bug fix. Writing
-       * nothing is the honest option: a stage entry is not an outcome, and
-       * `inspection_passed` remains available to whatever observes a real pass.
-       */
-      pto:              'pto_submitted',
-      complete:         'system_live',
-    };
-    const mappedMicro = PIPELINE_STAGE_TO_MICRO[newStage];
+    // The map now lives in lib/operations/pipelineMicroStage.ts, because this
+    // route is no longer its only reader: app/api/projects/update-status
+    // — the route the UI actually calls — needs the same mapping, and a copied
+    // table is how this codebase grew five copies of NEC 310.16. The
+    // `inspection` omission and its reasoning travelled with it.
+    const mappedMicro = microStageForPipelineStage(newStage);
     if (mappedMicro) {
       await writeMicroStage(projectId, mappedMicro, user.id ?? null, {
         action,

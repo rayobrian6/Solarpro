@@ -31,10 +31,25 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { stripComments } from './support/stripSource';
 import { MICRO_STAGES } from '../lib/microStage';
+import { microStageForPipelineStage } from '@/lib/operations/pipelineMicroStage';
 
 const ROOT = join(__dirname, '..');
+/**
+ * 🚨 THE MAP MOVED, AND THIS GUARD MOVED WITH IT.
+ *
+ * It used to read `app/api/projects/transition/route.ts`, which was the map's
+ * only home while that route was its only reader. It is not any more:
+ * `app/api/projects/update-status` — the route the UI actually calls, where every
+ * real stage change arrives — needs the same mapping, and the transition route
+ * has zero UI callers. Rather than copy the table (which is how this codebase
+ * grew five copies of NEC 310.16), it lives in lib/operations/pipelineMicroStage.ts
+ * and both routes read it.
+ *
+ * This guard protects the `inspection` omission, which is the reason the table
+ * needs guarding at all — so it follows the table, not the route.
+ */
 const ROUTE = stripComments(
-  readFileSync(join(ROOT, 'app', 'api', 'projects', 'transition', 'route.ts'), 'utf8'),
+  readFileSync(join(ROOT, 'lib', 'operations', 'pipelineMicroStage.ts'), 'utf8'),
 );
 
 /** The map body, anchored on real syntax rather than a character count. */
@@ -92,15 +107,41 @@ describe('🚨 entering a stage never claims its outcome', () => {
   });
 });
 
-describe('the route this protects is still the dormant one', () => {
-  it('it remains the governed path, with the micro-stage writer', () => {
-    expect(ROUTE).toMatch(/writeMicroStage\(projectId, mappedMicro/);
+describe('🚨 BOTH routes write the micro-stage, and both no-op on an unmapped stage', () => {
+  // This block used to be titled "the route this protects is still the dormant
+  // one" and checked only the transition route. That is no longer the shape of
+  // the world: the transition route has zero UI callers, and
+  // `app/api/projects/update-status` — where every real stage change arrives —
+  // now performs the same customer-facing sync, because before it did not and
+  // the homeowner portal simply never moved.
+  //
+  // So the protection has to cover both, or the live route is the unguarded one.
+  const routeSrc = (...p: string[]) =>
+    stripComments(readFileSync(join(ROOT, ...p), 'utf8'));
+
+  const ROUTES: Array<[string, () => string]> = [
+    ['transition', () => routeSrc('app', 'api', 'projects', 'transition', 'route.ts')],
+    ['update-status', () => routeSrc('app', 'api', 'projects', 'update-status', 'route.ts')],
+  ];
+
+  it.each(ROUTES)('%s writes the micro-stage', (_name, src) => {
+    expect(src()).toMatch(/writeMicroStage\(/);
   });
 
-  it('and it still writes nothing when a stage has no mapping', () => {
-    // The whole repair depends on an unmapped stage being a no-op rather than
-    // falling through to some default.
-    expect(ROUTE).toMatch(/const mappedMicro = PIPELINE_STAGE_TO_MICRO\[newStage\];/);
-    expect(ROUTE).toMatch(/if \(mappedMicro\) \{/);
+  it.each(ROUTES)('%s writes NOTHING when a stage has no mapping', (name, src) => {
+    // The whole repair depends on an unmapped stage — `inspection` above all —
+    // being a no-op rather than falling through to some default. Both routes ask
+    // the shared resolver and both guard on its result.
+    const s = src();
+    expect(s, `${name} no longer asks the shared mapping`)
+      .toMatch(/microStageForPipelineStage\(/);
+    expect(s, `${name} calls writeMicroStage without checking there IS a mapping`)
+      .toMatch(/if \(mappedMicro\) \{/);
+  });
+
+  it('and the shared resolver returns null for an unmapped stage', () => {
+    // The behavioural half: the source guards above only prove the routes ask
+    // and branch. This proves the answer they branch on is the right one.
+    expect(microStageForPipelineStage('inspection')).toBeNull();
   });
 });

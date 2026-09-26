@@ -19,6 +19,11 @@ import { getDbReady, handleRouteDbError } from '@/lib/db-neon';
 import { isValidStage, type PipelineStage } from '@/lib/operations/pipeline';
 import { generateTasksForStage } from '@/lib/operations/generateTasksForStage';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
+// 🚨 The customer-facing half of a stage change. See the block that calls these:
+// they used to be reachable ONLY from a route with no UI callers.
+import { syncHomeownerStage } from '@/lib/homeownerStageSync';
+import { writeMicroStage } from '@/lib/microStage';
+import { microStageForPipelineStage } from '@/lib/operations/pipelineMicroStage';
 
 export async function POST(req: NextRequest) {
   try {
@@ -152,6 +157,43 @@ export async function POST(req: NextRequest) {
       tasksGenerated = taskResult.inserted;
     } catch (taskErr) {
       console.warn('[update-status] task generation failed:', taskErr);
+    }
+
+    // ══ 🚨 THE CUSTOMER-FACING STAGE ADVANCES TOO ═════════════════════════════
+    //
+    // It did not, and that was a whole-pipeline lost handoff. `syncHomeownerStage`
+    // and `writeMicroStage` were called from ONE place —
+    // `app/api/projects/transition/route.ts`, whose docblock calls itself the
+    // authorised path and which has **ZERO UI callers** (verified: the only
+    // reference to `projects/transition` anywhere in app/, lib/, components/ or
+    // hooks/ is a comment). Every real stage change in the product arrives here,
+    // and this route wrote `project_status` and the legacy `status` and stopped.
+    //
+    // So an operator moved a job to `permit_submitted` and the homeowner's portal
+    // — which renders `homeowner_stage` and the `project_micro_stages` log, and
+    // deliberately never reads `project_status` — went on saying whatever it last
+    // said. The internal pipeline and the customer's view of it were two separate
+    // stories, and only one of them was being told.
+    //
+    // BOTH CALLS ARE NON-FATAL, deliberately. `homeowner_stage` and
+    // `project_micro_stages` are created only by migrations in the directory the
+    // runner does not scan, so on a database built from the scanned set these
+    // tables may not exist at all. `writeMicroStage` already swallows and logs;
+    // `syncHomeownerStage` is wrapped here the same way the transition route
+    // wraps it. A stage change must never fail because the customer view could
+    // not be updated — but it must also never silently skip trying, which is
+    // what it did before.
+    try {
+      await syncHomeownerStage(projectId, status, user.id ?? null);
+    } catch {
+      // Non-fatal — handled inside syncHomeownerStage.
+    }
+    const mappedMicro = microStageForPipelineStage(status);
+    if (mappedMicro) {
+      await writeMicroStage(projectId, mappedMicro, user.id ?? null, {
+        source: 'update-status',
+        to_stage: status,
+      });
     }
 
     // Fetch updated project — try full ops columns, fall back to basic
