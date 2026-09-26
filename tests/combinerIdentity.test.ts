@@ -104,18 +104,16 @@ describe('🚨 selecting a combiner on an Enphase project — the refusal, gone'
       basis: 'This is what we stock and fit.',
       current: null,
     });
-    expect(outcome.refusals.map(r => r.code), 'an installer fitting the declared device was refused')
-      .not.toContain('NOT_A_CANDIDATE');
+    expect(outcome.refusals, 'an installer fitting the declared device was refused').toEqual([]);
     expect(outcome.ok).toBe(true);
     expect(outcome.next!.active!.combinerDeviceId).toBe(FIVE_C);
     expect(outcome.next!.active!.compatibility.declaredCompatible).toBe(true);
   });
 
-  it('and a device the declaration does NOT name is still a real conflict', () => {
-    // Proof this is an identity repair and not a blanket loosening. The IQ8 rows
-    // do not declare the 6C, so choosing one still needs stated authority —
-    // exactly as before. (Enphase documents support on both; widening the
-    // catalogue is manufacturer data and is not done to make a test pass.)
+  it('and a device the declaration does NOT name is RECORDED as not declared — and still accepted', () => {
+    // The identity repair still decides `declaredCompatible` (the IQ8 rows do
+    // not declare the 6C, so it reads false). Since Ray's 2026-09-25 ruling
+    // that is information on the record, never a refusal of the pick.
     const r = planCombinerSelection({
       deviceId: SIX_C,
       lookupDevice,
@@ -123,11 +121,12 @@ describe('🚨 selecting a combiner on an Enphase project — the refusal, gone'
       declaredCompatibleIds: combinerCompatibilityFor(undefined, undefined, IQ8.id),
       actor: { id: 'ray@example.com', kind: 'user' },
       atIso: '2026-09-22T12:00:00.000Z',
-      basis: 'Battery job.',
+      basis: null,
       current: null,
     });
-    expect(r.ok).toBe(false);
-    expect(r.refusals.map(x => x.code)).toContain('NOT_A_CANDIDATE');
+    expect(r.ok).toBe(true);
+    expect(r.next!.active!.combinerDeviceId).toBe(SIX_C);
+    expect(r.next!.active!.compatibility.declaredCompatible).toBe(false);
   });
 });
 

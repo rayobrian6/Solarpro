@@ -43,6 +43,7 @@ import { useToast } from '@/components/ui/Toast';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { SOLAR_PANELS, STRING_INVERTERS, MICROINVERTERS, RACKING_SYSTEMS, OPTIMIZERS, BATTERIES, GENERATORS, ATS_UNITS, getBatteryById, getGeneratorById, getATSById, getBackupInterfaceById, getMonitoringGatewayById, getEVChargerById, getOptimizerById, getMicroinverterById, getInverterById, resolveBatteryBranch } from '@/lib/equipment-db';
 import { listCombiners } from '@/lib/equipment/integratedBos';
+import { resolveAcDisconnect } from '@/lib/electrical/acDisconnect';
 import { buildSheetManifest } from '@/lib/permit/sheetManifest';
 // ── Wave 5A — multi-lane SLD: page-path source-branch builder + the W4B.D
 // empty-fleet synthesis helper (a present sub with an empty fleet computes
@@ -8281,6 +8282,11 @@ function EngineeringPageInner() {
           attachmentSpacing: config.attachmentSpacing,
           interconnectionMethod: config.interconnectionMethod ?? 'LOAD_SIDE',
           panelBusRating: config.panelBusRating ?? config.mainPanelAmps ?? 200,
+          // The installer's recorded combiner/Envoy. This downloaded package is
+          // the one that reaches the AHJ, and it was the only one of the page's
+          // payloads that dropped the pick — its E-1 printed the catalogue
+          // pairing as "NOT SELECTED" after the installer chose (2026-09-25).
+          selectedCombinerId: projectCombinerId || undefined,
           // BATTERY GATE (Ray, 2026-06-30): the planset shows a battery ONLY when one is
           // explicitly enabled (added in engineering, or selected in 3D design → hydrates
           // batteryEnabled). The permit's equipment legend keys off batteryCount>0, so a
@@ -11651,7 +11657,10 @@ function EngineeringPageInner() {
                       <div className="grid grid-cols-2 gap-2.5">
                         <CombinerSelector
                           projectId={currentProjectId}
-                          visible={!!computedSystem?.isMicro}
+                          visible={!!computedSystem?.isMicro || config.inverters.some(i => i.type === 'micro')}
+                          // The micro this design uses — only for the catalogue-pairing
+                          // note (never the Design Studio's string-inverter default).
+                          inverterId={config.inverters.find(i => i.type === 'micro' && getMicroinverterById(i.inverterId))?.inverterId ?? null}
                           onSelectionChanged={(id) => { setProjectCombinerId(id); setSldSvg(''); }}
                         />
                         <div>
@@ -14448,7 +14457,28 @@ function EngineeringPageInner() {
                       </tr>
                     </thead>
                     <tbody>
-                      {cs.equipmentSchedule.map((row, idx) => (
+                      {cs.equipmentSchedule.map((row0, idx) => {
+                        // The combiner and disconnect rows name what the SLD names —
+                        // the installer's recorded combiner, and the SAME
+                        // resolveAcDisconnect call the drawing makes. The engine row
+                        // hard-codes 'IQ Combiner 4C' / 'Non-Fused' on every job
+                        // (Ray, 2026-09-25).
+                        let row = row0;
+                        if (/^COMB-/.test(row0.tag) && /enphase/i.test(row0.manufacturer || 'enphase')) {
+                          const d = projectCombinerId ? listCombiners().find(c => c.id === projectCombinerId) : undefined;
+                          row = { ...row0, manufacturer: d?.brand ?? row0.manufacturer,
+                                  model: d ? d.model : 'Not selected — see System Configuration' };
+                        } else if (/^AC-DISC-/.test(row0.tag) && !subSystemCounts.isHybrid) {
+                          const _ocpd = csRun(cs.isMicro ? 'COMBINER_TO_DISCO_RUN' : 'INV_TO_DISCO_RUN')?.ocpdAmps;
+                          if (_ocpd) {
+                            const _d = resolveAcDisconnect({ requiredAmps: _ocpd, targetAmps: _ocpd,
+                              fused: config.interconnectionMethod === 'SUPPLY_SIDE_TAP' });
+                            row = { ...row0, manufacturer: _d.manufacturer,
+                                    model: `${_d.partNumber} (${_d.typeLabel}${_d.fuseA ? `, ${_d.fuseA}A fuses` : ''})`,
+                                    rating: `${_d.frameA}A / 240V` };
+                          }
+                        }
+                        return (
                         <tr key={row.tag} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
                           <td className="border border-slate-200 px-2 py-1.5 font-semibold font-mono">{row.tag}</td>
                           <td className="border border-slate-200 px-2 py-1.5">{row.description}</td>
@@ -14458,7 +14488,8 @@ function EngineeringPageInner() {
                           <td className="border border-slate-200 px-2 py-1.5 font-bold text-amber-700">{row.rating}</td>
                           <td className="border border-slate-200 px-2 py-1.5 text-slate-500 text-xs">{row.necReference}</td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>

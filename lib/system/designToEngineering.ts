@@ -49,8 +49,24 @@ function defaultInverterId(topology: DesignElectrical['topology']): string {
  * low. Only the optimizer peripheral id stays separate (it's not the inverter).
  */
 function designRecordedInverterId(de: DesignElectrical): string | undefined {
-  if (de.topology === 'micro') return de.microModelId;
+  if (de.topology === 'micro') return fitsTopology(de.microModelId, 'micro') ? de.microModelId : undefined;
   return undefined;
+}
+
+/**
+ * Is this id a catalogue inverter of the kind the topology runs on? A micro
+ * design runs on a MICROINVERTER; string/optimizer on a string inverter.
+ *
+ * 🚨 The Design Studio defaults its inverter pick to 'se-7600h' (SolarEdge), and
+ * that id rode into micro designs as the "pinned" inverter — so an Enphase job
+ * came out {type:'micro', inverterId:'se-7600h'}: no Enphase branch basis, a
+ * combiner card listing SolarEdge optimizers (Ray, 2026-09-25). An id of the
+ * wrong kind is not a pin for this topology; it is skipped.
+ */
+function fitsTopology(id: string | undefined | null, topology: DesignElectrical['topology']): boolean {
+  if (!id) return false;
+  const isMicro = MICROINVERTERS.some(m => m.id === id);
+  return topology === 'micro' ? isMicro : !isMicro;
 }
 
 function inferBrand(de: DesignElectrical): string {
@@ -94,8 +110,10 @@ export function designElectricalToEngineering(
 
   return {
     inverterType: de.topology,
-    // Precedence: project-pinned inverter > the model the DESIGN recorded > topology default.
-    inverterId: opts.selectedInverterId || designRecordedInverterId(de) || defaultInverterId(de.topology),
+    // Precedence: project-pinned inverter > the model the DESIGN recorded > topology default —
+    // each only when it is an inverter of the kind this topology runs on.
+    inverterId: (fitsTopology(opts.selectedInverterId, de.topology) ? opts.selectedInverterId : undefined)
+      || designRecordedInverterId(de) || defaultInverterId(de.topology),
     inverterBrand: inferBrand(de),
     mountingId: de.rackingId,
     optimizerPeripheralId: de.topology === 'optimizer' ? de.optimizerModelId : undefined,

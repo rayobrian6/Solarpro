@@ -45,7 +45,8 @@
  * never guesses a pairing.
  */
 
-import { MICROINVERTERS, getMicroinverterById, getInverterById } from '@/lib/equipment-db';
+import { MICROINVERTERS, getMicroinverterById } from '@/lib/equipment-db';
+import { canonicalCombinerId } from '@/lib/equipment/combinerIdentity';
 
 const norm = (s: unknown): string => String(s ?? '').trim().toLowerCase();
 
@@ -65,14 +66,13 @@ export function combinerCompatibilityFor(
   inverterId?: string | null,
 ): string[] | undefined {
   if (inverterId) {
-    // 🚨 MICROINVERTERS FIRST, AND THAT IS A REPAIR, NOT A PREFERENCE.
-    // The SLD route's own copy of this rule called `getInverterById`, which
-    // searches STRING_INVERTERS only. Combiners pair with MICROinverters, so
-    // for the ids this is actually asked about it always missed and fell
-    // through to the name match — a silent near-miss that only worked because
-    // the fallback happened to be right. Both catalogues are searched here.
-    const id = String(inverterId);
-    const byId = (getMicroinverterById(id) ?? getInverterById(id)) as
+    // 🚨 MICROINVERTERS ONLY. Combiners pair with microinverters. This used to
+    // fall back to STRING_INVERTERS by id, and no string inverter declares a
+    // combiner — so a stale string id ('se-7600h', the Design Studio's
+    // default) answered with its OPTIMIZER list, and an Enphase IQ8+ job's
+    // combiner card read "This inverter declares: se-p401, se-p505, se-p730"
+    // (Ray, 2026-09-25). A non-micro id now falls through to the name match.
+    const byId = getMicroinverterById(String(inverterId)) as
       { compatibleWith?: string[] } | undefined;
     if (Array.isArray(byId?.compatibleWith)) return byId!.compatibleWith;
   }
@@ -84,4 +84,26 @@ export function combinerCompatibilityFor(
   const rec = MICROINVERTERS.find(r => norm(r.manufacturer) === m && norm(r.model) === d) as
     { compatibleWith?: string[] } | undefined;
   return Array.isArray(rec?.compatibleWith) ? rec!.compatibleWith : undefined;
+}
+
+/**
+ * The catalogue pairing for a MICROINVERTER id, for display only — a quiet
+ * note beside the picker, never a gate (Ray, 2026-09-25). `combinerIds` are the
+ * declared entries resolved to combiner product identities (non-combiner
+ * entries such as the gateway or a battery drop out). `null` for anything that
+ * is not a catalogue microinverter.
+ */
+export function declaredCombinerPairing(inverterId: string | null | undefined): {
+  inverterId: string;
+  inverterLabel: string;
+  declared: string[];
+  combinerIds: string[];
+} | null {
+  if (!inverterId) return null;
+  const m = getMicroinverterById(String(inverterId)) as
+    { id: string; manufacturer: string; model: string; compatibleWith?: string[] } | undefined;
+  if (!m) return null;
+  const declared = Array.isArray(m.compatibleWith) ? [...m.compatibleWith] : [];
+  const combinerIds = [...new Set(declared.map(d => canonicalCombinerId(d)).filter((x): x is string => !!x))];
+  return { inverterId: m.id, inverterLabel: `${m.manufacturer} ${m.model}`, declared, combinerIds };
 }

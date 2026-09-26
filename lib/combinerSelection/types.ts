@@ -23,11 +23,13 @@
 // "Yes" in the SOLAR ONLY column of the compatibility matrix. The catalogue's
 // `compatibleWith: ['enphase-iq-combiner-5']` on the IQ8 rows is therefore
 // INCOMPLETE, not wrong — microinverter family does not discriminate between
-// them. Refusing a pick merely because the catalogue never named it would block
-// a legitimate 6C on an IQ8 job, which is exactly the "the software decided"
-// failure this module exists to end. Absence of a declared pairing is recorded,
-// and permitted. A declared list that EXCLUDES the device is a real conflict and
-// is refused unless stated authority admits it.
+// them.
+//
+// 🚨 RAY'S RULING, 2026-09-25: THE INSTALLER IS NOT QUESTIONED. "I don't like
+// that I have to be questioned why I choose whatever Envoy I want to." Any
+// catalogue combiner is recorded on one pick — no reason, no authority. What
+// the catalogue declares is recorded beside the pick as INFORMATION
+// (`compatibility`) and never refuses it. Nothing is ever substituted.
 //
 // WHERE IT LIVES, AND WHY NO MIGRATION. `projects.selected_equipment` is the
 // canonical design-equipment store (migration 101), JSONB with an existing
@@ -58,10 +60,9 @@ export interface CombinerCompatibilityAuthority {
 }
 
 /**
- * Selecting a combiner the inverter's own declaration EXCLUDES is permitted, and
- * only with stated engineering authority. There is deliberately no boolean
- * "force": an override that cannot name its authority is indistinguishable from
- * a mistake, and this one ends up on a permit.
+ * LEGACY. Selections made before 2026-09-25 could carry a stated reason and
+ * authority for a pairing the catalogue did not declare. They still load and
+ * are kept verbatim; nothing requires one any more.
  */
 export interface CombinerCompatibilityOverride {
   reason: string;
@@ -90,8 +91,9 @@ export interface CombinerSelectionRecord {
   selectedBy: string;
   selectedByKind: 'user' | 'service';
   selectedAtIso: string;
-  /** WHY this device. Required, and required to be non-empty. */
-  basis: string;
+  /** An optional note on why this device. `null` ⇔ none stated — and none is
+   *  required (Ray, 2026-09-25). Legacy records carry the text they had. */
+  basis: string | null;
   compatibility: CombinerCompatibilityAuthority;
   compatibilityOverride: CombinerCompatibilityOverride | null;
   /** Set when this record was retired, so a superseded entry says how it ended. */
@@ -112,11 +114,10 @@ export interface CombinerSelectionRefusal {
   code:
     | 'DEVICE_REQUIRED'      // nothing was chosen
     | 'UNKNOWN_DEVICE'       // not in the BOS catalogue
-    | 'NOT_A_CANDIDATE'      // the inverter's own declaration excludes it
-    | 'BASIS_REQUIRED'       // no stated reason
     | 'ACTOR_REQUIRED'       // nobody owns the decision
-    | 'OVERRIDE_INCOMPLETE'  // an override without a reason or an authority
     | 'NO_ACTIVE_SELECTION'; // nothing to clear
+    // (NOT_A_CANDIDATE / BASIS_REQUIRED / OVERRIDE_INCOMPLETE were removed on
+    //  2026-09-25: the installer's pick is not interrogated.)
   message: string;
 }
 

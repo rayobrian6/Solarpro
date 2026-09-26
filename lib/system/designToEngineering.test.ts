@@ -110,6 +110,15 @@ describe('designElectricalToEngineering', () => {
     expect(h.inverterId).toBe('enphase-iq8h'); // pinned wins over recorded design model
   });
 
+  it('never pins a STRING inverter onto a micro design (the Design Studio se-7600h default)', () => {
+    // Ray, 2026-09-25: an Enphase job carried inverterId 'se-7600h' and its
+    // combiner card listed SolarEdge optimizers. Wrong-kind ids are skipped.
+    expect(designElectricalToEngineering({ ...baseDE, microModelId: 'enphase-iq8a' },
+      { selectedInverterId: 'se-7600h' }).inverterId).toBe('enphase-iq8a');
+    expect(designElectricalToEngineering({ ...baseDE, microModelId: 'se-7600h' },
+      { selectedInverterId: 'se-7600h' }).inverterId).toBe('enphase-iq8plus');
+  });
+
   it('falls back to the topology default only when neither pinned nor recorded model exists', () => {
     const h = designElectricalToEngineering({ ...baseDE, microModelId: undefined });
     expect(h.inverterId).toBe('enphase-iq8plus'); // MICROINVERTERS[0]

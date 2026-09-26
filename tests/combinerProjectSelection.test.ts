@@ -75,17 +75,37 @@ describe('an absent pairing is NOT incompatibility', () => {
   });
 });
 
-describe('a declared list that EXCLUDES the device is a real conflict', () => {
-  it('🚨 it is REFUSED — and never silently substituted', () => {
-    const r = select({ deviceId: SIX_C, declaredCompatibleIds: [FIVE_C] });
-    expect(r.ok).toBe(false);
-    expect(r.next, 'nothing may be written on a refusal').toBeNull();
-    expect(r.refusals.map(x => x.code)).toContain('NOT_A_CANDIDATE');
-    // The message must offer the override, not offer a different product.
-    expect(r.refusals[0].message).toMatch(/will not be substituted/i);
+describe("the installer's pick is never questioned (Ray, 2026-09-25)", () => {
+  it('🚨 a device the declaration does not name is ACCEPTED — recorded as chosen, never substituted', () => {
+    // "I don't like that I have to be questioned why I choose whatever Envoy I
+    // want to." The declaration is recorded as information, not a gate.
+    const r = select({ deviceId: SIX_C, declaredCompatibleIds: [FIVE_C], basis: null });
+    expect(r.ok).toBe(true);
+    expect(r.refusals).toEqual([]);
+    expect(r.next!.active!.combinerDeviceId).toBe(SIX_C);
+    expect(r.next!.active!.compatibility.declaredCompatible).toBe(false);
+    expect(r.next!.active!.basis).toBeNull();
+    expect(r.next!.active!.compatibilityOverride).toBeNull();
   });
 
-  it('stated engineering authority admits it, and is recorded', () => {
+  it('every catalogue combiner, against any declaration, with no text at all', () => {
+    for (const id of [FIVE_C, SIX_C]) {
+      for (const declared of [null, [FIVE_C], [SIX_C], ['se-p401', 'se-p505', 'se-p730']]) {
+        const r = select({ deviceId: id, declaredCompatibleIds: declared, basis: undefined });
+        expect(r.ok, `${id} vs ${JSON.stringify(declared)}`).toBe(true);
+        expect(r.next!.active!.combinerDeviceId).toBe(id);
+      }
+    }
+  });
+
+  it('re-picking the device already in force writes nothing new', () => {
+    const first = select({ deviceId: FIVE_C });
+    const again = select({ deviceId: FIVE_C, current: first.next });
+    expect(again.ok).toBe(true);
+    expect(again.next).toBe(first.next);
+  });
+
+  it('LEGACY: a complete stated authority is still recorded verbatim', () => {
     const r = select({
       deviceId: SIX_C,
       declaredCompatibleIds: [FIVE_C],
@@ -97,23 +117,25 @@ describe('a declared list that EXCLUDES the device is a real conflict', () => {
     expect(r.next!.active!.compatibility.declaredCompatible).toBe(false);
   });
 
-  it('an override without an authority is refused — there is no boolean force', () => {
+  it('a partial override is simply not recorded — it never refuses the pick', () => {
     const r = select({
       deviceId: SIX_C,
       declaredCompatibleIds: [FIVE_C],
       compatibilityOverride: { reason: 'because', authority: '  ' },
     });
-    expect(r.ok).toBe(false);
-    expect(r.refusals.map(x => x.code)).toContain('OVERRIDE_INCOMPLETE');
+    expect(r.ok).toBe(true);
+    expect(r.next!.active!.compatibilityOverride).toBeNull();
   });
 });
 
-describe('a selection must be owned and justified', () => {
+describe('a selection must be owned (and nothing more)', () => {
   it('refuses with no actor', () => {
     expect(select({ actor: null }).refusals.map(x => x.code)).toContain('ACTOR_REQUIRED');
   });
-  it('refuses with no basis — this device is named on a permit', () => {
-    expect(select({ basis: '   ' }).refusals.map(x => x.code)).toContain('BASIS_REQUIRED');
+  it('accepts with no basis — a reason is optional (Ray, 2026-09-25)', () => {
+    const r = select({ basis: '   ' });
+    expect(r.ok).toBe(true);
+    expect(r.next!.active!.basis).toBeNull();
   });
   it('refuses a device the catalogue has never heard of', () => {
     const r = select({ deviceId: 'acme-combiner-9000' });
@@ -127,10 +149,10 @@ describe('a selection must be owned and justified', () => {
       deviceId: '', lookupDevice, inverterId: null, declaredCompatibleIds: null,
       actor: null, atIso: AT, basis: '', current: null,
     });
-    const codes = r.refusals.map(x => x.code);
+    const codes = r.refusals.map(x => x.code) as string[];
     expect(codes).toContain('DEVICE_REQUIRED');
     expect(codes).toContain('ACTOR_REQUIRED');
-    expect(codes).toContain('BASIS_REQUIRED');
+    expect(codes).not.toContain('BASIS_REQUIRED');
   });
 });
 

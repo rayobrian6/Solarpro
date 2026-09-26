@@ -12,11 +12,14 @@
 // alternative — every caller carrying its own id reconciliation — is the defect
 // this module exists to end.)
 //
-// THE BOUNDARY THIS KEEPS. This module does not choose a combiner. What it does
-// is REFUSE TO RECORD A CLAIM IT CANNOT JUSTIFY — a device the catalogue has
-// never heard of, or one the selected inverter's own declaration excludes with
-// nothing stated to admit it. That is not selecting; it is declining to write
-// down an unsupported decision.
+// THE BOUNDARY THIS KEEPS. This module does not choose a combiner — the
+// installer does, and the installer is not questioned about it. Ray, 2026-09-25:
+// "I don't like that I have to be questioned why I choose whatever Envoy I want
+// to." ANY catalogue combiner is recorded on one pick, with no reason and no
+// authority required. Compatibility is still JUDGED and RECORDED — as
+// information on the record — and never as a gate. The only refusals left are
+// the ones that mean there is nothing to record: no device, no actor, or an id
+// the catalogue does not know (the picker only offers catalogue devices).
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { canonicalCombinerId } from '@/lib/equipment/combinerIdentity';
@@ -180,7 +183,9 @@ export function planCombinerSelection(args: {
   declaredCompatibleIds: string[] | null | undefined;
   actor: { id: string; kind: 'user' | 'service' } | null;
   atIso: string;
-  basis: string;
+  /** Optional note. Never required (Ray, 2026-09-25). */
+  basis?: string | null;
+  /** Legacy. Recorded when complete, ignored when not — never a refusal. */
   compatibilityOverride?: CombinerCompatibilityOverride | null;
   current: CombinerSelectionStore | null;
 }): CombinerSelectionOutcome {
@@ -193,20 +198,10 @@ export function planCombinerSelection(args: {
   if (!args.actor?.id?.trim()) {
     refusals.push({ code: 'ACTOR_REQUIRED', message: 'A combiner selection must name the person or service that made it.' });
   }
-  if (!args.basis?.trim()) {
-    refusals.push({
-      code: 'BASIS_REQUIRED',
-      message: 'A combiner selection must state why. This device is named on the permit package.',
-    });
-  }
-
-  const ov = args.compatibilityOverride ?? null;
-  if (ov && (!ov.reason?.trim() || !ov.authority?.trim())) {
-    refusals.push({
-      code: 'OVERRIDE_INCOMPLETE',
-      message: 'An override must state both a reason and the authority that admits the pairing. An override that cannot name its authority is indistinguishable from a mistake.',
-    });
-  }
+  // A legacy override is kept only when it is complete; a blank or partial one
+  // is simply not recorded. Nothing about it can refuse the pick.
+  const _ov = args.compatibilityOverride ?? null;
+  const ov = _ov && _ov.reason?.trim() && _ov.authority?.trim() ? _ov : null;
 
   const device = deviceId ? args.lookupDevice(deviceId) : null;
   if (deviceId && !device) {
@@ -222,26 +217,17 @@ export function planCombinerSelection(args: {
     declaredCompatibleIds: args.declaredCompatibleIds,
   });
 
-  // A declaration that EXISTS and excludes this device is a real conflict. It is
-  // surfaced, never silently replaced with something the software prefers.
-  //
-  // The message carries `compatibility.source` because the two sides are written
-  // in different catalogues' spellings: an operator told only that
-  // [enphase-iq-combiner-5] "does not name enphase-iq-combiner-5c" cannot see
-  // whether that is a real conflict or a vocabulary one, and for a year it was
-  // the second. The source line shows each declared id beside the product it
-  // resolves to, so a genuine exclusion reads as one.
-  if (compatibility.declaredCompatibleIds && !compatibility.declaredCompatible && !ov) {
-    refusals.push({
-      code: 'NOT_A_CANDIDATE',
-      message:
-        `The selected inverter declares [${compatibility.declaredCompatibleIds.join(', ')}] and does not name ${deviceId}. ` +
-        'Selecting it anyway is permitted with stated engineering authority; it will not be substituted for something else. ' +
-        `(${compatibility.source})`,
-    });
-  }
+  // `compatibility` is RECORDED, never enforced: a device the inverter's
+  // declaration does not name is still the installer's pick, recorded exactly
+  // as chosen and never substituted (Ray, 2026-09-25).
 
   if (refusals.length > 0) return refuse(...refusals);
+
+  const cur = args.current ?? { active: null, superseded: [] };
+  // Re-picking the device already in force writes nothing new.
+  if (cur.active?.combinerDeviceId === deviceId) {
+    return { ok: true, next: args.current ?? cur, refusals: [] };
+  }
 
   const record: CombinerSelectionRecord = {
     schemaVersion: 1,
@@ -253,12 +239,11 @@ export function planCombinerSelection(args: {
     selectedBy: args.actor!.id,
     selectedByKind: args.actor!.kind,
     selectedAtIso: args.atIso,
-    basis: args.basis.trim(),
+    basis: args.basis?.trim() || null,
     compatibility,
     compatibilityOverride: ov,
   };
 
-  const cur = args.current ?? { active: null, superseded: [] };
   // Supersession, never overwrite: the package has to be able to say what was
   // selected before and why it stopped being the answer.
   const superseded = cur.active

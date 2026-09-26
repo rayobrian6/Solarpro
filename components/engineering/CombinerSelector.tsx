@@ -8,23 +8,22 @@
 //
 // There WAS already a combiner control: a bare <select> in the SLD tab's toolbar
 // writing `config.combinerId` into `projects.engineering_config` — the
-// engineering page's private workspace. It had no actor, no reason, no history
-// and no compatibility statement, and the canonical store every other consumer
-// reads (`projects.selected_equipment`) never received it. So the drawing could
+// engineering page's private workspace. The canonical store every other consumer
+// reads (`projects.selected_equipment`) never received it, so the drawing could
 // be corrected while the BOM, the schedule and the permit package went on naming
-// whatever a resolver had guessed.
+// whatever a resolver had guessed. This control writes the canonical record.
 //
-// This control writes the canonical record instead. It states what the catalogue
-// declares, it makes the installer say WHY, and it never substitutes: a device
-// the inverter's declaration excludes is REFUSED with its reason shown, and
-// selecting it anyway requires stated engineering authority.
+// 🚨 ONE PICK, NO QUESTIONS (Ray, 2026-09-25). "I don't like that I have to be
+// questioned why I choose whatever Envoy I want to. It's ridiculous." Choosing a
+// combiner records it — no reason field, no authority field, no "(not
+// declared)" labels. What the catalogue pairs with the inverter is shown as a
+// quiet note, never a gate, and nothing is ever substituted for the pick.
 //
 // 🚨 IT DOES NOT RECOMMEND BY DEFAULT. With nothing selected the control says
-// so, in those words. An unanswered question must look unanswered — that is the
-// entire defect this replaces.
+// so, in those words. An unanswered question must look unanswered.
 // ═══════════════════════════════════════════════════════════════════════════
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 
 interface Candidate { id: string; brand: string; model: string }
 
@@ -32,49 +31,60 @@ interface SelectionRecord {
   combinerDeviceId: string;
   manufacturer: string;
   model: string;
-  basis: string;
+  basis: string | null;
   selectedBy: string;
   selectedAtIso: string;
-  compatibility: { declaredCompatibleIds: string[] | null; declaredCompatible: boolean; source: string };
-  compatibilityOverride: { reason: string; authority: string } | null;
 }
 
-interface Refusal { code: string; message: string }
+interface Pairing { inverterLabel: string; combinerIds: string[] }
 
 export interface CombinerSelectorProps {
   projectId: string | null | undefined;
   /** Combiners are an Enphase-microinverter concept today; hidden otherwise. */
   visible: boolean;
+  /** The microinverter the design uses — only for the catalogue-pairing note. */
+  inverterId?: string | null;
   /** Told the new device id (or null) so the page can drop a stale SLD. */
   onSelectionChanged?: (deviceId: string | null) => void;
 }
 
-export default function CombinerSelector({ projectId, visible, onSelectionChanged }: CombinerSelectorProps) {
+/** A closed <select> fires `change` on every arrow key in some browsers; wait
+ *  for the pick to settle so browsing the list does not write a history entry
+ *  per option. */
+const SETTLE_MS = 450;
+
+export default function CombinerSelector({ projectId, visible, inverterId, onSelectionChanged }: CombinerSelectorProps) {
   // Held in a ref so `load` does not re-create on every parent render, which
   // would re-fire the effect and re-fetch on every keystroke elsewhere.
-  const onSelectionChangedRef = React.useRef(onSelectionChanged);
+  const onSelectionChangedRef = useRef(onSelectionChanged);
   onSelectionChangedRef.current = onSelectionChanged;
+  // The project a response belongs to. A POST or GET that lands after the
+  // operator switched projects must not write another project's answer here.
+  const projectRef = useRef(projectId);
+  projectRef.current = projectId;
+  const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState<SelectionRecord | null>(null);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
-  const [declared, setDeclared] = useState<string[] | null>(null);
-  const [refusals, setRefusals] = useState<Refusal[]>([]);
+  const [pairing, setPairing] = useState<Pairing | null>(null);
   const [draftId, setDraftId] = useState('');
-  const [basis, setBasis] = useState('');
-  const [overrideReason, setOverrideReason] = useState('');
-  const [overrideAuthority, setOverrideAuthority] = useState('');
+  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!projectId) return;
+    const forProject = projectId;
     setLoading(true);
     try {
-      const res = await fetch(`/api/projects/${projectId}/combiner-selection`, { cache: 'no-store' });
+      const q = inverterId ? `?inverterId=${encodeURIComponent(inverterId)}` : '';
+      const res = await fetch(`/api/projects/${projectId}/combiner-selection${q}`, { cache: 'no-store' });
       const j = await res.json();
+      if (projectRef.current !== forProject) return;
       if (j?.success) {
         setSelected(j.selected ?? null);
         setCandidates(Array.isArray(j.candidates) ? j.candidates : []);
-        setDeclared(Array.isArray(j.declaredCompatibleIds) ? j.declaredCompatibleIds : null);
+        setPairing(j.pairing && Array.isArray(j.pairing.combinerIds) ? j.pairing : null);
         setDraftId(j.selected?.combinerDeviceId ?? '');
         // Report on LOAD as well as on change. Without this the page holds null
         // until the operator touches the control, and the first SLD of a session
@@ -82,80 +92,95 @@ export default function CombinerSelector({ projectId, visible, onSelectionChange
         onSelectionChangedRef.current?.(j.selected?.combinerDeviceId ?? null);
       }
     } catch { /* the panel stays empty rather than asserting anything */ }
-    finally { setLoading(false); }
-  }, [projectId]);
+    finally { if (projectRef.current === forProject) setLoading(false); }
+  }, [projectId, inverterId]);
 
   // 🚨 A SELECTION IS NOT PORTABLE BETWEEN PROJECTS. Drop it BEFORE the fetch.
   //
   // `load` reports the new project's answer only once the request lands. Until
-  // then this component went on DISPLAYING the previous project's device and
-  // the page went on SENDING it — and a reported `selectedCombinerId` outranks
-  // every other authority downstream, so a drawing or BOM generated in that
-  // window would have asserted another project's equipment decision rather than
-  // merely defaulted. Reset first, then load: a moment of "nothing selected" is
-  // true, where a moment of the wrong device is not.
+  // then this component would go on DISPLAYING the previous project's device and
+  // the page would go on SENDING it — and a reported `selectedCombinerId`
+  // outranks every other authority downstream. Reset first, then load: a moment
+  // of "nothing selected" is true, where a moment of the wrong device is not.
   useEffect(() => {
-    setSelected(null); setCandidates([]); setDeclared(null); setRefusals([]);
-    setDraftId(''); setBasis(''); setOverrideReason(''); setOverrideAuthority('');
+    if (settleTimer.current) { clearTimeout(settleTimer.current); settleTimer.current = null; }
+    setSelected(null); setCandidates([]); setPairing(null); setDraftId(''); setError(null); setBusy(false);
     onSelectionChangedRef.current?.(null);
   }, [projectId]);
 
   useEffect(() => { if (visible) void load(); }, [visible, load]);
 
+  useEffect(() => () => { if (settleTimer.current) clearTimeout(settleTimer.current); }, []);
+
   if (!visible) return null;
 
-  // A conflict is shown BEFORE the operator submits, so the override fields are
-  // offered rather than sprung on them by a refusal.
-  const conflict = Boolean(draftId && declared && declared.length > 0 && !declared.includes(draftId));
-
-  const submit = async () => {
-    if (!projectId || !draftId) return;
-    setBusy(true); setRefusals([]);
+  const save = async (id: string) => {
+    const forProject = projectRef.current;
+    if (!forProject || !id || id === selected?.combinerDeviceId) return;
+    setBusy(true); setError(null);
     try {
-      const res = await fetch(`/api/projects/${projectId}/combiner-selection`, {
+      const res = await fetch(`/api/projects/${forProject}/combiner-selection`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          combinerDeviceId: draftId,
-          basis,
-          compatibilityOverride: conflict ? { reason: overrideReason, authority: overrideAuthority } : null,
-        }),
+        body: JSON.stringify({ combinerDeviceId: id, inverterId: inverterId ?? null }),
       });
       const j = await res.json();
+      if (projectRef.current !== forProject) return;
       if (j?.success) {
         setSelected(j.selected ?? null);
-        setBasis(''); setOverrideReason(''); setOverrideAuthority('');
-        onSelectionChanged?.(j.selected?.combinerDeviceId ?? null);
+        onSelectionChangedRef.current?.(j.selected?.combinerDeviceId ?? null);
       } else {
-        setRefusals(Array.isArray(j?.refusals) ? j.refusals : [{ code: 'ERROR', message: j?.error ?? 'Refused.' }]);
+        setDraftId(selected?.combinerDeviceId ?? '');
+        setError(j?.refusals?.[0]?.message ?? j?.error ?? 'The selection could not be saved.');
       }
     } catch (e) {
-      setRefusals([{ code: 'NETWORK', message: (e as Error).message }]);
-    } finally { setBusy(false); }
+      if (projectRef.current === forProject) {
+        setDraftId(selected?.combinerDeviceId ?? '');
+        setError((e as Error).message || 'The selection could not be saved.');
+      }
+    } finally { if (projectRef.current === forProject) setBusy(false); }
+  };
+
+  const choose = (id: string) => {
+    setDraftId(id); setError(null);
+    if (settleTimer.current) clearTimeout(settleTimer.current);
+    if (!id) return;
+    settleTimer.current = setTimeout(() => { settleTimer.current = null; void save(id); }, SETTLE_MS);
   };
 
   const clear = async () => {
-    if (!projectId) return;
-    setBusy(true); setRefusals([]);
+    const forProject = projectRef.current;
+    if (!forProject) return;
+    if (settleTimer.current) { clearTimeout(settleTimer.current); settleTimer.current = null; }
+    setBusy(true); setError(null);
     try {
-      const res = await fetch(`/api/projects/${projectId}/combiner-selection`, {
+      const res = await fetch(`/api/projects/${forProject}/combiner-selection`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason: 'Equipment decision reopened from System Configuration.' }),
       });
       const j = await res.json();
-      if (j?.success) { setSelected(null); setDraftId(''); onSelectionChanged?.(null); }
-      else setRefusals(Array.isArray(j?.refusals) ? j.refusals : [{ code: 'ERROR', message: j?.error ?? 'Refused.' }]);
+      if (projectRef.current !== forProject) return;
+      if (j?.success) { setSelected(null); setDraftId(''); onSelectionChangedRef.current?.(null); }
+      else setError(j?.refusals?.[0]?.message ?? j?.error ?? 'The selection could not be cleared.');
     } catch (e) {
-      setRefusals([{ code: 'NETWORK', message: (e as Error).message }]);
-    } finally { setBusy(false); }
+      if (projectRef.current === forProject) setError((e as Error).message);
+    } finally { if (projectRef.current === forProject) setBusy(false); }
   };
+
+  const pairedNames = pairing
+    ? pairing.combinerIds
+        .map(id => candidates.find(c => c.id === id))
+        .filter((c): c is Candidate => !!c)
+        .map(c => `${c.brand} ${c.model}`)
+    : [];
 
   return (
     <div className="col-span-2 rounded-lg border border-slate-700/60 bg-slate-900/40 p-3 mb-2.5">
       <div className="flex items-baseline justify-between gap-2 mb-1.5">
-        <label className="eng-label !mb-0">AC Combiner — what you are installing</label>
-        {loading ? <span className="text-[10px] text-slate-500">loading…</span> : null}
+        <label className="eng-label !mb-0">AC Combiner / Envoy — what you are installing</label>
+        {loading ? <span className="text-[10px] text-slate-500">loading…</span>
+          : busy ? <span className="text-[10px] text-slate-500">saving…</span> : null}
       </div>
 
       {/* WHAT IS SELECTED — or, deliberately, that nothing is. */}
@@ -163,10 +188,8 @@ export default function CombinerSelector({ projectId, visible, onSelectionChange
         <div className="text-xs text-emerald-300 font-semibold mb-2">
           {selected.manufacturer} {selected.model}
           <span className="block text-[10px] font-normal text-slate-400 mt-0.5">
-            Selected by {selected.selectedBy} · {selected.basis}
-            {selected.compatibilityOverride
-              ? ` · override: ${selected.compatibilityOverride.authority}`
-              : ''}
+            Selected by {selected.selectedBy}
+            {selected.basis ? <span className="text-slate-500"> · {selected.basis}</span> : null}
           </span>
         </div>
       ) : (
@@ -183,26 +206,13 @@ export default function CombinerSelector({ projectId, visible, onSelectionChange
           className="eng-select flex-1 min-w-[180px]"
           value={draftId}
           disabled={busy}
-          onChange={e => { setDraftId(e.target.value); setRefusals([]); }}
+          onChange={e => choose(e.target.value)}
         >
           <option value="">— choose a combiner —</option>
           {candidates.map(c => (
-            <option key={c.id} value={c.id}>
-              {c.brand} {c.model}
-              {declared && declared.length > 0 ? (declared.includes(c.id) ? '  (declared compatible)' : '  (not declared)') : ''}
-            </option>
+            <option key={c.id} value={c.id}>{c.brand} {c.model}</option>
           ))}
         </select>
-        <input
-          className="eng-input flex-1 min-w-[180px]"
-          placeholder="Why this device (required)"
-          value={basis}
-          disabled={busy}
-          onChange={e => setBasis(e.target.value)}
-        />
-        <button className="btn-primary btn-sm" onClick={submit} disabled={busy || !draftId}>
-          {busy ? 'Saving…' : selected ? 'Change' : 'Select'}
-        </button>
         {selected ? (
           <button className="btn-ghost btn-sm" onClick={clear} disabled={busy} title="Reopen the equipment decision">
             Clear
@@ -210,37 +220,14 @@ export default function CombinerSelector({ projectId, visible, onSelectionChange
         ) : null}
       </div>
 
-      {/* The catalogue's own statement, said plainly in both directions. */}
       <p className="text-[10px] text-slate-500 mt-1.5">
-        {declared && declared.length > 0
-          ? `This inverter declares: ${declared.join(', ')}. A declaration is a compatibility statement, not a selection.`
-          : 'The catalogue declares no combiner pairing for this inverter. That is missing data, not incompatibility — Enphase documents IQ6/IQ7/IQ8 support on both the 5/5C and the 6C.'}
+        Each IQ Combiner has the IQ Gateway (Envoy) built in. Any one can be selected
+        {pairedNames.length > 0 && pairing
+          ? ` — the catalogue pairs ${pairing.inverterLabel} with ${pairedNames.join(', ')} (information only).`
+          : '.'}
       </p>
 
-      {conflict ? (
-        <div className="mt-2 rounded border border-amber-500/40 bg-amber-500/10 p-2">
-          <p className="text-[11px] text-amber-300 font-semibold mb-1.5">
-            This inverter&apos;s declaration does not name that combiner. It will not be substituted — state the
-            authority that admits the pairing.
-          </p>
-          <div className="flex flex-wrap gap-2">
-            <input className="eng-input flex-1 min-w-[160px]" placeholder="Reason" value={overrideReason}
-              disabled={busy} onChange={e => setOverrideReason(e.target.value)} />
-            <input className="eng-input flex-1 min-w-[160px]" placeholder="Authority (datasheet / brief / letter)"
-              value={overrideAuthority} disabled={busy} onChange={e => setOverrideAuthority(e.target.value)} />
-          </div>
-        </div>
-      ) : null}
-
-      {refusals.length > 0 ? (
-        <ul className="mt-2 space-y-1">
-          {refusals.map((r, i) => (
-            <li key={`${r.code}-${i}`} className="text-[11px] text-rose-300">
-              <span className="font-mono text-rose-400">{r.code}</span> — {r.message}
-            </li>
-          ))}
-        </ul>
-      ) : null}
+      {error ? <p className="mt-1.5 text-[11px] text-rose-300">{error}</p> : null}
     </div>
   );
 }
