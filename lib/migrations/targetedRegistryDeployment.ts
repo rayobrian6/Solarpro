@@ -301,6 +301,44 @@ const ALTER_SUBCOMMAND_BAN = [
   'UNIQUE', 'REFERENCES', 'CHECK', 'CONSTRAINT', 'COLLATE', 'USING',
 ];
 
+/**
+ * 🚨 ONE TOKEN SCAN. THERE WERE FOUR COPIES AND ONE COULD NEVER MATCH.
+ *
+ * The index-only shape built its pattern inside a TEMPLATE LITERAL with single
+ * backslashes, where its three siblings used double ones. In a template literal
+ * `\b` is not a word boundary — it is U+0008 BACKSPACE — and `\s` is a literal
+ * 's'. Measured, not read: the built pattern's first character came back as char
+ * code 8; `/<BS>DROP<BS>/i.test('DROP TABLE projects;')` is FALSE where the
+ * escaped form is TRUE; and the multi-word token degraded to
+ * `CREATEs+ORs+REPLACE`.
+ *
+ * So for that shape `forbiddenFound` was ALWAYS empty and `nonDestructive`
+ * ALWAYS true: the gate whose entire job is to refuse DROP / DELETE / TRUNCATE /
+ * GRANT / REVOKE / COPY / VACUUM inside a migration could not refuse any of them.
+ * Only migration 120 uses the shape today and 120 is genuinely index-only, so
+ * nothing reached a database through the hole — but the gate was blind to
+ * whatever came next, and this is the FIFTH time a `\b` has become a backspace in
+ * this repository.
+ *
+ * The repair is not to escape the fourth copy — it is to stop having four. A scan
+ * that exists once cannot drift, and the three callers now ask the same question.
+ *
+ * THE PATTERN CONTAINS NO BACKSLASH AT ALL, deliberately. Explicit character
+ * classes say the same thing — the token stands alone rather than sitting inside
+ * an identifier like `DROPPED_AT` or `no_copy_flag` — and they cannot be turned
+ * into a control character by the next person who edits this string.
+ */
+export function findForbiddenTokens(body: string, tokens: readonly string[]): string[] {
+  const NON_WORD = '[^A-Za-z0-9_]';
+  const escapeLiteral = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, (m) => `\\${m}`);
+  return tokens.filter((tok) => {
+    // A multi-word token ('CREATE OR REPLACE') may be separated by any run of
+    // whitespace in real SQL, including a newline.
+    const middle = tok.trim().split(/\s+/).map(escapeLiteral).join(`${NON_WORD}+`);
+    return new RegExp(`(?:^|${NON_WORD})${middle}(?:${NON_WORD}|$)`, 'i').test(body);
+  });
+}
+
 export interface RegistryMigrationShape {
   identifier: string;
   /** Which narrow shape this migration was analysed as. */
@@ -403,8 +441,7 @@ export function analyzeRegistryMigration(
     problems.push(`Migration ${identifier} creates unexpected table(s): ${unexpected.join(', ')}.`);
   }
 
-  const forbiddenFound = FORBIDDEN_TOKENS.filter((tok) =>
-    new RegExp(`\\b${tok.replace(/\s+/g, '\\s+')}\\b`, 'i').test(body));
+  const forbiddenFound = findForbiddenTokens(body, FORBIDDEN_TOKENS);
   const nonDestructive = forbiddenFound.length === 0;
   if (!nonDestructive) {
     problems.push(`Migration ${identifier} contains destructive/mutating/seeding token(s): ${forbiddenFound.join(', ')}.`);
@@ -479,8 +516,7 @@ function analyzeIndexOnlyMigration(
   if (missing.length) problems.push(`Migration ${identifier} does not create expected index(es): ${missing.join(', ')}.`);
   if (unexpected.length) problems.push(`Migration ${identifier} creates unexpected index(es): ${unexpected.join(', ')}.`);
 
-  const forbiddenFound = FORBIDDEN_TOKENS.filter(tok =>
-    new RegExp(`\b${tok.replace(/\s+/g, '\s+')}\b`, 'i').test(body));
+  const forbiddenFound = findForbiddenTokens(body, FORBIDDEN_TOKENS);
   const nonDestructive = forbiddenFound.length === 0;
   if (!nonDestructive) problems.push(`Migration ${identifier} contains destructive/mutating/seeding token(s): ${forbiddenFound.join(', ')}.`);
 
@@ -541,8 +577,11 @@ function analyzeAddColumnMigration(
         `Migration ${identifier} adds a column to '${table}', which no allowlisted migration deploys. `
         + 'This path may only alter tables it created, or one its spec names explicitly.');
     }
-    const banned = ALTER_SUBCOMMAND_BAN.filter(tok =>
-      new RegExp(`\\b${tok.replace(/\s+/g, '\\s+')}\\b`, 'i').test(typeClause));
+    // The fourth and last hand-built copy of the same scan — same question, a
+    // different subject (the admitted column's type clause) and a different token
+    // list. Routed through the one implementation so no version of this pattern is
+    // left in the file to drift again.
+    const banned = findForbiddenTokens(typeClause, ALTER_SUBCOMMAND_BAN);
     if (banned.length) {
       problems.push(
         `Migration ${identifier} adds '${table}.${column}' with disallowed clause(s): ${banned.join(', ')}. `
@@ -569,8 +608,7 @@ function analyzeAddColumnMigration(
   if (missing.length) problems.push(`Migration ${identifier} does not add expected column(s): ${missing.join(', ')}.`);
   if (unexpected.length) problems.push(`Migration ${identifier} adds unexpected column(s): ${unexpected.join(', ')}.`);
 
-  const forbiddenFound = FORBIDDEN_TOKENS_ADD_COLUMN.filter(tok =>
-    new RegExp(`\\b${tok.replace(/\s+/g, '\\s+')}\\b`, 'i').test(body));
+  const forbiddenFound = findForbiddenTokens(body, FORBIDDEN_TOKENS_ADD_COLUMN);
   const nonDestructive = forbiddenFound.length === 0;
   if (!nonDestructive) {
     problems.push(`Migration ${identifier} contains destructive/mutating/seeding token(s): ${forbiddenFound.join(', ')}.`);
