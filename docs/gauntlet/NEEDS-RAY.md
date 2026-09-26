@@ -12,7 +12,7 @@ Last updated: 2026-09-25.
 
 | # | One line | What it blocks |
 |---|---|---|
-| **R8** | A migration file can never apply, and the batch runner stops there — so 028–123 are unreachable; a whole feature's schema sits in a directory the runner never scans | Persisting homeowner/micro-stage state; any batch migration run |
+| **R8** | 🚨 **CORRECTED** — the batch halts at **003**, not 027: `ADD CONSTRAINT IF NOT EXISTS` is not valid PostgreSQL in any version, so `run-pending` is dead after 002 and 027 is never even reached. A whole feature's schema also sits in a directory the runner never scans | Persisting homeowner/micro-stage state; any batch migration run |
 | **R1** | A committed Google API key needs rotating — only you have the account | Nothing in code |
 | **R2** | How approximate should an UNCLAIMED lead's map pin be? Currently house-level | The marketplace pin only |
 | **R4** | Four milestone checkboxes are POSTed and silently discarded — the product says it recorded something it did not | Persisting those four |
