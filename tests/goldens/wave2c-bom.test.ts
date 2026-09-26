@@ -241,8 +241,15 @@ describe('Wave 2c — hybrid Enphase roof(48) + Solis ground(26) + EcoFlow fence
       expect(i.quantity).toBeLessThanOrEqual(2 * 48); // no project-wide 91-module scaling
     }
     // Shared grounding electrode lines stay unstamped.
-    const rod = bom.items.find(i => i.partNumber === 'GR-5/8-8');
-    expect(rod?.subSystem).toBeUndefined();
+    // 🚨 THIS WAS VACUOUS after the electrode gate was fixed. `bom` is built from a
+    // fixture that does not set `requiresGroundingElectrode`, so there IS no rod, `rod`
+    // is undefined, and `rod?.subSystem` is undefined — the assertion passed by finding
+    // nothing. An assertion that can only pass is not an assertion. Built against a BOM
+    // that actually HAS the electrode, and the rod's presence is required first.
+    const withElectrode = generateBOMV4(hybridInput({ requiresGroundingElectrode: true }));
+    const rod = withElectrode.items.find(i => i.partNumber === 'GR-5/8-8');
+    expect(rod, 'no electrode was emitted, so the stamping assertion proves nothing').toBeTruthy();
+    expect(rod!.subSystem).toBeUndefined();
   });
 
   it('truck stock: micro trunk spares emitted for the PRESENT brand group only', () => {

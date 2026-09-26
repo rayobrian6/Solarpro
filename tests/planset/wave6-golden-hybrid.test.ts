@@ -369,7 +369,9 @@ describe('wave 6 golden — hybrid BOM (SolFence/Tigo OPTIMIZER fence, I-3)', ()
   const sub = (key: SubSystemKey, over: Partial<SubSystemEquipment>): SubSystemEquipment =>
     ({ key, source: 'engineering', updatedAt: NOW, ...over });
 
-  const bom = generateBOMV4({
+  // Hoisted so the I-6 case can build a variant with requiresGroundingElectrode set,
+  // rather than asserting a phantom electrode is present.
+  const bomInput = {
     inverterId: 'enphase-iq8plus', panelId: 'rec-alpha-pure-r-405',
     moduleCount: 91, deviceCount: 48, stringCount: 3, inverterCount: 50,
     systemKw: 38.36, acOutputKw: 27.64,
@@ -401,7 +403,8 @@ describe('wave 6 golden — hybrid BOM (SolFence/Tigo OPTIMIZER fence, I-3)', ()
         trenchRunLengthFt: 40, env: { rooftopTempAdderC: 0, wireLengthFt: 60 },
       }),
     },
-  } as BOMGenerationInputV4);
+  } as BOMGenerationInputV4;
+  const bom = generateBOMV4(bomInput);
 
   it('THREE module lines at subset counts (48/26/17), each stamped', () => {
     const panels = bom.items.filter(i => i.category === 'solar_panel');
@@ -430,7 +433,33 @@ describe('wave 6 golden — hybrid BOM (SolFence/Tigo OPTIMIZER fence, I-3)', ()
     const acDiscos = bom.items.filter(i => i.stageId === 'ac' && i.category === 'disconnect');
     expect(acDiscos).toHaveLength(1);
     expect(acDiscos[0].subSystem).toBeUndefined();
-    expect(bom.items.filter(i => i.partNumber === 'GR-5/8-8')).toHaveLength(1);
+
+    // 🚨 RE-AIMED — the SAME anchor as wave2c-bom's I-6 case, and the second copy of it.
+    // This asserted exactly one 'GR-5/8-8' ground rod against a hybrid input that does
+    // NOT set `requiresGroundingElectrode`, so it was pinning a DEFECT: the hybrid BOM
+    // emitter shipped a rod + acorn clamp + 50 ft of bare copper GEC on every hybrid
+    // project and printed 'NEC 250.52(A)(5): ... required', while the permit package's
+    // own electrical sheet stated in print that no new electrode is added. The
+    // single-system emitter had the gate; this one did not.
+    //
+    // I fixed wave2c's copy when I closed that finding, but THIS file could not execute
+    // at the time — it threw on the peer's `buildHybridPermitMetering` import — so its
+    // copy of the anchor was invisible. A test that cannot run cannot tell you it is
+    // pinning a defect. Found when the peer's commit made the file runnable again.
+    //
+    // I-6 protects "ONE service-side set, not one PER SUB-SYSTEM". The old assertion
+    // could not distinguish "one because it is de-duplicated" from "one because the gate
+    // is missing", so it is now checked where it discriminates: zero when the design
+    // does not ask for an electrode, exactly one — not three — when it does.
+    expect(bom.items.filter(i => i.partNumber === 'GR-5/8-8'),
+      'a hybrid project shipped a phantom grounding electrode').toHaveLength(0);
+    const withElectrode = generateBOMV4({ ...bomInput, requiresGroundingElectrode: true });
+    expect(withElectrode.items.filter(i => i.partNumber === 'GR-5/8-8'),
+      'the electrode system was emitted once per sub-system instead of once per service',
+    ).toHaveLength(1);
+    expect(withElectrode.items.filter(i => /Bare Copper GEC/.test(i.model))).toHaveLength(1);
+    // And it stays unstamped — a shared service line belongs to no sub-system.
+    expect(withElectrode.items.find(i => i.partNumber === 'GR-5/8-8')?.subSystem).toBeUndefined();
   });
 
   it('shared trench: ONE combined-trench note, separate per-sub conduits (Addendum B)', () => {
