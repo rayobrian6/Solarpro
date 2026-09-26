@@ -69,16 +69,38 @@ export function getInverterSpecOrThrow(inverterId: string, type: 'string' | 'mic
 // are added because their ABSENCE was the defect: they are the long service feeders
 // this product exists to size, and no compliant answer existed above #2/0.
 //
-// 🚨 #3 AWG IS DELIBERATELY NOT IN THIS SEARCH ORDER — see NEEDS-RAY. It IS now in
-// the CONDUCTORS roster and in lib/nec/table8.ts, so a designer who states #3 gets a
-// real resistance and a real voltage drop instead of a fabricated zero. But inserting
-// it between #4 and #2 changes what the auto-sizer RECOMMENDS on designs that work
-// today — #3 is a real NEC size and rarely a stocked one — and that is a product
-// ruling about what to put on a BOM, not a correctness fix. Adding it here later is a
-// one-line change.
+// 🚨 #3 AWG IS NOW IN, AND MY EARLIER REASONING FOR LEAVING IT OUT WAS WRONG.
+// I had recorded this as a product ruling (R14: "does the sizing authority intend to
+// select #3?"), on the grounds that Table 8 carrying its resistance is not a reason to
+// recommend it. That framing was right, and the answer was still IN — because this
+// product's sizing authorities ALREADY select #3, in four independent ladders:
+//
+//   lib/permit/utils/conductorAuthority.ts:182  `if (ocpdAmps <= 100) return '#3 AWG'`
+//                                               — the permit sheet's conductor authority
+//   lib/segment-schedule.ts:276-279             AWG_ORDER contains '#3 AWG' — and
+//                                               lib/nec/ampacity.ts:60 calls that "the
+//                                               sizer that ACTUALLY OWNS THE CALLOUT"
+//   lib/computed-system.ts:603-607              AWG_ORDER contains '#3 AWG'
+//   app/api/engineering/bom/route.ts:343        `if (ocpd <= 100) return '#3 AWG'`
+//                                               — it already reaches a BOM
+// plus lib/segment-schedule.ts:894 (service entrance) and this file's own AWG_UPSIZE
+// at :295, which contains #3 for conduit-fill upsizing.
+//
+// So this file imported a #3-less ladder for the ampacity/voltage-drop search while
+// carrying a #3-bearing one for conduit fill — one file, two ladders, disagreeing. That
+// is an OUTPUT-CONSISTENCY violation, not a withheld decision.
+//
+// The "rarely stocked" argument cannot discriminate and that is itself an answer: the
+// repo holds NO gauge-specific wire procurement data. DISTRIBUTOR_PRICE_CATALOG has
+// exactly one wire SKU (BARE-CU-6, a #6 ground) and everything else prices off a flat
+// $0.85/ft `wire` category fallback. There is no SKU for #4 or #2 either, so "not
+// stocked" would exclude gauges that are already in this ladder.
+//
+// NEC 310.16 supports it in all three columns (60/75/90 °C = 85/100/115 A) and
+// Chapter 9 Table 5 has its area. R14 is retired.
 export const AWG_ORDER: string[] = [
   '#14 AWG', '#12 AWG', '#10 AWG', '#8 AWG', '#6 AWG',
-  '#4 AWG', '#2 AWG', '#1 AWG', '#1/0 AWG', '#2/0 AWG',
+  '#4 AWG', '#3 AWG', '#2 AWG', '#1 AWG', '#1/0 AWG', '#2/0 AWG',
   '#3/0 AWG', '#4/0 AWG',
 ];
 

@@ -22,6 +22,13 @@ import { renderSLDProfessional, SLDProfessionalInput } from '@/lib/sld-professio
 import { sanitizeClientSourceBranches } from '@/lib/permit/utils/sldAdapter';
 import { microBranchCount } from '@/lib/permit/utils/branching';
 import { getThermalDesignBasis } from '@/lib/permit/utils/designTemps';
+// The adopted NEC edition (canonical authority) and the ONE rooftop-adder gate that
+// turns on it. NEC 310.15(B)(3)(c) was deleted for PV by NEC 2017 690.31(A).
+import { getJurisdictionInfo } from '@/lib/jurisdiction';
+import { rooftopAmbientAdderC } from '@/lib/nec/rooftopAdder';
+// THE one NEC 240.6(A) ladder. Never Math.ceil(x / 5) * 5 - 55/65/75/85/95 A are not
+// ratings, and this route emitted them onto a degraded E-1 whenever computeSystem threw.
+import { nextStandardOcpd } from '@/lib/electrical/stdSizes';
 import { getInverterById, MICROINVERTERS } from '@/lib/equipment-db';
 import { resolveIntegratedEquipment, planLandingDevice } from '@/lib/equipment/integratedBos';
 import { readProductionMeterFlag } from '@/lib/equipment/currentTransformers';
@@ -287,6 +294,21 @@ export async function POST(req: NextRequest) {
         : null,
     });
     const designTempMin = _sldThermal.minDesignTempC;
+    // The ADOPTED NEC edition, from the one jurisdiction authority - needed because
+    // NEC 310.15(B)(3)(c) (the rooftop temperature adder) was deleted for PV by NEC
+    // 2017 690.31(A). Resolved from the same address/state this route already has, so
+    // the diagram cannot apply an adder the stamped plan set does not.
+    const _sldNecVersion: string | null = (() => {
+      const addr = typeof body.address === 'string' ? body.address : '';
+      const st = typeof body.state === 'string' ? body.state : '';
+      const probe = addr || st;
+      if (!probe) return null;   // unknown edition invents nothing - see rooftopAdder.ts
+      try {
+        return getJurisdictionInfo(probe).necVersion ?? null;
+      } catch {
+        return null;
+      }
+    })();
     // Phase 7 Topology Fix: body.topologyType is the INITIAL value from the client.
     // It may be STALE (e.g. 'MICROINVERTER' from a previous APsystems project when
     // the user has since switched to SolarEdge optimizer).
@@ -714,8 +736,24 @@ export async function POST(req: NextRequest) {
         manufacturerMaxPerBranch20A:   body.manufacturerMaxPerBranch20A ? Number(body.manufacturerMaxPerBranch20A) : undefined,
         manufacturerMaxPerBranch30A:   body.manufacturerMaxPerBranch30A ? Number(body.manufacturerMaxPerBranch30A) : undefined,
         designTempMin:                 designTempMin,
-        ambientTempC:                  Number(body.ambientTempC ?? 30),
-        rooftopTempAdderC:             Number(body.rooftopTempAdderC ?? 30),
+        // 🚨 THE ROUTE RESOLVED THE THERMAL AUTHORITY AND THREW HALF OF IT AWAY.
+        // _sldThermal is computed above from lat/lng/state/address and its COLD side is
+        // used for designTempMin - but the HOT side was discarded for a flat 30. So an
+        // SLD request without an explicit ambient was sized at 30 C -> factor 1.00,
+        // where an IL job should use 33 C -> 0.96 and an AZ job 43 C -> 0.87. The route
+        // returns runs: computedRuns, so its conductor schedule UNDER-DERATES relative
+        // to the permit set built from the same design: one job, two schedules.
+        ambientTempC:                  Number(body.ambientTempC ?? _sldThermal.maxDesignTempC),
+        // 🚨 AND A FLAT 30 C ROOFTOP ADDER FOR EVERY SYSTEM TYPE. A ground- or
+        // fence-mount SLD request got a rooftop adder it must never have, and nothing
+        // here consulted the adopted edition. lib/computed-system.ts already gated this
+        // privately; this route did not. lib/nec/rooftopAdder.ts is that gate, shared.
+        rooftopTempAdderC:             body.rooftopTempAdderC != null
+          ? Number(body.rooftopTempAdderC)
+          : rooftopAmbientAdderC({
+              systemType:  _systemType,
+              necEdition:  _sldNecVersion,
+            }).adderC,
         runLengths:                    body.runLengths ?? {},
         conduitType:                   String(body.conduitType ?? body.acConduitType ?? 'EMT'),
         mainPanelAmps:                 Number(body.mainPanelAmps ?? 200),
@@ -730,6 +768,17 @@ export async function POST(req: NextRequest) {
         batteryBackfeedA:              _batBackfeedA,
         batteryContinuousOutputA:      _batContinuousA,
         batteryIds:                    _batId ? [_batId] : (body.batteryIds ?? undefined),
+        // 🚨 MISSING, AND THE OMISSION LOST 40-100 A IN THE PERMISSIVE DIRECTION.
+        // resolveBatteryBranch evaluates the manufacturer's STEP FUNCTION - a battery's
+        // busbar contribution is not linear in unit count - and with no count it
+        // silently evaluated at ONE unit. Any design taken through /sld or /sld/pdf with
+        // more than one battery got an E-1 whose printed 120% panel and PASS/FAIL verdict
+        // came from one battery instead of the fleet: a multi-battery job on a bus with
+        // modest headroom printed PASS where the correct answer is FAIL, on a drawing an
+        // AHJ reads. The permit path (computedRuns.ts) DOES pass it, so the same design
+        // got two different verdicts depending on which artefact you generated. The value
+        // was already parsed in this file for the render input; it never reached the engine.
+        batteryCount:                  body.batteryCount ? Number(body.batteryCount) : undefined,
         generatorOutputBreakerA:       _genOutputBreakerA,
         generatorKw:                   _genKw > 0 ? _genKw : undefined,
         atsAmpRating:                  _atsAmpRating,
@@ -770,7 +819,12 @@ export async function POST(req: NextRequest) {
 
     // ── Resolve all electrical display values from PermitSystemModel (engine) ──
     // These replace all independent OCPD/wire calculations that previously existed here.
-    const resolvedAcOCPD       = systemModel?.acOcpdAmps      ?? (Math.ceil(acOutputAmps * 1.25 / 5) * 5);
+    // 🚨 Math.ceil(x / 5) * 5 - the formula stdSizes forbids in its own header, because
+    // 55, 65, 75, 85 and 95 A are not NEC 240.6(A) ratings. This fires whenever
+    // computeSystem throws (systemModel = null), and because resolvedBackfeedAmps
+    // defaults to resolvedAcOCPD it then drives the 120% row and the breaker callout on
+    // that degraded sheet - a drawing naming a device no manufacturer makes.
+    const resolvedAcOCPD       = systemModel?.acOcpdAmps      ?? nextStandardOcpd(acOutputAmps * 1.25);
     const resolvedBackfeedAmps = systemModel?.backfeedBreakerAmps ?? resolvedAcOCPD;
     const resolvedDcWireGauge  = systemModel?.dcWireGauge     ?? String(body.dcWireGauge ?? '#10 AWG');
     const resolvedAcWireGauge  = systemModel?.acWireGauge     ?? String(body.acWireGauge ?? body.wireGauge ?? '#8 AWG');

@@ -155,12 +155,27 @@ describe('the auto-size search order', () => {
     }
   });
 
-  it('🚨 does NOT yet include #3 AWG — a product ruling, recorded as NEEDS RAY', () => {
-    // Asserted so the decision is visible and cannot drift in silently. #3 IS
-    // resolvable (see above); it is simply not something the auto-sizer recommends.
-    expect(AWG_ORDER).not.toContain('#3 AWG');
+  it('🚨 INCLUDES #3 AWG — and my earlier assertion here had it backwards', () => {
+    // This case used to assert `.not.toContain('#3 AWG')`, recorded as a NEEDS-RAY
+    // product ruling. Investigating the ruling showed the repo had already answered it:
+    // this product's sizing authorities ALREADY select #3, in four independent ladders —
+    // conductorAuthority.ts:182 (the permit sheet's conductor authority),
+    // segment-schedule.ts:276 (which ampacity.ts:60 calls the sizer that "actually owns
+    // the callout"), computed-system.ts:603, and app/api/engineering/bom/route.ts:343,
+    // which already reaches a BOM. And manufacturer-specs itself carried #3 in its
+    // conduit-fill AWG_UPSIZE while omitting it from this search order: one file, two
+    // ladders, disagreeing.
+    //
+    // So leaving it out was not a withheld decision, it was an OUTPUT-CONSISTENCY
+    // violation — and the assertion that pinned it was pinning the defect. Sizing
+    // authority and resistance authority really are separate questions; the answer just
+    // came from the sizing side, not from Table 8.
+    expect(AWG_ORDER).toContain('#3 AWG');
+    // Ordered between #4 and #2 by area, so "next gauge" still means bigger.
+    expect(AWG_ORDER.indexOf('#3 AWG')).toBe(AWG_ORDER.indexOf('#4 AWG') + 1);
+    expect(AWG_ORDER.indexOf('#3 AWG')).toBe(AWG_ORDER.indexOf('#2 AWG') - 1);
     expect(dcResistanceOhmsPerKft('#3 AWG'),
-      '#3 AWG must still resolve for a designer who states it').toBe(0.245);
+      '#3 AWG must resolve for a designer who states it').toBe(0.245);
   });
 
   it('is ordered smallest-to-largest, so "next gauge" means bigger', () => {

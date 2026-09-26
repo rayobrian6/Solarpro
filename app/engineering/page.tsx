@@ -61,6 +61,30 @@ import { getManufacturerAsset } from '@/lib/manufacturer-assets-db';
 import { getAllMountingSystems, getMountingSystemsByCategory, getMountingSystemsByRoofType, type MountingSystemSpec, type SystemCategory as MountingCategory } from '@/lib/mounting-hardware-db';
 
 // ── Mounting systems from the canonical mounting-hardware-db (38 systems, 24 manufacturers) ──
+/**
+ * 🚨 THE COLD-TEMPERATURE BASIS, ONCE. There were EIGHT `designTempMin: resolveDesignTempMinC(compliance.autoDetected, config.state)`
+ * literals in this file, and −10 °C is a third cold basis that agrees with neither
+ * the engine nor the stamped plan set.
+ *
+ * Why it mattered: the string layout this page WRITES INTO THE PROJECT — panels per
+ * string, string count, inverter unit count via lib/system/sizingEngine.ts — was
+ * computed at −10 °C, while the permit set and /api/engineering/calculate recompute
+ * the same layout at the ASHRAE extreme low and reject it. Near the boundary that is
+ * a saved, quoted, ORDERED design whose strings are one panel too long for the
+ * inverter: an NEC 690.7(A) violation and an inverter-overvoltage risk. The national
+ * default is −25 °C and many states are colder still (MN −31, MT −32, AK −40), so
+ * −10 was warmer than almost every real site.
+ *
+ * A plain function rather than a `useMemo` on purpose: these eight call sites sit at
+ * very different nesting depths inside callbacks, and a hook would add ordering and
+ * dependency-array risk for no benefit — this is pure and cheap.
+ */
+function resolveDesignTempMinC(autoDetected: unknown, stateCode: string | null | undefined): number {
+  const detected = (autoDetected as { designTempMin?: number } | null | undefined)?.designTempMin;
+  if (typeof detected === 'number' && Number.isFinite(detected)) return detected;
+  return getThermalDesignBasis({ state: stateCode || null }).minDesignTempC;
+}
+
 const ALL_MOUNTING_SYSTEMS: MountingSystemSpec[] = getAllMountingSystems();
 const MOUNTING_BRANDS: string[] = Array.from(new Set(ALL_MOUNTING_SYSTEMS.map(s => s.manufacturer))).sort();
 import { BUILD_VERSION, BUILD_DATE, BUILD_FEATURES } from '@/lib/version';
@@ -181,6 +205,14 @@ import { userFacingServerError } from '@/lib/http/userFacingError';
 // dropdown.
 import { segmentVoltageDropPct } from '@/lib/segment-schedule';
 import { getThermalDesignBasis } from '@/lib/permit/utils/designTemps';
+// The ONE NEC 310.15(B)(3)(c) gate — edition + segment scope. Extracted from the
+// logic lib/computed-system.ts already had privately, so this page and the
+// wire-autosizer it feeds stop disagreeing with the permit engine.
+import { rooftopAmbientAdderC } from '@/lib/nec/rooftopAdder';
+// THE one NEC 240.6(A) ladder. `Math.ceil(x / 5) * 5` is forbidden in stdSizes'
+// own header because 55/65/75/85/95 A are not ratings — three sites in this file
+// used it, and one of them fed the BOM and the SLD.
+import { nextStandardOcpd } from '@/lib/electrical/stdSizes';
 
 // ── Auto-detect state + utility from address string ──────────────────────────
 /**
@@ -427,6 +459,11 @@ function rebuildFleetForCount(
   key: SubSystemKey,
   targetCount: number,
   selectedBrand: string | undefined,
+  /** NEC 690.7(A) cold basis, resolved by the CALLER from the project's own authority.
+   *  REQUIRED on purpose: a default would reintroduce the fabricated −10 °C basis this
+   *  parameter exists to remove, and making it required is what forces the call site to
+   *  supply the real value. This function is module-level and has no component state. */
+  designTempMinC: number,
 ): InverterConfig[] | null {
   const inv0 = fleet[0];
   if (!inv0 || targetCount <= 0) return null;
@@ -460,7 +497,7 @@ function rebuildFleetForCount(
       panelWattage:      panel?.watts ?? 400,
       panelVoc:          panel?.voc ?? 49.6,
       panelTempCoeffVoc: panel?.tempCoeffVoc ?? -0.27,
-      designTempMin:     -10,
+      designTempMin:     designTempMinC,
       optimizerMaxOutputCurrent: 15.0,
     };
     if (inv0.inverterId)     input.selectedInverterId = inv0.inverterId;
@@ -1509,7 +1546,7 @@ function EngineeringPageInner() {
                   panelWattage: panel?.watts ?? engCfg?.panelWatts ?? seed.panel_watt ?? 400,
                   panelVoc: panel?.voc ?? engCfg?.panelVoc ?? 49.6,
                   panelTempCoeffVoc: panel?.tempCoeffVoc ?? engCfg?.panelTempCoeffVoc ?? -0.27,
-                  designTempMin: -10,
+                  designTempMin: resolveDesignTempMinC(compliance.autoDetected, config.state),
                   selectedBrand: seedBrand,
                   optimizerMaxOutputCurrent: 15.0,
                 });
@@ -1629,7 +1666,7 @@ function EngineeringPageInner() {
                   panelWattage: _nsPanel?.watts ?? 400,
                   panelVoc: _nsPanel?.voc ?? 49.6,
                   panelTempCoeffVoc: _nsPanel?.tempCoeffVoc ?? -0.27,
-                  designTempMin: -10, selectedBrand: _nsBrand,
+                  designTempMin: resolveDesignTempMinC(compliance.autoDetected, config.state), selectedBrand: _nsBrand,
                   optimizerMaxOutputCurrent: 15.0,
                 });
                 if (_nsResult.strings.length > 0) _nsEngStrings = _nsResult.strings;
@@ -1922,7 +1959,7 @@ function EngineeringPageInner() {
                 panelVmp:          _hPanel.vmp,
                 panelIsc:          _hPanel.isc,
                 panelTempCoeffVoc: _hPanel.tempCoeffVoc,
-                designTempMin:     -10,
+                designTempMin:     resolveDesignTempMinC(compliance.autoDetected, config.state),
                 batteryEnabled:    false,
               };
               if (_hInvId) _hInput.selectedInverterId = _hInvId;
@@ -2108,7 +2145,7 @@ function EngineeringPageInner() {
                     panelWattage: _panelObj?.watts ?? 400,
                     panelVoc: _panelObj?.voc ?? 49.6,
                     panelTempCoeffVoc: _panelObj?.tempCoeffVoc ?? -0.27,
-                    designTempMin: -10,
+                    designTempMin: resolveDesignTempMinC(compliance.autoDetected, config.state),
                     optimizerMaxOutputCurrent: 15.0,
                   };
                   if (_invId0) _fixInput.selectedInverterId = _invId0;
@@ -2451,7 +2488,7 @@ function EngineeringPageInner() {
                 panelWattage: (_rfPanel as any)?.watts ?? run.panelWattage ?? 400,
                 panelVoc: (_rfPanel as any)?.voc ?? 49.6,
                 panelTempCoeffVoc: (_rfPanel as any)?.tempCoeffVoc ?? -0.27,
-                designTempMin: -10,
+                designTempMin: resolveDesignTempMinC(compliance.autoDetected, config.state),
                 selectedInverterId: inverterId,
                 optimizerMaxOutputCurrent: 15.0,
               });
@@ -3056,14 +3093,47 @@ function EngineeringPageInner() {
       // engine and the stamped plan set — see `getThermalDesignBasis`.
       designTempMin: (compliance.autoDetected as any)?.designTempMin
         ?? getThermalDesignBasis({ state: config.state || null }).minDesignTempC,
-      // Cap ambientTempC at 40°C — NEC 310.15 standard design ambient.
-      // compliance.autoDetected.designTempMax is the CONDUCTOR temp (air + rooftop adder),
-      // NOT the air ambient. autoSizeWire() applies its own rooftopTempAdderC separately.
-      // Using 95°C here causes massive over-derating (factor 0.41) → wrong wire gauges.
-      ambientTempC: Math.min((compliance.autoDetected as any)?.designTempMax ?? 40, 40),
-      // Rooftop temp adder: 30°C for roof (NEC 310.15), 0°C for fence/ground (no rooftop heat)
-      // Wave 3.7 / I-7: per-SUB at N>1 — the sub's own type, never the project's.
-      rooftopTempAdderC: systemTypeStr === 'roof' ? 30 : 0,
+      // 🚨 THE 40 °C CLAMP IS GONE, AND ITS COMMENT WAS THE REASON IT EXISTED.
+      // The old comment claimed `autoDetected.designTempMax` is "the CONDUCTOR temp
+      // (air + rooftop adder), NOT the air ambient" and feared that "using 95 °C here
+      // causes massive over-derating (factor 0.41)". Both halves are false, and they
+      // are checkable:
+      //   · app/api/engineering/calculate/route.ts:446 sets
+      //     `designTempMax: designTemps.maxTemp`, which is
+      //     `getThermalDesignBasis(...).maxDesignTempC` = `ashrae2pctHighC` — the AIR
+      //     AMBIENT;
+      //   · three downstream consumers ADD the rooftop adder to it —
+      //     electrical-calc.ts:754, ocpd-resolver.ts:83/139 and
+      //     manufacturer-specs.ts:250 all do `designTempMax + rooftopTempAdderC`. It
+      //     could not be the conductor temp and also be the thing the adder is added to;
+      //   · the highest value in the entire state envelope is 43 °C (AZ). 95 °C is
+      //     unreachable from this field, so the over-derating the clamp guarded against
+      //     could never have happened.
+      //
+      // What the clamp DID do is credit more ampacity than the site's own ASHRAE
+      // authority allows, in the UNSAFE direction, in exactly two states:
+      //   AZ 43 °C → clamped to 40: bare 0.91 instead of 0.87; with the roof adder
+      //              70 °C → 0.58 instead of 73 °C → 0.50, a 16 % over-credit
+      //   NV 41 °C → clamped to 40: 0.91 instead of 0.87
+      // Since page:2960 states this memo feeds the SLD, BOM, Electrical, Conduit and
+      // Permit modules, an under-derated feeder or DC home run could be quoted, drawn
+      // and sold. Read the authority directly, exactly as designTempMin does above.
+      ambientTempC: (compliance.autoDetected as any)?.designTempMax
+        ?? getThermalDesignBasis({ state: config.state || null }).maxDesignTempC,
+      // 🚨 AND THE ADDER IS NOT A LITERAL. This was `systemTypeStr === 'roof' ? 30 : 0`,
+      // one of THREE different values for the same physical roof run (30 here, 33 on the
+      // permit path, 35 on a third). All three are moot under the adopted edition:
+      // NEC 310.15(B)(3)(c) was DELETED for PV by NEC 2017 690.31(A), and every state in
+      // the jurisdiction table is on NEC 2020 or 2022. `lib/computed-system.ts` already
+      // knew this (its `_applies = _necYear < 2017` gate at :990 and the per-segment
+      // gate at :3151) — but `lib/wire-autosizer.ts`, which is what THIS memo feeds,
+      // applies the adder unconditionally and has no edition parameter at all. One
+      // engine gated it, the other did not. lib/nec/rooftopAdder.ts is that gate,
+      // extracted so both can share it.
+      rooftopTempAdderC: rooftopAmbientAdderC({
+        systemType: systemTypeStr,
+        necEdition: compliance.jurisdiction?.necVersion ?? null,
+      }).adderC,
       // System-type-aware run lengths — ESTIMATED from panel count + layout heuristics
       // derivedFrom: 'estimated-geometry' (not CAD model)
       // v47.432: CAD-based version historically lived in bom-unified.ts (deleted Stage 8.1)
@@ -3746,7 +3816,7 @@ function EngineeringPageInner() {
              ...(panel?.vmp ? { panelVmp: panel.vmp } : {}),
              ...(panel?.isc ? { panelIsc: panel.isc } : {}),
              ...(typeof panel?.tempCoeffVoc === 'number' ? { panelTempCoeffVoc: panel.tempCoeffVoc } : {}),
-             designTempMin: -10,
+             designTempMin: resolveDesignTempMinC(compliance.autoDetected, config.state),
              ...(panelId ? { panelId } : {}), selectedBrand: brand, ...(curInvId ? { selectedInverterId: curInvId } : {}), batteryEnabled: false } as any);
          } catch { rec = null; }
          rows.push({ key, curInvId, invMfr, rec });
@@ -4448,7 +4518,7 @@ function EngineeringPageInner() {
         ...(_preferPanel?.vmp          ? { panelVmp: _preferPanel.vmp } : {}),
         ...(_preferPanel?.isc          ? { panelIsc: _preferPanel.isc } : {}),
         ...(typeof _preferPanel?.tempCoeffVoc === 'number' ? { panelTempCoeffVoc: _preferPanel.tempCoeffVoc } : {}),
-        designTempMin: -10,
+        designTempMin: resolveDesignTempMinC(compliance.autoDetected, config.state),
         selectedBrand: seedBrand,
         ...(prefer?.inverterId ? { selectedInverterId: prefer.inverterId } : {}),
         batteryEnabled: false,
@@ -6435,7 +6505,25 @@ function EngineeringPageInner() {
         cache: 'no-store',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            electrical: { ...payload.electrical, designTempMin: -10, designTempMax: 40, rooftopTempAdder: config.systemType === 'roof' ? 30 : 0, necVersion: '2023',
+            // 🚨 FOUR HARDCODED THERMAL/CODE VALUES IN ONE LINE, and it is the payload
+            // the NEC RULES ENGINE is evaluated on — so the verdict shown beside the
+            // compliance calculation was computed on a different basis than the
+            // calculation itself. `designTempMin: -10` was warmer than almost every
+            // real site, `designTempMax: 40` clamped away AZ (43 °C) and NV (41 °C),
+            // `rooftopTempAdder: 30` applied a section NEC 2017 690.31(A) deleted for
+            // PV, and `necVersion: '2023'` asserted an edition regardless of the
+            // jurisdiction — which is the very field that decides whether the adder
+            // applies at all. All four now come from the authorities the rest of this
+            // memo already uses.
+            electrical: { ...payload.electrical,
+              designTempMin: resolveDesignTempMinC(compliance.autoDetected, config.state),
+              designTempMax: (compliance.autoDetected as any)?.designTempMax
+                ?? getThermalDesignBasis({ state: config.state || null }).maxDesignTempC,
+              rooftopTempAdder: rooftopAmbientAdderC({
+                systemType: config.systemType,
+                necEdition: compliance.jurisdiction?.necVersion ?? null,
+              }).adderC,
+              necVersion: compliance.jurisdiction?.necVersion ?? null,
               topologyType: payload.topologyType },  // v57.5 — topology guard for NEC 690.7 optimizer bypass in rules engine
             structural: payload.structural,
             engineeringMode,
@@ -6752,7 +6840,7 @@ function EngineeringPageInner() {
         || (cs.isMicro ? '#6 AWG' : ((compliance.electrical as any)?.acSizing?.conductorGauge || config.wireGauge));
       const csDcWireGauge = csDcRun?.wireGauge || firstStr?.wireGauge || '#10 AWG';
       const csConduitSize = csAcRun?.conduitSize || (compliance.electrical as any)?.acSizing?.conduitSize || '3/4"';
-      const csAcOcpd = cs.acOcpdAmps || (compliance.electrical as any)?.backfeedBreaker || Math.ceil(acOutputKw * 1000 / 240 * 1.25 / 5) * 5;
+      const csAcOcpd = cs.acOcpdAmps || (compliance.electrical as any)?.backfeedBreaker || nextStandardOcpd(acOutputKw * 1000 / 240 * 1.25);
 
       const res = await fetch('/api/engineering/sld', {
         method: 'POST',
@@ -7180,7 +7268,7 @@ function EngineeringPageInner() {
           if (compOcpd) return compOcpd;
           // Formula fallback: total AC kW -> continuous current -> OCPD
           const acKw = cs.totalAcKw || parseFloat(totalInverterKw) || parseFloat(totalKw) || 8;
-          return Math.ceil(acKw * 1000 / 240 * 1.25 / 5) * 5;
+          return nextStandardOcpd(acKw * 1000 / 240 * 1.25);
         })();
 
       const _bomPayload = {
@@ -8178,7 +8266,8 @@ function EngineeringPageInner() {
               if (fleet.length === 0) continue; // per-sub smart defaults own seeding
               const expected = subSystemCounts[key];
               if (expected <= 0 || fleetPanelTotal(fleet as any[]) === expected) continue;
-              const rebuilt = rebuildFleetForCount(fleet, key, expected, config.selectedBrand);
+              const rebuilt = rebuildFleetForCount(fleet, key, expected, config.selectedBrand,
+                resolveDesignTempMinC(compliance.autoDetected, config.state));
               if (rebuilt) _spRebuilds.push({ key, fleet: rebuilt });
             }
             if (_spRebuilds.length > 0) {
@@ -8310,7 +8399,7 @@ function EngineeringPageInner() {
                   panelWattage: _pcPanel?.watts ?? 400,
                   panelVoc: _pcPanel?.voc ?? 49.6,
                   panelTempCoeffVoc: _pcPanel?.tempCoeffVoc ?? -0.27,
-                  designTempMin: -10,
+                  designTempMin: resolveDesignTempMinC(compliance.autoDetected, config.state),
                   optimizerMaxOutputCurrent: 15.0,
                 };
                 // Prefer inverterId when set; fall back to brand to avoid empty-ID micro misfire
@@ -12743,7 +12832,7 @@ function EngineeringPageInner() {
             };
 
             const acAmps   = Math.round(canonicalAcKw * 1000 / 240); // v58.0: use canonical AC kW
-            const ocpdAmps = acSizing?.ocpdAmps ?? Math.ceil(acAmps * 1.25 / 5) * 5;
+            const ocpdAmps = acSizing?.ocpdAmps ?? nextStandardOcpd(acAmps * 1.25);
 
             return (
               <div className="space-y-5 max-w-none">

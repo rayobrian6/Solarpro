@@ -2497,7 +2497,14 @@ export const CONDUCTORS: Conductor[] = [
   // Resistance from NEC Ch.9 Table 8, ampacity from Table 310.16 (75 °C copper),
   // outer diameter derived from the Table 5 area already in lib/nec/chapter9.ts
   // (0.0973 in² ⇒ d = 2√(A/π) = 0.352 in).
-  { id: 'awg3-thwn2',  gauge: '#3 AWG',  type: 'THWN-2', ampacity_60c: 85, ampacity_75c: 100, ampacity_90c: 110, dcResistance: 0.245, acResistance: 0.245, outerDiameter: 0.352 },
+  // 🚨 `ampacity_90c` was 110. NEC Table 310.16 says 115, and lib/nec/ampacity.ts — the
+  // single ampacity authority — says 115. The 60 °C and 75 °C columns were already
+  // right, so this was one wrong cell in a row I added earlier in this campaign, in the
+  // UNSAFE direction: a 90 °C-rated conductor credited 5 A less than the table allows
+  // reads as conservative, but it disagrees with the authority, and the whole point of
+  // this roster is to agree with it. Found by the decisions investigation while proving
+  // that #3 belongs in the auto-size ladder.
+  { id: 'awg3-thwn2',  gauge: '#3 AWG',  type: 'THWN-2', ampacity_60c: 85, ampacity_75c: 100, ampacity_90c: 115, dcResistance: 0.245, acResistance: 0.245, outerDiameter: 0.352 },
   { id: 'awg2-thwn2',  gauge: '#2 AWG',  type: 'THWN-2', ampacity_60c: 95, ampacity_75c: 115, ampacity_90c: 130, dcResistance: 0.194, acResistance: 0.194, outerDiameter: 0.450 },
   { id: 'awg1-thwn2',  gauge: '#1 AWG',  type: 'THWN-2', ampacity_60c: 110, ampacity_75c: 130, ampacity_90c: 150, dcResistance: 0.154, acResistance: 0.154, outerDiameter: 0.495 },
   { id: 'awg1_0-thwn2', gauge: '#1/0 AWG', type: 'THWN-2', ampacity_60c: 125, ampacity_75c: 150, ampacity_90c: 170, dcResistance: 0.122, acResistance: 0.122, outerDiameter: 0.554 },

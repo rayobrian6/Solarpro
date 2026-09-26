@@ -230,12 +230,19 @@ describe('🚨 the banned formula is gone from the routes that own their own OCP
     };
     walk(join(ROOT, 'app'));
     walk(join(ROOT, 'lib'));
+    // 🚨 THE LIST IS NOW EMPTY, AND THIS CASE GOING RED IS WHAT CLOSED IT.
+    // It pinned three files that a peer session was mid-edit in, precisely so it would
+    // go red when they were fixed rather than leave a stale note. The peer committed,
+    // the files became editable, and all FIVE call sites across those three files are
+    // gone: two SLD routes and three sites in the engineering page — one more in the
+    // page than the note said, because the original grep counted files rather than
+    // occurrences.
+    //
+    // Keeping it as an empty expectation rather than deleting it: the scan is the guard
+    // against the formula ever coming back anywhere in app/ or lib/, which is worth more
+    // now than the census was.
     expect(offenders.sort(),
-      'the set of files using the banned OCPD rounding CHANGED — update this list')
-      .toEqual([
-        'app/api/engineering/sld/pdf/route.ts',
-        'app/api/engineering/sld/route.ts',
-        'app/engineering/page.tsx',
-      ]);
+      'the banned OCPD rounding is back — 55, 65, 75, 85, 95 A are not NEC 240.6(A) ratings')
+      .toEqual([]);
   });
 });

@@ -439,6 +439,18 @@ export interface SLDProfessionalInput {
   batteryBrand?:           string;
   batteryCount?:           number;
   batteryBackfeedA?:       number;
+  /** 🚨 PV ALONE, excluding storage — the one thing `backfeedAmps` is NOT.
+   *
+   *  `backfeedAmps` carries the POI TOTAL on every path that feeds this renderer:
+   *  `lib/computed-system.ts`:2948 exposes `backfeedBreakerAmps: totalBackfeedA`
+   *  (= PV + batteryBusImpactA) and `computeSystemProjection.ts`:72 passes it as both
+   *  `backfeedBreakerRequired` and `solarBreakerRequired`. A renderer that added the
+   *  battery to it counted the battery twice.
+   *
+   *  Set this ONLY when the caller genuinely knows the PV-only figure. Leave it
+   *  undefined and the E-1 table labels `backfeedAmps` as the combined total and adds
+   *  nothing — honest either way, and it cannot double count. */
+  pvOnlyBackfeedA?:        number;
   // Ecosystem / optimizer fields
   selectedBrand?:          string;           // e.g. 'solaredge', 'enphase'
   ecosystemTopology?:      string;           // 'optimizer' | 'string' | 'micro' | 'hybrid'
@@ -4215,9 +4227,35 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     ['Main Panel Rating',`${input.mainPanelAmps} A`],
     ...(isLoadSide ? (() => {
       // BUILD v24: NEC 705.12(B) — ALL backfeed breakers must sum ≤ 120% of bus rating
-      // Total backfeed = PV backfeed breaker + battery backfeed breaker(s)
+      //
+      // 🚨 THE BATTERY WAS COUNTED TWICE. This read
+      //     const _totalBfA = pvBreakerAmps + _batBfA;
+      // where `pvBreakerAmps = input.backfeedAmps ?? resolvedAcOCPD` — and
+      // `input.backfeedAmps` ALREADY INCLUDES THE BATTERY on every path that feeds it:
+      // `lib/computed-system.ts`:2948 exposes `backfeedBreakerAmps: totalBackfeedA`,
+      // which is `backfeedBreakerAmps + batteryBusImpactA`, and
+      // `computeSystemProjection.ts`:72 passes exactly that as both
+      // `backfeedBreakerRequired` and `solarBreakerRequired`.
+      //
+      // So on every single-system E-1 with a battery, the 'PV Breaker' row printed
+      // PV + battery under a PV-only label, and 'Total Backfeed' printed PV + 2×battery.
+      // On the permit path the PASS/FAIL cell is rescued by `poiRulePasses`, so the sheet
+      // showed a verdict its own printed arithmetic contradicts; on the standalone SLD
+      // route the verdict came FROM the doubled figure and could print FAIL on a design
+      // that passes. Either way the numbers an AHJ checks off the sheet do not reconcile.
+      //
+      // The finding's own conclusion was that the real fix is NAMING, so:
+      //   · a caller that can supply a genuinely PV-only figure sets `pvOnlyBackfeedA`,
+      //     and the three rows are then unambiguous and additive;
+      //   · a caller that cannot is passing the POI TOTAL — which is what
+      //     computed-system actually exposes — so the label says so and nothing is added.
+      // Neither branch can double count.
       const _batBfA = input.batteryBackfeedA ?? 0;
-      const _totalBfA = pvBreakerAmps + _batBfA;
+      const _pvOnlyA = typeof input.pvOnlyBackfeedA === 'number' ? input.pvOnlyBackfeedA : null;
+      const _backfeedIsPvOnly = _pvOnlyA != null;
+      const _pvRowLabel = _backfeedIsPvOnly || _batBfA <= 0 ? 'PV Breaker' : 'PV + Storage Bkr';
+      const _pvRowA = _backfeedIsPvOnly ? _pvOnlyA : pvBreakerAmps;
+      const _totalBfA = _backfeedIsPvOnly ? _pvOnlyA + _batBfA : pvBreakerAmps;
       // NEC 705.12(B): (busbar ampacity) × 1.2 ≥ (main breaker OCPD) + (sum of backfeed breakers).
       // C1 fix: use the real busbar rating, NOT mainPanelAmps for both terms (a de-rated bus
       // could never fail the old check). Mirrors computed-system.ts interconnectionPass.
@@ -4228,8 +4266,12 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
         ['Interconnection','Load Side Tap'],
         ['NEC Reference','NEC 705.12(B)'],
         ['Bus Rating',`${_busAmps} A`],
-        ['PV Breaker',`${pvBreakerAmps} A`],
-        ...(_batBfA > 0 ? [['Batt. Backfeed Bkr',`${_batBfA} A`] as [string,string]] : []),
+        [_pvRowLabel,`${_pvRowA} A`],
+        // When the figure above is already the POI total, the battery row states that it
+        // is included rather than implying it should be added to it.
+        ...(_batBfA > 0
+          ? [[ 'Batt. Backfeed Bkr', _backfeedIsPvOnly ? `${_batBfA} A` : `${_batBfA} A (incl. above)` ] as [string,string]]
+          : []),
         ['Total Backfeed',`${_totalBfA} A`],
         ['Bus 120% Limit',`${_busLimit.toFixed(0)} A`],
         ['120% Rule',`${_120pass ? 'PASS ✓':'FAIL ✗'}`],

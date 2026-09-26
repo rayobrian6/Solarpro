@@ -9,6 +9,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { sldCombinerFields, hybridLaneMetering } from '@/lib/equipment/sldCombinerFields';
 import { readProductionMeterFlag, ungroundedConductorsForService } from '@/lib/equipment/currentTransformers';
 import { getUserFromRequest } from '@/lib/auth';
+// THE one NEC 240.6(A) ladder — never `Math.ceil(x / 5) * 5`.
+import { nextStandardOcpd } from '@/lib/electrical/stdSizes';
 import { handleRouteDbError } from '@/lib/db-neon';
 import { renderSLDProfessional, SLDProfessionalInput } from '@/lib/sld-professional-renderer';
 import { sanitizeClientSourceBranches } from '@/lib/permit/utils/sldAdapter';
@@ -181,7 +183,11 @@ export async function POST(req: NextRequest) {
     if (!inverterModel) inverterModel = 'Primo 8.2-1';
 
     const acOutputAmps = Number(buildInput.acOutputAmps) || Math.round(acOutputKw * 1000 / 240);
-    const acOCPD = Number(buildInput.acOCPD) || Math.ceil(acOutputAmps * 1.25 / 5) * 5;
+    // 🚨 `Math.ceil(x / 5) * 5` — the formula lib/electrical/stdSizes.ts forbids in its
+    // own header, because 55, 65, 75, 85 and 95 A are NOT NEC 240.6(A) ratings. This is
+    // the EXPORTED sheet, so a rating no manufacturer makes went out as a PDF. The last
+    // of the five sites; the ladder is the one authority.
+    const acOCPD = Number(buildInput.acOCPD) || nextStandardOcpd(acOutputAmps * 1.25);
     const backfeedAmps = Number(buildInput.backfeedAmps || buildInput.acOCPD) || acOCPD;
     const acWireLength = Number(buildInput.acWireLength || buildInput.wireLength) || 60;
 
