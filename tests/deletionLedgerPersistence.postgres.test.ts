@@ -627,12 +627,24 @@ describe('🚨 undoing a deletion schedules a save of its own', () => {
   it('the autosave timer depends on the deletion ledger', () => {
     const at = STUDIO.indexOf('if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current)');
     expect(at).toBeGreaterThan(-1);
-    // The effect's own dependency array — the line that ends it — and nothing
-    // beyond it. A window wide enough to reach the E2E bridge would find
-    // `site.deletionLedger` there and pass while this effect ignored it.
-    const end = STUDIO.indexOf('saveLayoutToDB]);', at);
-    expect(end).toBeGreaterThan(at);
-    const deps = STUDIO.slice(STUDIO.lastIndexOf('}, [', end), end + 'saveLayoutToDB]);'.length);
+    // The effect's own dependency array and nothing beyond it. A window wide enough
+    // to reach the E2E bridge would find `site.deletionLedger` there and pass while
+    // this effect ignored it.
+    //
+    // 🚨 LOCATED BY THE ARRAY'S OWN BRACKET, NOT BY ITS LAST MEMBER. This anchored on
+    // the literal `saveLayoutToDB]);` — and that member was correctly REMOVED from the
+    // array, because it is a `useCallback` over nine values, so while it was a
+    // dependency the autosave debounce restarted on its identity churning rather than
+    // on the design changing, which could starve the save indefinitely. See
+    // tests/autosaveCannotBeStarved.test.ts.
+    //
+    // That makes THREE guards in this suite that anchored on a member name and broke
+    // when a correct change moved it. An array ends where the array ends.
+    const open = STUDIO.indexOf('}, [', at);
+    expect(open, 'the autosave effect has no dependency array').toBeGreaterThan(at);
+    const end = STUDIO.indexOf(']', open);
+    expect(end, 'the dependency array is unterminated').toBeGreaterThan(open);
+    const deps = STUDIO.slice(open, end + 1);
     // `forgetDeletions` ("Use Google 3D here") changes ONLY the ledger. Without
     // this the decision was held in memory, the row kept the tombstones, and
     // the faces the user asked back were refused again on the next reload.
