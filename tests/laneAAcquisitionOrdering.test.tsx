@@ -488,12 +488,44 @@ describe('🚨 the lifecycle is computed during RENDER, not in an effect', () =>
   it('it is not assigned from any post-commit callback in this hook', () => {
     // The requirement, not one spelling of it: no write to the mirror may be
     // deferred past the render pass, whichever post-commit hook defers it.
+    //
+    // 🚨 THIS TEST IS VACUOUS TODAY, AND IT NOW SAYS SO OUT LOUD.
+    //
+    // `useSiteDesign.ts` contains no `useEffect(` in code at all — the one
+    // occurrence is inside a comment — so the inner loop never runs and the
+    // assertion never evaluates. That is the honest expected state, and the test
+    // is worth keeping as a future-regression guard for the day somebody defers
+    // this write into an effect.
+    //
+    // But "no post-commit hook contains the write" and "my detector found
+    // nothing" are indistinguishable without the two controls below, which is
+    // precisely how a guard reads as coverage while proving nothing. So:
+    //   1. the write must be FOUND — if `geometryLifecycleRef.current =` is
+    //      renamed or moved, `write` is undefined and every comparison against it
+    //      is false, which would pass for the wrong reason;
+    //   2. `callSpans` must be able to find post-commit hooks AT ALL, proved
+    //      against a file that is full of them.
     const write = offsets(HOOK_SRC, /geometryLifecycleRef\.current\s*=(?!=)/)[0];
+    expect(write,
+      'the lifecycle mirror write was not found — this guard is comparing against undefined')
+      .toBeGreaterThan(-1);
+
+    const detectorWorks = callSpans(STUDIO_SRC, 'useEffect').length;
+    expect(detectorWorks,
+      'callSpans found no useEffect in DesignStudio, which has many — the detector is broken, ' +
+      'so a clean result from this guard means nothing')
+      .toBeGreaterThan(3);
+
+    let examined = 0;
     for (const hook of ['useEffect', 'useLayoutEffect', 'useInsertionEffect']) {
       for (const span of callSpans(HOOK_SRC, hook)) {
+        examined++;
         expect(write > span.start && write < span.end).toBe(false);
       }
     }
+    // Recorded rather than asserted: the count is expected to be 0 today, and a
+    // future non-zero is the interesting case, not a failure.
+    expect(examined).toBeGreaterThanOrEqual(0);
   });
 
   it('hydration installs the ledger BEFORE it schedules the recompute', () => {
