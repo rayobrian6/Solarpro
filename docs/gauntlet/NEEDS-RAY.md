@@ -17,7 +17,7 @@ Last updated: 2026-09-25.
 | **R2** | How approximate should an UNCLAIMED lead's map pin be? Currently house-level | The marketplace pin only |
 | **R4** | Four milestone checkboxes are POSTed and silently discarded — the product says it recorded something it did not | Persisting those four |
 | **R3** | Two engineering repairs would move the permit digest, which retires live PE approvals | Those two only |
-| **R6** | A geocoder silently overwrites a coordinate a human deliberately set, on every studio load | Nothing |
+| **R6** | A geocoder overwrites a coordinate a human deliberately set — **measured at 2.79 km and 28 m** — and that coordinate decides which property owns the design | Nothing, but it has been silently breaking things |
 | **R7** | The roof has no building-elevation sheet, so modelled wall and ridge heights reach no drawing | A roof elevation sheet only |
 | **R5** | Two new things to try in Dev — not a decision, but live acceptance overrides tests | Nothing |
 
@@ -154,7 +154,10 @@ and is queued separately.
 | **Where** | `components/design/DesignStudio.tsx` — `geocodeAddressForFlyTo` re-geocodes the project's address on studio mount and **unconditionally PUTs the geocoded position back over the stored coordinates.** Its sibling `geocodeAddress` guards with `if (!project.lat || !project.lng)`; this one has no guard at all. |
 | **How it surfaced** | Two `e2e/persistence-join.spec.ts` tests were failing. Not a product defect in the test's sense — the fixture pinned a coordinate and gave it a different address, the geocode won, and the seeded roof ended up 2.8 km from the active site, so autosave honestly wrote nothing. The fixture is wrong and is being repaired. But the mechanism it exposed is real. |
 | **Why it is yours** | The v52.1 rule is documented on purpose: *"street-level geocode always wins over stored coords"*, and for a project created from a typed address that is right — a geocoder beats a placeholder. But **it also beats a coordinate a person deliberately placed**, on every studio load, with no record that it happened. Your standing placement rules say where the user pointed is authoritative. These two disagree, and only you can say which wins when. |
-| **Extra fact worth knowing** | With no `GOOGLE_MAPS_API_KEY` set, the geocode falls through to live Census/Nominatim — so on a machine without that key, where a design thinks it is depends on whether an external service answers. |
+| **🚨 MEASURED, so the ruling has numbers** | For `1010 Franklin Ave, St Louis, MO` it moved a deliberately pinned coordinate **2.79 km**. For `3 Melvin Drive, Granite City, IL 62040` it moved it **28 m**. Both were measured against a live geocode with the dev server logging the result. |
+| **Why 28 m is not "close enough"** | Ownership of a design is decided from that coordinate via `siteKeyFromCoords` at 5 decimal places — about **1.1 m**. So a 28 m move makes the design belong to a DIFFERENT PROPERTY, and the restore then finds nothing and the autosave honestly writes an empty design. That is how two `persistence-join` tests came to look like a persistence defect for months. |
+| **Extra fact worth knowing** | With no `GOOGLE_MAPS_API_KEY` set, the geocode falls through to live Census/Nominatim — so on a machine without that key, where a design thinks it is depends on whether an external service answers, and it can land mid-session. |
+| **And it is not only the test fixture** | `app/design/page.tsx`'s quick-launch demo mints `makeDemoProject('1010 Franklin Ave, St Louis, MO', 38.6657, -90.2266)` — the same mismatched pair, 2.79 km apart. Anything built on Quick Design inherits it. |
 | **Blocked** | Nothing. |
 | **NOT blocked** | Everything continues. |
 | **Safe default NOT applied, deliberately** | Adding the sibling's guard (`only geocode when there are no stored coordinates`) is a two-line change and would probably be right — but it silently changes which authority wins for every existing project, and that is a ruling, not a patch. Left visible. |
