@@ -187,9 +187,35 @@ export async function PATCH(
      * canonical array or nothing, which makes a name the vocabulary does not
      * contain unwritable rather than merely discouraged.
      */
+    /**
+     * 🚨 `installation` MAPS TO NOTHING, AND MUST KEEP MAPPING TO NOTHING.
+     *
+     * It used to map to `contract_signed`. An installer moving a customer to the
+     * Installation stage therefore made that customer's OWN PORTAL state, with
+     * today's date, that the customer had signed the agreement —
+     * MICRO_STAGE_ACTIVITY renders it as "You signed — you're locked in!". On a
+     * project where no proposal was ever sent, and no signature exists anywhere.
+     *
+     * The portal is self-contradicting while it does that: the "Proposal Signed"
+     * block is driven by `proposals.signed_at` and stays absent, so the activity
+     * feed asserts a signature the proposal card cannot show. A customer
+     * disputing a contract was being handed a screenshot of the vendor's own
+     * system claiming they signed it.
+     *
+     * `contract_signed` is a fact about a SIGNATURE, so it is written only where
+     * a signature is recorded — app/api/proposals/[id]/sign and the signing
+     * branch of app/api/proposals/[id], both of which set `proposals.signed_at`
+     * in the same operation. Nothing else may write it. (Pinned by
+     * tests/portalNeverClaimsASignature.test.ts.)
+     *
+     * If this stage should announce something, the honest candidates are
+     * `permit_submitted` or `install_scheduled` — and only once the underlying
+     * fact exists, which entering the stage does not establish. The remaining
+     * entries are entry-true: `proposal` is entered by sending the proposal, and
+     * `completed` is entered when the system is live.
+     */
     const STAGE_MICRO_MAP: Partial<Record<HomeownerStage, MicroStage>> = {
       proposal:      'proposal_sent',
-      installation:  'contract_signed',
       completed:     'install_completed',
     };
     const mapped = STAGE_MICRO_MAP[stage];

@@ -125,6 +125,7 @@ export async function GET(req: NextRequest) {
     if (projectIds.length > 0) {
       const pfRows = await sql`
         SELECT
+          id::text,
           project_id::text,
           'project_file'           AS doc_type,
           file_type::text          AS file_type,
@@ -139,6 +140,12 @@ export async function GET(req: NextRequest) {
       `;
 
       documents = pfRows.map((r: Record<string, unknown>) => ({
+        // The row id is what GET /api/portal/files/[id] needs. Without it the
+        // vault's download control has nothing to point at, so the portal page
+        // renders a plain glyph instead of a link — which is exactly the dead
+        // control that was there before. The endpoint enforces ownership itself
+        // (client_id as a JOIN predicate) and this id is not a capability.
+        id:          String(r.id),
         project_id:  String(r.project_id),
         doc_type:    String(r.doc_type),
         file_type:   r.file_type ? String(r.file_type) : undefined,

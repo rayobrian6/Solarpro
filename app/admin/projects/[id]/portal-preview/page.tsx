@@ -9,16 +9,15 @@ import {
   AlertCircle, Zap, TrendingUp, Home, Phone, Mail,
 } from 'lucide-react';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+import {
+  STAGE_CONTENT,
+  ROADMAP_STEPS,
+  getStageIndex,
+  stageStepLabel,
+  type HomeownerStage,
+} from '@/lib/portal/stageContent';
 
-type HomeownerStage =
-  | 'lead_submitted'
-  | 'under_review'
-  | 'site_survey'
-  | 'design'
-  | 'proposal'
-  | 'installation'
-  | 'completed';
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Project {
   id: string;
@@ -39,79 +38,36 @@ interface StageHistoryEntry {
 }
 
 // ─── Stage Definitions ────────────────────────────────────────────────────────
+//
+// 🚨 A THIRD HARDCODED COPY OF THE CUSTOMER'S STAGE COPY WAS HERE, AND IT WAS
+//    THE MOST DANGEROUS OF THE THREE.
+//
+// This page is what a rep opens while ON THE PHONE with the homeowner, under a
+// banner that used to read "This is exactly what <name> sees in their portal."
+// It was not. Every stage differed in wording, the step name differed
+// ("Site Survey" vs the portal's "Home Visit", "Complete" vs "System Live"), and
+// none of the things the customer can actually act on were rendered at all — no
+// proposal link, no bill-upload prompt, no documents, no install date. A rep
+// reading this aloud describes a screen the customer is not looking at.
+//
+// The prose now comes from lib/portal/stageContent.ts, the same table the portal
+// renders and the stage-advance email sends. The ICON stays local — it is
+// presentation, and this page uses lucide components where the portal uses an
+// emoji.
+//
+// The "exactly what they see" claim is GONE rather than restated, because this
+// page still does not render the portal's real components and a claim a page
+// cannot honour is worse than no claim. See the Admin Preview notice below.
 
-type StageContent = {
-  roadmapLabel: string;
-  stepLabel: string;
-  headline: string;
-  body: string;
-  next: string;
-  action: string;
-  actionIsRequired: boolean;
-  icon: React.ReactNode;
+const STAGE_ICON: Record<HomeownerStage, React.ReactNode> = {
+  lead_submitted: <ClipboardList size={18} />,
+  under_review:   <Search size={18} />,
+  site_survey:    <Ruler size={18} />,
+  design:         <Zap size={18} />,
+  proposal:       <FileOutput size={18} />,
+  installation:   <Wrench size={18} />,
+  completed:      <Star size={18} />,
 };
-
-const STAGE_CONTENT: Record<HomeownerStage, StageContent> = {
-  lead_submitted: {
-    roadmapLabel: 'Request Received', stepLabel: 'Step 1 of 7',
-    headline: 'We got your request.',
-    body: "We're getting familiar with your home and energy needs. Your project has been created and we'll be in touch soon.",
-    next: "Next: We'll review your project and reach out.",
-    action: 'Nothing to do right now.', actionIsRequired: false, icon: <ClipboardList size={18} />,
-  },
-  under_review: {
-    roadmapLabel: 'Under Review', stepLabel: 'Step 2 of 7',
-    headline: "We're reviewing your project.",
-    body: "We're looking at your home, roof, and energy usage to figure out the right system for you. This usually takes 1–2 business days.",
-    next: "Next: We'll schedule your site survey.",
-    action: 'Nothing to do right now.', actionIsRequired: false, icon: <Search size={18} />,
-  },
-  site_survey: {
-    roadmapLabel: 'Site Survey', stepLabel: 'Step 3 of 7',
-    headline: 'Your site survey is coming up.',
-    body: "We're sending someone to your home to measure your roof and confirm the setup details.",
-    next: "Next: After the visit, we'll start designing your system.",
-    action: "Action needed: We'll reach out to confirm your appointment. Please be available.", actionIsRequired: true, icon: <Ruler size={18} />,
-  },
-  design: {
-    roadmapLabel: 'System Design', stepLabel: 'Step 4 of 7',
-    headline: "We're designing your system.",
-    body: "Our team is building a solar layout specifically for your home — size, placement, and output.",
-    next: "Next: We'll put together your proposal.",
-    action: 'Nothing to do right now.', actionIsRequired: false, icon: <Zap size={18} />,
-  },
-  proposal: {
-    roadmapLabel: 'Proposal Ready', stepLabel: 'Step 5 of 7',
-    headline: 'Your proposal is ready.',
-    body: "We've put together your solar plan — system size, estimated savings, and financing options.",
-    next: "Next: Once you approve, we'll move to installation.",
-    action: 'Action needed: Review your proposal and let us know if you have questions.', actionIsRequired: true, icon: <FileOutput size={18} />,
-  },
-  installation: {
-    roadmapLabel: 'Installation', stepLabel: 'Step 6 of 7',
-    headline: 'Installation is being scheduled.',
-    body: "We're handling permits and lining up your crew. You'll hear from us soon with a date.",
-    next: "Next: We'll confirm your install date.",
-    action: "Action needed: Watch for our call or email with scheduling details.", actionIsRequired: true, icon: <Wrench size={18} />,
-  },
-  completed: {
-    roadmapLabel: 'Complete', stepLabel: 'Step 7 of 7',
-    headline: 'Your system is live.',
-    body: "Your solar panels are installed and running. You're now generating your own power.",
-    next: '',
-    action: "You're all set. Enjoy the savings.", actionIsRequired: false, icon: <Star size={18} />,
-  },
-};
-
-const ROADMAP_STEPS: HomeownerStage[] = [
-  'lead_submitted', 'under_review', 'site_survey', 'design',
-  'proposal', 'installation', 'completed',
-];
-
-function getStageIndex(stage: HomeownerStage | null): number {
-  if (!stage) return -1;
-  return ROADMAP_STEPS.indexOf(stage);
-}
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
@@ -177,7 +133,7 @@ function Roadmap({ stage }: { stage: HomeownerStage | null }) {
                          : 'w-10 h-10 bg-white/[0.03] border-2 border-white/[0.08]'
                 }`}>
                   {past ? <CheckCircle2 size={18} className="text-emerald-400" />
-                    : cur ? <span className="text-xl leading-none">{c.icon}</span>
+                    : cur ? <span className="text-xl leading-none">{STAGE_ICON[s]}</span>
                            : <Circle size={16} className="text-white/[0.08]" />}
                   {cur ? <div className="absolute inset-0 rounded-full bg-amber-500/15 animate-ping scale-[1.6] pointer-events-none" /> : null}
                 </div>
@@ -204,7 +160,7 @@ function Roadmap({ stage }: { stage: HomeownerStage | null }) {
                          : 'w-8 h-8 bg-white/[0.03] border-white/[0.07]'
                 }`}>
                   {past ? <CheckCircle2 size={14} className="text-emerald-400" />
-                    : cur ? <span className="text-sm">{c.icon}</span>
+                    : cur ? <span className="text-sm">{STAGE_ICON[s]}</span>
                            : <Circle size={14} className="text-white/[0.08]" />}
                 </div>
                 {!last ? <div className={`w-[2px] flex-1 min-h-[24px] mt-1 rounded-full ${past ? 'bg-emerald-500/25' : 'bg-white/[0.04]'}`} /> : null}
@@ -294,11 +250,25 @@ export default function AdminPortalPreview() {
         </div>
       </div>
 
-      {/* Admin Notice */}
-      <div className="bg-blue-500/8 border border-blue-500/15 rounded-xl px-4 py-2.5 flex items-center gap-2 text-xs text-blue-300">
-        <span className="font-semibold text-blue-400">Admin Preview</span>
-        <span className="text-blue-400/40">·</span>
-        This is exactly what {firstName} sees in their portal.
+      {/* Admin Notice
+          🚨 IT SAID "This is exactly what {firstName} sees in their portal." IT
+          WAS NOT. Same stage, different words (three hardcoded tables), a
+          different step name, and none of the things the homeowner can act on —
+          their proposal link, the bill-upload prompt, their documents, their
+          confirmed install date. A rep trusted that sentence on a live call.
+          The stage copy below now comes from the portal's own authority
+          (lib/portal/stageContent.ts), so the WORDS match. The page still does
+          not render the portal's components, so the claim does not return until
+          it does. */}
+      <div className="bg-blue-500/8 border border-blue-500/15 rounded-xl px-4 py-2.5 flex items-start gap-2 text-xs text-blue-300">
+        <span className="font-semibold text-blue-400 flex-shrink-0">Admin Preview</span>
+        <span className="text-blue-400/40 flex-shrink-0">·</span>
+        <span>
+          {firstName}&apos;s current stage and the exact wording their portal shows for it.
+          This is <span className="font-semibold">not</span> the full portal — their
+          proposal, documents, install date and upload prompts are not reproduced here.
+          Open their portal to see everything they see.
+        </span>
       </div>
 
       {/* Portal Preview */}
@@ -420,7 +390,7 @@ export default function AdminPortalPreview() {
                 <p className="text-[10px] font-bold uppercase tracking-widest text-slate-600">Progress</p>
               </div>
               <p className="text-xl font-black text-white">{pct}<span className="text-sm font-bold text-slate-600">%</span></p>
-              <p className="text-xs text-slate-600">{content?.roadmapLabel ?? '—'} · {content?.stepLabel ?? ''}</p>
+              <p className="text-xs text-slate-600">{content?.roadmapLabel ?? '—'} · {stage ? stageStepLabel(stage) : ''}</p>
             </div>
           </div>
 

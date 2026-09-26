@@ -59,8 +59,22 @@ describe('DocumentVault component', () => {
     expect(src).toContain('Your Documents');
   });
 
-  it('maps over documents array', () => {
-    expect(src).toContain('documents.map(');
+  /**
+   * 🚨 UPDATED: the vault no longer maps `documents` directly.
+   *
+   * The bill upload now stores TWO rows — the homeowner's actual bill and a
+   * machine-readable `Bill_Data_*.json` summary of the five parsed fields — and
+   * both are `utility_bill`, so both reach the portal. The summary is filtered out
+   * before the list is rendered (lib/portal/documents.ts); offering the homeowner
+   * a download of five numbers in braces is not a document vault.
+   *
+   * What the homeowner actually SEES is asserted by rendering the page in
+   * tests/portalDashboardTellsOneTruth.component.test.tsx. This is the source-level
+   * remnant.
+   */
+  it('maps over the homeowner-facing documents', () => {
+    expect(src).toContain('documents.filter(isHomeownerFacingDocument)');
+    expect(src).toContain('visible.map(');
   });
 });
 
@@ -71,14 +85,29 @@ describe('ReferralSection component', () => {
     expect(src).toContain('function ReferralSection(');
   });
 
-  it('only shows for install_scheduled and completed stages', () => {
+  /**
+   * 🚨 UPDATED, AND THIS ONE WAS PINNING A DEFECT.
+   *
+   * `REFERRAL_ELIGIBLE_STAGES` held `['install_scheduled', 'completed']` and was
+   * tested with `.includes(stage)` where `stage` is a `HomeownerStage`.
+   * `install_scheduled` is a MICRO-stage — not a member of that union, and never
+   * equal to any member — so the install-scheduled half NEVER FIRED and the card
+   * appeared only at `completed`. The array had been widened to `string[]`, which
+   * is why the comparison type-checked.
+   *
+   * Each is now asked of the vocabulary that holds it. That the card really does
+   * appear at install_scheduled is proven by rendering, in
+   * tests/portalDashboardTellsOneTruth.component.test.tsx.
+   */
+  it('shows at completed (a homeowner stage) or install_scheduled (a micro-stage)', () => {
     expect(src).toContain("'install_scheduled'");
     expect(src).toContain("'completed'");
     expect(src).toContain('REFERRAL_ELIGIBLE_STAGES');
+    expect(src).toContain('REFERRAL_ELIGIBLE_MICRO_STAGES');
   });
 
   it('returns null for ineligible stages', () => {
-    expect(src).toContain('!REFERRAL_ELIGIBLE_STAGES.includes(stage)');
+    expect(src).toContain('if (!eligible) return null;');
   });
 
   it('uses navigator.clipboard.writeText', () => {
@@ -90,12 +119,25 @@ describe('ReferralSection component', () => {
     expect(src).toContain("'copy'");
   });
 
-  it('builds referral URL with /portal?ref= pattern', () => {
-    expect(src).toContain('/portal?ref=');
+  /**
+   * 🚨 UPDATED, AND THESE TWO PINNED THE DEFECT MOST DIRECTLY.
+   *
+   * `/portal?ref=<first name>` sent a referred neighbour to an email-OTP LOGIN
+   * WALL for an account they do not have — no quote form, no path forward — with
+   * the referrer's first name as an "attribution" that nothing anywhere read. The
+   * link now goes to the public intake funnel and carries the referring client's
+   * id in parameters that funnel already forwards and the intake route already
+   * persists. See lib/portal/referral.ts and
+   * tests/portalNumbersAndReferralUnit.test.ts for the URL's shape.
+   */
+  it('builds the referral URL through the shared builder, not inline', () => {
+    expect(src).toContain('buildReferralUrl(base, clientId)');
+    expect(src, 'the referral still points at the portal login wall')
+      .not.toContain('/portal?ref=');
   });
 
-  it('encodes client name for URL safety', () => {
-    expect(src).toContain('encodeURIComponent');
+  it('does not put the client\'s name in a link they are told to share', () => {
+    expect(src).not.toContain("clientName.split(' ')[0]");
   });
 
   it('has copy feedback state (copied)', () => {
@@ -157,8 +199,8 @@ describe('Portal dashboard JSX integration', () => {
     expect(src).toContain('ownerCompany={owner?.company ?? null}');
   });
 
-  it('passes clientName to ReferralSection', () => {
-    expect(src).toContain("clientName={client?.name ?? ''}");
+  it('passes the client ID to ReferralSection (not their name — see above)', () => {
+    expect(src).toContain('clientId={client?.id ?? null}');
   });
 
   it('DocumentVault appears before ReferralSection in render order', () => {
@@ -173,8 +215,10 @@ describe('Portal dashboard JSX integration', () => {
 // ─── 4. REFERRAL_ELIGIBLE_STAGES ──────────────────────────────────────────────
 
 describe('REFERRAL_ELIGIBLE_STAGES constant', () => {
-  it('is defined as a string array', () => {
-    expect(src).toContain("const REFERRAL_ELIGIBLE_STAGES: string[] = [");
+  it('is typed as HomeownerStage[], which is what made the old bug invisible', () => {
+    // It was `string[]`, so putting a micro-stage name in it type-checked. Typed to
+    // the union, `'install_scheduled'` in this array is now a compile error.
+    expect(src).toContain('const REFERRAL_ELIGIBLE_STAGES: HomeownerStage[] = [');
   });
 
   it('contains install_scheduled', () => {
@@ -227,12 +271,11 @@ describe('Referral URL structure', () => {
     expect(src).toContain('NEXT_PUBLIC_BASE_URL');
   });
 
-  it('appends /portal?ref= to the base URL', () => {
-    expect(src).toContain('/portal?ref=');
-  });
-
-  it('uses the client first name (split by space)', () => {
-    expect(src).toContain("clientName.split(' ')[0]");
+  it('hands the base URL to the shared builder', () => {
+    // The path and parameters are that module's business, and are asserted
+    // behaviourally in tests/portalNumbersAndReferralUnit.test.ts.
+    expect(src).toContain("import { buildReferralUrl } from '@/lib/portal/referral'");
+    expect(src).toContain('buildReferralUrl(base, clientId)');
   });
 });
 

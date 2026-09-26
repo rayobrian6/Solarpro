@@ -19,18 +19,27 @@ import {
   estimateAnnualKwh,
   estimateMonthlyKwh,
   estimateCo2Tons,
+  projectedBenefits,
 } from '@/lib/portal/production';
+/**
+ * 🚨 THE STAGE PROSE IS NOT DEFINED IN THIS FILE ANY MORE.
+ *
+ * It was — and so was a second copy in the stage-advance email
+ * (app/api/admin/projects/[id]/route.ts) and a third in the admin "portal
+ * preview" (app/admin/projects/[id]/portal-preview/page.tsx), which told a rep
+ * on the phone with the customer it was "exactly what they see". All three
+ * disagreed. See lib/portal/stageContent.ts.
+ */
+import {
+  STAGE_CONTENT,
+  ROADMAP_STEPS,
+  getStageIndex,
+  type HomeownerStage,
+} from '@/lib/portal/stageContent';
+import { isHomeownerFacingDocument } from '@/lib/portal/documents';
+import { buildReferralUrl } from '@/lib/portal/referral';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-
-type HomeownerStage =
-  | 'lead_submitted'
-  | 'under_review'
-  | 'site_survey'
-  | 'design'
-  | 'proposal'
-  | 'installation'
-  | 'completed';
 
 interface Project {
   id: string;
@@ -65,6 +74,18 @@ interface PortalDocument {
   doc_type: string;
   label: string;
   uploaded_at: string;
+  /**
+   * `project_files.id`, when the read route supplies it.
+   *
+   * 🚨 OPTIONAL ON PURPOSE, AND THE DOWNLOAD CONTROL IS GATED ON IT. The vault
+   * used to render a download glyph that was not a control at all — no href, no
+   * handler, no endpoint. A homeowner clicked it repeatedly and nothing
+   * happened. There is now a real endpoint (GET /api/portal/files/[id]), so the
+   * glyph becomes a link when there is an id to link to, and is simply absent
+   * when there is not. A read-only list is honest; a button that does nothing is
+   * not.
+   */
+  id?: string;
 }
 
 interface MicroStageEvent {
@@ -97,17 +118,9 @@ interface PortalProposal {
 }
 
 // ─── Stage Content ────────────────────────────────────────────────────────────
-
-type StageContent = {
-  roadmapLabel:     string;
-  stepNum:          number;
-  headline:         string;
-  body:             string;
-  next:             string;
-  action:           string;
-  actionIsRequired: boolean;
-  emoji:            string;
-};
+//
+// `STAGE_CONTENT`, the `StageContent` type, `ROADMAP_STEPS` and `getStageIndex`
+// are imported from lib/portal/stageContent.ts — see the note at the imports.
 
 // Phase 4: milestone-weighted progress (sums to 100)
 const STAGE_WEIGHTS: Record<HomeownerStage, number> = {
@@ -206,69 +219,6 @@ const STAGE_MICRO_MAP: Record<HomeownerStage, string[]> = {
   completed:      ['system_live', 'monitoring_active'],
 };
 
-const ROADMAP_STEPS: HomeownerStage[] = [
-  'lead_submitted', 'under_review', 'site_survey', 'design', 'proposal', 'installation', 'completed',
-];
-
-const STAGE_CONTENT: Record<HomeownerStage, StageContent> = {
-  lead_submitted: {
-    roadmapLabel: 'Request Received', stepNum: 1,
-    headline: 'We received your request.',
-    body: "We've created your project and our team is getting familiar with your home and energy needs. You'll hear from us soon.",
-    next: "We'll review your project and reach out shortly.",
-    action: 'Nothing to do right now — sit tight!',
-    actionIsRequired: false, emoji: '📋',
-  },
-  under_review: {
-    roadmapLabel: 'Under Review', stepNum: 2,
-    headline: "We're reviewing your project.",
-    body: "Our team is analyzing your home, roof, and energy profile to determine the right solar system for you. This typically takes 1–2 business days.",
-    next: "We'll schedule a visit to your home.",
-    action: 'Nothing to do right now.',
-    actionIsRequired: false, emoji: '🔍',
-  },
-  site_survey: {
-    roadmapLabel: 'Home Visit', stepNum: 3,
-    headline: "We're visiting your home.",
-    body: "A technician will visit your property to take measurements and confirm the details needed to build you an accurate solar design.",
-    next: "After the visit, we'll begin designing your system.",
-    action: "We'll reach out to confirm your appointment time. Please be available.",
-    actionIsRequired: true, emoji: '🏠',
-  },
-  design: {
-    roadmapLabel: 'Designing Your System', stepNum: 4,
-    headline: "We're designing your solar system.",
-    body: "Our team is building a custom solar plan for your home — optimizing panel placement, system size, and projected energy output.",
-    next: "We'll deliver your complete proposal.",
-    action: 'Nothing to do right now.',
-    actionIsRequired: false, emoji: '⚡',
-  },
-  proposal: {
-    roadmapLabel: 'Proposal Ready', stepNum: 5,
-    headline: 'Your proposal is ready.',
-    body: "We've put together your complete solar plan — system size, estimated annual savings, financing options, and available incentives.",
-    next: "Once you approve, we move straight to installation.",
-    action: "Review your proposal and sign when you're ready.",
-    actionIsRequired: true, emoji: '📄',
-  },
-  installation: {
-    roadmapLabel: 'Installation', stepNum: 6,
-    headline: 'Your installation is being planned.',
-    body: "We're handling permits and lining up your installation crew. Everything is in motion — you'll receive a confirmed date soon.",
-    next: "We'll reach out to confirm your installation date.",
-    action: "Watch for our call or email with scheduling details.",
-    actionIsRequired: true, emoji: '🔧',
-  },
-  completed: {
-    roadmapLabel: 'System Live', stepNum: 7,
-    headline: 'Your solar system is live! 🎉',
-    body: "Your panels are installed, inspected, and generating clean energy right now. Welcome to energy independence.",
-    next: '',
-    action: "You're all set. Enjoy the savings.",
-    actionIsRequired: false, emoji: '🌟',
-  },
-};
-
 // Phase 2: what the proposal will include (shown during design stage)
 const PROPOSAL_PREVIEW_ITEMS = [
   'Estimated annual energy production for your home',
@@ -281,10 +231,7 @@ const PROPOSAL_PREVIEW_ITEMS = [
 
 // ─── Utility helpers ──────────────────────────────────────────────────────────
 
-function getStageIndex(stage: HomeownerStage | null): number {
-  if (!stage) return -1;
-  return ROADMAP_STEPS.indexOf(stage);
-}
+// `getStageIndex` is imported from lib/portal/stageContent.ts.
 
 // Phase 4: milestone-weighted progress — not a simple linear percentage
 function calcWeightedProgress(stage: HomeownerStage | null): number {
@@ -323,15 +270,16 @@ function getGreeting(): string {
   return 'Good evening';
 }
 
-// Phase 5: rough benefit estimates from kW size
-function calcBenefits(kw: number | null) {
-  if (!kw || kw <= 0) return null;
-  const annualKwh     = Math.round(kw * 1400);
-  const annualSavings = Math.round(annualKwh * 0.135);
-  const co2Tons       = Math.round((annualKwh * 0.386) / 1000 * 10) / 10;
-  const treesEq       = Math.round(co2Tons * 16.5);
-  return { annualKwh, annualSavings, co2Tons, treesEq };
-}
+// 🚨 `calcBenefits` WAS HERE AND IT ANSWERED THE SAME QUESTION AS
+//    lib/portal/production.ts, DIFFERENTLY, ON THE SAME SCREEN.
+//
+// It used 1400 kWh/kW/yr and 0.386 kg CO2/kWh; the SystemPerformance card below
+// uses the module's 1370 and 0.4. Every completed-stage homeowner scrolled past
+// two cards giving two answers to "how much will my system make?" and "how much
+// CO2 do I offset?" — about 300 kWh/yr and 0.1 tons apart, with nothing to say
+// which was right. The dollar savings figure was derived from the wrong one.
+//
+// Both cards now read `lib/portal/production.ts`. One system, one answer.
 
 // ─── Progress Arc ─────────────────────────────────────────────────────────────
 
@@ -603,7 +551,7 @@ function ProjectTeam({ owner }: { owner: Owner }) {
 // ─── Phase 5: Projected System Benefits ──────────────────────────────────────
 
 function ProjectedBenefits({ systemSizeKw, stage }: { systemSizeKw: number | null; stage: HomeownerStage | null }) {
-  const benefits = calcBenefits(systemSizeKw);
+  const benefits = projectedBenefits(systemSizeKw);
   if (!benefits || getStageIndex(stage) < 2) return null;
 
   const metrics = [
@@ -651,6 +599,15 @@ function ProjectedBenefits({ systemSizeKw, stage }: { systemSizeKw: number | nul
 function DocumentVault({ documents }: { documents: PortalDocument[] }) {
   if (documents.length === 0) return null;
 
+  /**
+   * The parsed-bill JSON summary is a machine-readable derivative of a document
+   * the homeowner already has, and it now travels alongside the real bill
+   * (app/api/portal/bill-upload stores both). Listing it here would offer them a
+   * download of five numbers in braces. See lib/portal/documents.ts.
+   */
+  const visible = documents.filter(isHomeownerFacingDocument);
+  if (visible.length === 0) return null;
+
   function fmtDate(iso: string): string {
     try { return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }); }
     catch { return ''; }
@@ -663,8 +620,8 @@ function DocumentVault({ documents }: { documents: PortalDocument[] }) {
         <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Your Documents</span>
       </div>
       <div className="space-y-2">
-        {documents.map((doc, i) => (
-          <div key={i} className="flex items-center gap-3 rounded-xl bg-white/[0.02] border border-white/[0.04] px-4 py-3">
+        {visible.map((doc, i) => (
+          <div key={doc.id ?? i} className="flex items-center gap-3 rounded-xl bg-white/[0.02] border border-white/[0.04] px-4 py-3">
             <div className="w-8 h-8 rounded-lg bg-blue-500/[0.08] border border-blue-500/[0.12] flex items-center justify-center flex-shrink-0">
               <FileText size={13} className="text-blue-400/50" />
             </div>
@@ -672,7 +629,19 @@ function DocumentVault({ documents }: { documents: PortalDocument[] }) {
               <p className="text-xs font-semibold text-white truncate">{doc.label}</p>
               <p className="text-[10px] text-slate-600">{fmtDate(doc.uploaded_at)}</p>
             </div>
-            <Download size={13} className="text-slate-600 flex-shrink-0" />
+            {/* 🚨 A LINK WHEN IT CAN BE ONE, AND NOTHING WHEN IT CANNOT.
+                This glyph used to be a bare icon: no href, no onClick, and no
+                endpoint behind it. The homeowner clicked and clicked. */}
+            {doc.id ? (
+              <a
+                href={`/api/portal/files/${doc.id}`}
+                title={`Download ${doc.label}`}
+                aria-label={`Download ${doc.label}`}
+                className="text-slate-500 hover:text-white transition-colors flex-shrink-0"
+              >
+                <Download size={13} />
+              </a>
+            ) : null}
           </div>
         ))}
       </div>
@@ -681,26 +650,51 @@ function DocumentVault({ documents }: { documents: PortalDocument[] }) {
 }
 
 // ─── Referral Link Generator ────────────────────────────────────────────
-// Only shown after install_scheduled or completed.
+//
+// 🚨 ITS GATE COMPARED A MICRO-STAGE NAME AGAINST A HOMEOWNER STAGE.
+//
+// `REFERRAL_ELIGIBLE_STAGES` held `['install_scheduled', 'completed']` and was
+// tested with `.includes(stage)`, where `stage` is a `HomeownerStage`.
+// `install_scheduled` is a MICRO-stage — it is not a member of that union and
+// never equals it — so half the intended eligibility silently never fired and
+// the card appeared only at `completed`. The two vocabularies are named similarly
+// and the comparison type-checked because the array was widened to `string[]`.
+//
+// The honest test is: is the install date confirmed (a micro-stage fact), or is
+// the system live (a stage fact)? So each is now asked of the thing that holds
+// it.
 
-const REFERRAL_ELIGIBLE_STAGES: string[] = ['install_scheduled', 'completed'];
+/** Homeowner stages at which the referral card is offered. */
+const REFERRAL_ELIGIBLE_STAGES: HomeownerStage[] = ['completed'];
+/** Micro-stages at which it is offered, regardless of the homeowner stage. */
+const REFERRAL_ELIGIBLE_MICRO_STAGES: string[] = ['install_scheduled'];
 
 function ReferralSection({
-  stage, ownerCompany, clientName,
+  stage, microStages, ownerCompany, clientId,
 }: {
   stage: HomeownerStage | null;
+  microStages: MicroStageEvent[];
   ownerCompany: string | null;
-  clientName: string;
+  /** The REFERRING client's id — what the referral is credited to. */
+  clientId: string | null;
 }) {
   const [copied, setCopied] = useState(false);
 
-  if (!stage || !REFERRAL_ELIGIBLE_STAGES.includes(stage)) return null;
+  const eligible =
+    (!!stage && REFERRAL_ELIGIBLE_STAGES.includes(stage)) ||
+    microStages.some(m => REFERRAL_ELIGIBLE_MICRO_STAGES.includes(m.micro_stage));
+  if (!eligible) return null;
 
   const base = typeof window !== 'undefined'
     ? window.location.origin
     : (process.env.NEXT_PUBLIC_BASE_URL ?? '');
-  const safeRef = encodeURIComponent(clientName.split(' ')[0] ?? 'friend');
-  const referralUrl = `${base}/portal?ref=${safeRef}`;
+  // Lands on the public intake funnel — which has a form — carrying the client
+  // id in parameters the funnel forwards and the intake route stores. The old
+  // link pointed at /portal, a login wall for an account the neighbour does not
+  // have, with the referrer's FIRST NAME as the attribution. See
+  // lib/portal/referral.ts.
+  const referralUrl = buildReferralUrl(base, clientId);
+  if (!referralUrl) return null;
 
   async function copyLink() {
     try {
@@ -1381,8 +1375,9 @@ export default function PortalDashboard() {
             {/* ══ REFERRAL LINK GENERATOR ═════════════════════════════════ */}
             <ReferralSection
               stage={stage}
+              microStages={projectMicros}
               ownerCompany={owner?.company ?? null}
-              clientName={client?.name ?? ''}
+              clientId={client?.id ?? null}
             />
 
             {/* ══ PHASE 6: MONITORING FOUNDATION (completed) ══════════════ */}

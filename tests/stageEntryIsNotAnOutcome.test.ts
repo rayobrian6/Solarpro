@@ -27,8 +27,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { join, relative, sep } from 'node:path';
 import { stripComments } from './support/stripSource';
 import { MICRO_STAGES } from '../lib/microStage';
 import { microStageForPipelineStage } from '@/lib/operations/pipelineMicroStage';
@@ -143,5 +143,240 @@ describe('🚨 BOTH routes write the micro-stage, and both no-op on an unmapped 
     // The behavioural half: the source guards above only prove the routes ask
     // and branch. This proves the answer they branch on is the right one.
     expect(microStageForPipelineStage('inspection')).toBeNull();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 🚨 THE WIDENING: EVERY MICRO-STAGE WRITER, NOT JUST THE DORMANT ROUTE
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Everything above guards ONE table, reached from two routes — and the table it
+// guards is the careful one. Two OTHER writers were quietly doing the thing this
+// file exists to forbid, in the paths real UI actually calls:
+//
+//   • app/api/admin/projects/[id] held `HOMEOWNER_TO_MICRO_OVERRIDE`, mapping
+//     every stage an admin can select onto a "representative" milestone. One
+//     click on "Save Stage" told the homeowner their utility bill had been
+//     received (on a screen still asking them to upload it), that a site visit
+//     report had been submitted (while the card said a technician WILL visit), or
+//     that the installation crew had ARRIVED AT THEIR HOME (while the card said
+//     permits were still being handled). Dated, customer-visible, and false.
+//
+//   • app/api/projects/[id]/homeowner-stage mapped `installation` to
+//     `contract_signed`. Advancing a customer to Installation made that
+//     customer's own portal state, with today's date, that THEY had signed the
+//     agreement — on projects where no proposal was ever sent.
+//
+// A guard on one map is not a guard on the rule. The rule is:
+//
+//   A STAGE→MICRO-STAGE MAPPING MAY ONLY RECORD SOMETHING THAT IS TRUE BY THE
+//   FACT OF ENTERING THAT STAGE.
+//
+// That cannot be decided by a regex on the micro-stage's name — `bill_uploaded`
+// and `survey_submitted` assert no "pass" or "approval", and both were lies. It
+// is a judgement per PAIR. So the pairs are enumerated here, per file, and any
+// pair that is not on the list fails until someone states why entering that
+// stage makes that milestone true. A new writer with any stage→micro map fails
+// by default, which is the only way a rule survives the next author.
+//
+// SCOPE, stated so the next reader does not assume more coverage than exists:
+// this scans stage-KEYED MAPS. A direct `writeMicroStage(id, 'bill_parsed')` at
+// the point the bill is actually parsed is a specific observed event, not a
+// mapping, and is not what this rule is about.
+
+/** Repo-relative path, with forward slashes on every platform. */
+const relPath = (abs: string): string => relative(ROOT, abs).split(sep).join('/');
+
+function walk(dir: string, out: string[] = []): string[] {
+  for (const entry of readdirSync(dir)) {
+    if (entry === 'node_modules' || entry === '.next' || entry === '.git') continue;
+    const full = join(dir, entry);
+    if (statSync(full).isDirectory()) walk(full, out);
+    else if (/\.tsx?$/.test(entry)) out.push(full);
+  }
+  return out;
+}
+
+/**
+ * Anything that writes a micro-stage, or defines a map of them.
+ *
+ * Matched on RAW text (cheap, and a comment cannot create a call). The files it
+ * selects are then comment-stripped before being scanned for pairs, because the
+ * repairs' own docblocks quote the mappings they removed — the exact way two
+ * Phase-4 guards were satisfied by the comment documenting the fix.
+ */
+const WRITER_SIGNALS = /writeMicroStage\(|INSERT INTO project_micro_stages|MicroStage>/;
+
+const MICRO_STAGE_FILES: string[] = walk(join(ROOT, 'app'))
+  .concat(walk(join(ROOT, 'lib')))
+  .filter(f => WRITER_SIGNALS.test(readFileSync(f, 'utf8')))
+  // The vocabulary itself: it maps micro → homeowner stage, the other direction.
+  .filter(f => relPath(f) !== 'lib/microStage.ts')
+  .map(relPath)
+  .sort();
+
+/**
+ * The ONLY stage→micro mappings in the codebase, and why each is entry-true.
+ *
+ * Keyed by file, not by stage name, because the same word means different things
+ * in different vocabularies — and that is not hypothetical. `installation` in the
+ * ops pipeline means the crew is working (13-stage internal pipeline, an operator
+ * moves it when work starts). `installation` in the homeowner's 7-stage journey
+ * means "your installation is being planned… you'll receive a confirmed date
+ * soon". Mapping it to `install_started` is right in the first and was one of the
+ * three lies in the second.
+ */
+const ENTRY_TRUE_MAPPINGS: Record<string, Record<string, string>> = {
+  // The ops pipeline. Each stage is entered by an operator asserting the event.
+  'lib/operations/pipelineMicroStage.ts': {
+    site_assessment:   'survey_scheduled',
+    design_complete:   'layout_completed',
+    proposal_sent:     'proposal_sent',
+    contract_signed:   'contract_signed',   // stage name IS the outcome
+    engineering:       'engineering_started',
+    permit_submitted:  'permit_submitted',
+    permit_approved:   'permit_approved',
+    install_scheduled: 'install_scheduled',
+    installation:      'install_started',
+    pto:               'pto_submitted',
+    complete:          'system_live',
+    // `inspection` is absent, and §1 above is what keeps it absent.
+  },
+  // The installer's manual customer-stage control.
+  'app/api/projects/[id]/homeowner-stage/route.ts': {
+    proposal:  'proposal_sent',       // the stage is entered by sending it
+    completed: 'install_completed',   // entered once the system is live
+    // `installation` is absent: it used to map to `contract_signed`.
+  },
+};
+
+const MICRO_SET = new Set<string>(MICRO_STAGES as readonly string[]);
+
+/** `key: 'micro_stage'` pairs — an object literal mapping something to a micro. */
+function stageMicroPairs(src: string): Array<[string, string]> {
+  return [...src.matchAll(/([A-Za-z_][A-Za-z0-9_]*)\s*:\s*'([a-z_]+)'/g)]
+    .filter(m => MICRO_SET.has(m[2]))
+    .map(m => [m[1], m[2]] as [string, string]);
+}
+
+describe('🚨 EVERY micro-stage writer, not just the one with a test', () => {
+  it('the scan finds the writers it is supposed to find', () => {
+    // A predicate that silently matches nothing is the failure mode this whole
+    // file is about. These four are known writers; the list is not exhaustive by
+    // design — anything else the walk finds is scanned too.
+    for (const known of [
+      'app/api/projects/transition/route.ts',
+      'app/api/projects/update-status/route.ts',
+      'app/api/portal/bill-upload/route.ts',
+      'lib/operations/pipelineMicroStage.ts',
+    ]) {
+      expect(MICRO_STAGE_FILES, `${known} is not being scanned`).toContain(known);
+    }
+    expect(MICRO_STAGE_FILES.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('no file maps a stage onto a milestone that entering it does not establish', () => {
+    const offences: string[] = [];
+    for (const file of MICRO_STAGE_FILES) {
+      const src = stripComments(readFileSync(join(ROOT, file), 'utf8'));
+      const allowed = ENTRY_TRUE_MAPPINGS[file] ?? {};
+      for (const [stage, micro] of stageMicroPairs(src)) {
+        if (allowed[stage] !== micro) offences.push(`${file}: ${stage} -> ${micro}`);
+      }
+    }
+    expect(
+      offences,
+      'a stage selection is recording a milestone as having happened. If entering ' +
+      'that stage really does make that milestone true, add the pair to ' +
+      'ENTRY_TRUE_MAPPINGS with the reason — do not widen the pattern. ' +
+      'If the pair is not a stage→micro mapping at all (for example an audit field ' +
+      'like `from_stage: \'contract_signed\'` that happens to hold a micro-stage ' +
+      'NAME), say so in a comment next to the ENTRY_TRUE_MAPPINGS entry you add ' +
+      'for it — the scan is deliberately broad, because a narrow one is how the ' +
+      'admin route\'s map went unnoticed for months.',
+    ).toEqual([]);
+  });
+
+  it('and the enumerated mappings are all still there (the list is not stale)', () => {
+    // Without this, deleting a legitimate mapping and the whole scan going quiet
+    // would read as success.
+    for (const [file, pairs] of Object.entries(ENTRY_TRUE_MAPPINGS)) {
+      const src = stripComments(readFileSync(join(ROOT, file), 'utf8'));
+      const found = new Map(stageMicroPairs(src));
+      for (const [stage, micro] of Object.entries(pairs)) {
+        expect(found.get(stage), `${file} no longer maps ${stage} -> ${micro}`).toBe(micro);
+      }
+    }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 🚨 `contract_signed` IS A FACT ABOUT A SIGNATURE
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// The portal renders it as "You signed — you're locked in!". A customer disputing
+// a contract must never be shown the vendor's own system asserting they signed
+// one, dated, because an installer clicked a stage dropdown. So the census is
+// explicit: the only things that may write it are the two proposal signature
+// paths — each of which sets `proposals.signed_at` in the same operation — and
+// the ops pipeline stage whose own name is `contract_signed`.
+
+describe('🚨 nothing invents a signature', () => {
+  /**
+   * Files that can put `contract_signed` into `project_micro_stages`.
+   *
+   * 🚨 NOT "files that contain the string". That version failed for the right
+   * reason and the wrong finding: `app/api/projects/update-status` contains
+   * `contract_signed: 'approved'` (micro-stage name as a KEY, mapping to a
+   * PIPELINE status) and `transition` tests `newStage === 'contract_signed'`.
+   * Neither writes the milestone; both reach it, legitimately, through the shared
+   * pipeline map whose key is the identically-named stage — and update-status sets
+   * `contract_signed_at = NOW()` when it does. Counting a mention as a write
+   * would have made this suite demand the removal of correct code.
+   *
+   * A WRITE is: the literal handed to `writeMicroStage`, the literal inside an
+   * INSERT into the table, or a stage→micro pair whose value is it (the last of
+   * which is what the third test below generalises).
+   */
+  const writesContractSigned = (src: string): boolean =>
+    /INSERT INTO project_micro_stages[\s\S]{0,400}?'contract_signed'/.test(src) ||
+    /writeMicroStage\([^;]{0,300}'contract_signed'/.test(src) ||
+    stageMicroPairs(src).some(([, micro]) => micro === 'contract_signed');
+
+  const WRITERS = MICRO_STAGE_FILES
+    .filter(f => writesContractSigned(stripComments(readFileSync(join(ROOT, f), 'utf8'))))
+    .sort();
+
+  it('only the signature paths and the identically-named pipeline stage write it', () => {
+    expect(WRITERS).toEqual([
+      // Raw INSERT, in the same block that sets signed_at.
+      'app/api/proposals/[id]/route.ts',
+      'app/api/proposals/[id]/sign/route.ts',
+      // The map entry keyed by the identically-named pipeline stage.
+      'lib/operations/pipelineMicroStage.ts',
+    ]);
+  });
+
+  it('each signature path records the signature itself, not just the milestone', () => {
+    for (const f of ['app/api/proposals/[id]/route.ts', 'app/api/proposals/[id]/sign/route.ts']) {
+      const src = stripComments(readFileSync(join(ROOT, f), 'utf8'));
+      expect(src, `${f} writes the milestone without recording a signature`)
+        .toMatch(/signed_at\s*=\s*NOW\(\)|signed_at\)/);
+    }
+  });
+
+  it('and no stage-keyed mapping reaches it except one named for it', () => {
+    // The specific defect: `installation: 'contract_signed'`. Generalised — any
+    // key that is not itself `contract_signed`.
+    const offences: string[] = [];
+    for (const file of MICRO_STAGE_FILES) {
+      const src = stripComments(readFileSync(join(ROOT, file), 'utf8'));
+      for (const [stage, micro] of stageMicroPairs(src)) {
+        if (micro === 'contract_signed' && stage !== 'contract_signed') {
+          offences.push(`${file}: ${stage} -> contract_signed`);
+        }
+      }
+    }
+    expect(offences, 'a stage selection is claiming the customer signed').toEqual([]);
   });
 });

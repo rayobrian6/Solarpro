@@ -8,7 +8,7 @@
 //   2. Validate project_id belongs to this client
 //   3. Check if bill already exists → return early if so (no duplicate)
 //   4. Forward file to /api/bill-upload for parsing (reuse existing pipeline)
-//   5. Save parsed bill + raw file reference to project_files
+//   5. Save the ORIGINAL BYTES, then the parsed summary, to project_files
 //   6. If current stage is 'lead_submitted' → advance to 'under_review'
 //   7. Return { success, billData, stageAdvanced }
 //
@@ -28,6 +28,17 @@ import { getDbReady, handleRouteDbError, isValidUUID } from '@/lib/db-neon';
 import { getPortalSession } from '@/lib/portalAuth';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 import { writeMicroStage } from '@/lib/microStage';
+import {
+  PORTAL_BILL_SUMMARY_FILE_NAME,
+  portalOriginalBillFileName,
+} from '@/lib/portal/documents';
+
+/**
+ * The name the summary row used to have. Kept ONLY so a project that uploaded
+ * before the original bytes were retained is still recognised as "already
+ * uploaded" and is not silently re-parsed.
+ */
+const LEGACY_SUMMARY_FILE_NAME = 'Utility_Bill_Summary.json';
 
 export async function POST(req: NextRequest) {
   // ── Rate limit ────────────────────────────────────────────────────────────
@@ -76,11 +87,24 @@ export async function POST(req: NextRequest) {
     const currentStage = project.homeowner_stage as string | null;
 
     // ── Check for existing bill (prevent duplicate upload UI) ─────────────
+    //
+    // 🚨 SCOPED TO THE SUMMARY ROW, NOT TO ANY `utility_bill` FILE.
+    //
+    // This check used to match any row with `file_type = 'utility_bill'`, which
+    // is now TWO rows per upload (the original bytes and the parsed summary). If
+    // it kept matching either one, an upload that stored the bytes and then
+    // failed before writing the summary would be permanently stuck: the route
+    // would answer `alreadyExists` forever and the parse would never be redone.
+    //
+    // The SUMMARY is what proves a parse completed, so it is what "already
+    // uploaded" means. A half-finished upload is now retryable, which is the
+    // opposite of the state this finding was about.
     const existingBill = await sql`
       SELECT id, created_at
       FROM project_files
       WHERE project_id = ${projectId}
         AND file_type   = 'utility_bill'
+        AND file_name   IN (${PORTAL_BILL_SUMMARY_FILE_NAME}, ${LEGACY_SUMMARY_FILE_NAME})
       LIMIT 1
     `;
     if (existingBill.length > 0) {
@@ -121,7 +145,58 @@ export async function POST(req: NextRequest) {
 
     const billData = parseJson.billData;
 
-    // ── Save bill reference to project_files ──────────────────────────────
+    // ── Save the ORIGINAL BYTES ───────────────────────────────────────────
+    //
+    // 🚨 THIS IS THE WHOLE POINT OF THE ROUTE AND IT WAS MISSING.
+    //
+    // Everything downstream — system size, production, savings, the proposal —
+    // is derived from five numbers a parser guessed off this document, and the
+    // route hands back a `confidence` score for that guess. Without the document
+    // there is nothing to check the guess against, and no way to answer "are you
+    // sure my usage is 14,200 kWh?" except to ask the homeowner to upload it
+    // again, which the portal would not let them do.
+    //
+    // Written BEFORE the summary, and its failure FAILS THE REQUEST. That
+    // ordering is deliberate: if this insert cannot be done, no summary row
+    // exists either, so `alreadyExists` above does not latch and the homeowner
+    // can simply try again. The old code's failure mode was the reverse — a
+    // summary that permanently claimed a bill had been received.
+    //
+    // Size is already bounded: /api/bill-upload rejects anything over 10 MB with
+    // a 413 before we reach this line, so nothing larger can arrive here.
+    const originalBytes = Buffer.from(await file.arrayBuffer());
+    const originalMime  = (file.type || '').trim() || 'application/octet-stream';
+    const originalName  = portalOriginalBillFileName(file.type, file.name);
+
+    // project_files requires user_id — use client_id as sentinel for portal uploads
+    const portalUserId = session.clientId;
+
+    try {
+      await upsertProjectFile(sql, {
+        projectId,
+        clientId: session.clientId,
+        userId:   portalUserId,
+        fileName: originalName,
+        mimeType: originalMime,
+        bytes:    originalBytes,
+        notes:    `Original utility bill uploaded via homeowner portal (as "${file.name}")`,
+      });
+    } catch (storeErr) {
+      const msg = storeErr instanceof Error ? storeErr.message : String(storeErr);
+      console.error(
+        `[portal/bill-upload] ERROR: original bill bytes NOT stored for project=${projectId}: ${msg}`,
+      );
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            'We could not save your utility bill. Nothing was recorded — please try uploading it again.',
+        },
+        { status: 500 },
+      );
+    }
+
+    // ── Save the parsed summary to project_files ───────────────────────────
     const summaryText = JSON.stringify({
       utilityProvider: billData.utilityProvider ?? null,
       monthlyKwh:      billData.monthlyKwh ?? null,
@@ -133,42 +208,21 @@ export async function POST(req: NextRequest) {
 
     const buf = Buffer.from(summaryText, 'utf8');
 
-    // project_files requires user_id — use client_id as sentinel for portal uploads
-    const portalUserId = session.clientId;
-
-    try {
-      await sql`
-        INSERT INTO project_files
-          (project_id, client_id, user_id, file_name, file_type, file_size, mime_type, file_data, notes)
-        VALUES
-          (${projectId}, ${session.clientId}, ${portalUserId},
-           'Utility_Bill_Summary.json', 'utility_bill', ${buf.length},
-           'application/json', ${buf},
-           'Uploaded via homeowner portal')
-        ON CONFLICT (project_id, user_id, file_name)
-        DO UPDATE SET
-          file_data   = EXCLUDED.file_data,
-          notes       = EXCLUDED.notes,
-          upload_date = NOW()
-      `;
-    } catch {
-      // Fallback if ON CONFLICT not supported on this constraint
-      await sql`
-        DELETE FROM project_files
-        WHERE project_id = ${projectId}
-          AND user_id    = ${portalUserId}
-          AND file_name  = 'Utility_Bill_Summary.json'
-      `;
-      await sql`
-        INSERT INTO project_files
-          (project_id, client_id, user_id, file_name, file_type, file_size, mime_type, file_data, notes)
-        VALUES
-          (${projectId}, ${session.clientId}, ${portalUserId},
-           'Utility_Bill_Summary.json', 'utility_bill', ${buf.length},
-           'application/json', ${buf},
-           'Uploaded via homeowner portal')
-      `;
-    }
+    // 🚨 NAMED `Bill_Data_…`, WHICH IS NOT COSMETIC.
+    //
+    // app/engineering/page.tsx classifies a `utility_bill` file as "Bill Data"
+    // when its name starts `Bill_Data_`, and as the "Original Utility Bill"
+    // otherwise. Under the old name this 200-byte JSON summary WAS the thing the
+    // installer's engineering page presented as the original document.
+    await upsertProjectFile(sql, {
+      projectId,
+      clientId: session.clientId,
+      userId:   portalUserId,
+      fileName: PORTAL_BILL_SUMMARY_FILE_NAME,
+      mimeType: 'application/json',
+      bytes:    buf,
+      notes:    'Parsed bill data (summary) — uploaded via homeowner portal',
+    });
 
     // ── Write micro stages: bill_uploaded + bill_parsed ────────────────────
     // Critical events -- awaited so failures surface to the caller (writeMicroStage retries once internally)
@@ -215,6 +269,10 @@ export async function POST(req: NextRequest) {
       stageAdvanced,
       newStage:      stageAdvanced ? 'under_review' : currentStage,
       message:       'Utility bill received. We\'re analyzing your energy usage now.',
+      // The document itself is on file, not just the five numbers read off it.
+      // Reported so a caller can tell the difference — the old route could not.
+      originalStored: true,
+      originalFileName: originalName,
       billData: {
         utilityProvider: billData.utilityProvider ?? null,
         monthlyKwh:      billData.monthlyKwh ?? null,
@@ -225,5 +283,64 @@ export async function POST(req: NextRequest) {
 
   } catch (e: unknown) {
     return handleRouteDbError('[api/portal/bill-upload]', e);
+  }
+}
+
+/**
+ * Writes one `project_files` row, replacing any previous row with the same
+ * (project, user, file name).
+ *
+ * The ON CONFLICT target is the constraint the original code assumed, with the
+ * same delete-then-insert fallback for databases that do not have it. Extracted
+ * because there are now TWO rows per upload — the original bytes and the parsed
+ * summary — and duplicating 30 lines of upsert is how a fallback path ends up
+ * fixed in one copy and not the other.
+ */
+async function upsertProjectFile(
+  sql: Awaited<ReturnType<typeof getDbReady>>,
+  row: {
+    projectId: string;
+    clientId:  string;
+    userId:    string;
+    fileName:  string;
+    mimeType:  string;
+    bytes:     Buffer;
+    notes:     string;
+  },
+): Promise<void> {
+  try {
+    await sql`
+      INSERT INTO project_files
+        (project_id, client_id, user_id, file_name, file_type, file_size, mime_type, file_data, notes)
+      VALUES
+        (${row.projectId}, ${row.clientId}, ${row.userId},
+         ${row.fileName}, 'utility_bill', ${row.bytes.length},
+         ${row.mimeType}, ${row.bytes},
+         ${row.notes})
+      ON CONFLICT (project_id, user_id, file_name)
+      DO UPDATE SET
+        file_data   = EXCLUDED.file_data,
+        file_size   = EXCLUDED.file_size,
+        mime_type   = EXCLUDED.mime_type,
+        notes       = EXCLUDED.notes,
+        upload_date = NOW()
+    `;
+  } catch {
+    // Fallback if ON CONFLICT not supported on this constraint
+    await sql`
+      DELETE FROM project_files
+      WHERE project_id = ${row.projectId}
+        AND user_id    = ${row.userId}
+        AND file_name  = ${row.fileName}
+    `;
+    await sql`
+      INSERT INTO project_files
+        (project_id, client_id, user_id, file_name, file_type, file_size, mime_type, file_data, notes)
+      VALUES
+        (${row.projectId}, ${row.clientId}, ${row.userId},
+         ${row.fileName}, 'utility_bill', ${row.bytes.length},
+         ${row.mimeType}, ${row.bytes},
+         ${row.notes})
+    `;
   }
 }

@@ -2,9 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAdminApi } from '@/lib/adminAuth';
 import { getDbReady, handleRouteDbError, isValidUUID } from '@/lib/db-neon';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
-import { writeMicroStage } from '@/lib/microStage';
 import { sendStageAdvanceEmail } from '@/lib/email';
 import { getBaseUrl } from '@/lib/env';
+// 🚨 The customer-facing prose is NOT defined in this file any more. This route
+// sends the stage-advance email; the portal page renders the same stage. They
+// held two different hardcoded tables and contradicted each other (see
+// lib/portal/stageContent.ts).
+import { stageEmailContent } from '@/lib/portal/stageContent';
 
 export const maxDuration = 30;
 export const dynamic = 'force-dynamic';
@@ -210,26 +214,38 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
           (${id}, ${stage}, ${adminId}, ${safeNote})
       `;
 
-      // ── Write micro stage for admin-set homeowner_stage (non-fatal, fire-and-forget) ─
-      // Maps homeowner_stage → representative micro stage so the audit log
-      // reflects the manual override with consistent granularity.
-      const HOMEOWNER_TO_MICRO_OVERRIDE: Partial<Record<string, import('@/lib/microStage').MicroStage>> = {
-        lead_submitted:  'lead_created',
-        under_review:    'bill_uploaded',
-        site_survey:     'survey_submitted',
-        design:          'layout_completed',
-        proposal:        'proposal_sent',
-        installation:    'install_started',
-        completed:       'system_live',
-      };
-      const microOverride = HOMEOWNER_TO_MICRO_OVERRIDE[stage as string];
-      if (microOverride) {
-        void writeMicroStage(id, microOverride, adminId, {
-          source: 'admin_set_stage',
-          stage,
-          note: safeNote,
-        });
-      }
+      // ── NO MICRO-STAGE IS WRITTEN HERE. THIS IS THE FIX, NOT AN OMISSION. ──
+      //
+      // 🚨 ONE ADMIN CLICK USED TO FABRICATE A DATED, CUSTOMER-VISIBLE MILESTONE.
+      //
+      // A `HOMEOWNER_TO_MICRO_OVERRIDE` table mapped each stage onto a
+      // "representative" micro-stage and wrote it through `writeMicroStage`. But
+      // micro-stages are not an internal audit vocabulary — the portal
+      // translates them into prose the homeowner reads, with today's date, as
+      // things that HAVE HAPPENED (MICRO_STAGE_ACTIVITY in
+      // app/portal/dashboard/page.tsx). So selecting a phase asserted its
+      // milestone:
+      //
+      //   under_review  → bill_uploaded    → "Your utility bill was received"
+      //     …on the same screen that was still asking them to upload it, because
+      //     the upload prompt is driven by `project_files` and not by this row.
+      //   site_survey   → survey_submitted → "Site visit report submitted"
+      //     …while the stage card says a technician WILL visit.
+      //   installation  → install_started  → "Installation crew arrived at your
+      //     home" …while the card says permits are still being handled.
+      //
+      // Entering a stage is not evidence of its outcome — the rule stated in
+      // tests/stageEntryIsNotAnOutcome.test.ts. A manual stage change is exactly
+      // one fact: an operator set the stage. That fact is recorded above in
+      // `project_homeowner_stage_history`, which the portal already renders as
+      // "Milestone reached: <stage label>" — true, dated, and attributable.
+      //
+      // If a micro-stage-shaped audit row is ever wanted here, it must use a
+      // NON-OUTCOME name (e.g. `stage_set_manually`) that `MICRO_STAGE_ACTIVITY`
+      // does not translate. Adding one means adding to the canonical vocabulary
+      // in lib/microStage.ts and to its homeowner-stage map; until that exists,
+      // writing any EXISTING name from here is writing a milestone that did not
+      // happen.
 
       // ── Send stage-advance email to homeowner (non-fatal, fire-and-forget) ──
       void (async () => {
@@ -251,16 +267,19 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
           const clientEmail = row.client_email ? String(row.client_email) : null;
           if (!clientEmail) return;
 
-          const STAGE_EMAIL_CONTENT: Record<string, { label: string; body: string; next: string }> = {
-            lead_submitted:  { label: 'Lead Submitted',  body: "We\'ve received your information and are reviewing your solar project.", next: 'Our team will reach out to you shortly to discuss your project.' },
-            under_review:    { label: 'Under Review',    body: 'Our team is reviewing your utility bill and project details.',          next: 'We\'ll complete our review and schedule a site survey.' },
-            site_survey:     { label: 'Site Survey',     body: 'A site survey has been scheduled or is in progress at your property.',  next: 'Our technician will visit to measure your roof and assess your electrical setup.' },
-            design:          { label: 'System Design',   body: 'Our engineers are designing your custom solar system.',                 next: 'We\'ll prepare a detailed proposal with your system specs and savings estimate.' },
-            proposal:        { label: 'Proposal Ready',  body: 'Your solar proposal is ready to review — check your portal!',          next: 'Review and sign your proposal to move forward with installation.' },
-            installation:    { label: 'Installation',    body: 'Your solar system is being installed! Our crew is on-site.',           next: 'After installation we\'ll complete inspections and apply for Permission to Operate (PTO).' },
-            completed:       { label: 'System Live! 🎉', body: 'Congratulations — your solar system is live and generating clean energy!', next: 'You can monitor your system\'s production in your portal.' },
-          };
-          const content = STAGE_EMAIL_CONTENT[stage as string];
+          // 🚨 THE EMAIL AND THE PORTAL NOW READ THE SAME WORDS.
+          //
+          // A second hardcoded copy of the stage prose lived here, and it
+          // disagreed with the page it links to. Its `installation` entry read
+          // "Your solar system is being installed! Our crew is on-site." — sent
+          // by the same click that set the stage, linking to a portal page
+          // reading "Your installation is being planned… you'll receive a
+          // confirmed date soon." The homeowner was told the crew was at their
+          // house and then, two minutes later, that nothing had been scheduled.
+          //
+          // Neither table was the authority, which is why nobody noticed. There
+          // is one now: lib/portal/stageContent.ts.
+          const content = stageEmailContent(stage as string);
           if (!content) return;
 
           const portalUrl = `${getBaseUrl()}/portal/dashboard`;
