@@ -113,6 +113,77 @@ describe('🚨 and EVERY studio caller adopts the version it produced', () => {
     }
   });
 
+  it('🚨 and each one STATES the version it was based on', () => {
+    // 🚨 THE OTHER HALF, AND IT IS NOT THE SAME HALF. Adopting the version a write
+    // returns fixes a tab conflicting with ITSELF. It does nothing about a tab
+    // conflicting with somebody else: this route writes the layouts row, and without
+    // a precondition that write is unconditional, so a genuine two-tab collision on
+    // the Calculate or Save path is still last-write-wins — the exact behaviour the
+    // autosave path was fixed to stop.
+    // 🚨 EACH WINDOW IS BOUNDED BY ITS OWN ENCLOSING FUNCTION, and that took two
+    // attempts. A first version started the window at the nearest preceding
+    // `const body` — but the Save path builds its request inline inside
+    // `JSON.stringify({…})`, so there is no `const body` near it and the search ran
+    // all the way back to the CALCULATE path's. Site 2's window then contained site
+    // 1's token, and deleting the Save path's precondition stayed green.
+    //
+    // That is the two-writers blind spot, inside the guard written about the
+    // two-writers blind spot. Anchoring on the enclosing declaration makes each
+    // window structurally incapable of reaching into a sibling.
+    const sites = productionCallSites(STUDIO);
+    for (const [n, at] of sites.entries()) {
+      const end = STUDIO.indexOf('setCostEstimate(', at);
+      expect(end, `call site ${n + 1} has no success branch`).toBeGreaterThan(at);
+      const fnStart = STUDIO.lastIndexOf('\n  const ', at);
+      expect(fnStart, `call site ${n + 1} has no enclosing declaration`).toBeGreaterThan(-1);
+      const window = STUDIO.slice(fnStart, end);
+
+      // The bound is real: this window must NOT contain the other call site.
+      const others = sites.filter(s => s !== at);
+      for (const o of others) {
+        expect(o >= fnStart && o < end,
+          `call site ${n + 1}'s window swallows another call site — it can be satisfied by a sibling`)
+          .toBe(false);
+      }
+
+      expect(window,
+        `/api/production call site ${n + 1} writes the layouts row without saying which ` +
+        'version it was based on — a second tab silently loses')
+        .toMatch(/expectedUpdatedAt/);
+    }
+  });
+
+  it('🚨 the route hands the precondition to the writer on BOTH paths', () => {
+    // 🚨 TWO WRITE PATHS, AND A TOP-LEVEL FIELD REACHES ONLY ONE OF THEM. The
+    // no-client path is a wholesale spread — `{...rawLayout, projectId, userId}` —
+    // so a token at the top level of the body never arrives there. Wiring only the
+    // field-by-field path would be a precondition that silently does not apply to
+    // projects without a client, which is worse than none because the refusal code
+    // would be in the registry and the guard would be off.
+    const calls = [...PROD.matchAll(/upsertLayout\(\{/g)].map(m => m.index ?? -1);
+    expect(calls.length, 'the production route no longer has two upsertLayout calls')
+      .toBeGreaterThanOrEqual(2);
+    for (const [n, at] of calls.entries()) {
+      const end = PROD.indexOf('});', at);
+      expect(end, `upsertLayout call ${n + 1} is unterminated`).toBeGreaterThan(at);
+      expect(PROD.slice(at, end),
+        `upsertLayout call ${n + 1} in the production route receives no precondition`)
+        .toMatch(/expectedUpdatedAt/);
+    }
+  });
+
+  it('and a refusal from it reaches the operator', () => {
+    // Both callers are explicit user actions with a toast, so the server's own
+    // sentence is the right thing to show — it names the stored panel count, both
+    // timestamps, and says nothing was written.
+    const sites = productionCallSites(STUDIO);
+    for (const [n, at] of sites.entries()) {
+      const window = STUDIO.slice(at, at + 4000);
+      expect(window, `call site ${n + 1} swallows the server's message on failure`)
+        .toMatch(/data\.error/);
+    }
+  });
+
   it('it adopts the RETURNED version, never the one it sent', () => {
     // Echoing the request's own token back into the tab would be worse than
     // silence: every save would believe it was current for ever, and the guard

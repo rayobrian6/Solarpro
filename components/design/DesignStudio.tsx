@@ -4557,6 +4557,15 @@ export default function DesignStudio({ project, onSave }: Props) {
       // project hydrates it back (engineering audit C2 — was local-only/dropped).
       if (selectedInverter) body.selectedInverter = selectedInverter;
       if (selectedPanel) body.selectedPanel = selectedPanel;
+      // 🚨 THIS ROUTE WRITES THE LAYOUTS ROW, SO IT STATES ITS VERSION.
+      //
+      // Adopting the version it returns (below) fixes this tab conflicting with
+      // ITSELF. It does nothing about conflicting with somebody else: without a
+      // precondition the route's write is unconditional, so a genuine two-tab
+      // collision here is still last-write-wins — the behaviour the autosave path
+      // was fixed to stop. The refusal's own sentence reaches the operator through
+      // the `data.error` toast in the failure branch.
+      body.expectedUpdatedAt = site.storedVersion() ?? undefined;
       const res = await fetch('/api/production', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -4670,6 +4679,10 @@ export default function DesignStudio({ project, onSave }: Props) {
           // The Save button lands on this route, so a confirmed deletion has to
           // be able to authorise itself here too. See the autosave path.
           destructive: site.pendingDestructive() ?? undefined,
+          // Same obligation as the Calculate path: this route writes the layouts
+          // row, so it says which version it was based on rather than overwriting
+          // whatever is there.
+          expectedUpdatedAt: site.storedVersion() ?? undefined,
         }),
       });
       const data = await res.json();

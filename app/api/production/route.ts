@@ -426,6 +426,20 @@ export async function POST(req: NextRequest) {
       // replaced.
       const savedLayout = await upsertLayout({
         ...rawLayout, projectId, userId: user.id,
+        // 🚨 STATED EXPLICITLY, BECAUSE A SPREAD DOES NOT CARRY IT.
+        //
+        // This path spreads `rawLayout` wholesale, so a precondition sent at the
+        // TOP LEVEL of the body never arrives — only one nested inside `layout`
+        // would. Wiring the field-by-field path alone would give us a
+        // precondition that silently does not apply to projects without a client,
+        // which is worse than none: the refusal code would be in the registry and
+        // the guard would be off.
+        //
+        // Same precedence as the other write: a value inside `layout` wins, then
+        // the top-level one. Placed AFTER the spread so it cannot be overridden
+        // by a stale copy of itself in the client JSON.
+        expectedUpdatedAt: (rawLayout as { expectedUpdatedAt?: string | number | Date | null })
+          ?.expectedUpdatedAt ?? body.expectedUpdatedAt,
       } as any);
 
       const productionData = await calculateProductionFromDefinition(
