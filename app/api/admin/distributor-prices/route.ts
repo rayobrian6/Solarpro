@@ -278,6 +278,26 @@ export async function POST(req: NextRequest) {
               (${userId}::uuid IS NULL AND user_id IS NULL)
               OR user_id = ${userId}::uuid
             )
+            -- 🚨 A WILDCARD ROW IS KEYED ON ITS CATEGORY, NOT ON '*'.
+            --
+            -- buildOverrideMaps in lib/bom/distributorPricing.ts keys a normal row
+            -- on UPPER(part_number) and a '*' row on category — two different maps,
+            -- so ('*', battery) and ('*', optimizer) are two DIFFERENT keys that
+            -- must both be able to exist.
+            --
+            -- Without this term the logical key of the UPDATE was part_number
+            -- alone, and since EVERY category-wide override carries the same
+            -- part_number, saving a second one MATCHED THE FIRST and rewrote its
+            -- category. So a company could hold exactly ONE category-wide
+            -- override, and adding a second silently repurposed the previous one —
+            -- not deactivated, not superseded, just gone, with a 200 response.
+            -- tests/distributorPriceBusinessKey.postgres.test.ts section 5 measures
+            -- it, and goes red on this one clause.
+            --
+            -- NOTE: no backtick may appear in this comment. It sits inside a tagged
+            -- template literal, so a backtick here terminates the SQL string and the
+            -- file stops parsing.
+            AND (part_number <> '*' OR category IS NOT DISTINCT FROM ${category})
           RETURNING *
         `;
 
