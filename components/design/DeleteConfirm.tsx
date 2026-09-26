@@ -30,7 +30,7 @@
  * graph, so what the dialog promises and what the deletion does are one answer.
  */
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import type { DeletionPlan } from '@/lib/design/deletionAuthority';
 
 export interface DeleteConfirmProps {
@@ -41,6 +41,36 @@ export interface DeleteConfirmProps {
 }
 
 export function DeleteConfirm({ plan, onConfirm, onCancel }: DeleteConfirmProps) {
+  const showing = Boolean(plan && plan.ok);
+
+  /**
+   * 🚨 ESCAPE CANCELS. NEVER CONFIRMS.
+   *
+   * Escape is this product's invariant exit — the active-mode banner advertises it
+   * — and it did not work here, on the dialog standing in front of the two
+   * deletions that cannot be a slip. "Can I get out of this?" is the question a
+   * person is actually asking at a confirmation, and Escape is how they ask it.
+   *
+   * The direction is not a judgement call: on a destructive confirmation the key
+   * that means "get me out" must take the safe branch.
+   *
+   * Capture phase and `stopPropagation`, because the studio binds Escape globally
+   * to leave the armed tool — otherwise dismissing this dialog would also disarm
+   * whatever was selected behind it. Bound only while the dialog is showing, so a
+   * stale listener cannot swallow the studio's own Escape afterwards.
+   */
+  useEffect(() => {
+    if (!showing) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      e.preventDefault();
+      onCancel();
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
+  }, [showing, onCancel]);
+
   if (!plan || !plan.ok) return null;
 
   return (

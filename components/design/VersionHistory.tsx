@@ -133,6 +133,36 @@ export function VersionHistory({
     setConfirm(null);
   }, [open, load]);
 
+  /**
+   * 🚨 ESCAPE CLOSES IT, AND ESCAPE DOES NOT REACH THE TOOL UNDERNEATH.
+   *
+   * Escape is this product's invariant exit — the active-mode banner prints `ESC`
+   * for that reason, and a separate fix made Escape LEAVE the armed tool rather
+   * than merely clear the selection, because leaving the user armed meant their
+   * next click planted a second tree. A grammar that holds everywhere except the
+   * dialogs is not a grammar.
+   *
+   * CAPTURE PHASE, and `stopPropagation`. The studio binds Escape globally to
+   * leave the placement mode. Without this, one keypress would dismiss the panel
+   * AND disarm whatever the operator had selected behind it — two actions from one
+   * intent, the second invisible.
+   *
+   * Bound only while OPEN, and removed on close: a listener that outlives the
+   * dialog would swallow the studio's own Escape for the rest of the session,
+   * which is a worse bug than the one being fixed.
+   */
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      e.preventDefault();
+      onClose();
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
+  }, [open, onClose]);
+
   const restore = useCallback(async (row: VersionRow) => {
     setBusy(true); setRefusal(null);
     try {
