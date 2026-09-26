@@ -257,11 +257,14 @@ describe('Sizing Engine — 25-panel system across all brands', () => {
 });
 
 describe('Sizing Engine — 55-panel system (regression: string-capacity sizing)', () => {
-  it('Enphase: 55 panels → 55 micros, 4 AC branches', () => {
+  it('Enphase: 55 panels → 55 micros, 5 AC branches', () => {
+    // 5, not 4: four branches would carry 14 micros each, over every IQ8
+    // model's datasheet max per 20 A branch (IQ8+ 13, IQ8M/IQ8A 11). The old
+    // 4 pinned the flat 16/branch rule Ray caught on the SLD (2026-09-25).
     const r = sizeSystemFromBrand({ systemType: 'roof', panelCount: 55, selectedBrand: 'enphase' });
     expect(r.topology).toBe('micro');
     expect(r.microDeviceCount).toBe(55);
-    expect(r.acBranchCount).toBe(4);
+    expect(r.acBranchCount).toBe(5);
   });
 
   it('Fronius: 55 panels → ≥2 inverters, all panels assigned', () => {

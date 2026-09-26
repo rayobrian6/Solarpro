@@ -13,6 +13,7 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 export const maxDuration = 30;
 import { MICROINVERTERS } from '@/lib/equipment-db';
+import { microMaxPerBranch } from '@/lib/permit/utils/branching';
 import { requireAuth } from '@/lib/security';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
@@ -241,8 +242,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const accessories: EnphaseAccessoryItem[] = [];
 
     // ── 1. Trunk Cable ────────────────────────────────────────
-    // 1 section per 16 microinverters (standard branch circuit limit)
-    const microPerBranch = 16;
+    // 1 section per AC branch — the per-model datasheet max per 20 A branch
+    // (IQ8+ 13, IQ8M/IQ8A 11, IQ8H 10), the same source as the SLD. Was 16.
+    const microPerBranch = microMaxPerBranch(microData.model, 'Enphase');
     const trunkSections = Math.ceil(deviceCount / microPerBranch);
     const trunkParts = ENPHASE_PARTS.trunkCable['240v-standard'];
 
@@ -262,8 +264,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     });
 
     // ── 2. Terminators ────────────────────────────────────────
-    // 2 per trunk section (one at each end)
-    const terminatorQty = trunkSections * 2;
+    // 1 per branch, at the FAR end — the J-box end is cut and landed in the
+    // junction box (same rule as the BOM engine's trunk plan).
+    const terminatorQty = trunkSections;
     const termParts = ENPHASE_PARTS.terminators['240v'];
 
     accessories.push({
@@ -275,10 +278,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       quantity: terminatorQty,
       unit: 'ea',
       necReference: 'NEC 690.31',
-      notes: `2 terminators per trunk section × ${trunkSections} sections`,
+      notes: `1 terminator per branch (far end) × ${trunkSections} branches`,
       required: true,
       derivedFrom: 'trunkSections',
-      formula: `${trunkSections} × 2 = ${terminatorQty}`,
+      formula: `${trunkSections} × 1 = ${terminatorQty}`,
     });
 
     // ── 3. Cable Caps ─────────────────────────────────────────

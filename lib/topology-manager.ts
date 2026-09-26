@@ -15,6 +15,7 @@ import {
   EquipmentRegistryEntry,
   AccessoryRule,
 } from './equipment-registry-v4';
+import { microBranchCount } from './permit/utils/branching';
 
 // ─── Accessory Class Definition ──────────────────────────────────────────────
 
@@ -450,11 +451,18 @@ export function resolveTopology(ctx: TopologyManagerContext): TopologyResolution
   const ruleSet = TOPOLOGY_RULES[topology] ?? TOPOLOGY_RULES['STRING_INVERTER'];
 
   // 7. Resolve accessories from all selected equipment entries
+  // Enphase micro: `branches` is the AC-branch count from the per-model
+  // datasheet max (IQ8+ 13) — the same count computeSystem and the SLD use.
+  // Its Q-Cable / terminator formulas are per branch (was ceil(modules / 16)).
+  const _isEnphaseMicro = (topology === 'MICROINVERTER' || topology === 'AC_COUPLED_BATTERY')
+    && /enphase/i.test(inverterEntry?.manufacturer ?? '');
   const formulaContext = {
     modules: ctx.moduleCount,
     strings: ctx.stringCount,
     inverters: ctx.inverterCount,
-    branches: ctx.stringCount,
+    branches: _isEnphaseMicro
+      ? microBranchCount(ctx.moduleCount, inverterEntry?.model, inverterEntry?.manufacturer)
+      : ctx.stringCount,
     systemKw: 0,
   };
 

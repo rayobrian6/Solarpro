@@ -206,7 +206,9 @@ export const TRUNK_CABLE_SYSTEMS: TrunkCableSystem[] = [
     },
     // IQ8/IQ8+ = 13 @ 20 A / 240 V (datasheet-sourced; was wrongly 16 in the BOM).
     maxDevicesPerBranch: 13,
-    deviceBranchLimits: { IQ8M: 12, IQ8A: 10, IQ8H: 10, 'IQ8AC': 10 },
+    // Per-model max per 20 A branch — IQ8 Series datasheet, and the same
+    // figures as lib/system/brandCapabilities/enphase.ts (IQ8M/IQ8A were 12/10).
+    deviceBranchLimits: { IQ8M: 11, IQ8A: 11, IQ8H: 10, 'IQ8AC': 10 },
     branchOcpdA: 20,
     notes: [
       '⚠ Q-12-RAW-300 is CATALOG-ONLY (verificationState unverified-catalog): no archived Enphase '
@@ -381,8 +383,10 @@ export function resolveTrunkCablePlan(input: TrunkPlanInput): TrunkPlan | null {
     ?? system.cables[0];
 
   // Per-model branch limit when the catalog knows the model.
+  // Longest matching key wins — 'IQ8AC' must not resolve via 'IQ8A'.
   const modelKey = Object.keys(system.deviceBranchLimits ?? {})
-    .find(k => (input.model ?? '').toUpperCase().includes(k.toUpperCase()));
+    .filter(k => (input.model ?? '').toUpperCase().includes(k.toUpperCase()))
+    .sort((x, y) => y.length - x.length)[0];
   const perBranch = modelKey ? system.deviceBranchLimits![modelKey] : system.maxDevicesPerBranch;
   // §13 — the canonical plane-aware branch count wins when supplied; the flat
   // ceil(devices / perModelMax) heuristic is only the standalone fallback.

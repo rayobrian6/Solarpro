@@ -20,6 +20,7 @@ export const runtime = 'nodejs';
 export const maxDuration = 30;
 import { renderSLDProfessional, SLDProfessionalInput } from '@/lib/sld-professional-renderer';
 import { sanitizeClientSourceBranches } from '@/lib/permit/utils/sldAdapter';
+import { microBranchCount } from '@/lib/permit/utils/branching';
 import { getThermalDesignBasis } from '@/lib/permit/utils/designTemps';
 import { getInverterById, MICROINVERTERS } from '@/lib/equipment-db';
 import { resolveIntegratedEquipment } from '@/lib/equipment/integratedBos';
@@ -925,7 +926,8 @@ export async function POST(req: NextRequest) {
       microConfig: isMicro ? {
         deviceCount:      resolvedDeviceCount,
         topology: 'MICROINVERTER',
-        acBranchCircuits: Math.ceil(resolvedDeviceCount / 16),
+        // The engine's branch count (what the sheet draws); per-model max if it failed.
+        acBranchCircuits: cs?.acBranchCount || microBranchCount(resolvedDeviceCount, inverterModel, inverterManufacturer),
         note: 'Microinverters convert DC to AC at each panel. No DC strings.',
       } : null,
       // Resolved electrical values (from engine)

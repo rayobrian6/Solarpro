@@ -242,7 +242,10 @@ export async function POST(req: NextRequest) {
       panelId:            body.panelId,
       moduleCount:        Number(body.moduleCount)        || Number(body.totalPanels) || 0,  // FIX: was defaulting to 20; now reads totalPanels as fallback
       deviceCount:        body.deviceCount !== undefined ? Number(body.deviceCount) : undefined,
-      stringCount:        Number(body.stringCount)        || 2,
+      // Micro AC-branch count from the client's computeSystem (the SLD's
+      // branches). Absent ⇒ the trunk-cable resolver's per-model estimate.
+      branchCount:        Number(body.branchCount) > 0 ? Number(body.branchCount) : undefined,
+      stringCount:       Number(body.stringCount)        || 2,
       // FIX v57.4: inverterCount safety guard.
       // For micro topology (stringCount=0), inverterCount is always 1 (system-level).
       // For optimizer topology (STRING_WITH_OPTIMIZER), inverterCount is the number

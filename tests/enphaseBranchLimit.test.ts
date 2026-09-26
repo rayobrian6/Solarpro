@@ -157,3 +157,83 @@ describe('the drawn SLD — what Ray actually looks at', () => {
     expect(svg).not.toContain('30A OCPD');
   });
 });
+
+// ── Every other place that COUNTS Enphase branches must agree with the SLD ──
+// The sweep that followed 73404a66 found four more counters still on 16/branch
+// (sizing engine, Explain Logic, BOM trunk table) or on a split of their own
+// (the engineering card's branch bars). Each is pinned to the SLD's count here.
+import { sizeSystemFromBrand } from '../lib/system/sizingEngine';
+import { resolveTopology } from '../lib/topology-manager';
+import { resolveTrunkCablePlan } from '../lib/equipment/trunkCable';
+import { microBranchCount, enphaseBranchBasis } from '../lib/permit/utils/branching';
+
+describe('every Enphase branch counter agrees with the SLD', () => {
+  it('sizing engine: 32 × IQ8+ is 3 branches, and 3 terminators', () => {
+    const r = sizeSystemFromBrand({
+      systemType: 'roof', panelCount: 32, panelWattage: 420,
+      selectedBrand: 'enphase', selectedInverterId: 'enphase-iq8plus',
+    } as any);
+    expect(r.acBranchCount).toBe(3);
+    const term = r.requiredComponents.find(c => c.category === 'terminator');
+    expect(term?.qtyPolicy).toBe('per_branch');
+    expect(term?.qty).toBe(3);
+  });
+
+  it('Explain Logic (resolveTopology): Q-Cable sections and terminators are per branch', () => {
+    for (const [id, n, branches] of [
+      ['enphase-iq8plus', 32, 3], ['enphase-iq8m', 24, 3], ['enphase-iq8a', 32, 3],
+      ['enphase-iq8h', 30, 3], ['enphase-iq8ac', 21, 3],
+    ] as Array<[string, number, number]>) {
+      const t = resolveTopology({ inverterId: id, moduleCount: n, stringCount: 0, inverterCount: 1 });
+      const trunk = t.resolvedAccessories.find(a => a.category === 'trunk_cable');
+      const term = t.resolvedAccessories.find(a => a.category === 'terminator');
+      expect(trunk?.quantity, `${id} × ${n} trunk`).toBe(branches);
+      expect(term?.quantity, `${id} × ${n} terminators`).toBe(branches);
+    }
+  });
+
+  it('BOM trunk table: per-model max matches the datasheet (IQ8M 11, IQ8A 11), longest key wins', () => {
+    const plan = (model: string, n: number) =>
+      resolveTrunkCablePlan({ brand: 'Enphase', model, deviceCount: n })!.branchCount;
+    expect(plan('IQ8+', 32)).toBe(3);
+    expect(plan('IQ8M', 24)).toBe(3);   // was 2 on the old 12/branch
+    expect(plan('IQ8M', 12)).toBe(2);   // was 1
+    expect(plan('IQ8A', 32)).toBe(3);   // was 4 on the old 10/branch
+    expect(plan('IQ8A', 22)).toBe(2);   // was 3
+    expect(plan('IQ8AC', 21)).toBe(3);  // resolves via 'IQ8AC', not 'IQ8A'
+    for (const [model, n] of [['IQ8+', 32], ['IQ8M', 24], ['IQ8A', 32], ['IQ8H', 30], ['IQ8AC', 21]] as const) {
+      expect(plan(model, n), model).toBe(microBranchCount(n, model, 'Enphase'));
+    }
+  });
+
+  it('a placeholder manufacturer on an IQ8+ still gets the Enphase 20 A cap', () => {
+    expect(enphaseBranchBasis('IQ8+', 'Inverter Mfr')).toEqual({ maxPerBranch: 13, maxBranchOcpdA: 20 });
+    expect(enphaseBranchBasis('IQ8+', '—')).toEqual({ maxPerBranch: 13, maxBranchOcpdA: 20 });
+    expect(enphaseBranchBasis('DS3', 'APsystems')).toBeNull();
+    const cs = computeSystem(pageInput(26, {
+      inverterManufacturer: 'Inverter Mfr', inverterAcKw: 0.30, inverterBranchLimit: 13,
+    }) as any);
+    expect(cs.microBranches.every(b => b.ocpdAmps === 20)).toBe(true);
+    expect(Math.max(...cs.microBranches.map(b => b.deviceCount))).toBeLessThanOrEqual(13);
+  });
+
+  it('a per-branch OCPD never exceeds 20 A for Enphase, even with a manufacturer 20 A max + peak kW', () => {
+    const cs = computeSystem(pageInput(26, {
+      inverterAcKw: 0.30, manufacturerMaxPerBranch20A: 13,
+    }) as any);
+    expect(cs.microBranches.every(b => b.ocpdAmps === 20)).toBe(true);
+    expect(cs.runs.find(r => r.id === 'BRANCH_RUN')?.ocpdAmps).toBe(20);
+    expect(cs.segmentSchedule.every(s => s.segmentType !== 'ARRAY_TO_JBOX' || s.ocpdAmps <= 20)).toBe(true);
+  });
+
+  it('non-Enphase inverterSpec.branchLimit output is unchanged (legacy passthrough)', () => {
+    const cs = computeSystem({ ...pageInput(24, {
+      inverterManufacturer: 'APsystems', inverterModel: 'DS3', inverterAcKw: 0.88,
+      inverterAcCurrentMax: 3.7, inverterModulesPerDevice: 2,
+    }), inverterBranchLimit: 0 } as any);
+    expect(cs.inverterSpec).toBeTruthy();
+    expect(cs.inverterSpec!.branchLimit).toBe(0);
+    // …while an Enphase job reports the datasheet limit it was sized to.
+    expect(computeSystem(pageInput(32) as any).inverterSpec!.branchLimit).toBe(13);
+  });
+});

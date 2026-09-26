@@ -9,11 +9,13 @@
 //   • AC branch circuits: IQ8 units connect to Q Cable trunk runs.
 //     Branch circuit breaker sizing: ceil(units × acCurrentPerUnit / 0.8)A.
 //     Typical 20A breaker: floor(20 × 0.8 / acCurrentPerUnit) units max.
+//   Max units per 20 A branch (the maxMicrosPerBranch each profile resolves to):
 //   • IQ8+: 0.295kW AC, 1.21A AC output @ 240V. 13 units per 20A branch.
 //   • IQ8M:  0.330kW AC, 1.39A AC output @ 240V. 11 units per 20A branch.
-//   • IQ8H:  0.380kW AC, 1.59A AC output @ 240V.  9 units per 20A branch.
-//   • IQ8A:  0.366kW AC, 1.53A AC output @ 240V. 10 units per 20A branch.
-//   • IQ8AC: 0.384kW AC, 1.60A AC output @ 240V.  9 units per 20A branch.
+//   • IQ8H:  0.380kW AC, 1.59A AC output @ 240V. 10 units per 20A branch.
+//   • IQ8A:  0.366kW AC, 1.53A AC output @ 240V. 11 units per 20A branch (datasheet).
+//   • IQ8AC: 0.384kW AC, 1.60A AC output @ 240V. 10 units per 20A branch.
+//   Max branch OCPD: 20 A for every model — never a 30 A branch.
 //   • DC/AC ratio: always ~1.0–1.55 per-module (panel Wp ÷ micro acKw).
 //   • Target: 1.25 nominal (400W panel ÷ IQ8M 330W AC = 1.21 — acceptable).
 //
@@ -174,7 +176,7 @@ export const ENPHASE_IQ8A: CapabilityProfile = {
   batteryRequired: false,
 
   dataVersion: DATA_VERSION,
-  notes: 'IQ8A: All-panel compatibility micro. 366W AC. 10 units per 20A branch.',
+  notes: 'IQ8A: All-panel compatibility micro. 366W AC. 11 units per 20A branch.',
 };
 
 export const ENPHASE_IQ8AC: CapabilityProfile = {

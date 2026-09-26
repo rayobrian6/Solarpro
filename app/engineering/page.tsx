@@ -7028,6 +7028,11 @@ function EngineeringPageInner() {
           // single source of truth shared by the sizing engine, compliance engine, and BOM.
           moduleCount:      systemPanelCount > 0 ? systemPanelCount : totalPanels,
           deviceCount:      bomDeviceCount,   // micro qty = deviceCount not moduleCount
+          // The engine's AC-branch count — the branches the SLD draws — so the
+          // Q-Cable terminators and trunk text never come from a separate
+          // per-model estimate (Ray, 2026-09-25: 32 × IQ8+ is 3 branches).
+          // Single-system only; hybrid subs size their own trunk plans.
+          branchCount:      cs.isMicro && !subSystemCounts.isHybrid ? cs.acBranchCount : undefined,
           stringCount:      firstInv?.type === 'micro' ? 0 : (sizingRecommendation?.strings?.length ?? config.inverters.reduce((s, inv) => s + inv.strings.length, 0)),
           // v58.3 FIX: Compute inverterCount from sizingRecommendation when available.
           // When sizingRecommendation is null (e.g. CAD not yet loaded, systemPanelCount=0),
@@ -7311,7 +7316,7 @@ function EngineeringPageInner() {
     } finally {
       setBomLoading(false);
     }
-  }, [config, totalPanels, totalKw, compliance, sizingRecommendation]);
+  }, [config, totalPanels, totalKw, compliance, sizingRecommendation, computedSystem, subSystemCounts.isHybrid]);
 
   // ── PVWatts production estimate ──────────────────────────────
   const fetchPVWatts = useCallback(async () => {
@@ -10293,6 +10298,36 @@ function EngineeringPageInner() {
                             })();
                             // v58.6: Store BOTH central inverter (for sizing/brand inference)
                             // AND peripheral optimizer ID (for BOM Stage 1 optimizer line items).
+                            if (isMicro) {
+                              // A micro has no DC strings: collapse the WHOLE fleet into
+                              // one micro entry carrying the total panel count — the same
+                              // collapse handleTopologySwitch does. Keeping the previous
+                              // string inverter's strings left a 16 + 16 "string" layout
+                              // on the micro card (and any second string inverter behind
+                              // it); the AC branches come from computeSystem (Ray, 2026-09-25).
+                              const _fleetTotal = existingInverters.reduce(
+                                (sum, i) => sum + i.strings.reduce((s, str) => s + str.panelCount, 0), 0);
+                              const _microTotal = systemPanelCount > 0 ? systemPanelCount : (_fleetTotal || 20);
+                              const _s0 = firstInv.strings[0] ?? newString(0, config.systemType);
+                              updates.inverters = [_buildInvCfg({
+                                existingId: firstInv.id,
+                                inverterId: invId,
+                                type:       'micro',
+                                strings:    [_buildStrCfg({
+                                  index:          0,
+                                  systemType:     config.systemType,
+                                  panelCount:     _microTotal,
+                                  panelId:        _s0.panelId,
+                                  existingId:     _s0.id,
+                                  tilt:           _s0.tilt,
+                                  azimuth:        _s0.azimuth,
+                                  roofType:       _s0.roofType as any,
+                                  mountingSystem: _s0.mountingSystem,
+                                  wireGauge:      _s0.wireGauge,
+                                  wireLength:     _s0.wireLength,
+                                })],
+                              })];
+                            } else {
                             // v61.5 FIX: Route through _buildInvCfg so stringsPerInverter +
                             // modulesPerString metadata are always in sync with strings[].
                             updatedInverters[0] = _buildInvCfg({
@@ -10306,6 +10341,7 @@ function EngineeringPageInner() {
                                 : {}),
                             });
                             updates.inverters = updatedInverters;
+                            }
                           }
                         }
                         // v63 (Ray, 2026-06-30): an inverter ecosystem must NOT auto-add or
@@ -10595,14 +10631,14 @@ function EngineeringPageInner() {
                                         /* Micro sub → AC BRANCHES (micros have no DC strings — show the
                                            branch layout, not one lumped module bar). */
                                         (() => {
-                                          const _bc = Math.max(1, Math.min(subCsK?.acBranchCount ?? 1, 8));
-                                          const _dev = subCsK?.microDeviceCount ?? subCount;
-                                          const _per = _dev > 0 ? Math.ceil(_dev / _bc) : 0;
+                                          // The sub's own engine branches (what its SLD lane draws);
+                                          // one lumped bar only while the sub has no computed system.
+                                          const _sizes = subCsK?.microBranches?.length
+                                            ? subCsK.microBranches.map(b => b.deviceCount)
+                                            : [subCsK?.microDeviceCount ?? subCount];
                                           return (
                                             <div className="space-y-1.5">
-                                              {Array.from({ length: _bc }, (_, bi) => {
-                                                const isLast = bi === _bc - 1;
-                                                const cnt = isLast ? Math.max(0, _dev - (_bc - 1) * _per) : _per;
+                                              {_sizes.slice(0, 8).map((cnt, bi) => {
                                                 return (
                                                   <div key={bi} className="flex items-center gap-2">
                                                     <span className={`text-[10px] font-mono w-14 shrink-0 ${colorCls}`}>Branch {bi + 1}</span>
@@ -10616,6 +10652,9 @@ function EngineeringPageInner() {
                                                   </div>
                                                 );
                                               })}
+                                              {_sizes.length > 8 ? (
+                                                <div className="text-[10px] text-slate-500 text-center">+ {_sizes.length - 8} more branches</div>
+                                              ) : null}
                                             </div>
                                           );
                                         })()
@@ -10659,13 +10698,12 @@ function EngineeringPageInner() {
                                 });
                               })()
                             ) : cs.isMicro ? (
-                              /* Micro branch bars */
-                              Array.from({ length: Math.min(cs.acBranchCount, 8) }, (_, bi) => {
-                                const devPerBranch = cs.microDeviceCount > 0 ? Math.ceil(cs.microDeviceCount / cs.acBranchCount) : 0;
-                                const isLast = bi === Math.min(cs.acBranchCount, 8) - 1;
-                                const lastCount = cs.microDeviceCount - (Math.min(cs.acBranchCount, 8) - 1) * devPerBranch;
-                                const count = isLast ? Math.max(0, lastCount) : devPerBranch;
-                                const maxCount = devPerBranch || 1;
+                              /* Micro branch bars — the engine's balanced branches
+                                 (cs.microBranches, exactly what the SLD draws). First 8;
+                                 the rest are counted by the "+ N more branches" line
+                                 below — never folded into the 8th bar. */
+                              cs.microBranches.slice(0, 8).map((branch, bi) => {
+                                const count = branch.deviceCount;
                                 return (
                                   <div key={bi} className="flex items-center gap-2">
                                     <span className="text-[10px] text-purple-400 font-mono w-14 shrink-0">Branch {bi + 1}</span>
@@ -11106,9 +11144,26 @@ function EngineeringPageInner() {
                                       <div className="grid grid-cols-2 gap-3">
                                         <div>
                                           <label className="eng-label">Total Panel Count</label>
-                                          <input type="number" min={1} max={200} value={inv.strings[0]?.panelCount ?? 10}
-                                            onChange={e => updateString(inv.id, inv.strings[0]?.id ?? '', { panelCount: +e.target.value })}
+                                          {/* A micro can carry several panel GROUPS (one per roof plane
+                                              from Design Studio, each with its own tilt/azimuth). The
+                                              total is their SUM — showing strings[0] alone read "16" on
+                                              a 32-panel job, and typing 32 there made it 48. Editable
+                                              only when there is a single group. */}
+                                          <input type="number" min={1} max={200}
+                                            value={inv.strings.length > 1
+                                              ? inv.strings.reduce((s, str) => s + str.panelCount, 0)
+                                              : (inv.strings[0]?.panelCount ?? 10)}
+                                            readOnly={inv.strings.length > 1}
+                                            title={inv.strings.length > 1
+                                              ? `Sum of ${inv.strings.length} panel groups (${inv.strings.map(s => s.panelCount).join(' + ')}). AC branches are sized from the total.`
+                                              : undefined}
+                                            onChange={e => { if (inv.strings.length <= 1) updateString(inv.id, inv.strings[0]?.id ?? '', { panelCount: +e.target.value }); }}
                                             className="w-full bg-slate-700 border border-slate-600 rounded px-2 py-1.5 text-xs text-white focus:outline-none" />
+                                          {inv.strings.length > 1 ? (
+                                            <div className="text-[10px] text-slate-500 mt-0.5">
+                                              {inv.strings.length} panel groups ({inv.strings.map(s => s.panelCount).join(' + ')}) — not AC branches
+                                            </div>
+                                          ) : null}
                                         </div>
                                         <div>
                                           <label className="eng-label">Panel Model</label>
@@ -11122,7 +11177,9 @@ function EngineeringPageInner() {
                                       {(() => {
                                         const microInvData = getInvById(inv.inverterId, 'micro') as any;
                                         const mpd = microInvData?.modulesPerDevice ?? 1;
-                                        const panels = inv.strings[0]?.panelCount ?? 10;
+                                        const panels = inv.strings.length
+                                          ? inv.strings.reduce((s, str) => s + str.panelCount, 0)
+                                          : 10;
                                         const devices = Math.ceil(panels / mpd);
                                         return (
                                           <div className="mt-2 flex flex-wrap gap-3 text-xs text-slate-400">

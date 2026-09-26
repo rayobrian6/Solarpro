@@ -57,6 +57,7 @@ import {
 } from './feasibilityEvaluator';
 import { STRING_INVERTERS, SOLAR_PANELS, resolveBatteryForBrand } from '../equipment-db';
 import type { StringInverter, SolarPanel } from '../equipment-db';
+import { microBranchCount } from '../permit/utils/branching';
 import {
   evaluatePanelBrandCompatibility,
   type PanelCompatibilityGateResult,
@@ -1479,8 +1480,13 @@ function distributeStrings(
   // Micro: no DC strings; each panel → one micro device
   if (topology === 'micro') {
     const totalMicros = inverters.reduce((s, inv) => s + inv.qty, 0);
-    // AC branch count: typical is 16 units/branch; use panelCount-driven default
-    const branchCount = Math.max(1, Math.ceil(totalMicros / 16));
+    // AC branch count. Enphase: the per-model datasheet max (IQ8+ 13), the
+    // same single source computeSystem and the SLD use — 32 × IQ8+ is 3
+    // branches, never the 2 a flat 16 gave (Ray, 2026-09-25). Other micro
+    // brands keep the legacy 16/branch estimate.
+    const branchCount = brand.id === 'enphase'
+      ? microBranchCount(totalMicros, inverters[0]?.equipmentDbId, 'Enphase')
+      : Math.max(1, Math.ceil(totalMicros / 16));
     return {
       strings: [],
       microDeviceCount: totalMicros,

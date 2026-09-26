@@ -671,7 +671,7 @@ export function buildSegmentSchedule(input: SegmentScheduleInput): SegmentSchedu
     // if the actual branch current × 1.25 exceeds the chosen breaker — never above 30A.
     const requiredOcpd = next240VBreakerSize(branchCurrentA * 1.25);
     if (requiredOcpd > branchOcpd) {
-      branchOcpd = Math.min(requiredOcpd, 30); // cap at 30A for branch circuits
+      branchOcpd = Math.min(requiredOcpd, input.maxBranchOcpdA ?? 30); // cap at 30A (Enphase: 20A)
     }
 
     // Auto-size branch conductor gauge (open air, no conduit derating)

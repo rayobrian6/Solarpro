@@ -1110,7 +1110,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
       phases: 1,
     },
     modulesPerDevice: input.inverterModulesPerDevice,
-    branchLimit,
+    branchLimit: _enphaseBranch ? branchLimit : input.inverterBranchLimit,
   };
 
   // ── Array Summary ──────────────────────────────────────────────────────────
@@ -1388,8 +1388,10 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
       // Snap to real 240V 2-pole breaker size
       // Snap to real 240V 2-pole branch breaker — ONLY 20A or 30A for branch circuits
       // (40A+ are feeder sizes, not branch breaker sizes for #10 AWG trunk cable)
-      const BRANCH_BREAKER_SIZES = [20, 30];
-      const ocpd = BRANCH_BREAKER_SIZES.find(s => s >= branchCurrent * 1.25) ?? 30;
+      // Never above the manufacturer's max branch OCPD (Enphase: 20 A — its
+      // per-branch unit max is published on that basis).
+      const BRANCH_BREAKER_SIZES = [20, 30].filter(s => s <= maxBranchOcpdA);
+      const ocpd = BRANCH_BREAKER_SIZES.find(s => s >= branchCurrent * 1.25) ?? maxBranchOcpdA;
 
       // Validate: max devices per branch (NEC 690.8(B))
       if (devicesOnBranch > branchLimit) {

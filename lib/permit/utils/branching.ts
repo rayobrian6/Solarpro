@@ -113,9 +113,10 @@ export function enphaseBranchBasis(
 ): { maxPerBranch: number; maxBranchOcpdA: number } | null {
   const mfr = String(manufacturer ?? '').trim().toLowerCase();
   const m = _norm(String(inverterModel ?? ''));
-  const isEnphase = mfr
-    ? mfr.includes('enphase')
-    : ENPHASE_CAPABILITY_PROFILES.some(p => { const k = _norm(p.modelName); return !!k && m.includes(k); });
+  // Manufacturer OR model: a placeholder manufacturer ('Inverter Mfr', '—')
+  // on an IQ8+ must not lift the 20 A cap.
+  const isEnphase = mfr.includes('enphase')
+    || ENPHASE_CAPABILITY_PROFILES.some(p => { const k = _norm(p.modelName); return !!k && m.includes(k); });
   if (!isEnphase) return null;
   return {
     maxPerBranch: microMaxPerBranch(inverterModel, 'Enphase'),
