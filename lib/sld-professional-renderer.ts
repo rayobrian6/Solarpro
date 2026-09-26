@@ -26,6 +26,7 @@ import { necNextStandardOcpd, unselectedInverterLabel, isInverterUnselectedMarke
 import { wireGaugeForOcpd } from '@/lib/permit/utils/conductorAuthority';
 import { resolveAcDisconnect } from '@/lib/electrical/acDisconnect';
 import { getEGCSize } from '@/lib/manufacturer-specs';
+import { NEC_AWG_ORDER } from '@/lib/nec/ampacity';
 import { microBranchCount, microMaxPerBranch } from '@/lib/permit/utils/branching';
 import { getBuildBadge } from './version';
 import { isGroundingConductor, type ConductorBundle } from './segment-schedule';
@@ -4908,6 +4909,9 @@ interface CondTagRow {
   /** Engine RunSegment id backing this tag (R:/G:/F:-prefixed), when one exists. */
   runId?: string;
   gauge: string;        // e.g. '#8 AWG'
+  /** The one gauge the voltage-drop row computes with, when `gauge` names
+   *  several (a mixed branch plan, '#12/#10 AWG'): the lightest. */
+  vdGauge?: string;
   insul: string;        // 'THWN-2' | 'PV WIRE' | ...
   nCond: string;        // e.g. '3(L1,L2,N)' / '8(4+,4−)'
   conduitType: string;  // 'EMT' | 'N/A — FREE AIR' | ...
@@ -5391,6 +5395,7 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
     laneAcAmps: number; laneOcpd: number;
     // micro only
     nb: number; bocpd: number; brGauge: string; brGaugeTxt: string; brCur: number;
+    brLightGauge: string; brHeavyGauge: string;
     /** PV → first node (J-box, DC disconnect or inverter), the lane's middle
      *  run (J-box → combiner, DC disconnect → inverter; absent otherwise) and
      *  its feeder to the shared panel. */
@@ -5425,12 +5430,19 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
     const brGauge = wireGaugeForOcpd(bocpd);
     // Gauge text for the branch-trunk labels: the plan's own per-branch
     // callouts (mixed plans read "#12/#10"), never a hardcoded 20A gauge.
-    const brGaugeTxt = (() => {
-      const gs = [...new Set((b.microBranches ?? [])
-        .map(x => x.conductorCallout?.match(/#\d+(?:\/0)?/)?.[0])
-        .filter((g): g is string => !!g))];
-      return gs.length ? `${gs.join('/')} AWG` : brGauge;
-    })();
+    const brPlanGauges = [...new Set((b.microBranches ?? [])
+      .map(x => x.conductorCallout?.match(/#\d+(?:\/0)?/)?.[0])
+      .filter((g): g is string => !!g))];
+    const brGaugeTxt = brPlanGauges.length ? `${brPlanGauges.join('/')} AWG` : brGauge;
+    // The conductor schedule reads the SAME plan gauges the label prints — it
+    // used to take the 20 A ladder gauge, so a plan upsized to #10 drew "#10"
+    // and scheduled "#12" on one sheet. A mixed plan's one schedule row sizes
+    // its conduit on the heaviest gauge and its voltage drop on the lightest
+    // (the larger R — the conservative figure).
+    const _rank = (g: string) => (NEC_AWG_ORDER as readonly string[]).indexOf(`${g} AWG`);
+    const _bySize = [...brPlanGauges].sort((p, q) => _rank(p) - _rank(q));
+    const brLightGauge = _bySize.length ? `${_bySize[0]} AWG` : brGauge;
+    const brHeavyGauge = _bySize.length ? `${_bySize[_bySize.length - 1]} AWG` : brGauge;
     const brCur = b.microBranches?.length
       ? Math.max(...b.microBranches.map(x => x.branchCurrentA)) : bocpd / 1.25;
     const ns = b.totalStrings || 1;
@@ -5462,7 +5474,7 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
       mid = calloutSpec(laneRun(b, 'DC_DISCO_TO_INV_RUN'), [`${ns * 2}#10 THWN-2`, `+ EGC`, `IN ${b.acConduitType ?? 'EMT'}`], true);
     }
     return { tag, isFenceLane, modules, watts, panelModel, invUnselected, invMfr, invModel, laneLabel,
-      laneAcAmps, laneOcpd, nb, bocpd, brGauge, brGaugeTxt, brCur, first, mid, feeder };
+      laneAcAmps, laneOcpd, nb, bocpd, brGauge, brGaugeTxt, brCur, brLightGauge, brHeavyGauge, first, mid, feeder };
   });
 
   const LANE_PITCH = 330;
@@ -5875,7 +5887,8 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
     // none: an array whose branches land on a gateway drawn in another row.
     let cr: ReturnType<typeof renderCombiner> | null = null;
     if (g.topo === 'MICRO') {
-      const { nb, bocpd, brGauge: _brGauge, brGaugeTxt: _brGaugeTxt, brCur: _brCur } = F_;
+      const { nb, bocpd, brGaugeTxt: _brGaugeTxt, brLightGauge: _brLight, brHeavyGauge: _brHeavy, brCur: _brCur } = F_;
+      const _brEgc = b.branchEgcGauge ?? getEGCSize(bocpd);
       // 🚨 PER-LANE, AND THE BASIS COMES WITH IT. A lane's combiner is resolved
       // against that lane's brand and that lane's recorded answer; a lane the
       // project selection does not cover now has NO device rather than the other
@@ -5961,11 +5974,16 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
         const y = resolveSegY(pvPt.x, _jbIn.x, laneY);
         parts.push(fittedRun(buildWireRun(`LANE_${tag}_PV_TO_JBOX`, pvPt.x, y, _jbIn.x, y, run, lines, false, b.key === 'roof' ? 'OPEN_AIR' : 'RACEWAY'),
           F_.first, pvPt.x, _jbIn.x));
+        // When the engine carries this run, its callout is what the diagram
+        // prints (runLines reads the run's bundle), so its row states that
+        // bundle; otherwise the plan's gauges, as printed.
+        const _hot = run?.conductorBundle?.find(c => !isGroundingConductor(c))?.gauge ?? run?.wireGauge;
+        const _gnd = run?.conductorBundle?.find(c => isGroundingConductor(c))?.gauge ?? run?.egcGauge;
         addTag((pvPt.x + _jbIn.x) / 2, y + 24, {
           desc: `PV-${tag} AC BRANCH CIRCUITS — ARRAY TRUNK (${nb} BRANCH${nb > 1 ? 'ES' : ''})`,
-          gauge: _brGauge, insul: 'THWN-2', nCond: `${2 * nb}(L1,L2)`,
+          gauge: _hot ?? _brGaugeTxt, vdGauge: _hot ?? _brLight, insul: 'THWN-2', nCond: `${2 * nb}(L1,L2)`,
           conduitType: 'N/A — FREE AIR', conduitSize: 'N/A',
-          egc: b.branchEgcGauge ?? getEGCSize(bocpd), currentA: _brCur, baseVolts: 240,
+          egc: _gnd ?? _brEgc, currentA: _brCur, baseVolts: 240,
           runId: run ? prettyRunId(String(run.id)) : undefined,
           lenFt: run?.onewayLengthFt ?? null,
         });
@@ -5983,9 +6001,9 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
           F_.mid!, _jbOut.x, _fitEnd));
         addTag((_jbOut.x + _fitEnd) / 2, laneY + 24, {
           desc: `PV-${tag} AC BRANCH CIRCUITS — J-BOX TO COMBINER`,
-          gauge: _brGauge, insul: 'THWN-2', nCond: `${2 * nb}(L1,L2)`,
-          conduitType: 'EMT', conduitSize: conduitSizeForConductors(_brGauge, 2 * nb + 1),
-          egc: b.branchEgcGauge ?? getEGCSize(bocpd), currentA: _brCur, baseVolts: 240, lenFt: null,
+          gauge: _brGaugeTxt, vdGauge: _brLight, insul: 'THWN-2', nCond: `${2 * nb}(L1,L2)`,
+          conduitType: 'EMT', conduitSize: conduitSizeForConductors(_brHeavy, 2 * nb + 1),
+          egc: _brEgc, currentA: _brCur, baseVolts: 240, lenFt: null,
         });
       }
       if (cr) feedX = cr.feederOutX;
@@ -6762,11 +6780,12 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
   ];
   const b1rows: string[][] = condTagRows.map(t => {
     const L = t.lenFt ?? 25;
-    const R = rPerKft(t.gauge);
+    const vdGauge = t.vdGauge ?? t.gauge;
+    const R = rPerKft(vdGauge);
     const vd = (2 * L * t.currentA * R) / 1000;
     const pct = t.baseVolts > 0 && t.currentA > 0 ? (vd / t.baseVolts) * 100 : 0;
     return [
-      t.tag, t.gauge, t.desc,
+      t.tag, vdGauge, t.desc,
       String(L) + (t.lenFt == null ? ' *' : ''),
       t.currentA > 0 ? t.currentA.toFixed(1) + ' A' : '—',
       R.toFixed(3),

@@ -125,3 +125,68 @@ describe('an oversized permit package names two gateways on every sheet, in the 
     expect(outBreakers.reduce((s: number, i: any) => s + i.quantity, 0)).toBe(2);
   });
 });
+
+// ── Part 3 — the multi-source sheet schedules what it draws ─────────────────
+// A single system past one gateway now draws on the multi-source sheet, whose
+// conductor schedule took the branch gauge from the 20 A ladder while the
+// diagram printed the plan's callout: "#10 AWG THWN-2 + EGC" drawn over a
+// "#12 AWG THWN-2" schedule row, on one sheet.
+
+/** The sheet's text runs, in document order. */
+const sheetTexts = (svg: string): string[] =>
+  [...svg.matchAll(/>([^<]+)</g)].map(m => m[1].replace(/&quot;/g, '"').replace(/&amp;/g, '&').trim()).filter(Boolean);
+
+/** A branch-circuit schedule row: its gauge cell, its EGC row's gauge, and the
+ *  gauge its voltage-drop row computed with. */
+function branchRow(svg: string, desc: string) {
+  const t = sheetTexts(svg);
+  const at = t.map((s, i) => (s.endsWith(desc) ? i : -1)).filter(i => i >= 0);
+  expect(at.length, `${desc} appears in the conductor schedule and the voltage-drop table`).toBe(2);
+  const [sched, vd] = at;
+  const egcAt = t.indexOf('EQUIPMENT GROUNDING CONDUCTOR (EGC)', sched);
+  return { gauge: t[sched + 1], conduitSize: t[sched + 4], egc: t[egcAt + 1], vdGauge: t[vd - 1] };
+}
+
+/** The gauges the diagram's plan-drawn branch labels print — '#10 AWG THWN-2
+ *  + EGC', which a long gauge list wraps before '+ EGC'. */
+const drawnBranchGauges = (svg: string): string[] =>
+  [...new Set([...sheetTexts(svg).join(' ¦ ').matchAll(/(#[\d/#]+ AWG) THWN-2(?: ¦)? \+ EGC/g)].map(m => m[1]))];
+
+describe('the multi-source sheet schedules the branch conductors it draws', () => {
+  const homeRun = 'PV-R AC BRANCH CIRCUITS — J-BOX TO COMBINER';
+  const engineInput = () => microInput({ combiner: '5c', interconnection: 'LOAD_SIDE', ct: null, branches: 5, mode: 'sheet' });
+
+  it('a single system on two gateways: the plan\'s #10 is drawn and scheduled; the trunk row states the engine run the diagram prints', () => {
+    const input = engineInput();
+    expect(input.microBranches!.every(b => /#10 THWN-2/.test(b.conductorCallout ?? ''))).toBe(true);
+    const svg = renderSLDProfessional(input);
+    // J-box → combiner is drawn from the plan…
+    expect(drawnBranchGauges(svg)).toEqual(['#10 AWG']);
+    expect(branchRow(svg, homeRun)).toMatchObject({ gauge: '#10 AWG THWN-2', vdGauge: '#10 AWG' });
+    // …the array trunk from the engine's BRANCH_RUN, whose bundle the callout prints.
+    const trunkRun = input.runs!.find(r => r.id === 'BRANCH_RUN')!;
+    const hot = trunkRun.conductorBundle!.find(c => c.color !== 'GRN')!.gauge;
+    const gnd = trunkRun.conductorBundle!.find(c => c.color === 'GRN')!.gauge;
+    expect(sheetTexts(svg)).toEqual(expect.arrayContaining([expect.stringContaining(`×${hot.replace(' AWG', '')} THWN-2`), `1×${gnd.replace(' AWG', '')} GRN EGC`]));
+    expect(branchRow(svg, 'PV-R AC BRANCH CIRCUITS — ARRAY TRUNK (5 BRANCHES)'))
+      .toMatchObject({ gauge: `${hot} THWN-2`, egc: `${gnd} THWN-2`, vdGauge: hot });
+  });
+
+  it('a mixed plan: the row names both gauges, sizes the conduit on the heaviest and the voltage drop on the lightest', () => {
+    const input = engineInput();
+    input.microBranches![0] = { ...input.microBranches![0], conductorCallout: '2×#12 THWN-2\n1×#12 GRN EGC' };
+    const svg = renderSLDProfessional(input);
+    expect(drawnBranchGauges(svg)).toEqual(['#12/#10 AWG']);
+    // 5 branches × L1 + L2, plus the EGC, is 11 conductors: #10 needs 1-1/4", #12 would fit 1".
+    expect(branchRow(svg, homeRun)).toMatchObject({ gauge: '#12/#10 AWG THWN-2', conduitSize: '1-1/4"', vdGauge: '#12 AWG' });
+  });
+
+  it('the permit E-1 of the oversized package: the schedule agrees with the diagram', () => {
+    const p = bigRoofPermit();
+    const svg = renderSLDProfessional(buildSLDInputFromPermit(p as never, generateCADLayout(p as never)));
+    const drawn = drawnBranchGauges(svg);
+    expect(drawn.length).toBe(1);
+    expect(branchRow(svg, homeRun).gauge).toBe(`${drawn[0]} THWN-2`);
+    expect(branchRow(svg, 'PV-R AC BRANCH CIRCUITS — ARRAY TRUNK (6 BRANCHES)').gauge).toBe(`${drawn[0]} THWN-2`);
+  });
+});
