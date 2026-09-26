@@ -11,6 +11,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   MEAN_ROOF_HEIGHT_MAX_FT,
   NON_AUTHORITATIVE_NOMINAL_MEAN_ROOF_HEIGHT_FT,
@@ -203,5 +205,63 @@ describe('🚨 the height actually changes the wind pressure — the reason this
     // ~22 % on Exposure C (Kz 0.85 → 1.04). Asserted as a ratio band rather than a
     // number, so a legitimate Kz-table correction does not fail this case.
     expect(threeStorey / oneStorey).toBeGreaterThan(1.1);
+  });
+});
+
+describe('🚨 the Kz table the height feeds — it used to go FLAT at 40 ft', () => {
+  // Two copies of ASCE 7-22 Table 26.10-1 — the one that PRINTS the derivation and
+  // the one in structural-engine-v4 that DECIDES the uplift — both ended with a bare
+  // return of the 40-ft coefficient for every height above 30 ft. They agreed with
+  // each other and above 40 ft both were wrong, every error LESS conservative than
+  // the code.
+  //
+  // 🚨 AND THIS REPAIR IS WHAT MADE IT REACHABLE. While the permit hardcoded 15 ft
+  // the ladder was never asked about anything above 15; teaching it the real height
+  // — up to MEAN_ROOF_HEIGHT_MAX_FT, 60 — walked straight into the flat tail.
+
+  it('keeps every published row at or below 40 ft exactly as it was', async () => {
+    const { velocityPressureCoefficient: kz } = await import('@/lib/structural/asce7Wind');
+    const rows: Array<[number, 'B' | 'C' | 'D', number]> = [
+      [15, 'B', 0.57], [20, 'B', 0.62], [25, 'B', 0.66], [30, 'B', 0.70], [40, 'B', 0.76],
+      [15, 'C', 0.85], [20, 'C', 0.90], [25, 'C', 0.94], [30, 'C', 0.98], [40, 'C', 1.04],
+      [15, 'D', 1.03], [20, 'D', 1.08], [25, 'D', 1.12], [30, 'D', 1.16], [40, 'D', 1.22],
+    ];
+    for (const [h, e, v] of rows) expect(kz(h, e), `${h} ft ${e}`).toBe(v);
+  });
+
+  it('🚨 and KEEPS RISING above 40 ft, per Table 26.10-1', async () => {
+    const { velocityPressureCoefficient: kz } = await import('@/lib/structural/asce7Wind');
+    // The three the flat tail got wrong, with the code's own values.
+    expect(kz(50, 'C')).toBe(1.09);
+    expect(kz(60, 'C')).toBe(1.13);
+    expect(kz(60, 'B')).toBe(0.85);
+    expect(kz(50, 'D')).toBe(1.27);
+    // And not the old answers.
+    expect(kz(60, 'C')).not.toBe(1.04);
+    expect(kz(60, 'B')).not.toBe(0.76);
+  });
+
+  it('🚨 is strictly increasing with height — no flat region anywhere', async () => {
+    // The property, not a transcription. A value that stops varying is the shape
+    // that hid this for as long as it was hidden.
+    const { velocityPressureCoefficient: kz } = await import('@/lib/structural/asce7Wind');
+    for (const e of ['B', 'C', 'D'] as const) {
+      for (let h = 15; h < 200; h += 5) {
+        expect(kz(h + 5, e), `${e}: ${h} -> ${h + 5} ft must not go flat or fall`)
+          .toBeGreaterThan(kz(h, e) - 1e-9);
+      }
+      // and genuinely higher across the range the product allows
+      expect(kz(60, e), `${e}: 60 ft must exceed 40 ft`).toBeGreaterThan(kz(40, e));
+    }
+  });
+
+  it('the DECIDING copy in structural-engine-v4 gives the same answer', async () => {
+    // It was a second table. If it ever forks again, the uplift and the printed
+    // derivation part company — which is the defect that was shipped, not a theory.
+    const v4 = readFileSync(join(__dirname, '..', 'lib', 'structural-engine-v4.ts'), 'utf8');
+    expect(v4, 'structural-engine-v4 has re-declared its own Kz ladder')
+      .not.toMatch(/if \(heightFt <= 15\) return 0\.57/);
+    expect(v4, 'structural-engine-v4 no longer delegates to the one authority')
+      .toMatch(/velocityPressureCoefficient\(heightFt/);
   });
 });

@@ -14,7 +14,7 @@ import { allowableUpliftLbs, asdUpliftDemandLbs, MIN_ATTACHMENT_SF } from './str
 
 // ── Types: imported from canonical source ─────────────────────────────────
 import { calcRoofSnow } from '@/lib/structural/asce7Snow';
-import { velocityPressure, rooftopSolarPressureCoefficient } from '@/lib/structural/asce7Wind';
+import { velocityPressure, rooftopSolarPressureCoefficient, velocityPressureCoefficient } from '@/lib/structural/asce7Wind';
 import type {
   InstallationType,
   WindExposure,
@@ -428,27 +428,23 @@ const TRUSS_CAPACITY_PSF: Record<string, number> = {
 // ASCE 7-22 WIND CALCULATIONS
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * 🚨 DELEGATED. This was a SECOND copy of ASCE 7-22 Table 26.10-1, and it was the
+ * DECIDING one — `calcVelocityPressure` below feeds the net uplift, the uplift per
+ * attachment, the mount count and spacing printed on PV-4C, and the racking BOM —
+ * while the copy in lib/structural/asce7Wind.ts only printed the derivation.
+ *
+ * Both ended with a bare return of the 40-ft coefficient for every height above
+ * 30 ft. They agreed with each other, and above 40 ft both were wrong by 4–11 %,
+ * every one of them LESS conservative than the code. That is the second time in two
+ * days this repository has held two identical copies of a table that were wrong
+ * together; the first was the ambient-correction ladder going flat above 60 °C.
+ *
+ * It became reachable only when the permit stopped hardcoding a 15 ft building and
+ * began reading the real height, which an operator may set as high as 60 ft.
+ */
 function getKz(heightFt: number, exposure: WindExposure): number {
-  // ASCE 7-22 Table 26.10-1 — Velocity Pressure Exposure Coefficient
-  if (exposure === 'B') {
-    if (heightFt <= 15) return 0.57;
-    if (heightFt <= 20) return 0.62;
-    if (heightFt <= 25) return 0.66;
-    if (heightFt <= 30) return 0.70;
-    return 0.76;
-  } else if (exposure === 'C') {
-    if (heightFt <= 15) return 0.85;
-    if (heightFt <= 20) return 0.90;
-    if (heightFt <= 25) return 0.94;
-    if (heightFt <= 30) return 0.98;
-    return 1.04;
-  } else { // D
-    if (heightFt <= 15) return 1.03;
-    if (heightFt <= 20) return 1.08;
-    if (heightFt <= 25) return 1.12;
-    if (heightFt <= 30) return 1.16;
-    return 1.22;
-  }
+  return velocityPressureCoefficient(heightFt, exposure as 'B' | 'C' | 'D');
 }
 
 function calcVelocityPressure(windSpeedMph: number, exposure: WindExposure, heightFt: number): number {

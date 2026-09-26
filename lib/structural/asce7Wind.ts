@@ -49,19 +49,68 @@ export interface VelocityPressureRecord {
   derivation: string;
 }
 
-/** ASCE 7-22 Table 26.10-1 — velocity pressure exposure coefficient Kz (Kh). */
+/**
+ * ASCE 7-22 Table 26.10-1 — velocity pressure exposure coefficient Kz (Kh).
+ *
+ * 🚨 THIS LADDER USED TO GO FLAT AT 40 FT, AND SO DID ITS DUPLICATE.
+ *
+ * Both this function and `getKz` in lib/structural-engine-v4.ts ended with a bare
+ * return of the 40-ft coefficient for EVERY height above 30 ft. They agreed with
+ * each other perfectly and were both wrong above 40 ft — the same shape as the
+ * ambient-correction ladder that returned a flat 0.58 above 60 °C, and the same
+ * lesson: two agreeing copies can both be wrong, and a value that STOPS VARYING
+ * hides every disagreement inside it.
+ *
+ * Measured against Kz = 2.01·(z/zg)^(2/α), the published definition of this table:
+ *
+ *              code      ASCE      error
+ *   C @ 50 ft  1.04      1.09      −4.6 %
+ *   C @ 60 ft  1.04      1.13      −8.0 %
+ *   B @ 60 ft  0.76      0.85      −10.6 %
+ *
+ * every one of them LESS conservative than the code. And qz is linear in Kz, so
+ * the whole chain — net uplift, uplift per attachment, the mount count and spacing
+ * on the sealed PV-4C schedule, the racking BOM's lag-bolt quantity, and the
+ * MOUNT_INSUFFICIENT_CAPACITY gate — understated by the same margin.
+ *
+ * 🚨 AND IT WAS UNREACHABLE UNTIL TODAY. While the permit hardcoded a 15 ft
+ * building this ladder was never asked about anything above 15. Teaching it to read
+ * the real building height — `MEAN_ROOF_HEIGHT_MAX_FT` is 60, and the operator's own
+ * control is `min=8 max=60` — is what made the flat tail live. A repair reached the
+ * defect that was waiting behind it.
+ *
+ * The rows to 100 ft are the published table, so NOTHING at or below 40 ft changes.
+ * Above the last row it falls through to the power law rather than repeating a
+ * value, because a truncated ladder is exactly what this is fixing.
+ */
 export function velocityPressureCoefficient(heightFt: number, exposure: WindExposureCat): number {
   const h = Math.max(15, Number.isFinite(heightFt) ? heightFt : 15);
-  if (exposure === 'B') {
-    if (h <= 15) return 0.57; if (h <= 20) return 0.62; if (h <= 25) return 0.66;
-    if (h <= 30) return 0.70; return 0.76;
+
+  /** Table 26.10-1 rows: [height ft, B, C, D]. */
+  const TABLE: ReadonlyArray<readonly [number, number, number, number]> = [
+    [15, 0.57, 0.85, 1.03],
+    [20, 0.62, 0.90, 1.08],
+    [25, 0.66, 0.94, 1.12],
+    [30, 0.70, 0.98, 1.16],
+    [40, 0.76, 1.04, 1.22],
+    [50, 0.81, 1.09, 1.27],
+    [60, 0.85, 1.13, 1.31],
+    [70, 0.89, 1.17, 1.34],
+    [80, 0.93, 1.21, 1.38],
+    [90, 0.96, 1.24, 1.40],
+    [100, 0.99, 1.26, 1.43],
+  ];
+  const col = exposure === 'B' ? 1 : exposure === 'D' ? 3 : 2;
+  for (const row of TABLE) {
+    if (h <= row[0]) return row[col] as number;
   }
-  if (exposure === 'D') {
-    if (h <= 15) return 1.03; if (h <= 20) return 1.08; if (h <= 25) return 1.12;
-    if (h <= 30) return 1.16; return 1.22;
-  }
-  if (h <= 15) return 0.85; if (h <= 20) return 0.90; if (h <= 25) return 0.94;
-  if (h <= 30) return 0.98; return 1.04;
+
+  // Above the tabulated range: Kz = 2.01·(z/zg)^(2/α), the equation the table is
+  // generated from (ASCE 7-22 §26.10.1). Continuing to rise is the point.
+  const { alpha, zg } = exposure === 'B' ? { alpha: 7.0, zg: 1200 }
+    : exposure === 'D' ? { alpha: 11.5, zg: 700 }
+    : { alpha: 9.5, zg: 900 };
+  return Math.round(2.01 * Math.pow(h / zg, 2 / alpha) * 100) / 100;
 }
 
 /**
