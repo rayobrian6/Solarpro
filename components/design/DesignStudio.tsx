@@ -5598,7 +5598,7 @@ export default function DesignStudio({ project, onSave }: Props) {
               geometryLifecycleRef={site.geometryLifecycleRef}
               onRequestDelete={requestDeletion}
               onRunShadeAnalysis={runShadeAnalysis}
-              onPanelsAboutToBeCulled={site.recordPanelCull}
+              onPanelsAboutToBeCulled={site.recordGeometryWithPanels}
               deletion={engineDeletion ?? undefined}
               onUndoGeometry={site.undoGeometry}
               onRedoGeometry={site.redoGeometry}
@@ -5608,10 +5608,39 @@ export default function DesignStudio({ project, onSave }: Props) {
               redoGeometryLabel={site.redoGeometryLabel}
               onRoofPlanesStitched={(updates) => {
                 if (E2E_ENABLED) setE2EStitchedCorners(updates);
-                // Square Up, Stitch, the flat-trace rebuild and the standalone
-                // face nudge all arrive here, and all reshape stored geometry.
-                // See the note at onRoofPlaneCreated for why each one pushes.
-                site.recordGeometry('Reshape roof');
+                // Square Up, Stitch, the flat-trace rebuild, the standalone
+                // face nudge and the move-corner drag all arrive here, and all
+                // reshape stored geometry. See the note at onRoofPlaneCreated
+                // for why each one pushes.
+                //
+                // 🚨 THE SNAPSHOT MUST CARRY THE PANELS, and this line used to
+                // be `recordGeometry`, which does not.
+                //
+                // `recordGeometry`'s documented premise is that every edit it
+                // records MOVES a face, so its panels are recomputed from where
+                // the face went. That is FALSE for every gesture on this
+                // channel: none of the five emitters repositions panels
+                // forward — they cull. So the step told undo to recompute, undo
+                // obeyed, and `repositionPanelsForPlanes` translated the whole
+                // array by the ring-centroid delta.
+                //
+                // Measured on a real 6:12 face carrying 24 modules: a 1.2 m
+                // corner nudge that culled nothing put every panel 0.3000 m out
+                // of place after one undo — exactly |drag| / cornerCount, every
+                // panel by the same vector — with pitch and azimuth untouched,
+                // so nothing on screen or in the plan record looked wrong. A
+                // 7.2 m drag that grew the face left 3 panels exact and 21
+                // displaced 1.8028 m, collapsing module spacing from 1.1488 m
+                // to 0.8143 m: modules physically overlapping on a roof, in a
+                // permit drawing.
+                //
+                // The fix is not to change the repositioning map — a pitch
+                // change deforms the ring exactly as a corner drag does and that
+                // case genuinely must reposition, and gutting the map breaks
+                // eight section-edit guarantees. The fix is to record a step
+                // that carries the array verbatim, so undo restores it instead
+                // of recomputing it.
+                site.recordGeometryWithPanels('Reshape roof');
                 // v64: Stitch wrote averaged/connected corners + the stitched plane
                 // frame back. Replace each plane's vertices AND localFrame3D with the
                 // stitched geometry so panel placement (Auto Layout) lays its grid on

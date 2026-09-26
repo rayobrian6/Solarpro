@@ -292,8 +292,20 @@ export interface UseSiteDesign {
    * there — and there was no history step, so a mis-placed vent cost the array
    * permanently: deleting the vent did not bring the modules back, and the only
    * recovery was a full re-layout, which destroys every manual adjustment.
+   *
+   * 🚨 IT IS NAMED FOR WHAT IT CARRIES, NOT FOR ITS FIRST CALLER. It used to be
+   * `recordPanelCull`, and that name cost a real defect: the corner-move gesture
+   * reached for `recordGeometry` instead, because nothing it did was a "cull".
+   * `recordGeometry`'s documented premise is that the edit MOVES a face and its
+   * panels are recomputed from where the face went — false for every gesture on
+   * the stitched channel, which culls rather than recomputes. Undo therefore
+   * obeyed the premise, re-ran the rigid centroid map, and displaced every panel
+   * by the ring-centroid delta.
+   *
+   * Use this one whenever the forward gesture does NOT recompute panels from the
+   * new geometry — which is most of them.
    */
-  recordPanelCull: (label: string) => void;
+  recordGeometryWithPanels: (label: string) => void;
   /** The authorization for the NEXT save, or null. Read by the save paths. */
   pendingDestructive: () => DestructiveAuthorization | null;
   /** Consume it — called once the save that carried it has SUCCEEDED. A failed
@@ -1033,7 +1045,7 @@ export function useSiteDesign(): UseSiteDesign {
     };
   }, []);
 
-  const recordPanelCull = useCallback<UseSiteDesign['recordPanelCull']>((label) => {
+  const recordGeometryWithPanels = useCallback<UseSiteDesign['recordGeometryWithPanels']>((label) => {
     writeHistory(pushSnapshot(
       geometryHistoryRef.current, label, roofPlanesRef.current, null,
       nativeDispositionRef.current,
@@ -1111,7 +1123,7 @@ export function useSiteDesign(): UseSiteDesign {
     redoGeometryLabel: redoLabel(geometryHistory),
     deletionLedger, deletionLedgerRef,
     planDelete, applyDelete,
-    notePanelRemoval, recordPanelCull, pendingDestructive, clearPendingDestructive,
+    notePanelRemoval, recordGeometryWithPanels, pendingDestructive, clearPendingDestructive,
     forgetDeletions,
     geometryLifecycle, geometryLifecycleRef,
     admitGeometry, admitPlacedObstructions,

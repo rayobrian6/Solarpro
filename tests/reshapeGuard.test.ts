@@ -203,11 +203,33 @@ describe('🚨 something actually sets the mark', () => {
   it('the handler it sits in is the one Stitch and Square Up both reach', () => {
     const i = studio.indexOf('onRoofPlanesStitched={(updates)');
     expect(i, 'the reshape handler is not mounted').toBeGreaterThan(-1);
-    const block = studio.slice(i, i + 3000);
+    // 🚨 ANCHORED ON A REAL END TOKEN, NOT A FIXED LENGTH. This was
+    // `slice(i, i + 3000)`, and the handler's explanatory comment grew past that
+    // window when the panel-carrying fix landed — comment-stripping leaves the
+    // whitespace behind, so the block still "existed" but held none of the code
+    // being asserted.
+    //
+    // The end is the handler's OWN closing log line. Two other anchors were
+    // tried and both were wrong: `setRoofPlanes` cuts the block before the
+    // reshape flag, which is set inside the mapping callback it opens; and the
+    // "next prop on the engine" does not exist, because this handler is the last
+    // one. The log line is inside the handler, after everything asserted here.
+    const end = studio.indexOf("console.log('[DesignStudio] Stitch synced'", i);
+    expect(end, 'the handler no longer ends where this guard expects').toBeGreaterThan(i);
+    const block = studio.slice(i, end);
     expect(block).toMatch(/sectionFaceReshaped:\s*true/);
     // The same handler records history, so Undo steps back past the reshape —
     // which is the escape the refusal message tells the user about.
-    expect(block).toMatch(/recordGeometry\('Reshape roof'\)/);
+    //
+    // 🚨 THE REQUIREMENT IS THAT IT RECORDS, NOT WHICH RECORDER IT USES. This
+    // pinned `recordGeometry('Reshape roof')` verbatim, and it had to change:
+    // that recorder's premise is that panels are recomputed from where the face
+    // went, which is false for every gesture on this channel, and undo acting on
+    // it displaced the whole array by the ring-centroid delta. The label and the
+    // fact of recording are what this test is about; which recorder carries the
+    // panels is pinned in tests/vertexMoveUndoPanelFidelity.test.tsx.
+    expect(block, 'the reshape handler no longer records an undo step')
+      .toMatch(/record[A-Za-z]*\('Reshape roof'\)/);
     // 🚨 PROVE THE GUARD CAN FAIL: the string is not present in an unrelated file.
     expect(stripComments(ENGINE)).not.toMatch(/sectionFaceReshaped:\s*true/);
   });
