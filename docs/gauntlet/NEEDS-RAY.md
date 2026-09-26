@@ -18,6 +18,7 @@ Last updated: 2026-09-26 (Phase 5).
 | **R14** | Should the auto-sizer **recommend #3 AWG**? It is now resolvable (real Table 8 resistance, real voltage drop) so a designer who states it gets a true answer — but inserting it between #4 and #2 in `AWG_ORDER` changes what the engine recommends on designs that work today, and #3 is a real NEC size that is rarely stocked. A BOM ruling, not a correctness fix. One-line change either way | Nothing |
 | **R15** | `distributor_prices` has **no unique index at all** — proven by executing the shipped `ON CONFLICT` against real PostgreSQL (`42P10`). Repaired without a migration (UPDATE-then-INSERT), so this is optional hardening only. It **will fail if duplicate rows already exist**, so it needs a de-dup pass first (keep the newest `updated_at` per key) | Nothing — atomicity only |
 | **R16** | `pricing_config` is still **one global row for every organisation**, and per-system-type equipment cost has no column. The unauthenticated read is closed and the write is admin-gated, but there is no tenant key: the last save sets the price-per-watt used in every other company's customer-facing proposal. Needs an owning scope column with a per-scope uniqueness constraint | Per-organisation pricing |
+| **P2** | 🚨 **NOT A DECISION — A HANDOFF INTO A FILE ANOTHER SESSION OWNS.** Reopening a saved engineering run **silently re-equips the design**. The persistence half is fixed (see below), so no run saved from now on can be substituted — but `app/engineering/page.tsx` still substitutes for every run already in the database, and that file is peer-dirty | Faithful restore of runs saved before today |
 | **R8** | 🚨 **CORRECTED** — the batch halts at **003**, not 027: `ADD CONSTRAINT IF NOT EXISTS` is not valid PostgreSQL in any version, so `run-pending` is dead after 002 and 027 is never even reached. A whole feature's schema also sits in a directory the runner never scans | Persisting homeowner/micro-stage state; any batch migration run |
 | **R1** | A committed Google API key needs rotating — only you have the account | Nothing in code |
 | **R2** | How approximate should an UNCLAIMED lead's map pin be? Currently house-level | The marketplace pin only |
@@ -35,6 +36,78 @@ what is left is what to do about packages approved on the old value. **R8 and R1
 two that matter most operationally.** R8 because a batch migration run cannot
 get past file 027 today, and R1 because rotation is the only remedy for a leak.
 Everything else has a safe default already applied or recorded.
+
+---
+
+## P2 — 🚨 Reopening a saved engineering run silently re-equips the design
+
+**Not a decision. A two-file defect whose second file belongs to another session right now.**
+
+`migrations/009_engineering_runs.sql` exists for one stated reason — *"so files can be
+traced back to the exact system configuration that generated them"* — and defines the
+columns to do it: `panel_id`, `inverter_id`, `mounting_id`, `system_type`, `roof_pitch`,
+`rapid_shutdown`, `ac_disconnect`, `dc_disconnect`.
+
+`app/api/engineering/save-outputs/route.ts` wrote **none of them**. It computed
+`const firstInv = body.configSnapshot?.inverters?.[0] || null;` and then never referenced
+it in the INSERT, and it rebuilt the stored snapshot from scratch, copying exactly one key
+(`consumptionCtLocation`) out of the client's `configSnapshot` and discarding the rest —
+including `inverters`, the array carrying every `inverterId` and each string's `panelId`.
+So the page sent the whole selected-equipment identity and it was dropped at the database
+boundary.
+
+### What it cost
+
+| Step | Before |
+|---|---|
+| selected equipment → the run row | `panel_id` / `inverter_id` **always NULL** |
+| → `run-from-file` | returns null for both |
+| → `app/engineering/page.tsx` | **SUBSTITUTES** — `STRING_INVERTERS[0]` / `MICROINVERTERS[0]`, and `qcells-peak-duo-400` |
+| → recalc, device instances, SLD, permit, equipment schedule, BOM, pricing | all recomputed from equipment nobody chose — **beside** the stored BOM CSV and SLD describing the equipment that was chosen, both attached to the same `engineering_run` |
+
+Three more in the same INSERT, all measured against real PostgreSQL:
+
+- `system_type` unwritten while both readers coalesced it to **`'grid-tied'`** — a value
+  outside the page's `SystemType` (`'roof' | 'ground' | 'fence'`), applied unguarded as
+  `patches.systemType`. Reopening a saved **fence or ground** design knocked it out of its
+  own system type, and the next save wrote back `mountType: 'Roof Mount'` — into the permit
+  packet and the BOM's racking profile.
+- `rapid_shutdown BOOLEAN DEFAULT true` unwritten, so a design with 690.12 rapid shutdown
+  deliberately **off** restored with it **on**, and with it the rapid-shutdown devices in
+  the BOM.
+- `inverter_qty INTEGER DEFAULT 1` unwritten, so **every run ever saved stored a 1** and
+  both readers coalesced to 1 as well — a single inverter asserted for every
+  multi-inverter design.
+
+### What is fixed, and what is not
+
+**Fixed here** (`save-outputs`, `run-from-file`, `latest-run` — none peer-dirty): the
+identity columns are written from the payload the page already sends; the client's
+snapshot is preserved so the full topology survives; the readers stop inventing
+`'grid-tied'` and `1`; and `run-from-file` now returns
+`equipmentIdentity: { panelId, inverterId, complete, reason }` so a caller can tell a
+faithful run from one that cannot be restored. A device **count** is deliberately *not*
+stored — it is a conclusion of the real topology read against manufacturer capacity, and
+`config_snapshot.inverters` is what preserves that, so NULL is written explicitly to stop
+the column default filling it in.
+
+**NOT fixed** — `app/engineering/page.tsx`, which the peer session is mid-edit in:
+
+| Line | What it does | What it should do |
+|---|---|---|
+| ~2425 | `inverterId = invType === 'micro' ? MICROINVERTERS[0].id : STRING_INVERTERS[0].id` | read `equipmentIdentity.complete`; refuse and banner instead of substituting |
+| ~2442 | `panelId = sysType === 'fence' ? 'panel-fence-ps1' : 'qcells-peak-duo-400'` | same |
+| ~2520 | `patches.inverters = [_buildInvCfg({…})]` — one inverter | rebuild **all** inverters from `configSnapshot.inverters` |
+
+Until that lands, **every run already in the database** still restores by substitution —
+the persistence fix only protects runs saved from now on. Coverage that will catch the page
+side when it is touched: `tests/engineeringRunRemembersItsEquipment.postgres.test.ts`
+(13 cases, real PostgreSQL).
+
+| | |
+|---|---|
+| **Blocked** | Faithful restore of pre-existing runs. |
+| **NOT blocked** | New saves, and every other engineering path. |
 
 ---
 

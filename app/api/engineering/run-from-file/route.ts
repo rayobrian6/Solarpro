@@ -166,7 +166,12 @@ export async function GET(req: NextRequest) {
         inverterId:            run.inverter_id || null,
         inverterModel:         run.inverter_model || null,
         inverterType:          run.inverter_type || 'string',
-        inverterQty:           run.inverter_qty || 1,
+        // NOT 1. `inverter_qty` has never been written, and the device count is not a
+        // stored scalar: the authority is the actual electrical topology —
+        // `config_snapshot.inverters`, one entry per inverter with its own strings,
+        // read against the manufacturer's capacity. Coalescing a missing value to 1
+        // asserted a single inverter for every multi-inverter design ever saved.
+        inverterQty:           run.inverter_qty ?? null,
         mountingId:            run.mounting_id || null,
         mountType:             run.mount_type || null,
         mainPanelRating:       run.main_panel_rating || null,
@@ -183,11 +188,37 @@ export async function GET(req: NextRequest) {
         address:               run.address || null,
         ahj:                   run.ahj || null,
         roofPitch:             run.roof_pitch || null,
-        systemType:            run.system_type || 'grid-tied',
+        // 🚨 THIS USED TO READ `run.system_type || 'grid-tied'`, AND system_type WAS NEVER
+        // WRITTEN. So every restore returned 'grid-tied' — a value outside the engineering
+        // page's SystemType ('roof' | 'ground' | 'fence') — and the page applies it
+        // unguarded as `patches.systemType`. Reopening a saved FENCE or GROUND design
+        // therefore knocked it out of its own system type, and the next save wrote back
+        // `mountType: 'Roof Mount'`, carrying the wrong mount into the permit packet and
+        // the BOM's racking profile. NULL means not recorded; the page's hydration is
+        // truthiness-guarded, so null leaves the live config's own value alone.
+        systemType:            run.system_type || null,
         stringConfig:          run.string_config || [],
         configSnapshot:        run.config_snapshot || {},
         calcOutputs:           run.calc_outputs || {},
         generatedAt:           run.generated_at,
+      },
+      // 🚨 WHETHER THIS RUN CAN BE RESTORED AT ALL, stated rather than left to be inferred
+      // from two nulls. When the identity is missing the page substitutes catalogue
+      // defaults — STRING_INVERTERS[0] / MICROINVERTERS[0] for the inverter and
+      // `qcells-peak-duo-400` for the panel — so a restore silently re-equips the design
+      // and every downstream artefact (recalc, SLD, permit, equipment schedule, BOM,
+      // pricing) is computed from equipment nobody chose, beside a stored BOM CSV that
+      // describes the equipment that was. Runs saved before this route wrote the identity
+      // columns cannot be restored faithfully, and a consumer needs to be able to say so
+      // instead of guessing.
+      equipmentIdentity: {
+        panelId:    run.panel_id || null,
+        inverterId: run.inverter_id || null,
+        complete:   Boolean(run.panel_id) && Boolean(run.inverter_id),
+        reason: Boolean(run.panel_id) && Boolean(run.inverter_id) ? null
+          : 'This engineering run was saved before the selected panel and inverter were '
+            + 'recorded on the run. Restoring it cannot reproduce the original equipment; '
+            + 're-run the calculation from the live design instead of trusting a substitution.',
       },
       siblingFiles: siblingFiles.map((f: any) => ({
         id:         f.id,

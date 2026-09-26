@@ -159,7 +159,12 @@ export async function GET(req: NextRequest) {
         inverterId:            run.inverter_id || null,
         inverterModel:         run.inverter_model || null,
         inverterType:          run.inverter_type || 'string',
-        inverterQty:           run.inverter_qty || 1,
+        // NOT 1. `inverter_qty` has never been written, and the device count is not a
+        // stored scalar: the authority is the actual electrical topology —
+        // `config_snapshot.inverters`, one entry per inverter with its own strings,
+        // read against the manufacturer's capacity. Coalescing a missing value to 1
+        // asserted a single inverter for every multi-inverter design ever saved.
+        inverterQty:           run.inverter_qty ?? null,
         mountingId:            run.mounting_id || null,
         mountType:             run.mount_type || null,
         mainPanelRating:       run.main_panel_rating || null,
@@ -176,7 +181,13 @@ export async function GET(req: NextRequest) {
         address:               run.address || null,
         ahj:                   run.ahj || null,
         roofPitch:             run.roof_pitch || null,
-        systemType:            run.system_type || 'grid-tied',
+        // 🚨 NOT 'grid-tied'. `system_type` went unwritten by
+        // /api/engineering/save-outputs for the life of this table, so this coalesce
+        // returned 'grid-tied' for every run — a value outside the engineering page's
+        // SystemType ('roof' | 'ground' | 'fence'), applied unguarded as
+        // `patches.systemType`. NULL means not recorded, and the page's truthiness guard
+        // then leaves the live design's own system type alone.
+        systemType:            run.system_type || null,
         stringConfig:          run.string_config || [],
         configSnapshot:        run.config_snapshot || {},
         calcOutputs:           run.calc_outputs || {},

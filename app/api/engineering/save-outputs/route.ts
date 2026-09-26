@@ -300,8 +300,32 @@ export async function POST(req: NextRequest) {
       // Ensure project_files has engineering_run_id column
       await sql`ALTER TABLE project_files ADD COLUMN IF NOT EXISTS engineering_run_id VARCHAR(36)`;
 
-      // Build config snapshot from payload
+      // 🚨 THIS SNAPSHOT USED TO THROW THE EQUIPMENT IDENTITY AWAY.
+      //
+      // It was built from scratch and copied exactly ONE key out of the client's
+      // configSnapshot (consumptionCtLocation), discarding the rest — including
+      // `inverters`, the array that carries every `inverterId`, its strings and their
+      // `panelId`. That is the whole selected-equipment identity of the design, sent by
+      // app/engineering/page.tsx and dropped here.
+      //
+      // What it cost, on the restore path: run-from-file returns `panelId`/`inverterId`
+      // from columns this INSERT never wrote, so both were always null, and
+      // app/engineering/page.tsx then SUBSTITUTED — `MICROINVERTERS[0]` or
+      // `STRING_INVERTERS[0]` for the inverter, `qcells-peak-duo-400` for the panel.
+      // Reopening a saved run therefore silently re-equipped the design with catalogue
+      // defaults, and every downstream artefact — engineering recalc, SLD, permit,
+      // equipment schedule, BOM, pricing — was then computed from equipment nobody chose,
+      // beside a stored BOM CSV and SLD that describe the equipment that WAS chosen. Two
+      // answers in Client Files, both attached to the same engineering_run.
+      //
+      // So the client's snapshot is preserved and the structured columns are written
+      // below. The client's keys come first and are then overridden by the values this
+      // route computes, so a stale key in the payload cannot shadow a resolved one.
+      const _clientSnap = (body.configSnapshot && typeof body.configSnapshot === 'object')
+        ? body.configSnapshot as Record<string, unknown>
+        : {};
       const configSnapshot = {
+        ..._clientSnap,
         systemKw, panelCount, panelModel, inverterType, inverterModel,
         annualProductionKwh, mountType, stateCode,
         electrical, structural, compliance, permit, runs,
@@ -316,25 +340,97 @@ export async function POST(req: NextRequest) {
       const elec = electrical || {};
       const firstInv = body.configSnapshot?.inverters?.[0] || null;
 
+      // ── The equipment identity, as structured columns ──────────────────────
+      // `firstInv` was already computed here and then USED BY NOTHING — the INSERT below
+      // never referenced it, which is how the identity columns came to be created, read
+      // and never written. They are written now, from the payload the page already sends.
+      //
+      // NOT INVENTED: an id that is absent stays NULL. A null identity is recoverable
+      // (the restore can say "this run predates identity capture" and refuse to
+      // substitute); a guessed identity is not.
+      const _invId: string | null = typeof firstInv?.inverterId === 'string' && firstInv.inverterId
+        ? firstInv.inverterId : null;
+      // The panel is recorded per string — the same place `strings` carries it — so the
+      // first string of the first inverter is the design's panel, not a re-derivation.
+      const _panelId: string | null = typeof firstInv?.strings?.[0]?.panelId === 'string'
+        && firstInv.strings[0].panelId ? firstInv.strings[0].panelId : null;
+      // The panel id IS the wattage authority (lib/equipment-db.ts resolves watts from it),
+      // so this column is not a second source of truth — it is only the legacy fallback the
+      // restore path uses for runs saved before an id existed. Recorded when the caller
+      // supplies it, never parsed back out of the `panelModel` display string.
+      const _panelWatts: number | null = Number.isFinite(Number(body.panelWattage))
+        ? Number(body.panelWattage) : null;
+      const _mountingId: string | null = typeof _clientSnap.mountingId === 'string'
+        && _clientSnap.mountingId ? _clientSnap.mountingId : null;
+      // 🚨 `system_type` was never written, so run-from-file's `system_type || 'grid-tied'`
+      // returned 'grid-tied' for EVERY run — a value outside the page's
+      // SystemType ('roof' | 'ground' | 'fence'). Restoring any saved design therefore
+      // forced it out of its own system type, and the next save wrote
+      // `mountType: 'Roof Mount'` for a fence or ground array.
+      const _systemType: string | null = typeof _clientSnap.systemType === 'string'
+        && _clientSnap.systemType ? _clientSnap.systemType : null;
+      const _roofPitch: number | null = Number.isFinite(Number(_clientSnap.roofPitch))
+        ? Number(_clientSnap.roofPitch) : null;
+      // The three switches are BOOLEAN DEFAULT true in the DDL, so never writing them
+      // meant a design with rapid shutdown deliberately off restored as on — and with it
+      // the rapid-shutdown devices in the BOM. `undefined` keeps the column NULL rather
+      // than asserting either state.
+      // 🚨 `inverter_qty INTEGER DEFAULT 1`, AND THE ROUTE NEVER WROTE IT — so every run
+      // ever saved stored a 1, and both readers coalesced it to 1 as well. That asserted a
+      // single inverter for every multi-inverter design in the product.
+      //
+      // The device count is NOT written here, and NULL is passed explicitly so the column
+      // DEFAULT cannot fill it in. A count does not belong in this row: it is a conclusion
+      // of the actual electrical topology read against manufacturer capacity — which is
+      // exactly what `config_snapshot.inverters` preserves, one entry per inverter with its
+      // own strings. Deriving a second number here from `inverters.length` would be a
+      // second equipment-quantity authority, and it would be wrong for microinverters,
+      // where one entry stands for many devices. NULL means "ask the authority", which is
+      // recoverable; a stored 1 is not.
+      const _inverterQty: number | null = null;
+      const _bool = (v: unknown): boolean | null => typeof v === 'boolean' ? v : null;
+      const _rapidShutdown = _bool(_clientSnap.rapidShutdown);
+      const _acDisconnect  = _bool(_clientSnap.acDisconnect);
+      const _dcDisconnect  = _bool(_clientSnap.dcDisconnect);
+
+      // Older databases were created before these columns existed on this table; the
+      // CREATE TABLE IF NOT EXISTS above only builds a NEW one. Additive and idempotent,
+      // exactly like the project_files column guard above.
+      await sql`ALTER TABLE engineering_runs ADD COLUMN IF NOT EXISTS panel_id       VARCHAR(100)`;
+      await sql`ALTER TABLE engineering_runs ADD COLUMN IF NOT EXISTS panel_wattage  INTEGER`;
+      await sql`ALTER TABLE engineering_runs ADD COLUMN IF NOT EXISTS inverter_id    VARCHAR(100)`;
+      await sql`ALTER TABLE engineering_runs ADD COLUMN IF NOT EXISTS mounting_id    VARCHAR(100)`;
+      await sql`ALTER TABLE engineering_runs ADD COLUMN IF NOT EXISTS system_type    VARCHAR(20)`;
+      await sql`ALTER TABLE engineering_runs ADD COLUMN IF NOT EXISTS roof_pitch     INTEGER`;
+      await sql`ALTER TABLE engineering_runs ADD COLUMN IF NOT EXISTS rapid_shutdown BOOLEAN`;
+      await sql`ALTER TABLE engineering_runs ADD COLUMN IF NOT EXISTS ac_disconnect  BOOLEAN`;
+      await sql`ALTER TABLE engineering_runs ADD COLUMN IF NOT EXISTS dc_disconnect  BOOLEAN`;
+
       const runRows = await sql`
         INSERT INTO engineering_runs (
           project_id, user_id, client_id,
           system_size_kw, panel_count, annual_production_kwh,
-          panel_model, inverter_model, inverter_type,
-          mount_type, state_code, address, ahj,
+          panel_id, panel_model, panel_wattage,
+          inverter_id, inverter_model, inverter_type, inverter_qty,
+          mounting_id, mount_type, system_type, roof_pitch,
+          state_code, address, ahj,
           main_panel_rating, backfeed_breaker, interconnection_method,
           wire_gauge, conduit_type,
+          rapid_shutdown, ac_disconnect, dc_disconnect,
           utility_name, utility_id,
           string_config, config_snapshot, calc_outputs
         ) VALUES (
           ${projectId}, ${user.id}, ${resolvedClientId},
           ${systemKw || 0}, ${panelCount || 0}, ${annualProductionKwh || null},
-          ${panelModel || null}, ${inverterModel || null}, ${inverterType || null},
-          ${mountType || null}, ${stateCode || null},
+          ${_panelId}, ${panelModel || null}, ${_panelWatts},
+          ${_invId}, ${inverterModel || null}, ${inverterType || null}, ${_inverterQty},
+          ${_mountingId}, ${mountType || null}, ${_systemType}, ${_roofPitch},
+          ${stateCode || null},
           ${body.address || null}, ${permit?.ahj || null},
           ${elec.mainPanelBus || null}, ${elec.backfeedBreaker || null},
           ${elec.interconnection || null},
           ${elec.dcWireGauge || null}, ${body.conduitType || null},
+          ${_rapidShutdown}, ${_acDisconnect}, ${_dcDisconnect},
           ${permit?.utility || null}, ${body.utilityId || null},
           ${JSON.stringify(body.strings || [])}::jsonb,
           ${JSON.stringify(configSnapshot)}::jsonb,
