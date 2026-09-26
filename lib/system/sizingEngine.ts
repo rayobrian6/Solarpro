@@ -2228,7 +2228,14 @@ function runPanelCompatibilityGate(
   const panel = SOLAR_PANELS.find(p => p.id === input.panelId);
   if (!panel) return undefined;
 
-  const gate = evaluatePanelBrandCompatibility(panel, brand);
+  // 🚨 THIS CALL USED TO PASS NO OPTIONS, so `designTempMinC` was always undefined
+  // and the gate fell to its blanket cold-Voc multiplier on every design — the
+  // engine held the temperature and never handed it over. That also made the
+  // `tempCoeffVoc` field on every catalogue module DEAD on this code path: the gate
+  // could not tell a −0.236 %/°C Maxeon from a −0.30 %/°C Nexus.
+  const gate = evaluatePanelBrandCompatibility(panel, brand, {
+    designTempMinC: input.designTempMin,
+  });
 
   // Auto-swap only on 'incompatible' AND when at least one suggestion exists.
   if (gate.status === 'incompatible' && gate.suggestions.length > 0) {

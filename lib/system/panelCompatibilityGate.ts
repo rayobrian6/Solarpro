@@ -53,6 +53,9 @@ import type { BrandProfile } from './brandProfiles';
 import type { SolarPanel, StringInverter, Microinverter } from '../equipment-db';
 import { STRING_INVERTERS, MICROINVERTERS, SOLAR_PANELS } from '../equipment-db';
 import { findCompatiblePanels } from '../panel-compatibility';
+// THE NEC 690.7(A) cold-Voc law — the same one the permit engine applies, so this
+// gate and the engine that later re-checks the pairing cannot disagree.
+import { coldVocFactor } from '../permit/utils/panelSpecs';
 
 // ─── Public types ──────────────────────────────────────────────────────────
 
@@ -124,13 +127,15 @@ export interface EvaluatePanelBrandOptions {
    *  exact formula is used; otherwise the conservative table multiplier
    *  below applies. */
   designTempMinC?: number;
-  /** Fallback NEC 690.7 Table cold-correction multiplier applied to Voc
-   *  when no designTempMinC is available. Default 1.12 (≈ −1 to −5 °C
-   *  ambient band of NEC Table 690.7(A)). */
+  /** Fallback NEC 690.7 Table cold-correction multiplier applied to Voc when no
+   *  designTempMinC is available. Default 1.25 — Table 690.7(A)'s CONSERVATIVE row,
+   *  matching lib/permit/utils/panelSpecs.ts. It was 1.12, the table's warmest band,
+   *  which made this gate less conservative than the permit engine that re-checks
+   *  the same pairing later. */
   vocColdMultiplier?: number;
   /** Micro topology: cold-Voc headroom (fraction) below which a pairing is
-   *  'marginal'. Kept separate from marginalThreshold because the ×1.12
-   *  cold correction already embeds worst-case margin. Default 0.05 (5%). */
+   *  'marginal'. Kept separate from marginalThreshold because the cold-Voc
+   *  correction already embeds worst-case margin. Default 0.05 (5%). */
   microVocMarginalThreshold?: number;
 }
 
@@ -139,7 +144,24 @@ export interface EvaluatePanelBrandOptions {
 const DEFAULT_NEC_MULTIPLIER    = 1.25;
 const DEFAULT_MARGINAL_THRESHOLD = 0.15; // 15%
 const DEFAULT_MAX_SUGGESTIONS    = 3;
-const DEFAULT_VOC_COLD_MULTIPLIER = 1.12; // NEC Table 690.7(A), −1…−5 °C band
+// 🚨 WAS 1.12 — Table 690.7(A)'s −1…−5 °C row, i.e. the WARMEST band in the table.
+// Because `lib/system/sizingEngine.ts` called `evaluatePanelBrandCompatibility` with
+// no options at all, `designTempMinC` was always undefined and this fallback was the
+// ONLY correction the gate ever applied. On every site colder than −10 °C — 40
+// states — and on every site whose state does not resolve, it under-corrected Voc
+// and let a module/microinverter pairing through that exceeds the micro's rated
+// maximum DC input voltage. The verdict landed on 'marginal' rather than
+// 'incompatible', so sizingEngine emitted a soft PANEL_MARGINAL warning instead of
+// taking the auto-swap branch that exists precisely to keep this out of the design —
+// and the non-compliant module stayed selected into the saved layout, the BOM and
+// the permit package. The permit engine then recomputed the same module on the real
+// ASHRAE basis, got a Voc above the inverter maximum, and raised the red EQUIPMENT
+// COMPATIBILITY banner on a design the designer had been told was fine.
+//
+// 1.25 is Table 690.7(A)'s conservative row and matches
+// lib/permit/utils/panelSpecs.ts, so the no-temperature fallback can no longer be
+// LESS conservative than the engine that checks it later.
+const DEFAULT_VOC_COLD_MULTIPLIER = 1.25; // NEC Table 690.7(A), conservative row
 const DEFAULT_MICRO_VOC_MARGINAL_THRESHOLD = 0.05; // 5%
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
@@ -206,20 +228,23 @@ export function getBrandMinMicroMaxDcVoltage(brand: BrandProfile | null | undefi
 /**
  * NEC 690.7(A) cold-temperature Voc correction factor.
  * Exact formula when a design-low temperature and panel coefficient are
- * available; conservative table multiplier (default ×1.12) otherwise.
+ * available; conservative table multiplier (default ×1.25) otherwise.
  */
 function vocColdFactor(
   panel: SolarPanel,
   designTempMinC: number | undefined,
   fallbackMultiplier: number,
 ): number {
-  if (
-    typeof designTempMinC === 'number' &&
-    typeof panel.tempCoeffVoc === 'number' &&
-    panel.tempCoeffVoc !== 0
-  ) {
-    // tempCoeffVoc is %/°C (negative) → factor > 1 for sub-25°C design temps
-    return 1 + (panel.tempCoeffVoc / 100) * (designTempMinC - 25);
+  // ONE cold-Voc law. This used to re-implement `1 + (β/100)(T − 25)` locally; it
+  // now delegates to lib/permit/utils/panelSpecs.ts `coldVocFactor`, which is the
+  // same expression and is what the permit engine uses — so the gate and the engine
+  // that later checks it can no longer disagree about the same module.
+  //
+  // A zero coefficient is treated as ABSENT, not as "no correction": β = 0 would
+  // give a factor of exactly 1.0, i.e. no cold correction at all, which is the one
+  // answer that is certainly wrong for a silicon module.
+  if (typeof designTempMinC === 'number') {
+    return coldVocFactor(panel.tempCoeffVoc || undefined, designTempMinC);
   }
   return fallbackMultiplier;
 }
