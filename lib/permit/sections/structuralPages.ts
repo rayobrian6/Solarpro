@@ -186,6 +186,34 @@ export function pageStructuralFence(input: PermitInput, cad: CADModel, pageNum: 
   // present its fence-overturning check is projected so PV-4C / PE-1 / CERT
   // print one acceptance rule.
   const _proj = projectStructuralFromInput(input);
+  // ══ 2026-09-25 — THE ADEQUACY GATE THE ROOF SHEET HAS ALWAYS HAD ═══════════
+  //
+  // `projectStructuralConclusion` was imported by this file and read ONLY inside
+  // `pageStructuralRoof`. The fence and ground pages asserted "confirmed adequate"
+  // UNCONDITIONALLY — and on a package whose safety factor never computed, the SAME
+  // SHEET printed "Post foundation system confirmed adequate" in the narrative and
+  // "Structural analysis data incomplete — verify all parameters" in its own page
+  // conclusion, four lines apart. That contradiction needs no authority argument; it
+  // is provable from the two template branches.
+  //
+  // The rule is already written down here: docs/POST-CAMPAIGN-CORRECTION-2026-07-22.md
+  // forbids "confirmed adequate" without an approved review, and
+  // docs/REPAIR-PASS-ROOT-CAUSE-MAP.md records an ungated "confirmed adequate (safety
+  // factor 1.63)" on a DELIVERED PE-1 as the defect `certificationApproved` was
+  // introduced to fix. Fence and ground were never brought along.
+  //
+  // And the number can be client-posted: the server-side V4 run is wrapped in a catch
+  // that logs "permit still generates, structural page will show defaults", so an
+  // adequacy claim could be driven by a posted safety factor.
+  // The fence post-overturning bar. It was a bare 1.5 inlined in the page conclusion
+  // and nowhere else, so the narrative above it could not have consulted it even if it
+  // had wanted to. Named, once, and used by both.
+  const FENCE_POST_MIN_SF = 1.5;
+  const _concl = projectStructuralConclusion(_proj, structural?.rafter ?? null);
+  const _sfRaw = structural?.attachment?.safetyFactor;
+  const _sfEstablished = typeof _sfRaw === 'number' && Number.isFinite(_sfRaw);
+  /** An affirmative foundation conclusion may be stated ONLY when all of this holds. */
+  const _adequacyAsserted = !_concl.capacitySourceGated && _sfEstablished && _sfRaw >= FENCE_POST_MIN_SF;
   const windSpeed   = _proj.present ? fmt(_proj.windSpeedMph) : (cSite?.windSpeed ? String(cSite.windSpeed) : '—');
   const exposure    = _proj.present ? fmtStr(_proj.exposure) : (cSite?.exposureCategory || structural?.wind?.exposureCategory || '—');
   const groundSnowLbl = groundSnowLabel(_proj as never);
@@ -433,22 +461,35 @@ export function pageStructuralFence(input: PermitInput, cad: CADModel, pageNum: 
         at the design wind speed of ${windSpeed} mph (Exposure Category ${exposure}).
         The overturning moment at the base of each post is ${overturnMoment} ft-lbs.
         Fence post embedment of ${postEmbed} ft (driven inner steel post — no concrete, per the manufacturer's
-        published foundation) provides the required resistance to overturning and lateral loads.
+        published foundation) ${_adequacyAsserted
+          ? 'provides the required resistance to overturning and lateral loads.'
+          : 'is the manufacturer\'s published embedment; its resistance to overturning and lateral loads is NOT verified here.'}
         Ground snow load of ${groundSnow}${groundSnow === ENV_NOT_ESTABLISHED ? '' : ' psf'} applies to the site; roof slope reduction factors do not apply to
         vertical fence-mounted arrays — ground snow load per ${asce} §7 governs.
-        Post foundation system confirmed adequate for the imposed wind and dead loads per ${asce} §29.4.
+        ${_adequacyAsserted
+          ? `Post foundation system confirmed adequate for the imposed wind and dead loads per ${asce} §29.4.`
+          : _concl.capacitySourceGated
+            ? `Post foundation capacity is UNVERIFIED — the capacity source is not archived or not applicable, so NO foundation pass is asserted. Engineering review required per ${asce} §29.4.`
+            : `Post foundation adequacy is NOT asserted: ${_sfEstablished
+                ? `the computed safety factor of ${Number(_sfRaw).toFixed(2)} is BELOW the required minimum of ${FENCE_POST_MIN_SF.toFixed(1)}`
+                : 'no safety factor was computed for this design'}. Engineering review required per ${asce} §29.4.`}
       </div>` : ''}
       <div style="padding:var(--xs);margin-top:var(--sm);font-size:var(--f-md);line-height:1.5;border:2px solid #000;background:#fff;">
         <strong>PAGE CONCLUSION — FENCE STRUCTURAL ANALYSIS:</strong>
         The proposed solar fence photovoltaic array and post foundation system have been analyzed for wind
         overturning, dead load, and post embedment capacity per ${asce} §29.4 and ${cp.ibcLabel}.
-        ${structural && structural.attachment?.safetyFactor != null && structural.attachment.safetyFactor >= 1.5
+        ${/* Reads the SAME gate as the narrative above. These two branches used to be
+              able to disagree on one sheet: a null safety factor produced "confirmed
+              adequate" in the narrative and "analysis data incomplete" here. */ ''}
+        ${_adequacyAsserted
           ? `All structural parameters are within acceptable limits. The fence post foundation system is adequate
              to support the proposed solar fence PV array without modification. Post embedment and footing
              dimensions confirmed per ${asce} §29.4 wind overturning analysis.`
-          : structural && structural.attachment?.safetyFactor == null
-            ? 'Structural analysis data incomplete — verify all parameters per engineering analysis before installation.'
-            : 'Review flagged structural items before proceeding with installation. Foundation sizing may require revision.'}
+          : _concl.capacitySourceGated
+            ? 'The foundation capacity source is not established, so NO foundation adequacy conclusion is stated here. Engineering review required before installation.'
+            : !_sfEstablished
+              ? 'Structural analysis data incomplete — verify all parameters per engineering analysis before installation.'
+              : 'Review flagged structural items before proceeding with installation. Foundation sizing may require revision.'}
       </div>
 
       ${structuralRules.length > 0 ? `
@@ -489,6 +530,16 @@ export function pageStructuralGround(input: PermitInput, cad: CADModel, pageNum:
   // (no `|| 'C'` sheet default). Per-pile reactions remain on the ground
   // estimate path (compliance.structural) — documented in the AFTER report.
   const _proj = projectStructuralFromInput(input);
+  // ══ 2026-09-25 — THE ADEQUACY GATE THE ROOF SHEET HAS ALWAYS HAD ═══════════
+  // See the identical block in `pageStructuralFence`. This page asserted "Ground mount
+  // pile/pier capacity confirmed adequate" unconditionally, and its own page conclusion
+  // four lines below would simultaneously read "Structural analysis data incomplete"
+  // whenever the safety factor was null. One sheet, both sentences.
+  const _concl = projectStructuralConclusion(_proj, structural?.rafter ?? null);
+  const _sfRaw = structural?.attachment?.safetyFactor;
+  const _sfEstablished = typeof _sfRaw === 'number' && Number.isFinite(_sfRaw);
+  /** An affirmative foundation conclusion may be stated ONLY when all of this holds. */
+  const _adequacyAsserted = !_concl.capacitySourceGated && _sfEstablished && _sfRaw >= GROUND_PILE_MIN_SF;
   const windSpeed   = _proj.present ? fmt(_proj.windSpeedMph) : (structural?.wind?.windSpeed || '—');
   const exposure    = _proj.present ? fmtStr(_proj.exposure) : (structural?.wind?.exposureCategory || project.exposureCategory || '—');
   const velPressure = structural?.wind?.velocityPressure?.toFixed(2) || '—';
@@ -663,19 +714,28 @@ export function pageStructuralGround(input: PermitInput, cad: CADModel, pageNum:
         of ${windSpeed} mph (Exposure Category ${exposure}).
         ${snowNarrativeSentence(_proj as never, () => `Snow loading contributes ${snowPile} lbs per pile at the ${groundSnow} PSF ground snow load per ${asce} §7.`) ?? `Ground snow load is ${ENV_NOT_ESTABLISHED} for this site; snow effects are NOT evaluated in this analysis.`}
         Roof slope reduction factors do not apply to ground-mounted arrays — ground snow load governs per ${asce} §7.
-        Ground mount pile/pier capacity confirmed adequate for the imposed wind uplift and dead loads per ${asce} §27.
+        ${_adequacyAsserted
+          ? `Ground mount pile/pier capacity confirmed adequate for the imposed wind uplift and dead loads per ${asce} §27.`
+          : _concl.capacitySourceGated
+            ? `Ground mount pile/pier capacity is UNVERIFIED — the capacity source is not archived or not applicable, so NO capacity pass is asserted. Engineering review required per ${asce} §27.`
+            : `Ground mount pile/pier capacity adequacy is NOT asserted: ${_sfEstablished
+                ? `the computed safety factor of ${Number(_sfRaw).toFixed(2)} is BELOW the required pile-withdrawal minimum of ${GROUND_PILE_MIN_SF.toFixed(1)}`
+                : 'no safety factor was computed for this design'}. Engineering review required per ${asce} §27.`}
         ${Number(safetyFact) > 0 ? `Safety factor of ${safetyFact} confirmed ${Number(safetyFact) >= GROUND_PILE_MIN_SF ? 'above' : 'BELOW'} the required pile-withdrawal minimum of ${GROUND_PILE_MIN_SF.toFixed(1)} (demand 0.6W vs allowable capacity — ${asce} §2.4 / §12.13).` : 'Safety factor data not available — verify attachment capacity per engineering analysis.'}
       </div>` : ''}
       <div style="padding:var(--xs);margin-top:var(--sm);font-size:var(--f-md);line-height:1.5;border:2px solid #000;background:#fff;">
         <strong>PAGE CONCLUSION — GROUND MOUNT STRUCTURAL ANALYSIS:</strong>
         The proposed ground-mounted photovoltaic array and pile/pier foundation system have been analyzed for
         wind uplift, snow, dead load, and pile capacity per ${asce} §27 and ${cp.ibcLabel}.
-        ${structural && structural.attachment?.safetyFactor != null && structural.attachment.safetyFactor >= GROUND_PILE_MIN_SF
+        ${/* Reads the SAME gate as the narrative above — see the fence page. */ ''}
+        ${_adequacyAsserted
           ? `All structural parameters are within acceptable limits. The proposed ground mount pile/pier foundation
              system is adequate to support the proposed PV array without modification.`
-          : structural && structural.attachment?.safetyFactor == null
-            ? 'Structural analysis data incomplete — verify all parameters per engineering analysis before installation.'
-            : 'Review flagged structural items before proceeding with installation. Pile sizing may require revision.'}
+          : _concl.capacitySourceGated
+            ? 'The pile/pier capacity source is not established, so NO foundation adequacy conclusion is stated here. Engineering review required before installation.'
+            : !_sfEstablished
+              ? 'Structural analysis data incomplete — verify all parameters per engineering analysis before installation.'
+              : 'Review flagged structural items before proceeding with installation. Pile sizing may require revision.'}
       </div>
 
       ${structuralRules.length > 0 ? `
