@@ -223,3 +223,53 @@ A green test is not evidence. Every guard here was challenged by restoring the
 original defect — **by restoring its bytes, not by retyping it** — and the guard
 had to go red. Where only a source guard can discriminate, the file says so in
 its own words. Guards that could not be made to fail are not counted.
+
+---
+
+# PHASE 5 — VERIFIED BACKLOG BURN-DOWN
+
+**VERIFIED REMAINING: 80 → 19.** Full accounting, per-lane terminal states, every
+blind assertion and every peer-blocked item: **`PHASE5-BURNDOWN.md`**.
+
+Branch `phase5-fixes` (worktree `../repo-phase5`), 15 commits off `ca61ad98`. Not
+pushed — the push was refused by the session's permission layer.
+
+| Commit | What |
+|---|---|
+| `981c3b0a` | 🚨 **P0 ×2.** One process-global equipment catalog with no tenant key, mutable by any logged-in user — Company B could rewrite the panel Company A designs and prices with. And `GET /api/pricing` published labor cost, overhead and profit margin to the open internet |
+| `91945790` | 🚨 Four grounding/interconnection defects on parts somebody **buys and installs**: Table 250.66 in three copies disagreeing at every rung and keyed on the wrong axis, an EGC ternary flat at #6 above 100 A, an electrode gate present in one emitter and absent from the other, and `QO184` — a breaker Square D does not make |
+| `4d478fa7` | 🚨 A permit specified and the BOM **purchased** a 25 A DC fuse for a module listed at 20 A max — on a package that printed the 20 A limit two sheets earlier |
+| `7fb8a209` | 🚨 Nothing could enter the marketplace and no paid lead could be created — the only release writer 500'd, every screened lead auto-failed on a phantom column, and every paid-acquisition webhook produced no row |
+| `7b841d96` | 🚨 No installer could ever store a contract price (four gates, including an `ON CONFLICT` against an index that does not exist), and the archived BOM CSV had no SKUs and no costs |
+| `e965650a` | 🚨 Three guesses in the engineering report: a conduit trade size from an **ampacity bracket** (43.5 % DC fill against the 40 % limit, on a line a crew orders), load-side vs supply-side from `busbar × 0.2` with a fabricated 200 A, and a string ceiling that capped Florida as if it were at −38 °C |
+| `dc271f39` | 🚨 An unresolved battery got a **stamped 120 % PASS** from a sum missing the battery term, while `electrical-calc` refused on the same design. Routed into the snapshot's existing tri-state; new blocking release gate |
+| `6fcc0ba8` | 🚨 The homeowner portal stopped asserting things that had not happened — the uploaded bill was thrown away, "Save Stage" fabricated milestones, and selecting "Installation" claimed the customer had signed |
+| `a5e3cb32` | 🚨 The gate that exists to stop an overvoltage pairing was **temperature-blind**: the engine held the design temperature and never passed it, so 40 states got the warmest row of Table 690.7(A) |
+| `46544803` | 🚨 Two 240.6 ladders differing by a **capital letter**, one capped at 400 A; and a tail that invented ratings above 1200 A. Plus a sixth copy of 250.122 found while collapsing them |
+| `7c00efc7` | Stage changes now leave a trace (two of five surfaces wrote no audit row), the dashboard CTAs do what they say, and the stall clock measures the **stage** rather than `updated_at` |
+| `8bf8b50b` | An operator can now tell "nothing is wrong" from "nothing is measured" — 4 of 6 health tiles were hardcoded 'ok' with invented latencies; and the installer's margin card was computed from a price the customer is never quoted |
+| `58080a6f` | The stage clock has something to read, and a **fabricated `from_stage: 'contract_signed'`** literal is gone |
+| `1d20185e` | 🚨 Three selectable gauges silently reported a **perfect voltage drop** — `calcVoltageDrop` returned 0 for an unresolvable conductor, and `0 <= anyLimit` passes |
+| `996d5aef` | 🚨 The proposal stopped claiming credits, lender terms and warranties nobody supplied — including the **last path by which a 30 % federal credit reached a residential homeowner**, as prose rather than a number, which is why the numeric guards never caught it |
+
+## The two that matter most about method
+
+**A golden was pinning a defect.** `wave2c-bom`'s I-6 case asserted exactly one ground
+rod against a hybrid fixture that never sets `requiresGroundingElectrode`, so it could
+not tell "one because it is de-duplicated" from "one because the gate is missing". Two
+more existing suites were doing the same thing: `renderProposalHTML.test.ts` had fixture
+`itcRate: 0.30` asserting `'30%'` — which is *why* `× 100` survived review — and
+`priority10-portal-vault-referral` had 8 assertions pinning the referral defects.
+
+**My own panel-gate suite was almost useless.** Restoring the original bytes turned only
+1 of 7 cases red: every temperature case passed *against the defect*, because they called
+the gate directly WITH a design temperature, and the gate always honoured one it was
+given. The defect was that the engine never gave it one. Six assertions across the phase
+are recorded as **BLIND and not counted** — the table is in `PHASE5-BURNDOWN.md`.
+
+## Regression at the end
+
+`tests/planset` **2598 / 2601**. All 3 failures, across 4 files, are one cause and it is
+not this branch's: `build.ts` was committed importing `buildHybridPermitMetering` from a
+peer-dirty `sldAdapter.ts` that does not export it, so **`dev` does not typecheck and
+every hybrid permit throws at runtime**. Recorded as **P1** in `NEEDS-RAY.md`.

@@ -4,7 +4,7 @@
 keep moving. Each entry states what is blocked and — more importantly — what is
 **not**, so no item here is ever a reason to pause an unrelated lane.
 
-Last updated: 2026-09-25.
+Last updated: 2026-09-26 (Phase 5).
 
 ---
 
@@ -12,6 +12,12 @@ Last updated: 2026-09-25.
 
 | # | One line | What it blocks |
 |---|---|---|
+| **P1** | 🚨 **NOT A DECISION — A BROKEN BUILD ON `dev`.** `lib/permit/snapshot/build.ts:42` imports `buildHybridPermitMetering` from `lib/permit/utils/sldAdapter`, which does not export it at `ca61ad98`. It exists only in the **peer session's uncommitted** working copy. So `dev` does not typecheck, and **every hybrid permit generation throws at runtime** (`TypeError: buildHybridPermitMetering is not a function`). Introduced by `75a74099`. Four planset suites fail on it. Not patched from here: `sldAdapter.ts` is peer-dirty, and editing a file another session is mid-edit in is how regression evidence gets polluted | Any hybrid permit; a clean CI/Vercel build of `dev` |
+| **R12** | `projects.stage_changed_at` — the stall clock has no column. Derived from `project_activity` in the meantime, so it is correct for every stage change from here on and silent about history. **Do NOT backfill from `updated_at`** — that is the defect itself, and it would turn an honest "unknown" into a confident wrong answer permanently | Real days-in-stage on historical rows only |
+| **R13** | `pricing_config.loan_apr` / `loan_term_years` / `purchase_mode` — nothing in the repo ever wrote them, so `?? 7.99` / `?? 25` was the **resting state**, not a fallback. The APR line, monthly payment and term-comparison table are now SUPPRESSED rather than invented. All three columns must be **nullable with a NULL default**: NULL has to stay distinguishable from "a lender quoted 0" | Stating a real lender term at all |
+| **R14** | Should the auto-sizer **recommend #3 AWG**? It is now resolvable (real Table 8 resistance, real voltage drop) so a designer who states it gets a true answer — but inserting it between #4 and #2 in `AWG_ORDER` changes what the engine recommends on designs that work today, and #3 is a real NEC size that is rarely stocked. A BOM ruling, not a correctness fix. One-line change either way | Nothing |
+| **R15** | `distributor_prices` has **no unique index at all** — proven by executing the shipped `ON CONFLICT` against real PostgreSQL (`42P10`). Repaired without a migration (UPDATE-then-INSERT), so this is optional hardening only. It **will fail if duplicate rows already exist**, so it needs a de-dup pass first (keep the newest `updated_at` per key) | Nothing — atomicity only |
+| **R16** | `pricing_config` is still **one global row for every organisation**, and per-system-type equipment cost has no column. The unauthenticated read is closed and the write is admin-gated, but there is no tenant key: the last save sets the price-per-watt used in every other company's customer-facing proposal. Needs an owning scope column with a per-scope uniqueness constraint | Per-organisation pricing |
 | **R8** | 🚨 **CORRECTED** — the batch halts at **003**, not 027: `ADD CONSTRAINT IF NOT EXISTS` is not valid PostgreSQL in any version, so `run-pending` is dead after 002 and 027 is never even reached. A whole feature's schema also sits in a directory the runner never scans | Persisting homeowner/micro-stage state; any batch migration run |
 | **R1** | A committed Google API key needs rotating — only you have the account | Nothing in code |
 | **R2** | How approximate should an UNCLAIMED lead's map pin be? Currently house-level | The marketplace pin only |
