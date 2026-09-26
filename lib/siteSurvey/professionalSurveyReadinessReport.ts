@@ -384,7 +384,12 @@ function rawElectrical(
         electricalService.panelRating,
     ),
     busbarRatingAmps: scalarValue(
-      electrical.busbarRatingAmps ?? electricalService.busbarRatingAmps,
+      // `busbarRating` is the survey v2 chip (components/survey/StepElectrical.tsx). Without
+      // it this chain found nothing on a v2 survey, so normalizeSurvey always fell back to
+      // substituting the main rating — which collapses NEC 705.12(B)'s allowance to
+      // 0.2 × main and is the substitution that made the 120% check unfalsifiable.
+      electrical.busbarRatingAmps ?? electricalService.busbarRatingAmps
+        ?? electricalService.busbarRating,
     ),
     breakerSpacesAvailable: scalarValue(
       electrical.breakerSpacesAvailable ??

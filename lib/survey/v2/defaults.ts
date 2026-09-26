@@ -98,6 +98,8 @@ function blankRoofConditions(): SurveyRoofConditions {
 function blankElectricalService(): SurveyElectricalService {
   return {
     panelRating: '',
+    // Empty means NOT RECORDED, not "same as the main" — see the field's note in types.ts.
+    busbarRating: '',
     panelBrand: '',
     availableBreakerSlots: '',
     meterSocketType: '',

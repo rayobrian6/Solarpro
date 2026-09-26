@@ -9,6 +9,9 @@
  */
 
 import type { InterconnectionMethod } from '@/lib/electrical-calc';
+// The ONE implementation of NEC 705.12(B)'s (bus × 1.2) − main. This file used to carry
+// a fourth inline copy of that arithmetic next to a fabricated left-hand side.
+import { maxLoadSideBackfeedA } from '@/lib/nec/rule705_12';
 
 // ── Roof Pitch → Tilt Angle Conversion ─────────────────────
 // Roof pitch is expressed as rise/run ratio (e.g., "4/12" = 4" rise per 12" run)
@@ -151,21 +154,70 @@ export function computeInterconnection(input: {
 }): InterconnectionPrefill {
   const { busRating, mainBreaker, solarBreaker, availableSlots } = input;
 
-  // If we don't have panel data, suggest the most common scenario
+  // If we don't have panel data, suggest the most common scenario.
+  // The two missing inputs are named separately because the survey UI now leaves the main
+  // breaker undefined until someone records it (see components/survey/StepElectrical.tsx),
+  // and "No panel data available" on a panel whose busbar rating IS known reads as a
+  // survey failure rather than as the one field that is still outstanding.
   if (!busRating || !mainBreaker) {
+    const missing = !busRating && !mainBreaker ? 'No panel data available'
+      : !busRating ? 'Busbar rating not recorded'
+      : 'Main breaker rating not recorded';
     return {
       method: 'LOAD_SIDE',
       methodLabel: 'Load Side',
       confidence: 'low',
       source: 'ecosystem',
-      derivation: 'No panel data available — load side is the most common interconnection method. Survey the panel for accurate NEC 705.12 sizing.',
+      derivation: `${missing} — NEC 705.12(B) NOT evaluated. The allowance is (busbar × 1.2) − main `
+        + `breaker, so it cannot be computed without both. Load side is the most common `
+        + `interconnection method and is suggested pending the measurement.`,
       necReference: 'NEC 705.12(B)',
     };
   }
 
-  // Compute solar breaker size from system size if not provided
-  const computedSolarBreaker = solarBreaker || Math.ceil(busRating * 0.2); // 20% of bus rating
-  const maxAllowed = busRating * 1.2 - mainBreaker; // 120% rule: max solar breaker
+  // 🚨 A GUARD THAT COULD NOT FAIL, PRESENTED AS "high confidence, source: nec".
+  //
+  // This used to fabricate the solar breaker when the caller did not supply one:
+  //     const computedSolarBreaker = solarBreaker || Math.ceil(busRating * 0.2);
+  //     const maxAllowed = busRating * 1.2 - mainBreaker;
+  //     if (computedSolarBreaker <= maxAllowed) → 'high' / 'nec'
+  //
+  // For the near-universal case where the main breaker equals the busbar rating,
+  // `ceil(B × 0.2)` and `B × 1.2 − M` ARE THE SAME NUMBER — 40 A on a 200 A/200 A
+  // service — so the comparison is `0.2B <= 0.2B`, true by construction. And a main
+  // breaker never exceeds its busbar in practice, so `maxAllowed` is only ever larger.
+  // The check passed for every surveyed panel, and the derivation string quoted
+  // real-looking arithmetic — "200A bus × 1.2 = 240A - 200A main = 40A max solar. Need
+  // 40A breaker." — where the 40 A "need" was manufactured to match the 40 A limit.
+  //
+  // That matters because the chip it produces is what the surveyor accepts, and
+  // lib/engineering/reportGenerator.ts and lib/system/electricalFromSurvey.ts then treat
+  // `interconnection_point` as INSPECTOR-CAPTURED GROUND TRUTH, ahead of their own
+  // checks. A guard that cannot fail is worse than no guard, because three downstream
+  // consumers trust it more than their own arithmetic.
+  //
+  // So: no fabricated breaker. Without a real one the 120% rule has not been evaluated,
+  // and this says so at low confidence from the ecosystem — exactly as the no-panel-data
+  // branch above already does — rather than asserting a code conclusion.
+  if (!solarBreaker) {
+    return {
+      method: 'LOAD_SIDE',
+      methodLabel: 'Load Side',
+      confidence: 'low',
+      source: 'ecosystem',
+      derivation: `NEC 705.12(B) NOT evaluated — the solar backfeed breaker is not known yet, `
+        + `so the 120% rule has no left-hand side. The ${busRating}A bus with a ${mainBreaker}A `
+        + `main allows ${maxLoadSideBackfeedA(busRating, mainBreaker)}A of backfeed; load side is `
+        + `the most common method and is suggested pending the design's actual breaker.`,
+      necReference: 'NEC 705.12(B)',
+    };
+  }
+
+  // A REAL breaker was supplied, so the rule can actually be tested. The allowance comes
+  // from lib/nec/rule705_12.ts — the one implementation of (bus × 1.2) − main — rather
+  // than a fourth inline copy of that arithmetic.
+  const maxAllowed = maxLoadSideBackfeedA(busRating, mainBreaker);
+  const computedSolarBreaker = solarBreaker;
 
   // Check if load-side 120% rule passes
   if (computedSolarBreaker <= maxAllowed && (availableSlots === undefined || availableSlots > 0)) {

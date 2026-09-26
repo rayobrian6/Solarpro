@@ -565,13 +565,27 @@ function normalizeElectrical(
   const mainPanelRatingAmps = parseAmps(raw.mainPanelRatingAmps, 'mainPanelRatingAmps', log);
 
   // ── Busbar rating ─────────────────────────────────────────────────────────────
-  // If not captured, default to main panel rating (common configuration)
+  // If not captured, fall back to the main panel rating — the common configuration, and a
+  // DISCLOSED PROXY, not a measurement. The comment that used to sit here had the
+  // inequality the wrong way round: the main breaker protects the bus, so the busbar
+  // rating is greater than or equal to the main, never less.
+  //
+  // 🚨 WHAT THE PROXY COSTS. NEC 705.12(B)'s allowance is (busbar × 1.2) − main, so
+  // substituting the main for the busbar makes it 0.2 × main — and 0.2 × rating is exactly
+  // what the survey prefill used to fabricate as the solar breaker, which is why that
+  // check could never fail. The survey now has its own busbarRating chip
+  // (components/survey/StepElectrical.tsx), so this branch is the not-recorded case rather
+  // than the normal one, and the log says what the substitution does to the allowance.
   const busbarRaw = parseAmps(raw.busbarRatingAmps, 'busbarRatingAmps', log);
   const busbarRatingAmps = busbarRaw !== null
     ? busbarRaw
-    : mainPanelRatingAmps; // busbar ≤ main panel — use main as proxy
+    : mainPanelRatingAmps;
   if (busbarRaw === null && mainPanelRatingAmps !== null) {
-    log.push(`[normalize] busbarRatingAmps not captured — defaulting to mainPanelRatingAmps (${mainPanelRatingAmps}A)`);
+    log.push(`[normalize] WARN: busbarRatingAmps not captured — using mainPanelRatingAmps `
+      + `(${mainPanelRatingAmps}A) as a PROXY. NEC 705.12(B)'s allowance is therefore `
+      + `0.2 × ${mainPanelRatingAmps}A = ${Math.round(mainPanelRatingAmps * 0.2)}A, which assumes `
+      + `the busbar equals the main. Record the busbar rating in the survey to evaluate the `
+      + `rule against the real panel.`);
   }
 
   // ── Breaker spaces ────────────────────────────────────────────────────────────

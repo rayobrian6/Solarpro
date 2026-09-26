@@ -2140,6 +2140,45 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     // NEC 705.12(B): backfeed breaker size is equipment-specified
     const batOcpd = nextStandardOCPD(input.batteryBackfeedA);
     const batEgc  = getEGCGauge(batOcpd);
+
+    // 🚨 THE AUTHORITY PUBLISHED A CONDUCTOR FLOOR AND NOTHING READ IT.
+    // `resolveBatteryBranch` (lib/equipment-db.ts:4552) returns the manufacturer's
+    // `minConductorAwg` — '#4 AWG' for an 80 A battery branch — and a repo-wide search
+    // found NO consumer: every reference was inside equipment-db itself. So this block
+    // sized the conductor independently from `batContinuousA` and printed #8 AWG on an
+    // 80 A OCPD: a permit-grade conductor schedule, conduit schedule and BOM wire footage
+    // for a conductor that would fail plan review against the Enphase datasheet and, if
+    // built to the drawing, is protected 30 A ABOVE its ampacity.
+    //
+    // It is a FLOOR, not a replacement: autoSizeWire's answer still wins when it is
+    // larger (a long run may need more than the datasheet minimum). The refusal case is
+    // deliberate too — an unresolved battery yields no floor, and `interconnectionUnresolved`
+    // already blocks that design rather than letting it size against nothing.
+    const _batFloorAwg = (() => {
+      for (const [id, count] of _batteryCountsById) {
+        const r = resolveBatteryBranch(id, count);
+        if (r.resolved && r.minConductorAwg) return r.minConductorAwg;
+      }
+      return null;
+    })();
+    if (_batFloorAwg) {
+      const order = AWG_ORDER;
+      const floorIdx = order.indexOf(_batFloorAwg);
+      const pickedIdx = order.indexOf(batWire.gauge);
+      if (floorIdx > -1 && pickedIdx > -1 && pickedIdx < floorIdx) {
+        issues.push({
+          severity: 'info',
+          code: 'BATTERY_CONDUCTOR_RAISED_TO_DATASHEET_MINIMUM',
+          message: `Battery branch conductor raised from ${batWire.gauge} to ${_batFloorAwg} — `
+            + `the manufacturer's published minimum for a ${batOcpd}A branch. The ampacity `
+            + `calculation alone would have selected the smaller conductor.`,
+          necReference: 'NEC 705.12(B) / manufacturer datasheet',
+          autoFixed: true,
+        });
+        batWire.gauge = _batFloorAwg;
+      }
+    }
+
     const batGaugeNum = batWire.gauge.replace('#','').replace(' AWG','');
     const batEgcNum   = batEgc.replace('#','').replace(' AWG','');
     const batConduitAbbrev = input.conduitType === 'EMT' ? 'EMT'

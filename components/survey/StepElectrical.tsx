@@ -132,13 +132,32 @@ export function StepElectrical({ data, onChange, disabled, siteOverview, photos 
 
   // G3: Interconnection point auto-computation from NEC 705.12
   const interconnectionPrefill = useMemo(() => {
-    // Parse panel rating to numeric bus rating
-    const ratingStr = data.panelRating as string;
-    const busRating = ratingStr && ratingStr !== 'other' && ratingStr !== ''
-      ? parseInt(ratingStr, 10)
-      : undefined;
-    // Main breaker is typically same as panel rating for residential
-    const mainBreaker = busRating;
+    // 🚨 WHAT WAS HERE IS WHY THE 120% CHECK COULD NEVER FAIL:
+    //     const busRating   = parseInt(data.panelRating);
+    //     const mainBreaker = busRating;   // "typically same as panel rating"
+    // and the prefill then fabricated the solar breaker as ceil(busRating × 0.2). With
+    // main === bus those two are THE SAME NUMBER — 40 A on a 200 A service — so the
+    // comparison was 0.2B <= 0.2B, true by construction, and every surveyed panel came
+    // back "Load Side, high confidence, source: nec".
+    //
+    // The allowance turns on the DIFFERENCE between the busbar and the main, so assuming
+    // they are equal assumes the answer. "Typically the same" is often true and is still
+    // not a measurement: a derated main — a 225 A busbar behind a 175 A main — is exactly
+    // the case the rule exists to catch, and it is the case the assumption erases.
+    //
+    // `panelRating` is the MAIN rating: lib/siteSurvey/normalizeSurvey.ts reads it as
+    // `mainPanelRatingAmps`, and computeDefaultPanelRating calls it "the most common
+    // residential main panel rating". So the field that was missing is the BUSBAR, and it
+    // now exists and is surveyed below. Unrecorded means undefined, and
+    // `computeInterconnection` then reports that 705.12(B) was not evaluated instead of
+    // asserting a code conclusion.
+    const toAmps = (v: string | undefined): number | undefined => {
+      if (!v || v === 'other' || v === '') return undefined;
+      const n = parseInt(v, 10);
+      return Number.isFinite(n) ? n : undefined;
+    };
+    const mainBreaker = toAmps(data.panelRating as string);
+    const busRating = toAmps(data.busbarRating as string);
     // Parse available slots
     let availableSlots: number | undefined;
     if (data.availableBreakerSlots === '0') availableSlots = 0;
@@ -147,7 +166,9 @@ export function StepElectrical({ data, onChange, disabled, siteOverview, photos 
     else if (data.availableBreakerSlots === '5+') availableSlots = 6;
 
     return computeInterconnection({ busRating, mainBreaker, availableSlots });
-  }, [data.panelRating, data.availableBreakerSlots]);
+    // busbarRating belongs in the dependency list: a memo frozen on the old inputs would
+    // read the new field and never recompute when it is recorded.
+  }, [data.panelRating, data.busbarRating, data.availableBreakerSlots]);
 
   // Map InterconnectionMethod to survey InterconnectionPoint chip value
   const necToSurveyMap: Record<string, string> = {
@@ -286,6 +307,39 @@ export function StepElectrical({ data, onChange, disabled, siteOverview, photos 
               />
               <span className="text-slate-400">-- {panelRatingPrefill.derivation}</span>
             </div>
+          ) : null}
+        </StepField>
+
+        {/*
+          🚨 THE SECOND NUMBER NEC 705.12(B) NEEDS, which the survey never asked for.
+          The allowance is (busbar × 1.2) − main breaker, so one number cannot produce it.
+          Not `required`: an existing draft must not become invalid, and an unrecorded
+          busbar is reported honestly as "not evaluated" rather than guessed.
+        */}
+        <StepField
+          label="Busbar Rating (Amps)"
+          hint="Printed on the panel label, often beside the main breaker -- may be HIGHER than the main (e.g. 225A bus, 175A main). Leave blank if not visible."
+        >
+          <ChipGroup
+            options={PANEL_RATING_OPTIONS}
+            value={data.busbarRating}
+            onChange={(v) =>
+              set('busbarRating', v as SurveyElectricalService['busbarRating'])
+            }
+            columns={4}
+            disabled={disabled}
+          />
+          {!data.busbarRating ? (
+            <p className="mt-1.5 text-xs text-slate-500">
+              Not recorded -- NEC 705.12(B) cannot be evaluated without it, so the
+              interconnection suggestion below stays low confidence.
+            </p>
+          ) : data.panelRating && data.busbarRating !== 'other' && data.panelRating !== 'other'
+              && parseInt(data.busbarRating, 10) < parseInt(data.panelRating as string, 10) ? (
+            <p className="mt-1.5 text-xs text-red-600">
+              A {data.busbarRating}A busbar behind a {data.panelRating}A main breaker is not a
+              valid configuration -- the main protects the bus. Re-read the panel label.
+            </p>
           ) : null}
         </StepField>
 

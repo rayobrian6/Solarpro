@@ -96,7 +96,28 @@ export type InterconnectionPoint =
 export type ServiceEntrance = 'overhead' | 'underground' | '';
 
 export interface SurveyElectricalService {
+  /**
+   * The MAIN PANEL rating — the main breaker. `lib/siteSurvey/normalizeSurvey.ts` reads
+   * this field as `mainPanelRatingAmps`, and `computeDefaultPanelRating` describes it as
+   * "the most common residential main panel rating", so that is what it means here.
+   */
   panelRating: PanelRating;
+  /**
+   * 🚨 THE BUSBAR RATING, AND IT IS A SEPARATE MEASUREMENT.
+   * NEC 705.12(B)'s whole allowance is (busbar × 1.2) − main breaker, so it turns on the
+   * DIFFERENCE between these two numbers. Until this field existed, the survey captured
+   * one number and two layers manufactured the other from it by assuming equality —
+   * `components/survey/StepElectrical.tsx` read `panelRating` as the busbar and set the
+   * main equal to it, and `normalizeSurvey` substituted the main for a missing busbar.
+   * Either way the allowance collapses to 0.2 × main, which is also exactly what the
+   * prefill fabricated as the solar breaker, so the 120% check could not fail.
+   *
+   * Often it genuinely equals the main breaker rating. "Often equal" is not a measurement,
+   * and a derated main — a 225 A busbar behind a 175 A main — is precisely the case the
+   * rule exists to evaluate. Empty means NOT RECORDED, and the prefill then reports that
+   * the rule was not evaluated instead of asserting a code conclusion.
+   */
+  busbarRating: PanelRating;
   panelBrand: PanelBrand;
   availableBreakerSlots: AvailableBreakerSlots;
   meterSocketType: MeterSocketType;

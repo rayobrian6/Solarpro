@@ -254,6 +254,20 @@ export function StepReview({ draft, onEditStep, submitError, surveyToken }: Step
               : '-'
           }
         />
+        {/*
+          The second number NEC 705.12(B) needs. Shown even when blank, and flagged, because
+          an unrecorded busbar is what stops the 120% rule from being evaluated at all — the
+          reviewer should see that it is outstanding rather than not see the field.
+        */}
+        <ReviewRow
+          label="Busbar Rating"
+          value={
+            electricalService.busbarRating
+              ? electricalService.busbarRating + 'A'
+              : 'Not recorded -- NEC 705.12(B) not evaluated'
+          }
+          flag={electricalService.busbarRating ? undefined : 'warn'}
+        />
         <ReviewRow
           label="Breaker Slots"
           value={labelOrEmpty(electricalService.availableBreakerSlots)}
