@@ -65,7 +65,14 @@ export function mapComputedSystemToCompliance(cs: CS, ctx: ComplianceProjectionC
     groundingConductor: feeder?.egcGauge,            // FEEDER EGC (250.122 on feeder OCPD)
     busbar: {
       backfeedBreakerRequired: cs.backfeedBreakerAmps,
-      passes: isSupply ? true : cs.interconnectionPass,
+      // 🚨 A MISSING TERM IS NOT A PASS. When a battery could not be resolved,
+      // `cs.interconnectionPass` is the 120% arithmetic over the terms that WERE
+      // resolvable and the battery's contribution is absent from the sum — so it
+      // must not project as a verdict. null is the snapshot's existing "not
+      // evaluated" state and PV-4A already renders it as PENDING, which is the
+      // truthful thing to print: the rule was not evaluated, it did not fail.
+      // A supply-side tap has no busbar loading concern, so it is unaffected.
+      passes: isSupply ? true : (cs.interconnectionUnresolved ? null : cs.interconnectionPass),
       busbarRule: isSupply ? 'supply-side' : '120%',
       busRating: ctx.busRatingA ?? undefined,
       mainBreaker: ctx.mainBreakerA ?? undefined,

@@ -327,6 +327,16 @@ export interface ComputedSystem {
   acOcpdAmps: number;         // A — next standard OCPD
   backfeedBreakerAmps: number; // A — for MSP interconnection
   interconnectionPass: boolean; // NEC 705.12(B) 120% rule
+  /** 🚨 TRUE when a battery on this design could NOT be resolved, so its
+   *  705.12(B) contribution is MISSING from `backfeedBreakerAmps` and from the
+   *  120% sum. `interconnectionPass` is then the arithmetic over the terms that
+   *  WERE resolvable, and it must NOT be read as a clearance. A consumer that
+   *  renders a verdict must render PENDING/UNRESOLVED, not PASS and not FAIL —
+   *  the rule was not evaluated, it did not fail. */
+  interconnectionUnresolved: boolean;
+  /** Why, in the words a plan reviewer and an operator both need. null when
+   *  nothing is unresolved. */
+  batteryRefusal: string | null;
 
   // ── Wire & Conduit Runs ───────────────────────────────────────────────────
   runs: RunSegment[];         // ALL wiring runs — SLD reads from here
@@ -1477,6 +1487,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
   }
   let batteryBusImpactFromIds = 0;
   let _batteryUnresolved = false;
+  let _batteryRefusal: string | null = null;
   for (const [id, count] of _batteryCountsById) {
     const r = resolveBatteryBranch(id, count);
     if (r.resolved && r.busbarContributionA != null) batteryBusImpactFromIds += r.busbarContributionA;
@@ -1500,9 +1511,35 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
         'A — using the authority. Route the caller through resolveBatteryBranch().');
     }
     if (_batteryUnresolved) {
-      console.warn('[COMPUTED-SYSTEM] at least one battery could not be resolved;',
-        'its NEC 705.12(B) contribution is MISSING from the busbar total, which is',
-        'therefore incomplete — do not read interconnectionPass as a clearance.');
+      // 🚨 THIS USED TO BE A console.warn AND NOTHING ELSE — and its own text said
+      // "do not read interconnectionPass as a clearance" while the very next lines
+      // computed that clearance and shipped it. lib/permit/snapshot/computeSystemProjection.ts:68
+      // projects `cs.interconnectionPass` as the busbar `passes`, which reaches
+      // PV-4A's printed 120% verdict, and `backfeedBreakerAmps` is exposed as
+      // solar+battery combined (line 2948) — so with an unresolved battery the
+      // permit printed a PASS and an understated backfeed total computed from a sum
+      // that is missing the battery term. `lib/electrical-calc.ts`, running on the
+      // same design for the engineering page, refuses outright. The permit — the
+      // artifact that goes to the AHJ — was the permissive one.
+      //
+      // Carried on the RESULT now, so a consumer cannot fail to see it. The
+      // conclusion is UNRESOLVED, not FAIL: the rule was never evaluated.
+      _batteryRefusal =
+        'NEC 705.12(B) NOT EVALUATED — at least one battery on this design could not be '
+        + 'resolved from the equipment catalogue, so its busbar contribution is MISSING from '
+        + 'the total. Re-select the battery from the equipment picker so the design stores its '
+        + 'catalogue id, or record the manufacturer-stated backfeed/branch rating. A typical '
+        + 'value may not be substituted.';
+      console.warn('[COMPUTED-SYSTEM]', _batteryRefusal);
+      issues.push({
+        severity: 'error',
+        code: 'BATTERY_BACKFEED_UNRESOLVED',
+        message: _batteryRefusal,
+        necReference: 'NEC 705.12(B)',
+        autoFixed: false,
+        suggestion: 'Re-select the battery from the equipment picker so the design stores its '
+          + 'catalogue id, or record the manufacturer-stated backfeed/branch rating.',
+      });
     }
   } else {
     batteryBusImpactA = _directBatteryBackfeedA;
@@ -2947,6 +2984,12 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     acOcpdAmps,
     backfeedBreakerAmps: totalBackfeedA,  // NEC 705.12(B): solar + battery combined
     interconnectionPass,
+    // 🚨 Carried out so no consumer can read the pass as a clearance without also
+    // seeing that a term is missing. computeSystemProjection routes this into the
+    // snapshot's existing tri-state `rulePasses: boolean | null`, which PV-4A
+    // already renders as PENDING.
+    interconnectionUnresolved: _batteryUnresolved,
+    batteryRefusal: _batteryRefusal,
     runs,
     runMap,
     segmentSchedule,

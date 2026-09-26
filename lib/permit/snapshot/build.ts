@@ -2107,6 +2107,11 @@ export function buildPermitDesignSnapshot(
       // fabricated 5.0 kWh per unit, PV-5 printed 10.0 for the same design, and
       // the SLD equipment schedule dropped the row entirely.
       'BATTERY-CAPACITY-UNRESOLVED': { severity: 'blocking', authorityPath: 'project.batteryKwh / equipment catalogue (resolveBatteryBranch)', sheets: ['PV-1', 'PV-5', 'E-1', 'SCHED'], resolution: 'Re-select the battery from the equipment picker so the design stores its catalogue id, or record the manufacturer-stated usable capacity (kWh per unit). A typical value may not be substituted.' },
+      // The AMPS sibling of the row above. Capacity is the kWh NFPA 855 / IRC R328
+      // limit their thresholds in; this is the busbar contribution the NEC 705.12(B)
+      // 120% sum needs. A design can resolve one and not the other, so they are two
+      // gates and not one.
+      'BATTERY-BACKFEED-UNRESOLVED': { severity: 'blocking', authorityPath: 'computedSystem.interconnectionUnresolved (resolveBatteryBranch busbarContributionA)', sheets: ['PV-4A', 'E-1'], resolution: 'Re-select the battery from the equipment picker so the design stores its catalogue id, or record the manufacturer-stated backfeed/branch rating. Until then the 120% rule has NOT been evaluated and PV-4A prints PENDING rather than a verdict.' },
       'FEEDER-RACEWAY-AUTHORITY': { severity: 'blocking', authorityPath: 'electrical.feeder.conduit', sheets: ['PV-4B', 'E-1', 'SCHED'], resolution: 'Resolve the feeder raceway/conduit type + bonding authority on the canonical feeder segment.' },
       'BRANCH-RACEWAY-AUTHORITY': { severity: 'blocking', authorityPath: 'electrical.physicalRaceways[branch home-run]', sheets: ['PV-4A', 'PV-4B', 'E-1', 'SCHED'], resolution: 'Model the branch route as explicit sections (open-air Q-Cable + shared home-run raceway); the shared jbox→combiner raceway must carry documented shared-circuit count + fill (NEC Ch.9, Table 1).' },
       'RACEWAY-SEGMENT-CONFLICT': { severity: 'blocking', authorityPath: 'electrical.routeSegments[].raceway', sheets: ['PV-1', 'PV-4B', 'E-1', 'SCHED'], resolution: 'A single physical segment id resolves to more than one raceway type/size — reconcile to ONE raceway per physical run (gate 3).' },
@@ -2344,6 +2349,32 @@ export function buildPermitDesignSnapshot(
             },
           });
       }
+    }
+    // 🚨 A BATTERY WHOSE BUSBAR CONTRIBUTION IS UNKNOWN CANNOT CLEAR 705.12(B).
+    // Sibling of BATTERY-CAPACITY-UNRESOLVED above, and a different question:
+    // capacity is the kWh NFPA 855 / IRC R328 limit their thresholds in; this is the
+    // AMPS the 120% busbar sum needs. A design can resolve one and not the other.
+    //
+    // computed-system used to console.warn this and ship the arithmetic anyway —
+    // its own warning text said "do not read interconnectionPass as a clearance"
+    // while the next lines computed that clearance. The projection now routes the
+    // verdict to null (PV-4A prints PENDING) and this gate stops the package being
+    // RELEASED with a 120% conclusion that was never reached. lib/electrical-calc.ts
+    // already refused on the engineering page; the permit is what goes to the AHJ,
+    // so it must not be the permissive one.
+    if (cs && (cs as { interconnectionUnresolved?: boolean }).interconnectionUnresolved) {
+      push('BATTERY-BACKFEED-UNRESOLVED',
+        (cs as { batteryRefusal?: string | null }).batteryRefusal
+        ?? 'NEC 705.12(B) NOT EVALUATED — a battery on this design could not be resolved, '
+           + 'so its busbar contribution is missing from the 120% total.',
+        {
+          payload: {
+            batteryId: (proj.batteryId ?? null) as string | null,
+            batteryBrand: (proj.batteryBrand ?? null) as string | null,
+            batteryModel: (proj.batteryModel ?? null) as string | null,
+            pvBackfeedA: (cs as { backfeedBreakerAmps?: number }).backfeedBreakerAmps ?? null,
+          },
+        });
     }
     // §14 carry-forward: missing feeder raceway/conduit type authority stays
     // visible and blocking (never weakened by W3).

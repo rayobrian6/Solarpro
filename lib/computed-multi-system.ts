@@ -492,6 +492,14 @@ export function computeMultiSystem(
     segments: undefined,
     segmentIssues: undefined,
     segmentInterconnectionPass: interconnectionPass,
+    // 🚨 Propagated, not defaulted. Each sub-system's own computed-system already
+    // decided whether ITS battery resolved; the aggregate is unresolved if ANY of
+    // them is, because the 120% sum here is over all of them and one missing term
+    // makes the whole total incomplete. Hard-coding `false` here would have
+    // reintroduced the permissive verdict on exactly the hybrid designs most likely
+    // to carry a battery.
+    interconnectionUnresolved: subList.some(x => x.cs.interconnectionUnresolved),
+    batteryRefusal: subList.map(x => x.cs.batteryRefusal).find(Boolean) ?? null,
   };
 
   return {

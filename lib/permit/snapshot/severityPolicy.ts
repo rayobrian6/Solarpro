@@ -278,6 +278,17 @@ export const SEVERITY_POLICY: Record<string, SeverityRule> = {
     impact: { safety: true, codeCompliance: true, procurement: true, engineeringApproval: true, permitAcceptance: true },
     justification: '',
   },
+  // The AMPS sibling. An unresolved battery leaves its busbar contribution out of
+  // the NEC 705.12(B) 120% sum, so the rule was never evaluated — safety and code
+  // compliance because an overloaded busbar is the failure mode, engineering
+  // approval because a PE would be sealing a conclusion the engine did not reach,
+  // and permit acceptance because PV-4A prints PENDING where a reviewer needs a
+  // verdict. NOT procurement: the battery is identified well enough to order
+  // whenever capacity resolved, which is a separate gate.
+  'BATTERY-BACKFEED-UNRESOLVED': {
+    impact: { safety: true, codeCompliance: true, procurement: false, engineeringApproval: true, permitAcceptance: true },
+    justification: '',
+  },
   // Module catalog dimensions absent: footprints/layout cannot be built and the
   // ordered module identity is not pinned.
   'MODULE-DIMENSIONS-UNVERIFIED': {
