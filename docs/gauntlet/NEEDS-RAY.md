@@ -251,6 +251,89 @@ by any output, any route under `app/api/engineering`, or any status machine.
 | **NOT blocked** | The **ENGINEERING NOTES** box in the same class is FIXED (`df75ea85`) — its text was threaded into the permit generator and read by no sheet, while the cover printed generated boilerplate in the place the engineer's own notes should have been. It now renders as its own first bucket, PROJECT-SPECIFIC (ENGINEER OF RECORD). |
 | **Safe default applied** | Nothing invented. The three fields keep persisting and still reach no output — unchanged, now written down. |
 
+### 🚨 TRACED 2026-09-26 — the evidence, and a recommendation that is NOT "route it to the canonical authority"
+
+**The canonical authority is `projectAuthority.issueStatus`** — 8 states, derived by
+`deriveIssueState` on every permit build, **never stored**, and **never shown in the
+product**: `grep -rn "issueStatus|issueState" app components hooks` returns **zero**.
+It appears only on planset sheets.
+
+**All three fields confirmed dead** — searched across `app/ lib/ components/ hooks/
+contexts/ store/ types/ services/ worker/ e2e/ tests/ scripts/ db/ migrations/`,
+including snake_case and dynamic-index forms. They are also absent from every derived
+payload that leaves the page (`save-outputs` and the SolarDog snapshot both build
+explicitly whitelisted objects).
+
+**Data very likely exists.** All three shipped in `bdfba731` on **2026-05-01** and are
+on `master` — five months of autosaving (800 ms debounce **plus** a `sendBeacon`
+flush on tab-hide) into `projects.engineering_config`, with no key whitelist on the
+write path. The keys are absent unless an operator actually touched the control, so a
+non-zero count is a direct count of people who set a permit state the product ignored.
+
+**The read-only query to settle it** (nothing was run):
+
+```sql
+SELECT count(*) FILTER (WHERE engineering_config ? 'designNotes')  AS has_design_notes,
+       count(*) FILTER (WHERE engineering_config ? 'installDays')  AS has_install_days,
+       count(*) FILTER (WHERE engineering_config ? 'permitStatus') AS has_permit_status
+FROM projects WHERE deleted_at IS NULL AND engineering_config IS NOT NULL;
+```
+
+#### 🚨 `designNotes` is the dangerous one, and it is a LIVE SECOND COPY OF A BUG CLOSED YESTERDAY
+
+`ProjectConfig.notes` — the box headed **"Engineering Notes"** — now reaches the cover
+sheet as `PROJECT-SPECIFIC (ENGINEER OF RECORD)` (`df75ea85`). **"Design Notes" sits on
+the same tab**, with placeholder *"Add design assumptions, site notes, AHJ requirements,
+special conditions…"* against Engineering Notes' *"…special conditions, AHJ
+requirements…"*. Two near-identical invitations; one is plumbed to the stamped set and
+one to nothing. **Which box an engineer types an AHJ condition into is a coin flip.**
+
+| | |
+|---|---|
+| **Recommendation** | Retire the duplicate box. Do **not** concatenate the two — merging free text would order an engineer's conditions in a way nobody authored. |
+| **🚨 Why I did not do it** | `app/engineering/page.tsx` is a file the **peer session has uncommitted changes in**, and your own instruction is to migrate meaningful data *before* removing UI. Both point the same way: not yet. |
+| **What to do with stored text** | Report it to you per project, don't move it by script. An engineer's AHJ condition is his call. |
+
+#### `permitStatus` — REMOVE, do not route
+
+Routing it to the canonical authority is the obvious move and it is **wrong**. Its five
+states straddle two subjects the system keeps sharp: `Submitted`/`Approved` are the
+**AHJ's** actions, already owned by `project_status` (`permit_submitted` /
+`permit_approved`, settable in OperationsTab with task generation and an activity row).
+And **`Issued` collides head-on**: in `issueStatus`, `ISSUED FOR PERMIT` means *"our
+package cleared our internal gate and may now be submitted"* — the **beginning** of AHJ
+involvement. An operator picking "Issued" from a list that already has "Submitted" and
+"Approved" means *"the AHJ issued the permit"* — the **end**. Wiring the dropdown to
+`issueStatus` would silently equate "we may submit" with "they approved".
+
+Also: `issueStatus` has **no human writer by design**. If it is ever surfaced on the
+engineering page it must be **read-only, with its reason**, and **must not be labelled
+"Permit Status"** — call it the drawing-set release state, or the ambiguity just moves.
+
+#### `installDays` — REMOVE, lowest stakes
+
+Not a status, not a duplicate, and it has no exact canonical twin (`install_date` +
+`estimated_completion` are a range; `labor_hours` is effort). It is the one case where
+removal genuinely loses a concept and the one case where that costs nothing, because
+nothing has ever read it.
+
+### Two findings outside the brief
+
+- ✅ **FIXED (`ca3c05ce`).** `/api/projects/transition` — the governed stage machine
+  whose docblock calls it the authorised path — had **zero UI callers**, while every
+  real stage change went through `/api/projects/update-status`, which skipped
+  `syncHomeownerStage` and `writeMicroStage` entirely. The internal pipeline advanced
+  and **the customer-facing stage never did**. The live route now syncs both,
+  non-fatally.
+- **Still open, and it extends R8.** `projects.project_status`, `install_date`,
+  `estimated_completion`, `labor_hours`, `crew_assigned` and `contract_signed_at` are
+  created by **no scanned migration** — only by `app/api/migrate/route.ts`, which now
+  returns 423 Locked. If they are absent in production, OperationsTab's 13-stage picker
+  silently degrades to the 5-value legacy `status`, and the canonical home recommended
+  for `permitStatus` may have no `permit_submitted` state to land in. **Check before
+  acting on the `permitStatus` recommendation:**
+  `SELECT column_name FROM information_schema.columns WHERE table_name='projects' AND column_name IN ('project_status','homeowner_stage','install_date');`
+
 ---
 
 ## R6 — A geocoder silently overwrites a coordinate a human set
