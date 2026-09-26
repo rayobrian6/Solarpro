@@ -960,11 +960,47 @@ async function executeMigrationInTransaction(
   dryRun: boolean,
 ): Promise<{ success: boolean; error?: string; errorCode?: string }> {
   if (dryRun) {
-    // Dry-run: validate that the file can be split, but don't execute.
+    // ══ 🚨 A DRY-RUN THAT COULD NOT FAIL, USED AS PROOF ════════════════════
+    //
+    // This branch read the file, split it, and then returned `{ success: true }`
+    // from BOTH arms — the `statements.length === 0` check decided nothing, and
+    // the split result was discarded. It never contacted the database and, more
+    // importantly, never applied the STATIC refusals the real path applies twenty
+    // lines below. So a dry-run "passed" for a MANUAL_REVIEW file and for a
+    // FORBIDDEN one (CREATE INDEX CONCURRENTLY and friends) that the very next
+    // real run would refuse outright.
+    //
+    // `app/api/admin/migrations/route.ts` calls this before every targeted
+    // execution under the comment "forced dry-run first (proof, not execution)".
+    // It was proof of nothing.
+    //
+    // A dry-run still may not execute SQL — that is what makes it dry. But it can
+    // and must answer everything answerable WITHOUT a database, so its verdict
+    // means the same thing the real run's would. Anything it cannot determine
+    // without executing (SQL validity, constraint violations, whether the schema
+    // is in the expected shape) it still cannot determine, and does not claim to.
     const sqlContent = readFileSync(file.fullPath, 'utf-8');
     const statements = splitSqlStatements(sqlContent);
     if (statements.length === 0) {
       return { success: true };
+    }
+    if (file.transactionMode === 'MANUAL_REVIEW') {
+      return {
+        success: false,
+        errorCode: 'TRANSACTION_MODE_MANUAL_REVIEW',
+        error: `Migration '${file.identifier}' has transaction mode MANUAL_REVIEW. `
+          + `Its transaction compatibility cannot be automatically determined and `
+          + `requires manual review before execution.`,
+      };
+    }
+    if (file.transactionMode === 'FORBIDDEN') {
+      return {
+        success: false,
+        errorCode: 'MIGRATION_NON_TRANSACTIONAL_EXECUTION_UNSUPPORTED',
+        error: `Migration '${file.identifier}' contains transaction-incompatible `
+          + `statements, so it cannot be executed atomically. A real run would refuse `
+          + `it for the same reason.`,
+      };
     }
     return { success: true };
   }

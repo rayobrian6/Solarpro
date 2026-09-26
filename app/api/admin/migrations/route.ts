@@ -775,7 +775,30 @@ export async function POST(req: NextRequest) {
       const permit: TargetedExecutionPermit = { identifier, issuedAtMs: Date.now(), ttlMs: 3 * 60 * 1000, reason };
 
       // Canonical runner: forced dry-run first (proof, not execution), then run.
+      //
+      // 🚨 AND THE DRY-RUN'S VERDICT IS NOW READ. It was collected here and used
+      // in exactly one place — an audit-event detail — while the real run
+      // proceeded unconditionally. Presence is not consumption: a "forced dry-run
+      // first" that nothing branches on is a ritual, not a gate. Combined with a
+      // dry-run that returned success from both of its arms, this step proved
+      // nothing at all while reading, in code and in its own comment, as the
+      // safety check before the most dangerous operation this product performs.
+      //
+      // Refusing here can only PREVENT an execution, never cause one, and the
+      // dry-run applies exactly the static refusals the real run would apply — so
+      // this cannot reject anything that would otherwise have succeeded. It simply
+      // stops asking the database to prove what the file already told us.
       const dryRunResult = await runSinglePendingMigration(identifier, { dryRun: true, authorization: auth, targetedPermit: permit } as RunSingleMigrationOptions);
+      if (dryRunResult.status === 'failed') {
+        return NextResponse.json({
+          success: false,
+          error: `Dry-run refused migration ${identifier}: `
+            + `${dryRunResult.errorSummary ?? dryRunResult.errorCode ?? 'no detail'}. Nothing was executed.`,
+          errorCode: dryRunResult.errorCode ?? 'DRY_RUN_REFUSED',
+          identifier,
+          dryRun: { status: dryRunResult.status, errorCode: dryRunResult.errorCode },
+        }, { status: 409 });
+      }
       const execution = await runSinglePendingMigration(identifier, { dryRun: false, authorization: auth, targetedPermit: permit } as RunSingleMigrationOptions);
 
       // Success from the LEDGER + run-history + the ACTUAL tables — never HTTP.

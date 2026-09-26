@@ -350,3 +350,47 @@ describe('🚨 a run interrupted between starting a migration and recording its 
       .toMatch(/fatalErrors:\s*\[\s*_runningRefusal\s*\]/);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 6. THE DRY-RUN THAT COULD NOT FAIL
+// ═══════════════════════════════════════════════════════════════════════════
+describe('🚨 a forced dry-run must be able to refuse', () => {
+  // `app/api/admin/migrations/route.ts` runs a dry-run before every targeted
+  // execution, under the comment "forced dry-run first (proof, not execution)".
+  // The dry-run branch returned `{ success: true }` from BOTH of its arms, never
+  // contacted the database, and never applied the static refusals the real path
+  // applies — so it "passed" for exactly the files a real run would refuse. And
+  // the route collected its verdict into an audit-event detail and branched on it
+  // nowhere, so the real run proceeded regardless. Two layers of nothing.
+  const srcRunner = () => readFileSync(join(ROOT, 'lib', 'migrations', 'runner.ts'), 'utf8');
+  const srcRoute = () => readFileSync(join(ROOT, 'app', 'api', 'admin', 'migrations', 'route.ts'), 'utf8');
+
+  it('the dry-run applies the same transaction-mode refusals the real run applies', () => {
+    // SOURCE GUARD, said plainly: the dry-run branch takes no injectable
+    // dependency and reads the file from disk, so it cannot be driven with a
+    // synthetic FORBIDDEN file without a manifest fixture.
+    const src = srcRunner();
+    const at = src.indexOf('if (dryRun) {');
+    expect(at, 'the dry-run branch is gone').toBeGreaterThan(-1);
+    const branch = src.slice(at, src.indexOf('const sql = getRawSql();', at));
+    expect(branch, 'the dry-run still cannot refuse a MANUAL_REVIEW file')
+      .toMatch(/MANUAL_REVIEW/);
+    expect(branch, 'the dry-run still cannot refuse a FORBIDDEN file')
+      .toMatch(/FORBIDDEN/);
+    expect(branch, 'the dry-run never returns a failure')
+      .toMatch(/success:\s*false/);
+  });
+
+  it('🚨 and the route BRANCHES on the dry-run verdict before executing', () => {
+    const src = srcRoute();
+    const dry = src.indexOf('const dryRunResult = await runSinglePendingMigration');
+    const real = src.indexOf('const execution = await runSinglePendingMigration', dry);
+    expect(dry).toBeGreaterThan(-1);
+    expect(real).toBeGreaterThan(dry);
+    const between = src.slice(dry, real);
+    expect(between, 'the dry-run verdict is collected and never branched on — the real run proceeds regardless')
+      .toMatch(/if\s*\(\s*dryRunResult\.status\s*===\s*'failed'\s*\)/);
+    expect(between, 'the refusal branch does not return, so execution continues anyway')
+      .toMatch(/return NextResponse\.json/);
+  });
+});

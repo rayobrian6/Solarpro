@@ -80,6 +80,31 @@ function readSrc(rel: string): string {
 }
 
 /**
+ * 🚨 THE RUNNER'S EXECUTION PATH ONLY — everything from `const sql = getRawSql();`.
+ *
+ * The FORBIDDEN-mode guards below used to slice from the FIRST occurrence of
+ * `file.transactionMode === 'FORBIDDEN'` in runner.ts. That was fine while the only
+ * occurrence was in the execution path — and it broke the moment the DRY-RUN branch
+ * was taught to apply the same refusals. (It previously returned `{ success: true }`
+ * from BOTH arms, so a forced dry-run "passed" for exactly the files a real run
+ * refuses.) The new, earlier occurrence silently re-aimed every one of those
+ * assertions at the dry-run block.
+ *
+ * One of them then PASSED VACUOUSLY: "FORBIDDEN block does NOT execute SQL statements
+ * individually" is trivially true of a branch that executes nothing at all. The
+ * others failed loudly, which is the only reason this was noticed.
+ *
+ * Anchoring on the execution path is what these guards always meant, and nothing
+ * added above it can move them again.
+ */
+function executionPathOf(runnerSrc: string): string {
+  const at = runnerSrc.indexOf('const sql = getRawSql();');
+  expect(at, 'the runner execution path moved — the FORBIDDEN guards are now blind')
+    .toBeGreaterThan(-1);
+  return runnerSrc.slice(at);
+}
+
+/**
  * Recursively collect all .ts (and .tsx) files under a directory, excluding
  * node_modules. Used for whole-codebase invariant checks.
  */
@@ -2072,7 +2097,7 @@ describe('Phase 1A.2: Non-transactional blocking (MIGRATION-GOV-12)', () => {
   it('FORBIDDEN block does NOT execute SQL statements individually', () => {
     // The old behavior split SQL on ';' and ran each statement. The new
     // behavior must return an error immediately without executing anything.
-    const forbiddenSection = runnerSrc.split("file.transactionMode === 'FORBIDDEN'")[1]
+    const forbiddenSection = executionPathOf(runnerSrc).split("file.transactionMode === 'FORBIDDEN'")[1]
       ?.split('// ── REQUIRED mode')[0] ?? '';
     expect(forbiddenSection).toContain('return {');
     expect(forbiddenSection).toContain('success: false');
@@ -2082,21 +2107,21 @@ describe('Phase 1A.2: Non-transactional blocking (MIGRATION-GOV-12)', () => {
   });
 
   it('FORBIDDEN block emits migration.execution_blocked_non_transactional audit event', () => {
-    const forbiddenSection = runnerSrc.split("file.transactionMode === 'FORBIDDEN'")[1]
+    const forbiddenSection = executionPathOf(runnerSrc).split("file.transactionMode === 'FORBIDDEN'")[1]
       ?.split('// ── REQUIRED mode')[0] ?? '';
     expect(forbiddenSection).toContain('migration.execution_blocked_non_transactional');
     expect(forbiddenSection).toContain('emitAuditEvent');
   });
 
   it('FORBIDDEN block includes incompatibleStatements in audit details', () => {
-    const forbiddenSection = runnerSrc.split("file.transactionMode === 'FORBIDDEN'")[1]
+    const forbiddenSection = executionPathOf(runnerSrc).split("file.transactionMode === 'FORBIDDEN'")[1]
       ?.split('// ── REQUIRED mode')[0] ?? '';
     expect(forbiddenSection).toContain('incompatibleStatements');
     expect(forbiddenSection).toContain('detectTransactionMode');
   });
 
   it('FORBIDDEN block includes transactionMode and reason in audit details', () => {
-    const forbiddenSection = runnerSrc.split("file.transactionMode === 'FORBIDDEN'")[1]
+    const forbiddenSection = executionPathOf(runnerSrc).split("file.transactionMode === 'FORBIDDEN'")[1]
       ?.split('// ── REQUIRED mode')[0] ?? '';
     expect(forbiddenSection).toContain("transactionMode: 'FORBIDDEN'");
     expect(forbiddenSection).toContain('reason');
@@ -2105,7 +2130,7 @@ describe('Phase 1A.2: Non-transactional blocking (MIGRATION-GOV-12)', () => {
   it('MIGRATION_NON_TRANSACTIONAL_EXECUTION_UNSUPPORTED error references MIGRATION-GOV-12', () => {
     // The GOV-12 reference is in the error message string within the FORBIDDEN
     // block, not on the same line as the error code.
-    const forbiddenSection = runnerSrc.split("file.transactionMode === 'FORBIDDEN'")[1]
+    const forbiddenSection = executionPathOf(runnerSrc).split("file.transactionMode === 'FORBIDDEN'")[1]
       ?.split('// ── REQUIRED mode')[0] ?? '';
     expect(forbiddenSection).toContain('MIGRATION_NON_TRANSACTIONAL_EXECUTION_UNSUPPORTED');
     expect(forbiddenSection).toContain('MIGRATION-GOV-12');
