@@ -17,6 +17,7 @@ Last updated: 2026-09-25.
 | **R2** | How approximate should an UNCLAIMED lead's map pin be? Currently house-level | The marketplace pin only |
 | **R4** | Four milestone checkboxes are POSTed and silently discarded — the product says it recorded something it did not | Persisting those four |
 | **R10** | R4's shape on three more fields — including a five-state **Permit Status** dropdown nothing reads, while the real issue state lives elsewhere | Those three fields only |
+| **R11** | 🚨 Exposure B has TWO published Kz values (Case 1 0.70 / Case 2 0.57) and the repo uses BOTH under the same citation, on the same sheet — a 23 % split, and possibly 18.6 % low on most of the pipeline | Nothing — the value is unchanged |
 | **R9** | 🚨 The permit's wind analysis was hardcoded to a 15 ft building — **fixed**, but the fix raises loads 10–22 %, and prior PE approvals were granted on the lower number | Nothing — the decision is what to do about packages already approved |
 | **R3** | Two engineering repairs would move the permit digest, which retires live PE approvals | Those two only |
 | **R6** | A geocoder overwrites a coordinate a human deliberately set — **measured at 2.79 km and 28 m** — and that coordinate decides which property owns the design | Nothing, but it has been silently breaking things |
@@ -221,6 +222,20 @@ the principle.
   `metadata.stories`. Correction to the original note: the row was never *blank*,
   it was ABSENT — `infoRow` drops an empty value — which is why a missing field
   read as no field at all.
+
+---
+
+## R11 — 🚨 Exposure B has TWO published Kz values and the repo uses both, on the same sheet
+
+| | |
+|---|---|
+| **Severity** | 🚨 HIGH — a 23 % split on a coefficient a plan reviewer reads off a stamped page, and possibly an 18.6 % understatement on most of the pipeline |
+| **The fact** | ASCE 7-22 Table 26.10-1's Exposure B **0–15 ft** entry carries **both** 0.70 (Case 1) and 0.57 (Case 2). The table's note assigns Case 1 to **all components and cladding** — and to the MWFRS of low-rise buildings per Fig. 28.3-1 — and Case 2 to all other MWFRS. They converge at 0.70 by 30 ft, so it only matters for a single-storey roof, which is most of this pipeline. |
+| **What the repo does** | Uses **both**, under the same citation, in four places. `lib/structural/asce7Wind.ts` and `lib/structural-engine-v4.ts` → **0.57**. `lib/structural-calc.ts` and `lib/structural-engine-v2.ts` → **0.70**, and both are LIVE (`rules-engine`, `siteSurvey/engineeringIntegration`, `structural-resolver`). **No copy anywhere records which case it selected.** |
+| **🚨 Decision required** | Which case governs rooftop PV attachment. There is a strong reading that it is **Case 1 (0.70)** — rooftop PV attachment is a components-and-cladding check, and `asce7Wind.ts`'s own note already says panels are "evaluated with the roof's own components-and-cladding coefficients (Ch. 30)". |
+| **Why I did not just change it** | If Case 1 governs, every Exposure B design understates qz — and therefore net uplift, uplift per attachment, the PV-4C mount schedule and the racking BOM — by **18.6 %**. Correcting it raises loads across the bulk of the pipeline, moves the permit digest and retires live PE approvals. Identical consequences to R9, and it is an engineering ruling, not a transcription error. The selection is now stated explicitly in the code instead of being silent. |
+| **Blocked** | Nothing. The value is unchanged. |
+| **Related, already fixed** | The same table went **FLAT at 40 ft** in both copies (`f800c971`) — that one WAS a plain defect, wrong by 4–11 % in the unsafe direction, and it only became reachable because the mean-roof-height repair started feeding it real heights up to 60 ft. |
 
 ---
 

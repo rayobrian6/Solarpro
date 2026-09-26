@@ -86,7 +86,33 @@ export interface VelocityPressureRecord {
 export function velocityPressureCoefficient(heightFt: number, exposure: WindExposureCat): number {
   const h = Math.max(15, Number.isFinite(heightFt) ? heightFt : 15);
 
-  /** Table 26.10-1 rows: [height ft, B, C, D]. */
+  // ── 🚨 EXPOSURE B AT 0–15 FT HAS TWO PUBLISHED VALUES, AND THIS PICKS ONE ──
+  //
+  // Table 26.10-1's Exposure B 0–15 ft entry carries BOTH 0.70 (Case 1) and 0.57
+  // (Case 2). The table's own note assigns Case 1 to all components and cladding —
+  // and to the MWFRS of low-rise buildings per Fig. 28.3-1 — and Case 2 to all other
+  // MWFRS. The two columns converge at 0.70 by 30 ft, so the choice only matters for
+  // a single-storey roof, which is most of this pipeline.
+  //
+  // This table implements CASE 2 (0.57). That has never been recorded anywhere: no
+  // copy in the repository mentions Case 1 or Case 2 or says which it selected.
+  //
+  // 🚨 AND THE REPOSITORY DOES NOT AGREE WITH ITSELF. `lib/structural-calc.ts` and
+  // `lib/structural-engine-v2.ts` use 0.70 under the SAME citation, and both are
+  // live — `structural-calc` through `lib/rules-engine.ts`,
+  // `lib/siteSurvey/engineeringIntegration.ts` and `lib/structural-resolver.ts`. So
+  // one package can print two Exposure B velocity pressures that differ by 23 % on a
+  // coefficient a plan reviewer reads off the sheet.
+  //
+  // THE VALUE IS NOT CHANGED HERE, deliberately. If Case 1 governs — and rooftop PV
+  // attachment is a components-and-cladding check, which this file's own Ch. 30 note
+  // already says — then every Exposure B design understates qz by 18.6 %, and
+  // correcting it raises loads on the bulk of the pipeline, moves the permit digest
+  // and retires live PE approvals. That is an engineering ruling with the same
+  // consequences as the mean-roof-height correction, and it belongs to the engineer
+  // of record, not to this function. Recorded as NEEDS-RAY R11.
+
+  /** Table 26.10-1 rows: [height ft, B (Case 2), C, D]. */
   const TABLE: ReadonlyArray<readonly [number, number, number, number]> = [
     [15, 0.57, 0.85, 1.03],
     [20, 0.62, 0.90, 1.08],
