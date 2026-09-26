@@ -68,6 +68,11 @@ export interface ReviewCoverageDecision {
   invalidatedByLedger: boolean;
   /** every fact that refused, in order. Empty ⇔ `covers`. */
   refusals: string[];
+  /** R9 — an approval that covers an EARLIER revision, when one exists. Never a
+   *  clearance: it accompanies `covers: false` and exists so the package can say
+   *  RE-REVIEW REQUIRED with the engineer, the date and both digests, instead of
+   *  the sentence a never-reviewed design gets. */
+  supersededApproval?: import('@/lib/engineeringReview/types').SupersededApproval | null;
   /** one sentence for the artifact / the gate detail. */
   basis: string;
 }
@@ -147,6 +152,34 @@ export function decideReviewCoverage(input: ReviewCoverageDecisionInput): Review
     return refuse(`the engineering-review store could not be read (${c.storeError ?? 'no detail'}) — an unreadable store never satisfies a professional-release gate`);
   }
   if (!c.covered) {
+    // ── R9 — "NEVER REVIEWED" AND "REVIEWED, THEN THE DESIGN CHANGED" ─────────
+    // These are different facts and this branch used to give them the same
+    // sentence. The digest-mismatch branch further down reads well but is
+    // UNREACHABLE from the store path: `findActiveApproval` matches an exact
+    // digest, so `covered === true` already implies the digests agree, and any
+    // approval of an earlier revision arrives here as a plain "not covered".
+    //
+    // So the honest answer is assembled here, from the provenance the store now
+    // carries. It grants nothing — `refuse()` fixes covers:false and
+    // signatureSealSatisfied:false — it only stops the package claiming that
+    // nobody ever looked at it.
+    const s = c.supersededApproval;
+    if (s) {
+      const who = [s.reviewerName, s.reviewerLicense && `licence ${s.reviewerLicense}`, s.reviewerLicenseState]
+        .filter(Boolean).join(', ');
+      refusals.push('the approval on file covers an earlier revision of this design — RE-REVIEW REQUIRED');
+      return {
+        covers: false, signatureSealSatisfied: false, reviewedDigest: s.approvedDigest,
+        invalidatedByLedger: false, refusals, supersededApproval: s,
+        basis:
+          `RE-REVIEW REQUIRED. This design was approved by ${who || 'an engineer of record'}`
+          + `${s.approvedAtIso ? ` on ${s.approvedAtIso}` : ''}, for design digest `
+          + `${s.approvedDigest.slice(0, 12)}…. The design has changed since — this package is `
+          + `${s.currentDigest.slice(0, 12)}… — so that approval does not cover it. The approval `
+          + `is retained on record (${s.recordId}) and has NOT been withdrawn; it simply no longer `
+          + `describes this calculation.`,
+      };
+    }
     refusals.push('no active approved review record');
     return refuse(c.basis || 'no active approved engineering-review record');
   }

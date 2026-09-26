@@ -214,7 +214,13 @@ export const OPERATIONAL_AUTHORITY_FIELDS: Readonly<Record<string, readonly stri
   'structuralDocumentRetrieval.attempts[]': [],
   projectPersonnel: ['storeError'],
   'environmentalRetrieval.registryArchival': ['failure', 'operatorAction'],
-  engineeringReview: ['storeError'],
+  /** R9 — `supersededApproval` is the provenance of an approval that covers an
+   *  EARLIER revision: who sealed it, when, and which digest. It is a fact about the
+   *  REVIEW LEDGER, not about the design, and it appears only for projects that have
+   *  ever been approved — so leaving it in the digested bag would make one unchanged
+   *  design hash differently before and after an unrelated approval was recorded.
+   *  The real value travels on `resolverAttemptEvidence`, like `storeError`. */
+  engineeringReview: ['storeError', 'supersededApproval'],
   /** the per-model registry lookup carries the RAW `read.error` on failure
    *  (resolvers.ts, module-datasheet binding). `boundDocumentId` — the accepted
    *  document identity — is NOT operational and stays in the digest. */
@@ -413,6 +419,7 @@ export function buildResolverAttemptEvidence(
     if (env && env.registryArchival) authorityOperational.environmentalRegistryArchival = env.registryArchival;
     const er = authorityBag.engineeringReview as Rec | null | undefined;
     if (er && er.storeError != null) authorityOperational.engineeringReviewStoreError = er.storeError;
+    if (er && er.supersededApproval != null) authorityOperational.engineeringReviewSupersededApproval = er.supersededApproval;
     const pla = authorityBag.projectLegalAuthority as Rec | null | undefined;
     if (pla && Array.isArray(pla.chainFailures) && pla.chainFailures.length) {
       authorityOperational.projectLegalAuthorityChainFailures = pla.chainFailures;

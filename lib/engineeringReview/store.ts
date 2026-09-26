@@ -121,6 +121,38 @@ export async function findActiveApproval(
 }
 
 /**
+ * R9 — the most recent ACTIVE approval for a project, WHATEVER digest it names.
+ *
+ * 🚨 THIS IS NOT A COVERAGE READ AND MUST NEVER BE USED AS ONE. Coverage is
+ * `findActiveApproval`, which matches an exact digest and is the only function
+ * allowed to answer "is this design approved". This one answers a strictly
+ * different question — "was an EARLIER revision of this design approved, and by
+ * whom" — so that a package whose design has moved on can say RE-REVIEW REQUIRED
+ * with the provenance attached, instead of reporting itself the way a design no
+ * engineer has ever opened reports itself.
+ *
+ * Deliberately keeps `superseded_at IS NULL`: a record an operator explicitly
+ * superseded is not the approval this design moved past, it is one that was
+ * withdrawn, and resurrecting it in a refusal message would misattribute it to a
+ * reviewer who had already stepped away from it.
+ */
+export async function findMostRecentApproval(
+  projectId: string,
+): Promise<EngineeringReviewRecord | null> {
+  const sql = await getDbReady();
+  const rows = await sql`
+    SELECT * FROM engineering_review_records
+    WHERE project_id = ${projectId}
+      AND decision = 'approved'
+      AND superseded_at IS NULL
+    ORDER BY decided_at DESC
+    LIMIT 1
+  `;
+  const r = (rows as any[])[0];
+  return r ? rowToReview(r) : null;
+}
+
+/**
  * THE resolver-facing read. PURE about its verdict: coverage requires an ACTIVE
  * 'approved' record whose digest matches EXACTLY and whose recorded role is
  * licensed. A store that cannot be read is `storeUnavailable`, never covered.
@@ -140,8 +172,34 @@ export async function resolveEngineeringReviewCoverage(
   }
   const rec = await findActiveApproval(projectId, snapshotDigest);
   if (!rec) {
+    // 🚨 R9 — BEFORE ANSWERING "NO APPROVAL", ASK WHETHER THERE WAS ONE.
+    //
+    // This used to return the bare sentence below, which is the SAME answer a
+    // never-reviewed design gets. So a package whose structural basis had been
+    // corrected — new qz, new uplift, new attachment schedule, therefore a new
+    // design digest — reported itself indistinguishably from one no engineer had
+    // ever looked at. The approval row was still there; nothing asked for it.
+    //
+    // This read NEVER grants coverage. `uncoveredReview` fixes `covered: false`,
+    // and the extra fact only makes the refusal honest: approved, by whom, when,
+    // of which digest, and superseded by this one.
+    const prior = await findMostRecentApproval(projectId);
     return uncoveredReview(
       `no active approved engineering-review record covers snapshot digest ${snapshotDigest.slice(0, 12)}…`,
+      prior
+        ? {
+            supersededApproval: {
+              recordId: prior.id,
+              reviewerName: prior.reviewerName ?? null,
+              reviewerRole: prior.reviewerRole ?? null,
+              reviewerLicense: prior.reviewerLicense ?? null,
+              reviewerLicenseState: prior.reviewerLicenseState ?? null,
+              approvedAtIso: prior.decidedAt ?? null,
+              approvedDigest: prior.snapshotDigest,
+              currentDigest: snapshotDigest.toLowerCase(),
+            },
+          }
+        : undefined,
     );
   }
   if (!isLicensedReviewRole(rec.reviewerRole)) {

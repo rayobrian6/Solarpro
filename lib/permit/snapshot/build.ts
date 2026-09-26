@@ -39,6 +39,7 @@ import { buildConductorAuthority } from '../utils/conductorAuthority';
 import { buildIntegratedEquipment, planLandingDevice, permitStandaloneGateway } from '../utils/integratedEquipment';
 import { interconnectionRuleOf, permitInterconnectionToken } from '../utils/interconnectionRule';
 import { resolveDesignMetering } from '@/lib/equipment/designMetering';
+import { buildHybridPermitMetering } from '../utils/sldAdapter';
 import { utilityDisplayName, resolveBatteryCapacity } from '../utils/helpers';   // §15(b) — human utility name, never a slug
 // resolveBatteryCapacity is THE permit-wide ESS capacity authority — the same
 // function PV-1, PV-5 and the SLD equipment schedule print from.
@@ -3094,15 +3095,28 @@ export function buildPermitDesignSnapshot(
       // A designer-RECORDED consumption-CT location changes what E-1 draws, so
       // it moves THIS project's digest. With no record the key is undefined
       // (dropped by canonicalJson) and the digest is unchanged.
-      // Only when E-1 actually DRAWS those CTs: a single-lane design whose
-      // combiner meters, through the same composer the sheets use. A recorded
-      // value on a string / hybrid / non-metering design asserts nothing.
+      // Only when E-1 actually DRAWS those CTs: a design whose combiner meters,
+      // through the same composer the sheets use. A recorded value on a string /
+      // non-metering design asserts nothing.
       // `gatewayPlacement` rides along ONLY when the plan has it: a standalone
       // gateway is not an integrated one, and without it the composer drops the
       // consumption CTs E-1 draws — so a recorded location would go unrecorded.
       // Every other design hands the composer the identical slice.
+      // A HYBRID now draws CTs too (Ray, 2026-09-26) — on its primary metering
+      // lane, through buildHybridPermitMetering, the same answer E-1 draws and
+      // PV-4A states. The rule is the single-lane one, unchanged: recorded ONLY
+      // when the designer recorded a location AND that lane draws the
+      // consumption CTs. Every hybrid with no record keeps the key absent, so no
+      // existing hybrid digest moves.
       meteringTopology: (() => {
-        if (auth.isHybrid || !isMicro) return undefined;
+        if (auth.isHybrid) {
+          const met = buildHybridPermitMetering(input, cad, auth)?.primary?.metering;
+          const c = met?.drawing?.consumption;
+          if (!met || met.placement.basis !== 'designer-recorded' || !c) return undefined;
+          return { consumptionCtLocation: c.location, boundary: met.placement.boundary, mode: c.mode,
+                   basis: 'designer-recorded' as const };
+        }
+        if (!isMicro) return undefined;
         const met = resolveDesignMetering({
           plan: {
             brains: bos.brains ?? bos.devices[0] ?? null,
@@ -3523,9 +3537,24 @@ export function buildPermitDesignSnapshot(
           role: _reviewCoverage?.reviewerRole,
         } as never,
       };
-    } else if (_reviewEntry && _reviewCoverage && !_reviewCoverage.storeUnavailable && _reviewCoverage.covered) {
+    } else if (
+      _reviewEntry && _reviewCoverage && !_reviewCoverage.storeUnavailable
+      && (_reviewCoverage.covered || _decision.supersededApproval)
+    ) {
       // A record EXISTS but does not release this package. Say exactly why —
       // "pending" would hide a stale or invalidated approval from the reviewer.
+      //
+      // 🚨 R9 — THIS GUARD COULD NOT FIRE FOR THE CASE IT WAS WRITTEN FOR.
+      // The condition was `_reviewCoverage.covered` alone. `covered` is true only
+      // when the store matched an approval of THIS EXACT digest, so this branch
+      // reached only the narrow cases where such a record failed a LATER test
+      // (unlicensed role, no scope, incomplete identity, ledger invalidation).
+      // The commonest stale case — an engineer approved the design and then the
+      // design changed, which is precisely what the structural-basis correction
+      // does — leaves `covered` FALSE, so the explanation stayed the PASS-1
+      // neutral "pending engineering review" text. A sealed approval on file
+      // became invisible, and the package read as though nobody had ever
+      // reviewed it. That is the exact outcome the comment above forbids.
       (_reviewEntry as { explanation: string }).explanation =
         `Engineering review does not cover this package: ${_decision.basis}`;
     }

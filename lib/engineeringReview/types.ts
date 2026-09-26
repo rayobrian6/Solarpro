@@ -158,12 +158,65 @@ export interface EngineeringReviewCoverage {
    *  DIFFERENT fact from "no approval exists", and never a clearance. */
   storeUnavailable: boolean;
   storeError: string | null;
+  // ── R9 — A PRIOR APPROVAL THAT THE DESIGN HAS MOVED ON FROM ───────────────
+  // 🚨 "NOT APPROVED" AND "APPROVED, THEN THE CALCULATION CHANGED" ARE DIFFERENT
+  // FACTS, AND THE PRODUCT USED TO REPORT THEM IDENTICALLY.
+  //
+  // An approval names a design digest. Change anything the design digest covers
+  // — and the structural-basis correction that stopped the permit hardcoding a
+  // 15 ft building changes qz, net uplift and the attachment schedule — and
+  // `findActiveApproval` matches nothing, so the package fell back to the same
+  // "no active approved record" sentence a never-reviewed design gets. The
+  // engineer who sealed it, the date they sealed it, and the digest they
+  // accepted responsibility for all disappeared from the answer.
+  //
+  // That is a PROVENANCE failure, not a badge: the record still exists in
+  // `engineering_review_records` and is never deleted, but nothing surfaced it,
+  // so no one could tell "nobody has reviewed this" from "a PE approved an
+  // earlier revision and this one needs re-review".
+  //
+  // Populated ONLY when coverage is refused and a prior approved record exists
+  // for the project. It NEVER grants coverage — `covered` stays false — and it
+  // is ELIDED from the digested authority projection (see
+  // elideOperationalAuthority), with the real value kept on
+  // `resolverAttemptEvidence`, exactly as `storeError` is handled.
+  //
+  // OPTIONAL, and set ONLY when one exists — that is deliberate and it is a digest
+  // property, not a style choice. `JSON.stringify({a: null})` KEEPS the key while
+  // `{a: undefined}` DROPS it, and this object is projected into
+  // `snapshot.resolutionAuthority`, which IS digested. A `null` leaf here would
+  // therefore alter every package that carries a coverage record; an absent key
+  // alters none of them.
+  supersededApproval?: SupersededApproval | null;
   /** why coverage is what it is, in one sentence. */
   basis: string;
 }
 
+/**
+ * The provenance of an approval that no longer covers the current design.
+ *
+ * Every field here answers a question an operator or a reviewing engineer will
+ * ask about a package that says RE-REVIEW REQUIRED: who accepted the earlier
+ * revision, under what licence, when, and which two digests are in play.
+ */
+export interface SupersededApproval {
+  /** the `engineering_review_records` row — never deleted, always citable. */
+  recordId: string;
+  reviewerName: string | null;
+  reviewerRole: LicensedReviewRole | null;
+  reviewerLicense: string | null;
+  reviewerLicenseState: string | null;
+  /** when they approved it. */
+  approvedAtIso: string | null;
+  /** the design digest they accepted responsibility for. */
+  approvedDigest: string;
+  /** the design digest this build produced — what they have NOT reviewed. */
+  currentDigest: string;
+}
+
 export function uncoveredReview(basis: string, opts?: {
   storeUnavailable?: boolean; storeError?: string | null;
+  supersededApproval?: SupersededApproval | null;
 }): EngineeringReviewCoverage {
   return {
     covered: false, reviewedDigest: null, approvedAtIso: null,
@@ -173,6 +226,9 @@ export function uncoveredReview(basis: string, opts?: {
     sealLicenseState: null, sealVerified: false,
     storeUnavailable: opts?.storeUnavailable ?? false,
     storeError: opts?.storeError ?? null,
+    // Spread, never `?? null` — see the field's own note: an absent key is dropped
+    // by JSON.stringify, a null one is not, and this lands in a digested container.
+    ...(opts?.supersededApproval ? { supersededApproval: opts.supersededApproval } : {}),
     basis,
   };
 }
