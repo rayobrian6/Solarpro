@@ -77,8 +77,11 @@ export function recalculateRouteVoltageDrop(input: VoltageDropRecalcInput): Volt
 
   const pct = calcVoltageDrop(currentA as number, lengthFt as number, gauge as string, volts as number);
   if (!Number.isFinite(pct) || pct <= 0) {
-    // calcVoltageDrop returns 0 for an unrecognised gauge, which is a REFUSAL
-    // wearing the shape of a perfect result. Treat it as indeterminate.
+    // calcVoltageDrop now returns NULL for an unrecognised gauge, and this guard
+    // catches it because Number.isFinite(null) is false. It used to return 0 — a
+    // REFUSAL wearing the shape of a perfect result — which this site caught only by
+    // the `pct <= 0` half of the condition. lib/wire-autosizer.ts had no such guard
+    // and passed the conductor. Keep both halves.
     return {
       voltageDropPct: null, currentBasis, currentA, lengthFt, conductorGauge: gauge, systemVoltage: volts,
       derivation: `voltage drop NOT recalculated — the conductor specification for '${gauge}' yielded no resistance, `

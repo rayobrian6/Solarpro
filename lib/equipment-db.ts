@@ -2491,10 +2491,24 @@ export const CONDUCTORS: Conductor[] = [
   { id: 'awg8-thwn2',  gauge: '#8 AWG',  type: 'THWN-2', ampacity_60c: 40, ampacity_75c: 50, ampacity_90c: 55, dcResistance: 0.778, acResistance: 0.778, outerDiameter: 0.271 },
   { id: 'awg6-thwn2',  gauge: '#6 AWG',  type: 'THWN-2', ampacity_60c: 55, ampacity_75c: 65, ampacity_90c: 75, dcResistance: 0.491, acResistance: 0.491, outerDiameter: 0.322 },
   { id: 'awg4-thwn2',  gauge: '#4 AWG',  type: 'THWN-2', ampacity_60c: 70, ampacity_75c: 85, ampacity_90c: 95, dcResistance: 0.308, acResistance: 0.308, outerDiameter: 0.384 },
+  // 🚨 #3 AWG WAS MISSING from this roster while being a selectable gauge elsewhere,
+  // so `getConductorSpec('#3 AWG')` returned null and `calcVoltageDrop` answered 0 —
+  // a perfect voltage drop on a conductor whose resistance was never looked up.
+  // Resistance from NEC Ch.9 Table 8, ampacity from Table 310.16 (75 °C copper),
+  // outer diameter derived from the Table 5 area already in lib/nec/chapter9.ts
+  // (0.0973 in² ⇒ d = 2√(A/π) = 0.352 in).
+  { id: 'awg3-thwn2',  gauge: '#3 AWG',  type: 'THWN-2', ampacity_60c: 85, ampacity_75c: 100, ampacity_90c: 110, dcResistance: 0.245, acResistance: 0.245, outerDiameter: 0.352 },
   { id: 'awg2-thwn2',  gauge: '#2 AWG',  type: 'THWN-2', ampacity_60c: 95, ampacity_75c: 115, ampacity_90c: 130, dcResistance: 0.194, acResistance: 0.194, outerDiameter: 0.450 },
   { id: 'awg1-thwn2',  gauge: '#1 AWG',  type: 'THWN-2', ampacity_60c: 110, ampacity_75c: 130, ampacity_90c: 150, dcResistance: 0.154, acResistance: 0.154, outerDiameter: 0.495 },
   { id: 'awg1_0-thwn2', gauge: '#1/0 AWG', type: 'THWN-2', ampacity_60c: 125, ampacity_75c: 150, ampacity_90c: 170, dcResistance: 0.122, acResistance: 0.122, outerDiameter: 0.554 },
   { id: 'awg2_0-thwn2', gauge: '#2/0 AWG', type: 'THWN-2', ampacity_60c: 145, ampacity_75c: 175, ampacity_90c: 195, dcResistance: 0.0967, acResistance: 0.0967, outerDiameter: 0.618 },
+  // 🚨 #3/0 AND #4/0 WERE MISSING TOO, and they are the long service feeders this
+  // product is built for. `lib/wire-autosizer.ts` could not search past #2/0 and fell
+  // through to a hard-coded '#2/0 AWG' carrying `ampacityPass: false,
+  // voltageDropPass: false` — a conductor reported as SELECTED while flagged FAILED.
+  // Diameters from the Table 5 areas in chapter9.ts (0.2679 ⇒ 0.584, 0.3237 ⇒ 0.642).
+  { id: 'awg3_0-thwn2', gauge: '#3/0 AWG', type: 'THWN-2', ampacity_60c: 165, ampacity_75c: 200, ampacity_90c: 225, dcResistance: 0.0766, acResistance: 0.0766, outerDiameter: 0.584 },
+  { id: 'awg4_0-thwn2', gauge: '#4/0 AWG', type: 'THWN-2', ampacity_60c: 195, ampacity_75c: 230, ampacity_90c: 260, dcResistance: 0.0608, acResistance: 0.0608, outerDiameter: 0.642 },
 ];
 
 // EMT conduit inner diameters and fill areas (NEC Table 4)

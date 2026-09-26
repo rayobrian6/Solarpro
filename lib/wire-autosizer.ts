@@ -184,8 +184,18 @@ export function autoSizeACWire(input: WireAutoSizerInput): WireAutoSizerResult {
       gauge,
       input.systemVoltage
     );
-    const vdrop = Number.isFinite(vdropRaw) ? vdropRaw : 0;
-    const vdropPass = vdrop <= input.maxVoltageDropPct;
+    // 🚨 THIS LINE USED TO READ `Number.isFinite(vdropRaw) ? vdropRaw : 0`, and
+    // `calcVoltageDrop` returned 0 for a gauge whose resistance it could not resolve.
+    // `Number.isFinite(0)` is true, so the coercion never fired — the refusal came
+    // through AS a zero and `0 <= maxVoltageDropPct` PASSED. A conductor nobody had
+    // computed a voltage drop for was selected as compliant.
+    //
+    // `calcVoltageDrop` now returns null for that case. An unresolved drop CANNOT
+    // pass: the search moves on to the next gauge rather than accepting a conductor
+    // on the strength of an answer that does not exist.
+    const vdropUnresolved = vdropRaw === null;
+    const vdrop = (vdropRaw !== null && Number.isFinite(vdropRaw)) ? vdropRaw : 0;
+    const vdropPass = !vdropUnresolved && vdrop <= input.maxVoltageDropPct;
 
     let action: WireAutoSizeStep['action'];
     let reason: string;

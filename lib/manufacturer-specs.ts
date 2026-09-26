@@ -22,6 +22,10 @@ import {
   Conductor,
   Conduit,
 } from './equipment-db';
+// NEC Chapter 9 Table 8 — the ONE resistance source. Read through it rather than off
+// the CONDUCTORS roster, so a gauge missing from that roster is a REFUSAL (null)
+// instead of a fabricated zero resistance.
+import { dcResistanceOhmsPerKft } from './nec/table8';
 
 // ─── Panel Spec Lookup ────────────────────────────────────────────────────────
 
@@ -59,9 +63,23 @@ export function getInverterSpecOrThrow(inverterId: string, type: 'string' | 'mic
 // ─── Conductor Lookup ─────────────────────────────────────────────────────────
 
 // AWG order from smallest to largest (for auto-sizing iteration)
+// 🚨 THE AUTO-SIZE SEARCH ORDER. It stopped at #2/0, so lib/wire-autosizer.ts could
+// not reach a larger conductor and fell through to a hard-coded '#2/0 AWG' flagged
+// `ampacityPass: false, voltageDropPass: false` — selected AND failed. #3/0 and #4/0
+// are added because their ABSENCE was the defect: they are the long service feeders
+// this product exists to size, and no compliant answer existed above #2/0.
+//
+// 🚨 #3 AWG IS DELIBERATELY NOT IN THIS SEARCH ORDER — see NEEDS-RAY. It IS now in
+// the CONDUCTORS roster and in lib/nec/table8.ts, so a designer who states #3 gets a
+// real resistance and a real voltage drop instead of a fabricated zero. But inserting
+// it between #4 and #2 changes what the auto-sizer RECOMMENDS on designs that work
+// today — #3 is a real NEC size and rarely a stocked one — and that is a product
+// ruling about what to put on a BOM, not a correctness fix. Adding it here later is a
+// one-line change.
 export const AWG_ORDER: string[] = [
   '#14 AWG', '#12 AWG', '#10 AWG', '#8 AWG', '#6 AWG',
   '#4 AWG', '#2 AWG', '#1 AWG', '#1/0 AWG', '#2/0 AWG',
+  '#3/0 AWG', '#4/0 AWG',
 ];
 
 export function getConductorSpec(gauge: string): Conductor | null {
@@ -176,20 +194,34 @@ export function getEGCSize(ocpdAmps: number): string {
 // VD% = (2 × I × R × L) / (V × 1000) × 100
 // R = DC resistance in ohms/1000ft
 
+/**
+ * Voltage drop as a percentage, or **null** when the conductor's resistance cannot
+ * be resolved.
+ *
+ * 🚨 IT USED TO RETURN 0 FOR AN UNRESOLVABLE GAUGE, and `0 <= anyLimit` is true, so
+ * a conductor whose resistance was never looked up reported a PERFECT voltage drop.
+ * That is a refusal converted into a pass — the most dangerous shape in this repo,
+ * because every downstream check then agrees.
+ *
+ * The genuinely-zero-input guards below still return 0 and that is correct: no
+ * current, no length or no voltage is a real zero drop, not an unresolved one. Only
+ * an unknown CONDUCTOR is a refusal.
+ */
 export function calcVoltageDrop(
   currentAmps: number,
   onewayLengthFt: number,
   gauge: string,
   systemVoltage: number
-): number {
-  const cond = getConductorSpec(gauge);
-  if (!cond) return 0;
+): number | null {
+  const r = dcResistanceOhmsPerKft(gauge);
+  // null, not 0 — the caller must decide what to do with "not computed".
+  if (r === null) return null;
   // FIX v57.1: Guard against NaN/0/Infinity inputs that cause NaN VDrop,
   // which then makes vdropPass = (NaN <= limit) = false, forcing #2/0 AWG fallback.
   if (!Number.isFinite(currentAmps) || currentAmps <= 0) return 0;
   if (!Number.isFinite(onewayLengthFt) || onewayLengthFt <= 0) return 0;
   if (!Number.isFinite(systemVoltage) || systemVoltage <= 0) return 0;
-  const vd = (2 * currentAmps * cond.dcResistance * onewayLengthFt) / 1000;
+  const vd = (2 * currentAmps * r * onewayLengthFt) / 1000;
   return (vd / systemVoltage) * 100;
 }
 
