@@ -22,6 +22,7 @@
 // ============================================================
 
 import type { PermitInput } from '../types';
+import { permitInterconnectionToken } from './interconnectionRule';
 import type { CADModel } from '@/lib/cad/types';
 import {
   generateBOMV4,
@@ -820,7 +821,10 @@ export function generateBOMForPermit(
         requiresRapidShutdown:   true,
         requiresWarningLabels:   true,
         requiresProductionMeter: false,
-        interconnectionMethod:   project.interconnectionMethod || 'LOAD_SIDE',
+        // The package's ONE interconnection rule: survey free text ('Supply-Side
+        // (NEC 705.11)') is not a token, and the engine matches tokens — so a
+        // surveyed supply-side tap could buy a backfed breaker and Net CTs.
+        interconnectionMethod:   permitInterconnectionToken(project.interconnectionMethod),
         consumptionCtLocation:   project.consumptionCtLocation ?? undefined,
         panelBusRating:          project.panelBusRating || mainPanelA,
         systemType:              bomSystemType,

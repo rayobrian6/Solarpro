@@ -35,6 +35,7 @@ import { hasRealBattery } from './helpers';
 import { applyFieldMeasurementsToRuns } from '../snapshot/applyFieldMeasurements';
 import type { FieldRouteMeasurementAuthority } from '@/lib/fieldMeasurement/resolver';
 import { normalizeConduitType as necNormalizeConduitType } from '@/lib/nec/chapter9';
+import { interconnectionRuleOf } from './interconnectionRule';
 
 /**
  * Wave 2a (contract §3, 2a Compute): per-subsystem scoping for the permit-path
@@ -276,7 +277,11 @@ export function buildComputedRunsForPermit(
       conduitSizeInch: input.project.conduitSize || undefined,
       maxACVoltageDropPct: 2,
       maxDCVoltageDropPct: 3,
-      interconnectionMethod: (input.project.interconnectionMethod === 'SUPPLY_SIDE_TAP' ? 'SUPPLY_SIDE_TAP' : 'LOAD_SIDE'),
+      // The package's ONE rule (./interconnectionRule), not the exact token. The
+      // survey writes 'Supply-Side (NEC 705.11)': the snapshot recorded 705.11
+      // and drew the tap, while these runs were sized for a load-side job
+      // (DISCO→METER 18 ft instead of 12). Every token maps as it always did.
+      interconnectionMethod: interconnectionRuleOf(input.project.interconnectionMethod) === '705.11' ? 'SUPPLY_SIDE_TAP' : 'LOAD_SIDE',
       // The battery's 705.12(B) contribution, from the authority (see above).
       // No battery on the job ⇒ the historical zeros, unchanged.
       batteryIds: _hasBattery && _batteryEngineId ? [_batteryEngineId] : undefined,

@@ -37,9 +37,8 @@ import type { FramingCapacityDocumentEvidence, FramingEngineerReviewEvidence } f
 import type { EnvironmentalLoadSourceEvidence } from './environmentalAuthority';
 import { buildConductorAuthority } from '../utils/conductorAuthority';
 import { buildIntegratedEquipment } from '../utils/integratedEquipment';
-import {
-  parseConsumptionCtLocation, pvConnectionSide, consumptionCtBoundaryFor, deriveConsumptionMeteringMode,
-} from '@/lib/equipment/currentTransformers';
+import { interconnectionRuleOf, permitInterconnectionToken } from '../utils/interconnectionRule';
+import { resolveDesignMetering } from '@/lib/equipment/designMetering';
 import { utilityDisplayName, resolveBatteryCapacity } from '../utils/helpers';   // §15(b) — human utility name, never a slug
 // resolveBatteryCapacity is THE permit-wide ESS capacity authority — the same
 // function PV-1, PV-5 and the SLD equipment schedule print from.
@@ -856,7 +855,7 @@ export function buildPermitDesignSnapshot(
   let _tapSpanAuthority: TapSpanAuthority | null = null;
   const serviceTopology: import('./types').ServiceTopologyObject[] = (() => {
     const method = String(proj.interconnectionMethod ?? 'LOAD_SIDE');
-    const isSupply = /SUPPLY|LINE/i.test(method);
+    const isSupply = interconnectionRuleOf(method) === '705.11';
     const feederOcpd = cs?.backfeedBreakerAmps ?? cs?.acOcpdAmps ?? feederRun?.ocpdAmps ?? null;
     const feederGauge = feederRun?.wireGauge ?? auth.acFeeder.wireGauge ?? null;
     const pvOutA = cs?.acOutputCurrentA ?? null;
@@ -1166,7 +1165,7 @@ export function buildPermitDesignSnapshot(
     {
       const _canonMethod = String(proj.interconnectionMethod ?? 'LOAD_SIDE');
       const _legMethod = String(legacyShadow?.busbar?.method ?? _canonMethod);
-      const _bothSupply = /SUPPLY/i.test(_canonMethod) === /SUPPLY/i.test(_legMethod);
+      const _bothSupply = interconnectionRuleOf(_canonMethod) === interconnectionRuleOf(_legMethod);
       _par('interconnection method', null, _canonMethod, _legMethod,
         'model-definition-difference',
         'method is a design decision on the project record — neither engine decides it; legacy stores a display label',
@@ -2974,7 +2973,7 @@ export function buildPermitDesignSnapshot(
       },
       interconnection: {
         method: proj.interconnectionMethod ?? 'LOAD_SIDE',
-        rule: String(proj.interconnectionMethod ?? '').toUpperCase().includes('SUPPLY') ? '705.11' : '705.12(B)',
+        rule: interconnectionRuleOf(proj.interconnectionMethod),
       },
       thermal: (() => {
         const minC = proj.designTempMin ?? temps.ashraeExtremeLowC;
@@ -3089,12 +3088,20 @@ export function buildPermitDesignSnapshot(
       // A designer-RECORDED consumption-CT location changes what E-1 draws, so
       // it moves THIS project's digest. With no record the key is undefined
       // (dropped by canonicalJson) and the digest is unchanged.
+      // Only when E-1 actually DRAWS those CTs: a single-lane design whose
+      // combiner meters, through the same composer the sheets use. A recorded
+      // value on a string / hybrid / non-metering design asserts nothing.
       meteringTopology: (() => {
-        const loc = parseConsumptionCtLocation(proj.consumptionCtLocation);
-        if (!loc) return undefined;
-        const side = pvConnectionSide(proj.interconnectionMethod ?? 'LOAD_SIDE');
-        const boundary = consumptionCtBoundaryFor(loc, side);
-        return { consumptionCtLocation: loc, boundary, mode: deriveConsumptionMeteringMode(boundary, side),
+        if (auth.isHybrid || !isMicro) return undefined;
+        const met = resolveDesignMetering({
+          plan: { brains: bos.brains ?? bos.devices[0] ?? null, hasIntegratedGateway: bos.hasIntegratedGateway },
+          interconnectionRaw: permitInterconnectionToken(proj.interconnectionMethod),
+          consumptionCtLocation: proj.consumptionCtLocation ?? null,
+          systemVoltage: 240,
+        });
+        const c = met.drawing?.consumption;
+        if (met.placement.basis !== 'designer-recorded' || !c) return undefined;
+        return { consumptionCtLocation: c.location, boundary: met.placement.boundary, mode: c.mode,
                  basis: 'designer-recorded' as const };
       })(),
       parity: { legacyEngine: 'runElectricalCalc', legacyRan, checks: parityChecks, unresolved: parityUnresolved },

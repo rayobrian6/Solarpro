@@ -7,6 +7,7 @@ import type { PermitInput, ResolvedEquipment } from '../types';
 import { SOLAR_PANELS, getInverterById, getMicroinverterById, resolveBatteryBranch } from '@/lib/equipment-db';
 import { effectiveInverterSubKey } from './subSystems';
 import { nextStandardOcpd } from '@/lib/electrical/stdSizes';
+import { interconnectionRuleOf } from './interconnectionRule';
 
 // ═══════════════════════════════════════════════════════════════
 // FAIL-LOUD unselected-inverter marker (permit integrity)
@@ -268,7 +269,9 @@ export function isSupplySideInterconnection(input: {
   const bus = input.compliance?.electrical?.busbar;
   if (bus?.necReference?.includes('705.11')) return true;
   if (bus?.method && /supply/i.test(bus.method)) return true;
-  return input.project?.interconnectionMethod === 'SUPPLY_SIDE_TAP';
+  // The snapshot's rule, so survey text ('Supply-Side (NEC 705.11)') is not
+  // load-side here while the snapshot calls it 705.11.
+  return interconnectionRuleOf(input.project?.interconnectionMethod) === '705.11';
 }
 
 // ─── FIX v47.341: Topology auto-detection ──────────────────────────────────────

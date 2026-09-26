@@ -7,6 +7,7 @@ import type { PermitInput } from '../types';
 import type { CADModel } from '@/lib/cad/types';
 import { titleBlock } from '../utils/titleBlock';
 import { sysTypeLabel, topologyDisplayLabel, resolveInverterCount, interconnectionLabel, utilityDisplayName, compassDir, resolveBatteryCapacity } from '../utils/helpers';
+import { interconnectionRuleOf } from '../utils/interconnectionRule';
 import { buildSchemSVG, escapeH } from '../utils/drawing';
 import { isFence, isGround } from '@/lib/system';
 import { nearmapConfigured, fetchNearmapStaticAerial, nearmapRoofSnapCenter, OBSTRUCTION_CLEARANCE_M, lngToGlobalPx, latToGlobalPx, type NearmapObstruction } from '@/lib/aerial/nearmap';
@@ -51,7 +52,7 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
   // hasBatt — the legend listed phantom ESS gear on battery-less jobs, with the
   // "controller" model set to the MICROINVERTER model. The AC disconnect on a
   // supply-side tap is the FUSED tap OCPD (see E-1), not non-fused.
-  const _pv1SupplySide = project.interconnectionMethod === 'SUPPLY_SIDE_TAP';
+  const _pv1SupplySide = interconnectionRuleOf(project.interconnectionMethod) === '705.11';
   // Legend keys use the SAME tag codes as the wall chips on the drawing —
   // numbered legend rows (1-6) that never appeared on the plan were a
   // coordination P1 an AHJ red-lines.

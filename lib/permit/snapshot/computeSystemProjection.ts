@@ -12,6 +12,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 import type { ElectricalCompliance } from '../types';
 import type { computeSystem } from '@/lib/computed-system';
+import { interconnectionRuleOf } from '../utils/interconnectionRule';
 
 type CS = ReturnType<typeof computeSystem>;
 
@@ -25,7 +26,7 @@ export function mapComputedSystemToCompliance(cs: CS, ctx: ComplianceProjectionC
   const runMap: Record<string, any> = (cs as any).runMap ?? {};
   const feeder = runMap['COMBINER_TO_DISCO_RUN'] ?? runMap['INV_TO_DISCO_RUN'] ?? null;
   const dcRun = runMap['DC_STRING_RUN'] ?? null;
-  const isSupply = String(ctx.interconnectionMethod).toUpperCase().includes('SUPPLY');
+  const isSupply = interconnectionRuleOf(ctx.interconnectionMethod) === '705.11';
 
   // AAC WS-7 (2026-07-27) — THE FOUR FIELD-NAME MISMATCHES THAT DISCARDED A
   // CORRECTLY COMPUTED NEC Ch.9 TABLE 1 FILL (audit §2.14 / §7.1).

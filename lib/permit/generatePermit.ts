@@ -34,6 +34,7 @@ import {
 } from '@/lib/engineeringDecisionProvenance';
 import { deriveRunLengths } from '@/lib/bom/deriveRunLengths';
 import { necNextStandardOcpd } from './utils/helpers';
+import { permitInterconnectionToken } from './utils/interconnectionRule';
 import { classifyPanel, isSubSystemKey } from './utils/subSystems';
 import { runElectricalCalc, type ElectricalCalcInput, type InverterInput, type StringInput, type InterconnectionMethod } from '@/lib/electrical-calc';
 import { getPanelById, getInverterById, getMicroinverterById,
@@ -946,7 +947,9 @@ export function generatePermitHTML(
           : '2020';
 
       // ── Determine interconnection method ──
-      const interconnMethod = input.project.interconnectionMethod || 'LOAD_SIDE';
+      // A token the snapshot agrees with (./utils/interconnectionRule): survey
+      // text used to fall through to LOAD_SIDE and run the 120% rule on a tap.
+      const interconnMethod = permitInterconnectionToken(input.project.interconnectionMethod);
       const panelBusRating = input.project.panelBusRating || input.project.mainPanelAmps || 200;
 
       // ── Build the full ElectricalCalcInput ──

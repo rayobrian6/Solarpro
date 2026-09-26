@@ -106,9 +106,10 @@ export function sldCombinerFields(inputs: SldCombinerInputs): SldCombinerFields 
   // is exactly when the consumption CTs are required. Tying the two to one
   // predicate is what stops a sheet claiming a measurement the job never bought.
   // The one composer (lib/equipment/designMetering.ts) — the same answer the
-  // Diagram tab, the permit E-1, PV-4A and the BOM get.
+  // Diagram tab, the permit E-1, PV-4A and the BOM get. Micro only — no other
+  // topology draws the device the CTs land in.
   const _met = resolveDesignMetering({
-    plan: { brains: brains ?? null, hasIntegratedGateway: plan.hasIntegratedGateway },
+    plan: inputs.isMicro ? { brains: brains ?? null, hasIntegratedGateway: plan.hasIntegratedGateway } : null,
     interconnectionRaw: inputs.interconnectionRaw,
     consumptionCtLocation: inputs.consumptionCtLocation ?? null,
     ungroundedConductorCount: inputs.ungroundedConductorCount ?? null,

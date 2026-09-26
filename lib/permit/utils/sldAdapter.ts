@@ -16,6 +16,7 @@ import { buildIntegratedEquipment } from './integratedEquipment';
 // E-1 schedule reads it here so it carries the same Metering row the Diagram tab
 // and the exported SLD PDF already print — see the note at `meteringChannels`.
 import { resolveDesignMetering } from '@/lib/equipment/designMetering';
+import { permitInterconnectionToken, interconnectionRuleOf } from './interconnectionRule';
 import { isSubSystemKey, type SubSystemKey } from './subSystems';
 import { getInverterById, getMicroinverterById, SOLAR_PANELS,
          resolveBatteryBranch } from '@/lib/equipment-db';
@@ -180,10 +181,15 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
     : 'STRING_INVERTER';
 
   // ── Interconnection ──
+  // The SIDE is the package's one rule (./interconnectionRule) — the snapshot,
+  // PV-4A and the CT record read the same one. This used to run its own
+  // substring match, checking 'load' first, so it could draw a load-side MSP
+  // for a record the snapshot calls 705.11. A load-side record that names no
+  // side keeps its own text (MAIN_BREAKER_DERATE / PANEL_UPGRADE draw the
+  // backfed breaker they always drew).
   const rawInterconnection = project.interconnectionMethod ?? 'LOAD_SIDE';
-  const interconnection = rawInterconnection === 'LOAD_SIDE' || rawInterconnection.toLowerCase().includes('load') ? 'Load Side Tap'
-    : rawInterconnection === 'SUPPLY_SIDE_TAP' || rawInterconnection.toLowerCase().includes('supply') ? 'Supply Side Tap'
-    : rawInterconnection.toLowerCase().includes('line') ? 'Line Side Tap'
+  const interconnection = interconnectionRuleOf(project.interconnectionMethod) === '705.11' ? 'Supply Side Tap'
+    : rawInterconnection === 'LOAD_SIDE' || rawInterconnection.toLowerCase().includes('load') ? 'Load Side Tap'
     : rawInterconnection;
 
   // ── Battery / Generator / ATS ──
@@ -416,10 +422,15 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
     // label: the authority owns the token table. 120/240 V 1Ø 3W is what every
     // other statement on this sheet assumes. The E-1 draws the CTs and lead
     // from `meteringDrawing`; E-1.1 prints the rows.
+    // The side comes from the package's ONE interconnection rule
+    // (./interconnectionRule): survey free text such as 'Supply-Side (NEC 705.11)'
+    // used to leave E-1 "MODE TBD" while PV-4A stated TOTAL. And only a micro job
+    // draws a combiner/gateway, so only a micro job draws CTs — a string job with
+    // a leftover combiner pick got CT glyphs beside no gateway at all.
     ...(() => {
       const _met = resolveDesignMetering({
-        plan: { brains: _bosBrains ?? null, hasIntegratedGateway: _bos.hasIntegratedGateway },
-        interconnectionRaw: project.interconnectionMethod ?? null,
+        plan: isMicro ? { brains: _bosBrains ?? null, hasIntegratedGateway: _bos.hasIntegratedGateway } : null,
+        interconnectionRaw: permitInterconnectionToken(project.interconnectionMethod),
         consumptionCtLocation: project.consumptionCtLocation ?? null,
         systemVoltage: 240,
       });

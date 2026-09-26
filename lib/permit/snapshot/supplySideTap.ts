@@ -22,6 +22,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 import type { Provenance, ServiceTopologyObject, SupplySideTapConnectionAuthority } from './types';
 import { SUPPLY_SIDE_TAP_CANDIDATE_LABEL } from './types';
+import { interconnectionRuleOf } from '../utils/interconnectionRule';
 
 export { SUPPLY_SIDE_TAP_CANDIDATE_LABEL };
 
@@ -73,7 +74,7 @@ export function buildSupplySideTapConnectionAuthority(
   args: BuildSupplySideTapArgs,
 ): SupplySideTapConnectionAuthority | null {
   const { interconnectionMethod, serviceTopology, project } = args;
-  if (!/SUPPLY|LINE/i.test(String(interconnectionMethod))) return null;
+  if (interconnectionRuleOf(interconnectionMethod) !== '705.11') return null;
 
   const tapObj = serviceTopology.find(o => o.type === 'tap-conductors') ?? null;
 

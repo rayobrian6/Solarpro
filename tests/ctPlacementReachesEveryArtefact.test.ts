@@ -21,6 +21,13 @@ import { buildSLDInputFromPermit } from '@/lib/permit/utils/sldAdapter';
 import { buildPermitDesignSnapshot } from '@/lib/permit/snapshot/build';
 import { computeSnapshotDigest } from '@/lib/permit/snapshot/digest';
 import { renderSLDProfessional, type SLDProfessionalInput } from '@/lib/sld-professional-renderer';
+import { interconnectionRuleOf, permitInterconnectionToken } from '@/lib/permit/utils/interconnectionRule';
+import { sldCombinerFields } from '@/lib/equipment/sldCombinerFields';
+import { generateBOMForPermit } from '@/lib/permit/utils/bomForPermit';
+import { groundProject } from '../test-fixtures/groundProject';
+import { generateCADLayout } from '@/lib/cad/cadEngine';
+import { generatePermitHTML } from '@/lib/permit/generatePermit';
+import { isSupplySideInterconnection } from '@/lib/permit/utils/helpers';
 
 vi.mock('@/lib/security', () => ({
   requireAuth: vi.fn(async () => ({ user: { id: 'test-user' }, response: null })),
@@ -166,5 +173,139 @@ describe('digest: only an explicit record moves it', () => {
     const p = job({ consumptionCtLocation: 'main-breaker-load-side' });
     expect(snap(p).electrical.meteringTopology).toMatchObject({ consumptionCtLocation: 'main-breaker-load-side', mode: 'LOAD_ONLY' });
     expect(digestOf(p)).not.toBe(digestOf(job()));
+  });
+});
+
+// ── One interconnection rule per package (review, 2026-09-25) ──────────────
+// The survey writes FREE TEXT into interconnectionMethod. The snapshot decides
+// the rule from it; E-1, PV-1, the general notes, the permit BOM, the CT record,
+// the legacy electrical calc and the computeSystem runs used to read the raw
+// text as an exact token — so one surveyed supply-side package said
+// "CONS (MODE TBD)" on E-1 and "CONS (TOTAL)" on PV-4A, routed its last run to
+// the main panel instead of the tap, and printed the 705.12 backfeed note.
+const SURVEY_TEXT: Array<[string, 'SUPPLY_SIDE_TAP' | 'LOAD_SIDE']> = [
+  ['Supply-Side (NEC 705.11)', 'SUPPLY_SIDE_TAP'],
+  ['Load-Side Breaker (NEC 705.12(B)(2)) — max NA', 'LOAD_SIDE'],
+  ['Panel Upgrade Required', 'LOAD_SIDE'],
+  ['See Electrical Engineer', 'LOAD_SIDE'],
+];
+
+/** Every leaf where two snapshots differ, as [path, a, b]. */
+function leafDiff(a: unknown, b: unknown, path = '', out: Array<[string, unknown, unknown]> = []) {
+  if (a === b) return out;
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) { out.push([path, a, b]); return out; }
+  const ao = a as Record<string, unknown>, bo = b as Record<string, unknown>;
+  for (const k of new Set([...Object.keys(ao), ...Object.keys(bo)])) leafDiff(ao[k], bo[k], `${path}.${k}`, out);
+  return out;
+}
+const generated = (method: string) => {
+  const p = job({ interconnectionMethod: method });
+  const html = generatePermitHTML(p);
+  return { html, snap: (p as { _snapshot?: Record<string, unknown> })._snapshot! };
+};
+
+describe("the interconnection rule is the snapshot's, everywhere", () => {
+  it('tokens pass through; free text resolves by the one rule; a line-side tap is 705.11', () => {
+    for (const t of ['LOAD_SIDE', 'SUPPLY_SIDE_TAP', 'MAIN_BREAKER_DERATE', 'PANEL_UPGRADE']) {
+      expect(permitInterconnectionToken(t)).toBe(t);
+    }
+    for (const [text, token] of SURVEY_TEXT) expect(permitInterconnectionToken(text), text).toBe(token);
+    for (const v of [undefined, null, '']) expect(permitInterconnectionToken(v)).toBe('LOAD_SIDE');
+    expect(interconnectionRuleOf('Supply-Side (NEC 705.11)')).toBe('705.11');
+    expect(interconnectionRuleOf(undefined)).toBe('705.12(B)');
+    // The predicate the snapshot's tap topology, tap-connection authority and
+    // tap-span grade always used — the rule line was the one that disagreed.
+    expect(interconnectionRuleOf('LINE_SIDE_TAP')).toBe('705.11');
+    expect(permitInterconnectionToken('LINE_SIDE_TAP')).toBe('SUPPLY_SIDE_TAP');
+    expect(isSupplySideInterconnection({ project: { interconnectionMethod: 'Supply-Side (NEC 705.11)' } })).toBe(true);
+    expect(isSupplySideInterconnection({ project: { interconnectionMethod: 'Panel Upgrade Required' } })).toBe(false);
+  });
+
+  it('E-1 states the same metering as PV-4A for every survey spelling, and for none', () => {
+    for (const text of [...SURVEY_TEXT.map(s => s[0]), undefined, '']) {
+      const p = job({ interconnectionMethod: text });
+      const rule = snapOf(p).project.interconnection.rule;
+      // PV-4A's own mapping (lib/permit/sections/electricalPages.ts).
+      const pv4a = resolveDesignMetering({ plan: plan(FIVE_C),
+        interconnectionRaw: rule === '705.11' ? 'SUPPLY_SIDE_TAP' : 'LOAD_SIDE', systemVoltage: 240 });
+      const e1 = buildSLDInputFromPermit(p, cad);
+      expect(e1.meteringChannels, String(text)).toBe(pv4a.scheduleValue);
+      expect(e1.meteringChannels, String(text)).not.toContain('MODE TBD');
+      expect(e1.meteringDrawing?.consumption?.location, String(text)).toBe(pv4a.drawing?.consumption?.location);
+    }
+  });
+
+  it("E-1 draws the MSP for the snapshot's side", () => {
+    const msp = (m: string) => buildSLDInputFromPermit(job({ interconnectionMethod: m }), cad).interconnection;
+    expect(msp('Supply-Side (NEC 705.11)')).toBe('Supply Side Tap');
+    expect(msp('LINE_SIDE_TAP')).toBe('Supply Side Tap');
+    expect(msp('Load-Side Breaker (NEC 705.12(B)(2)) — max NA')).toBe('Load Side Tap');
+    // tokens draw what they always drew
+    expect(msp('SUPPLY_SIDE_TAP')).toBe('Supply Side Tap');
+    expect(msp('LOAD_SIDE')).toBe('Load Side Tap');
+    expect(msp('MAIN_BREAKER_DERATE')).toBe('MAIN_BREAKER_DERATE');
+  });
+
+  it("the permit BOM buys for the snapshot's side — equipment AND run lengths", () => {
+    const key = (items: ReturnType<typeof generateBOMForPermit>) =>
+      items.map(i => `${i.category}|${i.partNumber ?? ''}|${i.quantity}`).sort().join('\n');
+    expect(key(generateBOMForPermit(job({ interconnectionMethod: 'Supply-Side (NEC 705.11)' }), cad)))
+      .toBe(key(generateBOMForPermit(job({ interconnectionMethod: 'SUPPLY_SIDE_TAP' }), cad)));
+  });
+
+  it('a surveyed supply-side package IS the supply-side design: the snapshot differs only where it quotes the text', () => {
+    const TEXT = 'Supply-Side (NEC 705.11)';
+    const token = generated('SUPPLY_SIDE_TAP'), survey = generated(TEXT);
+    const body = (s: Record<string, unknown>) => { const c = JSON.parse(JSON.stringify(s)); delete c.meta; return c; };
+    const diffs = leafDiff(body(token.snap), body(survey.snap));
+    // What USED to differ: the last run went to the MAIN SERVICE PANEL (15 ft)
+    // instead of the tap (10 ft, design constraint), a TAP-CONDUCTOR-LENGTH
+    // blocker appeared, and the legacy/canonical parity check disagreed.
+    expect(diffs.length).toBeGreaterThan(0);
+    for (const [path, a, b] of diffs) {
+      expect(path, `${path}: ${JSON.stringify(a)} vs ${JSON.stringify(b)}`)
+        .toMatch(/^\.(project\.interconnection\.method|electrical\.poi\.method|electrical\.supplySideTapConnection\.interconnectionMethod|electrical\.parity\.checks\.\d+\.canonical)$/);
+      expect([a, b]).toEqual(['SUPPLY_SIDE_TAP', TEXT]);
+    }
+    // …and the sheets say what the token package says.
+    const count = (h: string, re: RegExp) => (h.match(re) ?? []).length;
+    for (const re of [/supply-side tap per NEC 705\.11/g, /705\.12\(B\)\(2\)\(3\)\(b\)/g, /MODE TBD/g, /SUPPLY-SIDE TAP POINT/g]) {
+      expect(count(survey.html, re), String(re)).toBe(count(token.html, re));
+    }
+    expect(count(survey.html, /supply-side tap per NEC 705\.11/g)).toBeGreaterThan(0);
+  });
+});
+
+const snapOf = (p: any) => buildPermitDesignSnapshot(p, cad, { projectId: 'p1', designVersionId: 'v1' }) as any;
+
+// ── Only a micro job draws CTs ─────────────────────────────────────────────
+// A combiner selection is cleared only by an explicit DELETE, so a job switched
+// from Enphase to a string inverter still carries one. Nothing on that sheet is
+// a combiner or a gateway, so nothing on it may be a CT.
+describe('a string job with a leftover combiner pick draws no CTs', () => {
+  const stringJob = () => {
+    const p = JSON.parse(JSON.stringify(groundProject));
+    p.project.selectedCombinerId = FIVE_C;
+    p.project.interconnectionMethod = 'SUPPLY_SIDE_TAP';
+    p.project.consumptionCtLocation = 'main-breaker-load-side';
+    return p;
+  };
+  const stringCad = () => generateCADLayout(groundProject as any);
+
+  it('the SLD PDF / page fields', () => {
+    const f = sldCombinerFields({ inverterManufacturer: 'SolarEdge', inverterModel: 'SE7600H-US', isMicro: false,
+      totalDevices: 40, branchCount: 0, hasBattery: false, selectedCombinerId: FIVE_C,
+      interconnectionRaw: 'SUPPLY_SIDE_TAP', consumptionCtLocation: 'main-breaker-load-side' });
+    expect(f.meteringDrawing).toBeNull();
+    expect(f.combinerMeteringSummary).toBeUndefined();
+  });
+  it('the permit E-1', () => {
+    const sld = buildSLDInputFromPermit(stringJob(), stringCad());
+    expect(sld.meteringDrawing).toBeUndefined();
+    expect(sld.meteringChannels).toBeUndefined();
+  });
+  it('the snapshot records nothing, so the recorded location cannot move the digest', () => {
+    const s = buildPermitDesignSnapshot(stringJob(), stringCad(), { projectId: 'p1', designVersionId: 'v1' }) as any;
+    expect(s.electrical.meteringTopology).toBeUndefined();
   });
 });

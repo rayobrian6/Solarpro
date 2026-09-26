@@ -181,6 +181,7 @@
       "lastStringPanels",
       "mainPanelAmps",
       "meteringChannels",
+      "meteringDrawing",
       "microBranches",
       "mpptAllocation",
       "mpptChannels",

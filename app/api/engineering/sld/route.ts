@@ -850,9 +850,11 @@ export async function POST(req: NextRequest) {
       // …and WHERE its CTs are: the one composer every consumer calls
       // (lib/equipment/designMetering.ts), so the drawing, the schedule, PV-4A
       // and the BOM state the same placement and mode (Ray, 2026-09-25).
+      // Micro only: no other topology draws the combiner/gateway the CTs land in,
+      // and a string job can still carry a leftover combiner selection.
       ...(() => {
         const _met = resolveDesignMetering({
-          plan: _bosPlan,
+          plan: isMicro ? _bosPlan : null,
           interconnectionRaw: body.interconnection ?? body.interconnectionType ?? body.interconnectionMethod ?? null,
           consumptionCtLocation: typeof body.consumptionCtLocation === 'string' ? body.consumptionCtLocation : null,
           systemVoltage: Number(body.systemVoltage) || 240,

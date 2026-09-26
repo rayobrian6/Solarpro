@@ -5,6 +5,7 @@
 
 import type { PermitInput } from '../types';
 import { utilityDisplayName, resolveEquipment } from './helpers';
+import { interconnectionRuleOf } from './interconnectionRule';
 import { escapeH } from './drawing';
 import type { ResolvedEquipment } from '../types';
 import { projectCodeAuthorityFromInput, adoptedICodePhrase } from '../snapshot/codeAuthorityProjection';
@@ -224,8 +225,9 @@ export function buildConstructionNotes(input: PermitInput): string[] {
     `Solar PV wiring shall comply with NEC Article 690. DC wiring methods shall be per NEC 690.31. PV source and output circuit conductors shall be identified at all access points per NEC 690.31(B).`,
     // Interconnection note follows the ACTUAL method — the load-side backfeed
     // boilerplate on a supply-side-tap job re-introduced the exact set-wide
-    // contradiction the teardown flagged.
-    project.interconnectionMethod === 'SUPPLY_SIDE_TAP'
+    // contradiction the teardown flagged. The package's one rule, so survey
+    // text reads the way the snapshot records it.
+    interconnectionRuleOf(project.interconnectionMethod) === '705.11'
       ? `System shall interconnect via supply-side tap per NEC 705.11. Tap conductors shall be sized ≥ 125% of PV output current and terminate in a fused disconnect within 10 ft of the tap per NEC 705.11(C). The 120% busbar rule (NEC 705.12(B)) does not apply to supply-side connections.`
       : `System shall comply with NEC 705.12 for interconnected power production equipment. Backfeed breaker shall be sized per NEC 705.12(B)(2)(3)(b). Sum of all supply breakers shall not exceed 120% of bus rating.`,
     // 2026-08-29 - THE NOTE NO LONGER STATES A DEVICE LOCATION OF ITS OWN.
@@ -287,12 +289,12 @@ export function buildConstructionNotes(input: PermitInput): string[] {
     // PPC §6 — the inverter-output citation is TOPOLOGY-DEPENDENT. It printed NEC
     // 705.12 (load-side) unconditionally, including on 705.11 supply-side designs —
     // the same defect the interconnection note above already avoids.
-    `Inverter(s) shall be UL 1741-listed and comply with IEEE 1547 for grid interconnection. Anti-islanding protection required per NEC 705.40. Inverter output circuit rated per NEC ${project.interconnectionMethod === 'SUPPLY_SIDE_TAP' ? '705.11' : '705.12'} and manufacturer requirements.`,
+    `Inverter(s) shall be UL 1741-listed and comply with IEEE 1547 for grid interconnection. Anti-islanding protection required per NEC 705.40. Inverter output circuit rated per NEC ${interconnectionRuleOf(project.interconnectionMethod) === '705.11' ? '705.11' : '705.12'} and manufacturer requirements.`,
     `Photovoltaic source circuit conductors shall be marked or tagged "PHOTOVOLTAIC POWER SOURCE" at all accessible locations per NEC 690.31(B). Markings shall be sunlight-resistant and moisture-resistant.`,
     `GFDI (Ground Fault Detection and Interruption) shall be provided as integrated in the listed inverter(s) per NEC 690.41. DC arc-fault circuit interrupter (AFCI) shall be provided per NEC 690.11.`,
     // PPC §6 — 705.12(B)(2)(3)(e) is a LOAD-SIDE marking clause; on a supply-side
     // (705.11) design the applicable interconnection marking clause is 705.10 / 705.11.
-    `Warning labels and placards shall be installed per NEC 690.54, NEC 690.56(C), NEC ${project.interconnectionMethod === 'SUPPLY_SIDE_TAP' ? '705.10 / 705.11' : '705.12(B)(2)(3)(e)'}, and ${cp.label('ifc')} \u00a71204 (rooftop PV access/marking; \u00a7605.11 in pre-2018 editions). See sheet PV-5 for complete label schedule and placement diagram.`,
+    `Warning labels and placards shall be installed per NEC 690.54, NEC 690.56(C), NEC ${interconnectionRuleOf(project.interconnectionMethod) === '705.11' ? '705.10 / 705.11' : '705.12(B)(2)(3)(e)'}, and ${cp.label('ifc')} \u00a71204 (rooftop PV access/marking; \u00a7605.11 in pre-2018 editions). See sheet PV-5 for complete label schedule and placement diagram.`,
     // Statutory site/clearance notes \u2014 migrated from the retired PV-1 site sheet
     // (2026-07-08 fold) so they persist in the set's general notes.
     `All electrical equipment \u2014 inverters, disconnects, main service panel, and junction/combiner boxes \u2014 shall be located a minimum of 3 ft from the gas meter supply and demand piping.`,
