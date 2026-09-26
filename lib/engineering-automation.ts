@@ -12,6 +12,8 @@
 // v47.9: Use getDbReady() (async, cold-start resilient) instead of getDb() (sync, no retry)
 import { getDbReady } from '@/lib/db-neon';
 import { nextStandardOcpd } from '@/lib/electrical/stdSizes';
+import { NEC_310_16_COPPER_75C, NEC_310_16_COPPER_90C } from '@/lib/nec/ampacity';
+import { getEGCSize as necEGCSize } from '@/lib/manufacturer-specs';
 
 // Get database connection — async, retries on Neon cold start
 const getSql = () => getDbReady();
@@ -98,32 +100,42 @@ const EXPOSURE_CATEGORY_RULES = {
 
 // ===== CONDUCTOR AMPACITY DATA =====
 
+// 🚨 DERIVED FROM THE ONE NEC 310.16 TABLE - this was the FIFTH copy, and it
+// carried the same '#1 AWG': 150 error that made the conductor schedule disagree with
+// its own printed derivation (145 is correct; 150 is 1/0's 75 °C value). It also had
+// XHHW2 at 25 A for #14 in the 75 °C column where the other two insulations, and the
+// code, say 20. All three insulations share the same copper columns, so they share
+// the same table. See lib/nec/ampacity.ts.
+const _numericAmpacity = (t: Record<string, number>): Record<number, number> => ({
+  14: t['#14 AWG'], 12: t['#12 AWG'], 10: t['#10 AWG'], 8: t['#8 AWG'],
+  6: t['#6 AWG'], 4: t['#4 AWG'], 3: t['#3 AWG'], 2: t['#2 AWG'], 1: t['#1 AWG'],
+});
+const _COPPER_COLUMNS = {
+  90: _numericAmpacity(NEC_310_16_COPPER_90C),
+  75: _numericAmpacity(NEC_310_16_COPPER_75C),
+};
 const CONDUCTOR_AMPACITY = {
-  copper: {
-    THHN: {
-      90: { 14: 25, 12: 30, 10: 40, 8: 55, 6: 75, 4: 95, 3: 110, 2: 130, 1: 150 },
-      75: { 14: 20, 12: 25, 10: 35, 8: 50, 6: 65, 4: 85, 3: 100, 2: 115, 1: 130 },
-    },
-    XHHW2: {
-      90: { 14: 25, 12: 30, 10: 40, 8: 55, 6: 75, 4: 95, 3: 110, 2: 130, 1: 150 },
-      75: { 14: 25, 12: 25, 10: 35, 8: 50, 6: 65, 4: 85, 3: 100, 2: 115, 1: 130 },
-    },
-    USE2: {
-      90: { 14: 25, 12: 30, 10: 40, 8: 55, 6: 75, 4: 95, 3: 110, 2: 130, 1: 150 },
-      75: { 14: 20, 12: 25, 10: 35, 8: 50, 6: 65, 4: 85, 3: 100, 2: 115, 1: 130 },
-    },
-  },
+  copper: { THHN: _COPPER_COLUMNS, XHHW2: _COPPER_COLUMNS, USE2: _COPPER_COLUMNS },
 };
 
 // EGC SIZE (NEC 250.122)
-const EGC_SIZES = [14, 12, 10, 8, 6, 4, 3, 2, 1, '1/0', '2/0', '3/0', '4/0', '250'];
-
-function getEGCSize(ocpdAmps: number): string {
-  for (const size of EGC_SIZES) {
-    const amps = typeof size === 'number' ? size * 15 : parseInt(size.toString()) * 15;
-    if (amps >= ocpdAmps) return `${size} AWG`;
-  }
-  return '250 kcmil';
+// 🚨 THIS WAS NOT NEC 250.122. IT WAS `size * 15`.
+//
+// The old rule walked [14, 12, 10, ...] and returned the first size whose AWG NUMBER
+// times fifteen reached the OCPD rating. 14 x 15 = 210, so EVERY overcurrent device
+// up to 210 A got a #14 AWG equipment grounding conductor - a 100 A circuit included -
+// and the log line published it as "NEC 250.122: EGC sized for 100A OCPD". NEC 250.122
+// requires #8 there. The formula is not in the code; it appears to be a misremembering,
+// and the citation beside it is what made it credible.
+//
+// The real Table 250.122 copper ladder already existed in lib/manufacturer-specs.ts.
+// The '#' is stripped to preserve this module's existing `egc_size` string format.
+// Exported so a test can reach THE FUNCTION THIS MODULE USES. A test that only
+// exercised the canonical table passed against a mutation that put the old
+// `size * 15` rule straight back here - it was asserting the right answer exists
+// somewhere, not that this module asks for it.
+export function getEGCSize(ocpdAmps: number): string {
+  return necEGCSize(ocpdAmps).replace('#', '');
 }
 
 // CONDUIT FILL CALCULATION

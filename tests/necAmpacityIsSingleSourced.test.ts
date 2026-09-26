@@ -209,3 +209,56 @@ describe('🚨 the derating ladders, which had THREE copies and one dissenter', 
       .toEqual([]);
   });
 });
+
+describe('🚨 NEC 250.122 — the EGC rule that was `size * 15`', () => {
+  // `lib/engineering-automation.ts` walked [14, 12, 10, …] and returned the first size
+  // whose AWG NUMBER times fifteen reached the OCPD rating. 14 × 15 = 210, so EVERY
+  // overcurrent device up to 210 A got a #14 AWG equipment grounding conductor — and
+  // the log line published it as "NEC 250.122: EGC sized for 100A OCPD". The formula is
+  // not in the code. The citation beside it is what made it credible.
+  it('a 100 A circuit does not get a #14 EGC', async () => {
+    const { getEGCSize } = await import('@/lib/manufacturer-specs');
+    expect(getEGCSize(100)).toBe('#8 AWG');
+    expect(getEGCSize(100)).not.toMatch(/#14/);
+  });
+
+  it('matches Table 250.122 at every break the table steps on', async () => {
+    const { getEGCSize } = await import('@/lib/manufacturer-specs');
+    const cases: Array<[number, string]> = [
+      [15, '#14 AWG'], [20, '#12 AWG'], [60, '#10 AWG'], [100, '#8 AWG'],
+      [200, '#6 AWG'], [300, '#4 AWG'], [400, '#3 AWG'], [500, '#2 AWG'],
+      [600, '#1 AWG'], [800, '#1/0 AWG'],
+    ];
+    for (const [a, g] of cases) expect(getEGCSize(a), `${a} A`).toBe(g);
+  });
+
+  it('\u{1F6A8} and THE AUTOMATION MODULE ITSELF asks for that answer', async () => {
+    // The two cases above passed against a mutation that put `size * 15` straight back
+    // into engineering-automation: they asserted the right answer EXISTS somewhere, not
+    // that the module which had it wrong now asks for it. This calls the function that
+    // module actually uses.
+    const { getEGCSize: automationEGC } = await import('@/lib/engineering-automation');
+    const { getEGCSize: canonical } = await import('@/lib/manufacturer-specs');
+    for (const a of [15, 20, 60, 100, 200, 300, 400, 500, 600, 800]) {
+      expect(automationEGC(a), `${a} A`).toBe(canonical(a).replace('#', ''));
+    }
+    expect(automationEGC(100)).toBe('8 AWG');
+  });
+
+  it('🚨 and the rule is never re-derived from an arithmetic formula', () => {
+    // The specific shape to refuse: an EGC chosen by multiplying the gauge number.
+    const offenders: string[] = [];
+    const walk = (dir: string) => {
+      for (const name of readdirSync(dir)) {
+        const p = join(dir, name);
+        if (statSync(p).isDirectory()) { if (name !== 'node_modules') walk(p); continue; }
+        if (!name.endsWith('.ts')) continue;
+        const src = readFileSync(p, 'utf8');
+        if (/EGC_SIZES/.test(src) && /\*\s*15/.test(src)) offenders.push(p.slice(ROOT.length + 1));
+      }
+    };
+    walk(join(ROOT, 'lib'));
+    expect(offenders, 'an EGC is being sized by arithmetic on the gauge number rather than Table 250.122')
+      .toEqual([]);
+  });
+});
