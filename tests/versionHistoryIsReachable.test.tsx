@@ -105,6 +105,43 @@ describe('🚨 it talks to the real routes', () => {
     expect(RESTORE.slice(i, end)).toMatch(/expectedUpdatedAt/);
   });
 
+  it('🚨 a restore CANCELS the pending autosave, or it silently undoes itself', () => {
+    // 🚨 FOUND IN A REAL BROWSER, and it is the worst failure this feature could
+    // have: the restore succeeded, and then the design went back to what it was.
+    //
+    // The studio holds its in-memory design and a pending autosave timer. A restore
+    // writes a DIFFERENT design to the row, and the panel then correctly adopts the
+    // version that write produced — which is what stops the next save being refused.
+    // But the pending autosave still carries the PRE-RESTORE panels, and it is now
+    // holding a CURRENT token, so the stale-write guard cannot refuse it. It fires,
+    // writes the old design over the restored one, and the reload that follows
+    // hydrates the old design. Measured: restore a 12-module version over a 4-module
+    // design, and the studio comes back with 4.
+    //
+    // The precondition cannot help here, and that is the point — the write is not
+    // stale, it is simply wrong. The in-memory design is about to be discarded by the
+    // reload, so a save of it must not happen at all.
+    //
+    // A flag rather than only clearing the timer: a state change during the 600 ms
+    // before the reload would re-arm it.
+    const i = STUDIO.indexOf('onRestored={(result)');
+    expect(i, 'the restore handler moved — this guard is blind').toBeGreaterThan(-1);
+    const end = STUDIO.indexOf('window.location.reload', i);
+    expect(end).toBeGreaterThan(i);
+    const handler = STUDIO.slice(i, end);
+
+    expect(handler,
+      'a restore does not stop the pending autosave — it will write the pre-restore ' +
+      'design over the restored one, and the reload will hydrate the old design')
+      .toMatch(/restoreInFlightRef\.current = true/);
+    expect(handler, 'the pending autosave timer is not cleared')
+      .toMatch(/clearTimeout\(autoSaveTimerRef\.current\)/);
+
+    // And the flag must actually block the save, not merely exist.
+    expect(STUDIO, 'the autosave effect ignores the restore flag')
+      .toMatch(/if \(restoreInFlightRef\.current\) return;/);
+  });
+
   it('🚨 and the tab adopts the version the restore produced', () => {
     // 🚨 THE WEDGE. A restore moves the row's version. A tab that keeps its old
     // token is refused on its very next autosave — so a SUCCESSFUL restore would

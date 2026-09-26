@@ -1085,6 +1085,23 @@ export default function DesignStudio({ project, onSave }: Props) {
   const autosaveDeadlineRef = useRef<number | null>(null);
 
   /**
+   * 🚨 A RESTORE IS ABOUT TO DISCARD THE IN-MEMORY DESIGN, SO NO SAVE OF IT MAY FIRE.
+   *
+   * Found in a browser, and it is the worst failure the design history could have:
+   * the restore succeeded and then the design went back to what it was. The pending
+   * autosave still carried the PRE-RESTORE panels, and because the panel correctly
+   * adopts the version the restore produced, that save was holding a CURRENT token —
+   * so the stale-write guard could not refuse it. It wrote the old design over the
+   * restored one and the reload hydrated the old design. Measured: restore a
+   * 12-module version over a 4-module design and the studio comes back with 4.
+   *
+   * The precondition cannot help, and that is the point: the write is not stale, it
+   * is simply wrong. A FLAG rather than only clearing the timer, because a state
+   * change in the moment before the reload would re-arm it.
+   */
+  const restoreInFlightRef = useRef(false);
+
+  /**
    * 🚨 THE SAVE FUNCTION, REACHED BY REF SO ITS IDENTITY IS NOT A TRIGGER.
    *
    * `saveLayoutToDB` is a `useCallback` over nine values — `stringAssignment`,
@@ -1490,6 +1507,9 @@ export default function DesignStudio({ project, onSave }: Props) {
   // checks at FIRE time so a restore finishing inside the 3s window isn't lost).
   useEffect(() => {
     if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    // A restore is replacing the whole design and reloading; saving what is still in
+    // memory would overwrite it with the design being discarded.
+    if (restoreInFlightRef.current) return;
 
     // 🚨 THE DEADLINE IS SET BY THE FIRST CHANGE IN THE BURST AND SURVIVES THE REST.
     // Resetting it alongside the debounce would not be a deadline at all.
@@ -1572,6 +1592,20 @@ export default function DesignStudio({ project, onSave }: Props) {
       // Same restore gate as autosave: closing the tab before the layout
       // loaded must not beacon an empty save over the stored design.
       if (restoreStateRef.current !== 'done') return;
+      // 🚨 AND NOT WHILE A VERSION RESTORE IS REPLACING THE DESIGN.
+      //
+      // This is what actually undid the restore, and a browser test caught it after
+      // the autosave had already been stopped. The design-history panel reloads the
+      // page, the reload fires `beforeunload`, and this beacon sends the IN-MEMORY
+      // design — the one the restore just replaced. It carries
+      // `site.storedVersion()`, which the panel has just set to the version the
+      // restore produced, so it is CURRENT and nothing refuses it. It wrote the old
+      // design over the restored one and the reload hydrated the old design.
+      //
+      // Measured: restore a 12-module version over a 4-module design, and the studio
+      // came back with 4 — twice, once before the autosave was gated and once after,
+      // because the beacon is a second writer on the same path.
+      if (restoreInFlightRef.current) return;
       const panelList = panelsRef2.current;
       const designElectrical = designElectricalRef.current ?? undefined;
       // v66: must match saveLayoutToDB's signature exactly, or closing the tab
@@ -5081,6 +5115,12 @@ export default function DesignStudio({ project, onSave }: Props) {
         storedVersion={site.storedVersion}
         onClose={() => setVersionHistoryOpen(false)}
         onRestored={(result) => {
+          // 🚨 STOP THE PENDING AUTOSAVE FIRST. It carries the design this restore
+          // just replaced, and it now holds a current token, so nothing downstream
+          // would refuse it. See `restoreInFlightRef`.
+          restoreInFlightRef.current = true;
+          if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+          autosaveDeadlineRef.current = null;
           // 🚨 ADOPT THE NEW VERSION FIRST, BEFORE THE RELOAD. The restore moved
           // the row's `updated_at`. The autosave is on a timer and can fire in
           // the window between here and the page coming back — with the token

@@ -181,11 +181,31 @@ export function VersionHistory({
       if (res.status === 409) {
         // The route has two distinct refusals here and BOTH say nothing was
         // written: a snapshot whose panels cannot be placed, and a design that
-        // has moved on since this panel was opened. Its sentence is better than
-        // anything this component could compose, so show it verbatim.
-        setRefusal(body?.error
-          || 'The server refused this restore. Nothing has been written.');
+        // has moved on since this panel was opened.
+        //
+        // 🚨 THE SECOND ONE'S MESSAGE IS NOT TRUE HERE, and a browser test caught
+        // it. The server says "this design was saved somewhere else — another tab,
+        // another device, or an older copy of this page", which is the right
+        // sentence for an autosave losing a race with a second tab. But the
+        // commonest way to reach it from THIS panel is the operator's own tab
+        // autosaving while the panel sits open — nothing was saved anywhere else,
+        // and telling them it was sends them looking for a second window that does
+        // not exist. Measured: open the studio, open History, click Restore, and
+        // the studio's own in-flight autosave had already moved the row.
+        //
+        // So a stale-version refusal is rephrased truthfully AND the list is
+        // re-read, because it is genuinely out of date — that autosave created a
+        // version this list does not show. The operator then chooses again from
+        // what is actually there, which is the honest recovery rather than a retry
+        // button that papers over it.
+        const stale = /LAYOUT_STALE_WRITE|saved somewhere else/i.test(String(body?.error ?? ''));
+        setRefusal(stale
+          ? 'This design changed while the history was open — most often because this tab '
+            + 'saved in the background. Nothing has been written. The list below has been '
+            + 'refreshed; pick the version you want again.'
+          : (body?.error || 'The server refused this restore. Nothing has been written.'));
         setConfirm(null);
+        if (stale) await load();
         return;
       }
       if (!res.ok || !body?.success) {

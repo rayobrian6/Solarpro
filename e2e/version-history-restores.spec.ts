@@ -54,9 +54,24 @@ const MELVIN = {
   address: '3 Melvin Drive, Granite City, IL 62040',
 };
 
-const panelIds = (p: Page): Promise<string[]> =>
-  p.evaluate(() => ((window as E2EWin).__solarE2E?.panels ?? [])
-    .map((q: { id: string }) => String(q.id)).sort());
+/**
+ * The live panel ids, or [] while the page is mid-navigation.
+ *
+ * 🚨 THE CATCH IS LOAD-BEARING. The history panel reloads the studio after a
+ * successful restore, and `page.evaluate` throws "Execution context was destroyed"
+ * if it lands during that navigation. Playwright's `expect.poll` does NOT swallow a
+ * callback's exception — it propagates and fails the test — so a poll waiting for the
+ * restored array would die on the very reload it is waiting for. Returning [] lets
+ * the poll keep polling, which is what it is for.
+ */
+async function panelIds(p: Page): Promise<string[]> {
+  try {
+    return await p.evaluate(() => ((window as E2EWin).__solarE2E?.panels ?? [])
+      .map((q: { id: string }) => String(q.id)).sort());
+  } catch {
+    return [];
+  }
+}
 
 /**
  * Create a project through the REAL route, then pin its coordinates.
@@ -167,31 +182,70 @@ test.describe('design history — list, restore, and the two ways it could bite'
     await expect.poll(async () => (await panelIds(page)).length,
       { message: 'the studio should load the 4-panel design', timeout: 45_000 }).toBe(4);
 
+    // 🚨 WAIT FOR THE STUDIO TO GO QUIET BEFORE OPENING THE PANEL.
+    //
+    // The first run of this test failed here, and the server log explained it: the
+    // studio's OWN autosave fired after mount (a third layout POST), which moved the
+    // row's version, so the panel's restore stated a token the row had already left
+    // and was correctly refused with 409. The product now tells the truth about that
+    // and refreshes the list — but a test that races its own subject measures the
+    // race, not the feature. So: wait until the row's version has stopped moving,
+    // which is when the autosave has settled.
+    let lastVersion = '';
+    await expect.poll(async () => {
+      const res = await page.request.get(`/api/projects/${id}/layout`);
+      const now = String((await res.json())?.data?.updatedAt ?? '');
+      const settled = now !== '' && now === lastVersion;
+      lastVersion = now;
+      return settled;
+    }, {
+      message: 'the studio never stopped writing — its autosave is not settling',
+      timeout: 45_000, intervals: [1500, 1500, 2000, 2000],
+    }).toBe(true);
+
     // Open the panel through the control the operator uses.
     await page.getByRole('button', { name: /History/i }).first().click();
     const rows = page.locator('[data-testid="version-history-row"]');
     await expect(rows.first()).toBeVisible({ timeout: T });
-    await expect.poll(async () => rows.count(), { timeout: T }).toBe(2);
 
-    // 🚨 THE NUMBERS, not a column of dates. This is what makes the list a
-    // recovery tool: "which one do I want" is answerable from the module count.
-    await expect(rows.nth(0)).toContainText(/4 modules/);
-    await expect(rows.nth(1)).toContainText(/12 modules/);
+    // 🚨 AT LEAST the two seeded versions, not EXACTLY two. A first version asserted
+    // exactly 2 and failed: opening the studio produces its OWN autosave, so the
+    // history legitimately holds a third. Pinning the count assumed this test was
+    // the only writer, which it is not — the product is the other one.
+    await expect.poll(async () => rows.count(),
+      { message: 'the history should hold at least the two seeded versions', timeout: T })
+      .toBeGreaterThanOrEqual(2);
+
+    // 🚨 THE NUMBERS, not a column of dates. This is what makes the list a recovery
+    // tool: "which one do I want" is answerable from the module count. So the row is
+    // FOUND BY ITS COUNT rather than by position, which is also how an operator
+    // finds it.
+    const twelve = rows.filter({ hasText: /12 modules/ }).first();
+    await expect(twelve, 'no version in the list is labelled with 12 modules')
+      .toBeVisible({ timeout: T });
+    await expect(rows.filter({ hasText: /4 modules/ }).first(),
+      'the 4-module version is not in the list either').toBeVisible({ timeout: T });
 
     // Restore the 12-panel version. It must CONFIRM first — one click may not
     // replace the whole design.
-    await rows.nth(1).getByTestId('version-history-restore').click();
-    const confirm = rows.nth(1).getByTestId('version-history-confirm-ok');
+    await twelve.getByTestId('version-history-restore').click();
+    const confirm = twelve.getByTestId('version-history-confirm-ok');
     await expect(confirm, 'restoring did not ask first').toBeVisible({ timeout: T });
     expect(await panelIds(page), 'the design changed before the confirmation')
       .toHaveLength(4);
 
     await confirm.click();
 
-    // The panel reloads the studio after a successful restore.
+    // The panel reloads the studio after a successful restore. Wait for the
+    // navigation to have happened at all before probing the page, then for the
+    // studio to mount — the probe itself tolerates a mid-navigation context.
+    await page.waitForLoadState('domcontentloaded').catch(() => {});
     await expect.poll(
-      () => page.evaluate(() => Boolean((window as E2EWin).__solarE2E)),
-      { message: 'the studio should come back after the restore', timeout: 60_000 },
+      async () => {
+        try { return await page.evaluate(() => Boolean((window as E2EWin).__solarE2E)); }
+        catch { return false; }
+      },
+      { message: 'the studio should come back after the restore', timeout: 90_000 },
     ).toBe(true);
     await expect.poll(async () => (await panelIds(page)).length,
       { message: 'the restored design never arrived', timeout: 45_000 }).toBe(12);
