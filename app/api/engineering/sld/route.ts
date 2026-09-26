@@ -26,6 +26,7 @@ import { getInverterById, MICROINVERTERS } from '@/lib/equipment-db';
 import { resolveIntegratedEquipment, planLandingDevice } from '@/lib/equipment/integratedBos';
 import { readProductionMeterFlag } from '@/lib/equipment/currentTransformers';
 import { resolveDesignMetering } from '@/lib/equipment/designMetering';
+import { hybridLaneMetering, standaloneGatewayFieldsFor } from '@/lib/equipment/sldCombinerFields';
 import { computeSystem, type ComputedSystemInput, type ComputedSystem } from '@/lib/computed-system';
 import { buildPermitSystemModel, type PermitSystemModel } from '@/lib/plan-set/permit-system-model';
 import {
@@ -125,6 +126,25 @@ export async function POST(req: NextRequest) {
           ? (body.runs as Array<{ id?: unknown }>).filter(r => r && typeof r.id === 'string')
           : undefined;
         const _sumLaneBackfeed = _sources.reduce((s, b) => s + (b.backfeedAmps ?? b.acOCPD ?? 0), 0);
+        const _mlSelectedCombinerId = body.selectedCombinerId ? String(body.selectedCombinerId) : null;
+        // ── The hybrid's CTs (Ray, 2026-09-26: "add CTs to the hybrid SLDs too") ──
+        // This branch returns before the single-lane metering below is ever
+        // composed, so a hybrid drew no CT at all. Each metering lane now gets
+        // its CTs from the ONE composer run on THAT lane's plan — resolved from
+        // the same lanes and the same (stored-read) selection the renderer
+        // resolves its per-lane combiners from, so the CTs belong to the box the
+        // lane draws. One lane (roof > ground > fence) carries the site's
+        // consumption CTs; any other metering lane is production only. Same
+        // interconnection spelling and service voltage as the single-lane call
+        // below. The client's `sources` cannot carry a drawing of its own —
+        // sanitizeClientSourceBranches keeps only the fields it names.
+        const _mlMetering = hybridLaneMetering({
+          lanes: _sources,
+          selectedCombinerId: _mlSelectedCombinerId,
+          interconnectionRaw: body.interconnection ?? body.interconnectionType ?? body.interconnectionMethod ?? null,
+          consumptionCtLocation: typeof body.consumptionCtLocation === 'string' ? body.consumptionCtLocation : null,
+          systemVoltage: Number(body.systemVoltage) || 240,
+        });
         const _mlInput: SLDProfessionalInput = {
           projectName:             String(body.projectName ?? 'Solar PV System'),
           clientName:              String(body.clientName ?? 'Homeowner'),
@@ -145,7 +165,7 @@ export async function POST(req: NextRequest) {
           // A hybrid job could therefore have its combiner corrected in System
           // Config and still be drawn, exported and permitted with a device
           // nobody chose.
-          selectedCombinerId:      body.selectedCombinerId ? String(body.selectedCombinerId) : null,
+          selectedCombinerId:      _mlSelectedCombinerId,
           totalModules:            Number(body.totalModules) || _sources.reduce((s, b) => s + (b.totalModules ?? 0), 0),
           totalStrings:            Number(body.totalStrings) || 0,
           panelModel:              String(body.panelModel ?? _sources[0].panelModel ?? 'PV Module'),
@@ -188,10 +208,12 @@ export async function POST(req: NextRequest) {
           scale:                   String(body.scale ?? 'NOT TO SCALE'),
           acWireLength:            Number(body.acWireLength || body.wireLength) || 60,
           runs:                    _clientRuns as SLDProfessionalInput['runs'],
-          sources:                 _sources,
+          // The lanes with their CTs attached (a lane that meters nothing is
+          // the same object sanitizeClientSourceBranches returned).
+          sources:                 _mlMetering.lanes,
         };
         const _mlSvg = renderSLDProfessional(_mlInput);
-        console.log(`[SLD] Wave 5A multi-lane server render: lanes=${_sources.length} keys=${_sources.map(s => s.key).join('+')} backfeed=${_mlInput.backfeedAmps}A`);
+        console.log(`[SLD] Wave 5A multi-lane server render: lanes=${_sources.length} keys=${_sources.map(s => s.key).join('+')} backfeed=${_mlInput.backfeedAmps}A metering=${_mlMetering.metered.map(m => `${m.key}${m.isPrimary ? '*' : ''}`).join('+') || 'none'}`);
         if ((body.format ?? 'svg') === 'svg') {
           return new NextResponse(_mlSvg, {
             headers: {
@@ -594,22 +616,11 @@ export async function POST(req: NextRequest) {
     const _bosLanding = planLandingDevice(_bosPlan);
     const _bosLabel  = _bosLanding ? `${_bosLanding.brand} ${_bosLanding.model}` : undefined;
     // The standalone gateway, in the shape sldCombinerFields gives the PDF
-    // route (StandaloneGatewayFields) — built from THIS route's plan the same
-    // way, because this route resolves its own plan rather than calling the
-    // adapter. Micro only, and ABSENT otherwise (never undefined-valued).
-    // 🚨 A COPY of sldCombinerFields' mapping (and of the permit helper's) —
-    // tests/sldStandaloneGatewayAndCtLeads.test.ts pins this route's printed
-    // strings to sldCombinerFields' until lib/equipment exports ONE builder.
-    const _saGwPlan = isMicro && _bosPlan.gatewayPlacement === 'standalone' ? _bosPlan.gateway : undefined;
-    const _standaloneGateway = _saGwPlan && _bosPlan.gatewaySupply && _bosLabel
-      ? {
-          label: `${_saGwPlan.brand} ${_saGwPlan.model}`,
-          ...(_saGwPlan.partNumber ? { partNumber: _saGwPlan.partNumber } : {}),
-          supplyBreakerA: _bosPlan.gatewaySupply.breakerA,
-          supplyConductor: _bosPlan.gatewaySupply.conductor,
-          landingLabel: _bosLabel,
-        }
-      : undefined;
+    // route (StandaloneGatewayFields) — built from THIS route's plan by the ONE
+    // builder the adapter and the hybrid lanes use (this route resolves its own
+    // plan rather than calling the adapter, so it calls the builder directly).
+    // Micro only, and ABSENT otherwise (never undefined-valued).
+    const _standaloneGateway = isMicro ? standaloneGatewayFieldsFor(_bosPlan) : undefined;
     console.log(`[SLD BOS] isMicro=${isMicro} devices=${resolvedDeviceCount} branches=${Array.isArray(body.microBranches) ? body.microBranches.length : 0} → ${_bosLabel ?? '(none)'} (source=${_bosPlan.source})`);
 
     // SINGLE SOURCE OF TRUTH: computeSystem() → PermitSystemModel

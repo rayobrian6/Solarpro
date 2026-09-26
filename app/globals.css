@@ -1148,3 +1148,95 @@ html, body {
   --theme-saturation: 0.9;
   filter: brightness(0.84) sepia(0.08) saturate(0.92);
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   THE DRAWING FACES, IN THE APP — so the SLD on the Diagram tab reads like E-1.
+
+   Every drawing SVG names 'SolarPro Sans, SolarPro Symbols' (the canonical pack,
+   lib/permit/fonts/fontPack.ts). The permit HTML and the SLD PDF embed those
+   faces; this page declared neither name, so both resolved to nothing and the
+   browser painted its DEFAULT face — a serif, spaced unlike the Liberation Sans
+   advances every label on the sheet was placed for.
+
+   These aliases point the canonical names at a face the machine already has
+   with IDENTICAL advance widths (Liberation Sans ≡ Arimo ≡ Arial ≡ Helvetica;
+   Liberation Mono ≡ Cousine ≡ Courier New ≡ Courier), so a label takes the same
+   box here as on the permit. `local()` serves no bytes: the pack's .woff2 are
+   for embedding inside a generated artifact only — fontPack.ts says why.
+
+   No italic faces, deliberately: the pack has none, so the permit SYNTHESISES
+   its italics, and aliasing a real Arial Italic here would draw the Diagram tab
+   differently from E-1.
+
+   tests/sldFontsLoadEverywhere.test.ts holds every rule in this block to
+   fontPack.ts — the face set, the metric-compatible names and the stacks.
+   ═══════════════════════════════════════════════════════════════════════════ */
+@font-face {
+  font-family: 'SolarPro Sans';
+  src: local('Liberation Sans'), local('LiberationSans'), local('LiberationSans-Regular'),
+       local('Arimo'), local('Arimo Regular'), local('Arimo-Regular'),
+       local('Arial'), local('ArialMT'),
+       local('Helvetica');
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+}
+@font-face {
+  font-family: 'SolarPro Sans';
+  src: local('Liberation Sans Bold'), local('LiberationSans-Bold'),
+       local('Arimo Bold'), local('Arimo-Bold'),
+       local('Arial Bold'), local('Arial-BoldMT'),
+       local('Helvetica Bold'), local('Helvetica-Bold');
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+}
+@font-face {
+  font-family: 'SolarPro Mono';
+  src: local('Liberation Mono'), local('LiberationMono'), local('LiberationMono-Regular'),
+       local('Cousine'), local('Cousine Regular'), local('Cousine-Regular'),
+       local('Courier New'), local('CourierNewPSMT'),
+       local('Courier');
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+}
+@font-face {
+  font-family: 'SolarPro Mono';
+  src: local('Liberation Mono Bold'), local('LiberationMono-Bold'),
+       local('Cousine Bold'), local('Cousine-Bold'),
+       local('Courier New Bold'), local('CourierNewPS-BoldMT'),
+       local('Courier Bold'), local('Courier-Bold');
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+}
+/* The symbols Liberation lacks (⚡ ⚠ ✓ ▶ ⇒ ‖ ⬡ …) in a MONOCHROME face. Left to
+   the browser's own fallback, ⚡ (emoji presentation by default) lands in the
+   colour emoji font — a cartoon on an electrical drawing, and not what E-1
+   prints. DejaVu Sans is the pack's own source for this face. The
+   unicode-range is the pack's symbol blocks, all at or above U+2000, so this
+   face can never win a Latin glyph and move a label's width. */
+@font-face {
+  font-family: 'SolarPro Symbols';
+  src: local('DejaVu Sans'), local('DejaVuSans'),
+       local('Segoe UI Symbol'), local('SegoeUISymbol'),
+       local('Apple Symbols'), local('AppleSymbols');
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  unicode-range: U+2000-206F, U+2190-21FF, U+2200-22FF, U+2500-257F, U+25A0-25FF,
+                 U+2600-26FF, U+2700-27BF, U+2B00-2BFF;
+}
+/* The fallbacks, added to the drawing's OWN attribute. A stylesheet rule
+   outranks an SVG presentation attribute, so on a machine with none of the faces
+   above the text lands on a metric-compatible sans (or, last, the generic) —
+   never on the default serif. The renderer's attribute stays pack-only because
+   the same markup is E-1, where no host fallback is allowed. Same rules as
+   svgFontFallbackCss() in fontPack.ts. */
+[font-family*="SolarPro Sans"] {
+  font-family: SolarPro Sans, SolarPro Symbols, Liberation Sans, Arimo, Arial, Helvetica, sans-serif;
+}
+[font-family*="SolarPro Mono"] {
+  font-family: SolarPro Mono, SolarPro Symbols, Liberation Mono, Cousine, Courier New, Courier, monospace;
+}

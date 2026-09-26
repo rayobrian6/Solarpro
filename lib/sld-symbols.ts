@@ -376,16 +376,20 @@ const symInverter: SLDSymbol = {
     parts.push(p_rect(acZoneX, acZoneY, acZoneW, acZoneH,
       { fill: '#E3F2FD', stroke: T.AC_CLR, sw: 1.5, r: 3 }));
     parts.push(p_text(acZoneX + acZoneW/2, acZoneY + 10, 'AC OUT', { sz: 8, fill: T.AC_CLR, bold: true }));
-    // Breaker symbol in AC zone
-    parts.push(p_rect(acZoneX+8, acZoneY+28, 44, 18, { fill: '#BBDEFB', stroke: T.AC_CLR, sw: 1, r: 2 }));
+    // Breaker symbol in AC zone — 52 wide, not 44: 'GFCI/OCP' prints at the
+    // 8.67 uu floor (41.6 uu in the mono face) and filled the 44 uu box edge
+    // to edge.
+    parts.push(p_rect(acZoneX+4, acZoneY+28, 52, 18, { fill: '#BBDEFB', stroke: T.AC_CLR, sw: 1, r: 2 }));
     parts.push(p_text(acZoneX + acZoneW/2, acZoneY + 37, 'GFCI/OCP', { sz: 7, fill: T.AC_CLR }));
     // Vent slots (right side bottom)
     parts.push(vents(acZoneX+8, acZoneY+58, 44, 4));
     // AC leads
     parts.push(p_line(acZoneX + acZoneW, 75, 200, 75, { stroke: T.AC_CLR, sw: 2 }));
     parts.push(p_line(acZoneX + acZoneW, 95, 200, 100, { stroke: T.AC_CLR, sw: 2 }));
-    parts.push(p_text(193, 70, 'L', { sz: 9, fill: T.AC_CLR, bold: true }));
-    parts.push(p_text(193, 106, 'N', { sz: 9, fill: T.AC_CLR, bold: true }));
+    // The terminal letters stand clear of their conductors (at 70 / 106 the
+    // caps came within 1 uu of the L lead and the N lead).
+    parts.push(p_text(193, 66, 'L', { sz: 9, fill: T.AC_CLR, bold: true }));
+    parts.push(p_text(193, 111, 'N', { sz: 9, fill: T.AC_CLR, bold: true }));
     // Vent slots on DC side bottom
     parts.push(vents(dcZoneX+6, dcZoneY+72, 48, 3));
     // GND lead
@@ -688,8 +692,11 @@ const symDCDisconnect: SLDSymbol = {
     // Lead lines
     parts.push(p_line(0, CY, 31, CY, { stroke: T.DC_CLR, sw: 2 }));
     parts.push(p_line(84, CY, 120, CY, { stroke: T.DC_CLR, sw: 2 }));
-    // NEC label
-    parts.push(p_text(CX, 76, 'NEC 690.15', { sz: 8, fill: T.GRAY }));
+    // NEC label — LEFT of the ground stub, ending 6 short of it. Centred on
+    // CX it sat on the stub's axis, and the stub (drawn after it) struck it
+    // through: 'NEC 6|90.15' on every string sheet and hybrid PV-G lane. The
+    // right side is the host sheet's (it prints the fuse rating there).
+    parts.push(p_text(CX - 6, 76, 'NEC 690.15', { sz: 8, fill: T.GRAY, anchor: 'end' }));
     // GND
     parts.push(p_line(CX, 66, CX, 100, { stroke: T.GND, sw: 1.5, dash: '4,3' }));
     parts.push(cpDot(0, CY, 'DC'));

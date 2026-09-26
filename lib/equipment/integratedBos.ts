@@ -922,6 +922,17 @@ export interface HybridSourceCombining {
    * Undefined on a string/hybrid lane, which takes no combiner.
    */
   combinerBasis?: import('@/lib/combinerSelection/types').CombinerBasis;
+  /**
+   * The lane's whole resolved plan — micro lanes only, ABSENT on a string lane.
+   *
+   * `combiner` above answers "which box do the branches land in"; the METERING
+   * belongs to the plan's brains (the gateway), and on a standalone-gateway lane
+   * those are two different devices. A hybrid lane's CTs are composed from THIS
+   * (lib/equipment/sldCombinerFields → hybridLaneMetering), so the gateway whose
+   * CTs a hybrid sheet draws is the one this very resolution chose — never a
+   * second resolve that could land on another device.
+   */
+  plan?: IntegratedEquipmentPlan;
 }
 export interface HybridAcCollectionPlan {
   perSource: HybridSourceCombining[];
@@ -958,6 +969,7 @@ export function resolveHybridAcCollection(sources: HybridSourceInput[]): HybridA
         // not answer for. It was computed here and thrown away, and the drawing
         // then printed a derived device with the same confidence as a chosen one.
         combinerBasis: plan.combinerBasis ?? 'unresolved-default',
+        plan,
       };
     }
     // String / hybrid inverter: no dedicated combiner — its OCPD is a backfed

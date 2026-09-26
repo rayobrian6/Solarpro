@@ -16,6 +16,7 @@ import { buildIntegratedEquipment, planLandingDevice, permitStandaloneGateway } 
 // E-1 schedule reads it here so it carries the same Metering row the Diagram tab
 // and the exported SLD PDF already print — see the note at `meteringChannels`.
 import { resolveDesignMetering } from '@/lib/equipment/designMetering';
+import { hybridLaneMetering, type HybridLaneMeteringResult } from '@/lib/equipment/sldCombinerFields';
 import { permitInterconnectionToken, interconnectionRuleOf } from './interconnectionRule';
 import { isSubSystemKey, type SubSystemKey } from './subSystems';
 import { getInverterById, getMicroinverterById, SOLAR_PANELS,
@@ -499,7 +500,13 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
   // conductorAuthority.subSystems (see buildSourceBranchesFromAuthority).
   const _sources = buildSourceBranchesFromAuthority(_auth, input);
   if (_sources && _sources.length > 1) {
-    sldInput.sources = _sources;
+    // Each metering lane carries its CTs (Ray, 2026-09-26: "add CTs to the
+    // hybrid SLDs too") — the ONE composer run on that lane's own plan, resolved
+    // from the same selection the multi-lane renderer resolves the lane
+    // combiners from (`selectedCombinerId` above). One lane carries the site's
+    // consumption CTs. PV-4A and the snapshot read the same answer through
+    // buildHybridPermitMetering, so the three cannot disagree.
+    sldInput.sources = permitHybridLaneMetering(input, _sources).lanes;
     // On the hybrid multi-lane path the TOP-LEVEL inverter fields are a title-
     // block summary only — each lane renders (and fail-louds) its OWN inverter.
     // getEquipmentContext has no single project-wide winner for a hybrid, so it
@@ -665,6 +672,39 @@ export function buildHybridAcCollection(
   // function precisely so they cannot disagree; passing the selection on only
   // one side would have reintroduced the disagreement it exists to prevent.
   return acCollectionFromLanes(lanes, input.project.selectedCombinerId ?? null);
+}
+
+/**
+ * The permit's hybrid metering: every lane E-1 draws, with its CTs, plus the
+ * one lane that carries the site's consumption CTs — from the SAME lanes and
+ * the SAME selection E-1's multi-lane drawing resolves its lane combiners from
+ * (see buildHybridAcCollection above for why that sameness is the point), and
+ * the interconnection in the package's one spelling (permitInterconnectionToken,
+ * which E-1's single-lane metering uses too). 120/240 V 1Ø 3W, as every other
+ * statement on the sheet assumes.
+ *
+ * E-1 attaches the lanes; PV-4A states the primary lane's metering; the
+ * snapshot records a designer-recorded placement from it. null for a
+ * single-system input — nothing on that path changes.
+ */
+export function buildHybridPermitMetering(
+  input: PermitInput,
+  cad?: CADModel | null,
+  auth?: ConductorAuthority,
+): HybridLaneMeteringResult | null {
+  const lanes = buildSourceBranchesFromAuthority(auth ?? buildConductorAuthority(input, cad ?? undefined), input);
+  if (!lanes || lanes.length < 2) return null;
+  return permitHybridLaneMetering(input, lanes);
+}
+
+function permitHybridLaneMetering(input: PermitInput, lanes: SLDSourceBranch[]): HybridLaneMeteringResult {
+  return hybridLaneMetering({
+    lanes,
+    selectedCombinerId: input.project.selectedCombinerId ?? null,
+    interconnectionRaw: permitInterconnectionToken(input.project.interconnectionMethod),
+    consumptionCtLocation: input.project.consumptionCtLocation ?? null,
+    systemVoltage: 240,
+  });
 }
 
 // ─── PAGE PATH — computedMulti.subSystems → SLDSourceBranch[] ────────────────

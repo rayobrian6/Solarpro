@@ -20,7 +20,13 @@
 //     receives (cx, cy, w, h) in the host symbol's native coord space and
 //     returns a ready-to-concat SVG string.
 //   • Illustrations never emit wire terminals or labels — the host symbol
-//     owns those. This module owns the "body of the box" only.
+//     owns those. This module owns the "body of the box" only. The older art
+//     paints model/rating micro-text on the body for the admin preview; the
+//     SLD draws every illustration through forPrintedSheet(), which keeps the
+//     shapes and a brand wordmark that fits its plate at the printed size and
+//     drops the rest (the renderer's nameplate states make, model and rating).
+//   • illustrationBox() is the box an art really occupies in its slot — the
+//     host ties its conductors to that, not to the slot.
 //   • Pure-function emission (no React, no DOM, no side effects).
 //
 // SCOPE (Phase 1)
@@ -97,7 +103,12 @@ function circleSvg(
 }
 function textSvg(
   x: number, y: number, txt: string,
-  opts: { size?: number; fill?: string; bold?: boolean; anchor?: string } = {},
+  opts: { size?: number; fill?: string; bold?: boolean; anchor?: string;
+          /** The plate the text is printed on — [x, y, w, h] — for a BRAND
+           *  WORDMARK only. On the printed sheet (forPrintedSheet) a wordmark
+           *  authored under the type floor is kept, at the floor, when it fits
+           *  this plate at that size; every other sub-floor line is dropped. */
+          fit?: [number, number, number, number] } = {},
 ): string {
   const size = opts.size ?? 4;
   const fill = opts.fill ?? '#fff';
@@ -106,7 +117,8 @@ function textSvg(
   const safe = txt.replace(/&/g, '&' + 'amp;')
                   .replace(/</g, '&' + 'lt;')
                   .replace(/>/g, '&' + 'gt;');
-  return `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" font-family="SolarPro Sans, SolarPro Symbols" font-size="${size}" font-weight="${weight}" fill="${fill}" text-anchor="${anc}">${safe}</text>`;
+  const fitAttr = opts.fit ? ` data-print-fit="${opts.fit.map(n => n.toFixed(1)).join(' ')}"` : '';
+  return `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" font-family="SolarPro Sans, SolarPro Symbols" font-size="${size}" font-weight="${weight}" fill="${fill}" text-anchor="${anc}"${fitAttr}>${safe}</text>`;
 }
 function pathSvg(d: string, fill: string, stroke = 'none', sw = 0.5): string {
   return `<path d="${d}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round"/>`;
@@ -133,9 +145,74 @@ const BOLD_ADV: Readonly<Record<string, number>> = {
   ' ': 278, A: 723, B: 723, C: 723, D: 723, E: 667, F: 611, G: 778, H: 723, I: 278, J: 557, K: 723, L: 611,
   M: 834, N: 723, O: 778, P: 667, Q: 778, R: 723, S: 667, T: 611, U: 723, V: 667, W: 944, X: 667, Y: 667, Z: 611,
   0: 557, 1: 557, 2: 557, 3: 557, 4: 557, 5: 557, 6: 557, 7: 557, 8: 557, 9: 557,
+  // Lower case and the punctuation a brand wordmark uses ('SolarEdge',
+  // 'Sol-Ark'), for forPrintedSheet below — Liberation Sans Bold's advances.
+  a: 556, b: 611, c: 556, d: 611, e: 556, f: 333, g: 611, h: 611, i: 278, j: 278, k: 556, l: 278, m: 889,
+  n: 611, o: 611, p: 611, q: 611, r: 389, s: 556, t: 333, u: 611, v: 556, w: 778, x: 556, y: 556, z: 500,
+  '-': 333, '.': 278, ',': 278, '/': 278, '+': 584, '(': 333, ')': 333, '&': 722, '|': 280, '·': 333,
 };
-const fitsOneLine = (text: string, size: number, width: number): boolean =>
-  [...text].reduce((em, ch) => em + (BOLD_ADV[ch] ?? 1000) / 1000, 0) * size <= width;
+const emWidth = (text: string): number => [...text].reduce((em, ch) => em + (BOLD_ADV[ch] ?? 1000) / 1000, 0);
+const fitsOneLine = (text: string, size: number, width: number): boolean => emWidth(text) * size <= width;
+
+/**
+ * An illustration AS THE PRINTED SHEET SHOWS IT (Ray, 2026-09-26: "the word
+ * bleed and overlays").
+ *
+ * The SLD raises every font-size under the floor to 8.67 uu on the finished
+ * sheet. The older art authored its micro-text at 1.8–4 uu, so on the sheet each
+ * line grew 2–4× over the art's own shapes — 'HD-Wave · UL 1741-SB' under the
+ * red 'ON' handle and past the cabinet ('UL 17[ON]B'), 'Home Hub · SE7600H'
+ * across the display window. And those lines are hard-coded model numbers and
+ * ratings — 'IQ Battery 5P 5.0 kWh · 3.84 kW' over a nameplate reading
+ * 'IQ Battery 5P 10 kWh', 'Solis S6-EH1P-L 7.6K' over 'Solis S6-GR1P6K': two
+ * specs for one box on a permit drawing. The renderer's nameplate under each
+ * device is the one that states make, model and rating.
+ *
+ * So on the sheet an illustration is its SHAPES, its type authored at or above
+ * the floor (the fitted IQ Gateway / IQ Combiner wordmarks), and a brand
+ * wordmark (textSvg `fit`) raised to the floor only when it fits its plate at
+ * that size — centred on the plate's height, never past its sides. Every other
+ * line is dropped. The admin preview keeps calling render() and shows the art
+ * as drawn.
+ */
+export function forPrintedSheet(svg: string, floorUu: number = PRINTED_TYPE_FLOOR_UU): string {
+  const num = (attrs: string, name: string): number => {
+    const m = new RegExp(`\\s${name}="([-\\d.]+)"`).exec(attrs);
+    return m ? Number(m[1]) : NaN;
+  };
+  return svg.replace(/<text\b([^>]*)>([\s\S]*?)<\/text>/g, (_whole, attrs: string, body: string) => {
+    const fit = /\sdata-print-fit="([^"]*)"/.exec(attrs)?.[1];
+    const clean = attrs.replace(/\sdata-print-fit="[^"]*"/, '');
+    const size = num(attrs, 'font-size');
+    if (Number.isFinite(size) && size >= floorUu) return `<text${clean}>${body}</text>`;
+    if (!fit) return '';
+    const [px, py, pw, ph] = fit.split(/\s+/).map(Number);
+    const text = body.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+    const w = emWidth(text) * floorUu;
+    const x = num(attrs, 'x');
+    const anchor = /\stext-anchor="(\w+)"/.exec(attrs)?.[1] ?? 'start';
+    const left = anchor === 'middle' ? x - w / 2 : anchor === 'end' ? x - w : x;
+    // Ink above / below the baseline in the printed face (caps 0.725 em; g, p,
+    // y descend 0.21 em): 1 uu of plate left at each end, and the ink inside
+    // the plate's height ('SolarEdge' — caps and a 'g' — is 8.1 uu of ink on
+    // the Home Hub's 8.4 uu bar).
+    const cap = 0.725 * floorUu, desc = /[gjpqy,]/.test(text) ? 0.21 * floorUu : 0, PAD = 1;
+    if (!Number.isFinite(x) || left < px + PAD || left + w > px + pw - PAD || cap + desc > ph - 0.2) return '';
+    const baseline = py + ph / 2 + (cap - desc) / 2;
+    return `<text${clean.replace(/\sy="[^"]*"/, ` y="${baseline.toFixed(1)}"`).replace(/\sfont-size="[^"]*"/, ` font-size="${floorUu}"`)}>${body}</text>`;
+  });
+}
+
+/** The box an illustration actually draws in a slot: every art keeps its
+ *  native aspect (aspectW : aspectH) and is centred, so a 200-wide slot can hold
+ *  a 100-wide cabinet. A host that ties conductors to the art ties them to THIS
+ *  box — the slot's edge floats in white space beside the drawing. */
+export function illustrationBox(d: DeviceIllustration, cx: number, cy: number, slotW: number, slotH: number):
+    { x0: number; y0: number; x1: number; y1: number; w: number; h: number } {
+  const s = Math.min(slotW / d.aspectW, slotH / d.aspectH);
+  const w = d.aspectW * s, h = d.aspectH * s;
+  return { x0: cx - w / 2, y0: cy - h / 2, x1: cx + w / 2, y1: cy + h / 2, w, h };
+}
 
 // ─── Tesla Powerwall 3 (battery) ─────────────────────────────────────────────
 // Proportions modelled on the published spec: ~1105 mm H × 609 mm W × 193 mm D.
@@ -172,6 +249,7 @@ function renderTeslaPowerwall(cx: number, cy: number, slotW: number, slotH: numb
     size: Math.max(2.4, H * 0.022),
     fill: '#F4F4F2',
     bold: true,
+    fit: [plateX, plateY, plateW, plateH],
   }));
   // Lower trim (integrated inverter block)
   const trimY = y + H * 0.82;
@@ -208,6 +286,7 @@ function renderEcoflowOceanProInverter(cx: number, cy: number, slotW: number, sl
     size: Math.max(2.8, H * 0.032),
     fill: '#FFFFFF',
     bold: true,
+    fit: [x + W * 0.04, y + H * 0.04, W * 0.92, H * 0.06],
   }));
   // Display window (dark glass, upper third)
   const dispX = x + W * 0.12;
@@ -265,6 +344,7 @@ function renderEcoflowOceanProBattery(cx: number, cy: number, slotW: number, slo
     size: Math.max(2.6, H * 0.028),
     fill: '#FFFFFF',
     bold: true,
+    fit: [x, y, W, capH],
   }));
   // Module seams — 4 LFP modules stacked (representing up to 4-module 40 kWh pack
   // common in OCEAN Pro single-tower configurations).
@@ -344,6 +424,7 @@ function renderTeslaGateway2(cx: number, cy: number, slotW: number, slotH: numbe
     size: Math.max(2.4, H * 0.03),
     fill: '#F4F4F2',
     bold: true,
+    fit: [plateX, plateY, plateW, plateH],
   }));
   parts.push(textSvg(x + W / 2, y + H * 0.94, 'GATEWAY 2', {
     size: Math.max(2.0, H * 0.024),
@@ -379,6 +460,7 @@ function renderEcoflowSmartHomePanel(cx: number, cy: number, slotW: number, slot
     size: Math.max(2.4, H * 0.026),
     fill: '#FFFFFF',
     bold: true,
+    fit: [x + W * 0.04, y + H * 0.04, W * 0.92, H * 0.07],
   }));
   // Front-door glass window
   const glassX = x + W * 0.08;
@@ -449,6 +531,7 @@ function renderEnphaseIQ8Micro(cx: number, cy: number, slotW: number, slotH: num
     size: Math.max(3, H * 0.08),
     fill: '#FFFFFF',
     bold: true,
+    fit: [x + W * 0.12, y + H * 0.2, W * 0.76, H * 0.08],
   }));
   // Label
   parts.push(textSvg(x + W / 2, y + H * 0.55, 'IQ8+ MICRO', {
@@ -492,6 +575,7 @@ function renderEnphaseIQBattery5P(cx: number, cy: number, slotW: number, slotH: 
     size: Math.max(2.8, H * 0.055),
     fill: '#FFFFFF',
     bold: true,
+    fit: [x + W * 0.03, y + H * 0.05, W * 0.94, H * 0.1],
   }));
   // Side cooling vents (both sides)
   for (let i = 0; i < 5; i++) {
@@ -549,6 +633,7 @@ function renderEnphaseIQSC3(cx: number, cy: number, slotW: number, slotH: number
     size: Math.max(2.6, H * 0.035),
     fill: '#FFFFFF',
     bold: true,
+    fit: [x + W * 0.04, y + H * 0.04, W * 0.92, H * 0.09],
   }));
   // Display window
   const dispY = y + H * 0.18;
@@ -801,6 +886,7 @@ function renderSolarEdgeHomeHub(cx: number, cy: number, slotW: number, slotH: nu
     size: Math.max(2.8, H * 0.03),
     fill: '#FFFFFF',
     bold: true,
+    fit: [x + W * 0.05, y + H * 0.04, W * 0.9, H * 0.06],
   }));
   // Display window
   const dispX = x + W * 0.14;
@@ -862,6 +948,7 @@ function renderSolarEdgeEnergyBank(cx: number, cy: number, slotW: number, slotH:
     size: Math.max(2.6, H * 0.03),
     fill: '#FFFFFF',
     bold: true,
+    fit: [x, y, W, H * 0.09],
   }));
   // Module stack (3 LFP modules)
   const stackY0 = y + H * 0.13;
@@ -905,6 +992,7 @@ function renderSolarEdgeBackupInterface(cx: number, cy: number, slotW: number, s
     size: Math.max(2.4, H * 0.032),
     fill: '#FFFFFF',
     bold: true,
+    fit: [x + W * 0.04, y + H * 0.04, W * 0.92, H * 0.09],
   }));
   // Transfer switch window
   const winY = y + H * 0.18;
@@ -958,6 +1046,7 @@ function renderGeneracPWRcellInverter(cx: number, cy: number, slotW: number, slo
     size: Math.max(3, H * 0.034),
     fill: '#FFFFFF',
     bold: true,
+    fit: [x + W * 0.04, y + H * 0.04, W * 0.92, H * 0.07],
   }));
   // Display
   parts.push(rect(x + W * 0.14, y + H * 0.15, W * 0.72, H * 0.14, '#0A0E12', '#000', 0.4, 1));
@@ -1003,6 +1092,7 @@ function renderGeneracPWRcellBattery(cx: number, cy: number, slotW: number, slot
     size: Math.max(2.4, H * 0.028),
     fill: '#FFFFFF',
     bold: true,
+    fit: [x, y, W, H * 0.08],
   }));
   // Module stack (up to 6 modules of 3 kWh each = 18 kWh)
   const stackY0 = y + H * 0.12;
@@ -1046,6 +1136,7 @@ function renderGeneracPWRmanager(cx: number, cy: number, slotW: number, slotH: n
     size: Math.max(2.6, H * 0.035),
     fill: '#FFFFFF',
     bold: true,
+    fit: [x + W * 0.04, y + H * 0.04, W * 0.92, H * 0.09],
   }));
   // Transfer switch window
   const winY = y + H * 0.18;
@@ -1108,6 +1199,7 @@ function renderSolArkHybridInverter(cx: number, cy: number, slotW: number, slotH
     size: Math.max(3.2, H * 0.04),
     fill: '#FFFFFF',
     bold: true,
+    fit: [x + W * 0.1, y + H * 0.08, W * 0.8, H * 0.09],
   }));
   // Display window
   parts.push(rect(x + W * 0.12, y + H * 0.22, W * 0.5, H * 0.18, '#0C1218', '#000', 0.5, 1.5));
@@ -1179,6 +1271,7 @@ function renderSolArkSmartLoadCenter(cx: number, cy: number, slotW: number, slot
     size: Math.max(3, H * 0.038),
     fill: '#FFFFFF',
     bold: true,
+    fit: [x + W * 0.1, y + H * 0.08, W * 0.8, H * 0.1],
   }));
   parts.push(textSvg(x + W / 2, y + H * 0.165, 'SMART LOAD CENTER', {
     size: Math.max(1.8, H * 0.022),
@@ -1226,6 +1319,7 @@ function renderGrowattSPHInverter(cx: number, cy: number, slotW: number, slotH: 
     size: Math.max(3, H * 0.036),
     fill: '#FFFFFF',
     bold: true,
+    fit: [x + W * 0.04, y + H * 0.04, W * 0.92, H * 0.07],
   }));
   // LCD display window
   parts.push(rect(x + W * 0.1, y + H * 0.16, W * 0.8, H * 0.22, '#1D2A3A', '#0B141F', 0.5, 1.5));
@@ -1278,6 +1372,7 @@ function renderGrowattARKBattery(cx: number, cy: number, slotW: number, slotH: n
     size: Math.max(2.6, H * 0.03),
     fill: '#FFFFFF',
     bold: true,
+    fit: [x + W * 0.04, y, W * 0.92, H * 0.14],
   }));
   parts.push(textSvg(x + W / 2, y + H * 0.105, 'ARK BMS', {
     size: Math.max(2.2, H * 0.023),
@@ -1326,6 +1421,7 @@ function renderGrowattATS(cx: number, cy: number, slotW: number, slotH: number):
     size: Math.max(2.8, H * 0.034),
     fill: '#FFFFFF',
     bold: true,
+    fit: [x + W * 0.04, y + H * 0.04, W * 0.92, H * 0.1],
   }));
   parts.push(textSvg(x + W / 2, y + H * 0.155, 'ATS-S 200A', {
     size: Math.max(2.2, H * 0.024),
@@ -1375,6 +1471,7 @@ function renderSolisHybridInverter(cx: number, cy: number, slotW: number, slotH:
     size: Math.max(3.2, H * 0.04),
     fill: '#FFFFFF',
     bold: true,
+    fit: [x + W * 0.04, y + H * 0.04, W * 0.92, H * 0.08],
   }));
   // Model label beneath brand
   parts.push(textSvg(x + W / 2, y + H * 0.15, 'S6-EH1P-L 7.6K', {
@@ -1434,6 +1531,7 @@ function renderAPsystemsDS3Micro(cx: number, cy: number, slotW: number, slotH: n
     size: Math.max(2.8, H * 0.078),
     fill: '#FFFFFF',
     bold: true,
+    fit: [x + W * 0.1, y + H * 0.23, W * 0.8, H * 0.08],
   }));
   // Model + rating
   parts.push(textSvg(x + W / 2, y + H * 0.45, 'DS3-L / DS3-H', {
@@ -1482,6 +1580,7 @@ function renderHoymilesHMSMicro(cx: number, cy: number, slotW: number, slotH: nu
     size: Math.max(2.8, H * 0.078),
     fill: '#FFFFFF',
     bold: true,
+    fit: [x + W * 0.1, y + H * 0.23, W * 0.8, H * 0.08],
   }));
   // Model + rating
   parts.push(textSvg(x + W / 2, y + H * 0.45, 'HMS-2000DW-4T', {

@@ -6,7 +6,7 @@
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server';
-import { sldCombinerFields } from '@/lib/equipment/sldCombinerFields';
+import { sldCombinerFields, hybridLaneMetering } from '@/lib/equipment/sldCombinerFields';
 import { readProductionMeterFlag, ungroundedConductorsForService } from '@/lib/equipment/currentTransformers';
 import { getUserFromRequest } from '@/lib/auth';
 import { handleRouteDbError } from '@/lib/db-neon';
@@ -334,8 +334,25 @@ export async function POST(req: NextRequest) {
     // aggregate §1.7 total on this path.
     const _pdfSources = sanitizeClientSourceBranches(buildInput.sources);
     if (_pdfSources) {
-      input.sources = _pdfSources;
-      console.log(`[SLD PDF] Wave 5A multi-lane export: lanes=${_pdfSources.length} keys=${_pdfSources.map(s2 => s2.key).join('+')}`);
+      // …with each metering lane's CTs, composed exactly as the Diagram route
+      // composes them (hybridLaneMetering — one composer, run on each lane's
+      // own plan, one lane carrying the site's consumption CTs), from the same
+      // selection the renderer resolves the lanes' combiners from and the same
+      // interconnection / CT count / location this route hands sldCombinerFields
+      // above. The export draws what the screen draws.
+      const _pdfMetering = hybridLaneMetering({
+        lanes: _pdfSources,
+        selectedCombinerId: input.selectedCombinerId ?? null,
+        selectedCombinerIdByLane: input.selectedCombinerIdByLane ?? null,
+        interconnectionRaw: buildInput.interconnection ?? buildInput.interconnectionType
+          ?? buildInput.interconnectionMethod ?? null,
+        ungroundedConductorCount: ungroundedConductorsForService(
+          Number(buildInput.systemVoltage) || 240, 1),
+        consumptionCtLocation: typeof buildInput.consumptionCtLocation === 'string'
+          ? buildInput.consumptionCtLocation : null,
+      });
+      input.sources = _pdfMetering.lanes;
+      console.log(`[SLD PDF] Wave 5A multi-lane export: lanes=${_pdfSources.length} keys=${_pdfSources.map(s2 => s2.key).join('+')} metering=${_pdfMetering.metered.map(m => `${m.key}${m.isPrimary ? '*' : ''}`).join('+') || 'none'}`);
     }
 
     // Render SVG
