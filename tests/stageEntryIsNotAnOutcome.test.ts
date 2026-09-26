@@ -248,6 +248,20 @@ const ENTRY_TRUE_MAPPINGS: Record<string, Record<string, string>> = {
     completed: 'install_completed',   // entered once the system is live
     // `installation` is absent: it used to map to `contract_signed`.
   },
+  // 🚨 THE SIGNATURE PATH ITSELF — the one place `contract_signed` is established
+  // rather than asserted. This is NOT a stage→micro mapping: it is the
+  // `toStage` argument handed to `applyStageChange` in the SAME operation that
+  // writes `proposals.signed_at` and the signer's name. The customer really did
+  // just sign; nothing is being inferred from a phase selection.
+  //
+  // This entry exists because the scan is deliberately broad and CAUGHT this pair
+  // when it was added, which is the guard working. The rule it enforces is
+  // unchanged: `contract_signed` may be reached only by the code that records the
+  // signature, and `app/api/projects/[id]/homeowner-stage/route.ts` is still
+  // forbidden from reaching it by selecting a phase.
+  'app/api/proposals/[id]/sign/route.ts': {
+    toStage: 'contract_signed',
+  },
 };
 
 const MICRO_SET = new Set<string>(MICRO_STAGES as readonly string[]);
@@ -368,15 +382,52 @@ describe('🚨 nothing invents a signature', () => {
   it('and no stage-keyed mapping reaches it except one named for it', () => {
     // The specific defect: `installation: 'contract_signed'`. Generalised — any
     // key that is not itself `contract_signed`.
+    //
+    // 🚨 THIS CASE NOW HONOURS ENTRY_TRUE_MAPPINGS, and that is a fix to the guard
+    // pair rather than a weakening of it. Its sibling above consults the allow-list;
+    // this one hard-coded `stage !== 'contract_signed'`, so the documented escape
+    // hatch — "add the pair with the reason" — was unusable for the one stage it
+    // matters most for. The two assertions disagreed about the rule they enforce.
+    //
+    // The rule is unchanged: a PHASE SELECTION may never claim a signature. What the
+    // allow-list admits is the signature path's own `toStage` argument, in the same
+    // operation that writes `signed_at` — and the case below this one independently
+    // requires every file on that list to record the signature itself, so an entry
+    // here cannot buy a milestone without the fact.
     const offences: string[] = [];
     for (const file of MICRO_STAGE_FILES) {
       const src = stripComments(readFileSync(join(ROOT, file), 'utf8'));
+      const allowed = ENTRY_TRUE_MAPPINGS[file] ?? {};
       for (const [stage, micro] of stageMicroPairs(src)) {
-        if (micro === 'contract_signed' && stage !== 'contract_signed') {
+        if (micro === 'contract_signed' && stage !== 'contract_signed'
+            && allowed[stage] !== micro) {
           offences.push(`${file}: ${stage} -> contract_signed`);
         }
       }
     }
     expect(offences, 'a stage selection is claiming the customer signed').toEqual([]);
+  });
+
+  it('🚨 the allow-list cannot admit a phase selection — the defect stays caught', () => {
+    // The mutation that matters: if `installation: 'contract_signed'` came back in the
+    // homeowner-stage route, the case above must still fail. Proven by construction
+    // here rather than by trusting the loop, because the allow-list is now consulted.
+    const homeownerRoute = 'app/api/projects/[id]/homeowner-stage/route.ts';
+    const allowed = ENTRY_TRUE_MAPPINGS[homeownerRoute] ?? {};
+    expect(allowed.installation,
+      'the homeowner-stage route has been allow-listed to claim a signature from a '
+      + 'phase selection — that is the original defect, restored',
+    ).toBeUndefined();
+    // And no file may be allow-listed for `contract_signed` unless it also records
+    // the signature; the case above enforces that for the signature paths, so assert
+    // the allow-list holds nothing else.
+    const claimants = Object.entries(ENTRY_TRUE_MAPPINGS)
+      .filter(([, pairs]) => Object.values(pairs).includes('contract_signed'))
+      .map(([f]) => f)
+      .sort();
+    expect(claimants).toEqual([
+      'app/api/proposals/[id]/sign/route.ts',   // the signature itself
+      'lib/operations/pipelineMicroStage.ts',   // stage name IS the outcome
+    ]);
   });
 });

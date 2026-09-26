@@ -28,9 +28,31 @@ export async function GET(req: NextRequest) {
 
     const results: Record<string, unknown> = {}
 
+    // 🚨 PER-SECTION ISOLATION. This handler had ONE try/catch around all six
+    // sections, so the geography block's phantom `no.state` column turned a single
+    // 42703 into a 500 for the whole endpoint — and the page renders a 500 as a
+    // permanent "Loading analytics…". Five working SQL blocks were invisible because
+    // the sixth named a column that has never existed.
+    //
+    // A section that fails now costs ONLY that section. The failure is REPORTED, not
+    // swallowed: `sectionErrors` rides on the response so the page can say "this panel
+    // is unavailable" instead of showing a spinner forever or, worse, an empty chart
+    // that reads as "no data". An outage rendered as an all-clear is the defect class
+    // this whole audit kept finding.
+    const sectionErrors: Record<string, string> = {}
+    const runSection = async <T>(name: string, fn: () => Promise<T>): Promise<T | null> => {
+      try {
+        return await fn()
+      } catch (e: unknown) {
+        console.error(`[admin/network/analytics] section '${name}' failed:`, e)
+        sectionErrors[name] = (e as Error)?.message ?? 'unknown error'
+        return null
+      }
+    }
+
     // ── Funnel Overview ──────────────────────────────────────────────────────
     if (section === 'all' || section === 'funnel') {
-      const funnelRows = await sql`
+      const funnelRows = await runSection('funnel', () => sql`
         SELECT
           COUNT(*) AS total_leads,
           COUNT(*) FILTER (WHERE status != 'intake')                          AS screened,
@@ -48,8 +70,9 @@ export async function GET(req: NextRequest) {
           COUNT(*) FILTER (WHERE opportunity_grade = 'C')                      AS c_grade_count
         FROM network_opportunities
         WHERE created_at > NOW() - (${days} || ' days')::INTERVAL
-      `
-      const funnel = funnelRows[0] as Record<string, unknown>
+      `)
+      const funnel = (funnelRows?.[0] ?? null) as Record<string, unknown> | null
+      if (funnel) {
 
       // Conversion rates
       const total     = parseInt(funnel.total_leads as string) || 1
@@ -67,11 +90,12 @@ export async function GET(req: NextRequest) {
         win_rate:     (won / Math.max(claimed, 1)).toFixed(3),
         overall_cvr:  (won / total).toFixed(3),
       }
+      }
     }
 
     // ── Source Performance ───────────────────────────────────────────────────
     if (section === 'all' || section === 'sources') {
-      const sources = await sql`
+      const sources = await runSection('sources', () => sql`
         SELECT
           no.source_type,
           COUNT(*) AS total,
@@ -86,21 +110,31 @@ export async function GET(req: NextRequest) {
         WHERE no.created_at > NOW() - (${days} || ' days')::INTERVAL
         GROUP BY no.source_type
         ORDER BY total DESC
-      `
-      results.sources = sources
+      `)
+      if (sources) results.sources = sources
     }
 
     // ── Campaign Attribution ─────────────────────────────────────────────────
     if (section === 'all' || section === 'campaigns') {
-      const campaigns = await getCampaignPerformance({ days })
-      results.campaigns = campaigns
+      const campaigns = await runSection('campaigns', () => getCampaignPerformance({ days }))
+      if (campaigns) results.campaigns = campaigns
     }
 
     // ── Geography ───────────────────────────────────────────────────────────
     if (section === 'all' || section === 'geography') {
-      const geo = await sql`
+      // 🚨 THIS BLOCK BLACKED OUT THE WHOLE TAB. `network_opportunities` has no
+      // `state` column — the canonical schema (migrations 047+054+062+072+088) calls it
+      // `location_state`, and `state` exists only in the secret-gated inline DDL at
+      // app/api/migrate/route.ts, which no migration file reproduces. So this SELECT
+      // raised 42703, the handler's single try/catch turned it into a 500, and the
+      // Campaign Intel tab sat on "Loading analytics…" indefinitely for every admin,
+      // on every load — no error, no empty state. Five perfectly good SQL blocks were
+      // invisible because the sixth named a column that has never existed.
+      //
+      // Aliased AS state so the response key stays stable for the page.
+      const geo = await runSection('geography', () => sql`
         SELECT
-          no.state,
+          no.location_state AS state,
           COUNT(*) AS total,
           COUNT(*) FILTER (WHERE no.status NOT IN ('intake','rejected')) AS qualified,
           COUNT(*) FILTER (WHERE no.status IN ('claimed','closed_won','closed_lost')) AS claimed,
@@ -108,17 +142,17 @@ export async function GET(req: NextRequest) {
         FROM network_opportunities no
         LEFT JOIN opportunity_intelligence oi ON oi.opportunity_id = no.id
         WHERE no.created_at > NOW() - (${days} || ' days')::INTERVAL
-          AND no.state IS NOT NULL
-        GROUP BY no.state
+          AND no.location_state IS NOT NULL
+        GROUP BY no.location_state
         ORDER BY total DESC
         LIMIT 20
-      `
-      results.geography = geo
+      `)
+      if (geo) results.geography = geo
     }
 
     // ── Lead Quality Distribution ────────────────────────────────────────────
     if (section === 'all' || section === 'quality') {
-      const quality = await sql`
+      const quality = await runSection('quality', () => sql`
         SELECT
           oi.overall_grade,
           COUNT(*) AS count,
@@ -134,9 +168,9 @@ export async function GET(req: NextRequest) {
             WHEN 'A+' THEN 1 WHEN 'A' THEN 2 WHEN 'B' THEN 3
             WHEN 'C' THEN 4 WHEN 'D' THEN 5 ELSE 6
           END
-      `
+      `)
 
-      const screening = await sql`
+      const screening = await runSection('quality_screening', () => sql`
         SELECT
           osq.auto_decision,
           COUNT(*) AS count,
@@ -147,14 +181,15 @@ export async function GET(req: NextRequest) {
         JOIN network_opportunities no ON no.id = osq.opportunity_id
         WHERE no.created_at > NOW() - (${days} || ' days')::INTERVAL
         GROUP BY osq.auto_decision
-      `
+      `)
 
-      results.quality = { grades: quality, screening }
+      // Either half may be null; report what resolved rather than dropping both.
+      if (quality || screening) results.quality = { grades: quality ?? [], screening: screening ?? [] }
     }
 
     // ── Volume Trend (daily) ─────────────────────────────────────────────────
     if (section === 'all' || section === 'trend') {
-      const trend = await sql`
+      const trend = await runSection('trend', () => sql`
         SELECT
           DATE_TRUNC('day', created_at)::date AS date,
           COUNT(*) AS leads,
@@ -164,11 +199,19 @@ export async function GET(req: NextRequest) {
         WHERE created_at > NOW() - (${days} || ' days')::INTERVAL
         GROUP BY DATE_TRUNC('day', created_at)
         ORDER BY date ASC
-      `
-      results.trend = trend
+      `)
+      if (trend) results.trend = trend
     }
 
-    return NextResponse.json({ success: true, days, ...results })
+    // `sectionErrors` is present only when something actually failed, so the page can
+    // distinguish "this panel is unavailable" from "this panel has no data" — the
+    // distinction the permanent spinner destroyed.
+    return NextResponse.json({
+      success: true,
+      days,
+      ...results,
+      ...(Object.keys(sectionErrors).length ? { sectionErrors } : {}),
+    })
   } catch (error) {
     console.error('[GET /api/admin/network/analytics]', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })

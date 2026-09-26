@@ -236,15 +236,39 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
         WHERE id = ${projectId}
           AND homeowner_stage = 'proposal'
       `;
-      // Also record the pipeline stage
-      await sql`
-        UPDATE projects
-        SET stage = 'approved', updated_at = NOW()
-        WHERE id = ${projectId}
-          AND stage IN ('lead', 'design', 'proposal')
-      `;
     } catch {
-      // Stage advancement is best-effort
+      // Homeowner-stage advancement is best-effort.
+    }
+
+    // 🚨 THE PIPELINE STAGE. This used to be
+    //     UPDATE projects SET stage = 'approved' WHERE ... AND stage IN (...)
+    // and `projects.stage` DOES NOT EXIST — not in any migration, not in the inline
+    // DDL. The statement raised `column "stage" does not exist`, the bare catch above
+    // swallowed it, and nothing happened. So when a homeowner signed:
+    //   · the installer's Operations board never moved — project_status stayed at its
+    //     default 'lead' while the proposal view showed a signed contract;
+    //   · `contract_signed_at` was never stamped;
+    //   · `generateTasksForStage` never ran;
+    //   · and the two auto-generated commands gated on `contract_signed`
+    //     (schedule_install, engineering_review) never appeared.
+    // With no error anywhere.
+    //
+    // `applyStageChange` is the one stage writer: it sets project_status AND the legacy
+    // status column, stamps contract_signed_at, writes the project_activity row with
+    // the stage it actually read, and generates the tasks. Kept non-fatal — a signature
+    // is already recorded by this point and must not be lost to a stage-write failure —
+    // but it now logs instead of vanishing.
+    try {
+      const { applyStageChange } = await import('@/lib/operations/stageChange');
+      await applyStageChange({
+        projectId,
+        toStage: 'contract_signed',
+        userId: null,
+        source: 'proposal_signature',
+        activityTitle: 'Proposal signed by homeowner',
+      });
+    } catch (stageErr) {
+      console.error('[proposals/sign] pipeline stage advance failed for', projectId, stageErr);
     }
 
     // Audit-trail event. The PATCH signature branch in

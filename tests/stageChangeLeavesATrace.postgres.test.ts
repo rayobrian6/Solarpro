@@ -498,16 +498,31 @@ describe('🚨 C5: the proposal signature writes a column that does not exist', 
 // 4. C6 — TWO NUMBERS FOR ONE DEAL
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe('🚨 C6: creating a proposal advances only the legacy column', () => {
-  it('the shipped statement leaves project_status at lead', async () => {
-    // Verbatim from app/api/proposals/route.ts. It succeeds — there is no error
-    // to catch — and that is the problem: the deal renders in the 'Lead' kanban
-    // column and in Pipeline Control's lead count while the legacy sales list
-    // shows 'Proposal'. Two numbers for the same deal on one dashboard.
+describe('C6: creating a proposal advances the pipeline, not just the legacy column', () => {
+  // 🚨 RE-AIMED. This block was written to DOCUMENT C6 as still-live, because the
+  // CRM lane shipped the receiving end and handed off the one-line caller change.
+  // The caller has now been changed, so the assertion that the route STILL contains
+  // `UPDATE projects SET status = 'proposal'` died of a correct fix — the
+  // anchor-dying-of-a-repair shape, for the fourth time this campaign.
+  //
+  // The two cases below still execute that statement DIRECTLY against real
+  // PostgreSQL, so they remain true and useful: they characterise what the old
+  // statement did and why it mattered. What changed is that the route no longer
+  // issues it, which is what the source assertion now says.
+  it('the route no longer writes only the legacy column', async () => {
     const src = read('app', 'api', 'proposals', 'route.ts');
-    expect(src, 'the create route no longer writes only `status` — re-read C6')
-      .toMatch(/UPDATE projects SET status = 'proposal'/);
+    expect(src, 'proposal creation is back to writing only `status`')
+      .not.toMatch(/UPDATE projects SET status = 'proposal'/);
+    expect(src, 'proposal creation does not reach the one stage writer')
+      .toMatch(/applyStageChange\(/);
+    expect(src).toMatch(/toStage:\s*'proposal_sent'/);
+  });
 
+  it('the legacy statement, executed directly, leaves project_status at lead', async () => {
+    // Why C6 mattered: the statement SUCCEEDS — there is no error to catch — and the
+    // deal then renders in the 'Lead' kanban column and in Pipeline Control's lead
+    // count while the legacy sales list shows 'Proposal'. Two numbers for one deal on
+    // one dashboard.
     await db.query(
       `UPDATE projects SET status = 'proposal', updated_at = NOW()
         WHERE id = $1 AND user_id = $2`, [PROJECT, USER_ID]);
@@ -517,7 +532,7 @@ describe('🚨 C6: creating a proposal advances only the legacy column', () => {
     expect(p.project_status, 'project_status moved — the finding has changed').toBe('lead');
   });
 
-  it('and the follow-up nag is therefore never generated', async () => {
+  it('and with project_status at lead the follow-up nag cannot fire', async () => {
     const { generateActionsForProject } = await import('@/lib/commands/generateActions');
     await db.query(
       `UPDATE projects SET status = 'proposal' WHERE id = $1`, [PROJECT]);

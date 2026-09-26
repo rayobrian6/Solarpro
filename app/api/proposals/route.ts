@@ -230,11 +230,30 @@ export async function POST(req: NextRequest) {
       RETURNING *
     `);
 
-    // Update project status to proposal
-    await sql`
-      UPDATE projects SET status = 'proposal', updated_at = NOW()
-      WHERE id = ${projectId} AND user_id = ${user.id}
-    `;
+    // 🚨 THIS USED TO WRITE ONLY THE LEGACY `status` COLUMN, so a project with a
+    // generated and shared proposal rendered in the 'Lead' kanban column and in
+    // Pipeline Control's lead count while the legacy sales list showed 'Proposal' —
+    // two numbers for the same deal on one dashboard. It also suppressed the nag:
+    // lib/commands/generateActions.ts fires the "Follow up with <client>" command only
+    // for `project_status === 'proposal_sent'`, so no follow-up was ever generated for
+    // a real sent proposal.
+    //
+    // `applyStageChange` moves BOTH columns through the one stage writer, records the
+    // activity row, and generates the stage's tasks. Non-fatal: a proposal that exists
+    // must not be lost because the pipeline write failed, but it logs rather than
+    // passing silently.
+    try {
+      const { applyStageChange } = await import('@/lib/operations/stageChange');
+      await applyStageChange({
+        projectId,
+        toStage: 'proposal_sent',
+        userId: user.id ?? null,
+        source: 'proposal_created',
+        activityTitle: 'Proposal created',
+      });
+    } catch (stageErr) {
+      console.error('[POST /api/proposals] pipeline stage advance failed for', projectId, stageErr);
+    }
 
     console.log('[POST /api/proposals] Saved proposal data snapshot:', {
       proposalId: (rows[0] as Record<string, unknown>).id,
