@@ -416,3 +416,84 @@ describe('🚨 the stored BOM can never be attributed to equipment it was not bu
       .toBe(INV_B);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// The page side, which was a handoff until the session that owns
+// app/engineering/page.tsx confirmed the line ranges and cleared it.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('🚨 the restore refuses rather than substituting', () => {
+  const PAGE = 'app/engineering/page.tsx';
+  /**
+   * The REVERSE-HYDRATION BLOCK ONLY, not the whole 16k-line file.
+   *
+   * Scope matters here, and the first version of this suite got it wrong: it banned
+   * `MICROINVERTERS[0]` file-wide and went red on line ~1497, which is the NEW-PROJECT seed
+   * path — a project whose stored `engineering_config` carries no inverter yet, where
+   * offering the head of the catalogue is a legitimate starting default the designer then
+   * changes. The defect is specifically that the RESTORE of a SAVED run did the same thing
+   * and called the result "restored". So this slices the block between the `run-from-file`
+   * fetch and the end of its effect, and asserts only inside it.
+   *
+   * Comments are stripped, because the comments in that block quote the defect verbatim and
+   * would otherwise satisfy the very checks they explain.
+   */
+  const pageStripped = () => {
+    const src = readFileSync(join(ROOT, PAGE), 'utf8');
+    const from = src.indexOf('/api/engineering/run-from-file?fileId=');
+    expect(from, 'the reverse-hydration fetch is gone — this suite is asserting nothing')
+      .toBeGreaterThan(-1);
+    const to = src.indexOf('}, [searchParams, fileHydrated]);', from);
+    expect(to, 'the end of the reverse-hydration effect could not be found').toBeGreaterThan(from);
+    return src.slice(from, to)
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n');
+  };
+
+  it('🚨 no catalogue-head substitution for the inverter', () => {
+    expect(pageStripped(), 'the restore still falls back to the first inverter in the catalogue')
+      .not.toMatch(/MICROINVERTERS\[0\]\?\.id\s*\?\?\s*'enphase-iq8plus'/);
+    expect(pageStripped(), 'the restore still falls back to the first string inverter')
+      .not.toMatch(/STRING_INVERTERS\[0\]\?\.id\s*\?\?\s*'se-7600h'/);
+  });
+
+  it('🚨 no hardcoded panel substitution on the restore path', () => {
+    // The fence/roof pair that produced 'qcells-peak-duo-400' for every restored design.
+    expect(pageStripped(), "the restore still hardcodes a panel by system type")
+      .not.toMatch(/sysType === 'fence' \? 'panel-fence-ps1' : 'qcells-peak-duo-400'/);
+  });
+
+  it('🚨 it reads the identity verdict and withholds the equipment when it is incomplete', () => {
+    const s = pageStripped();
+    expect(s, 'the restore does not read equipmentIdentity at all').toMatch(/data\.equipmentIdentity/);
+    expect(s, 'nothing decides whether the equipment is restorable').toMatch(/_equipmentUnrestorable/);
+    // And it must not silently proceed to recalculate a design it could not vouch for.
+    expect(s, 'the auto-calc still fires on an unrestorable design')
+      .toMatch(/if \(_equipmentUnrestorable\)[\s\S]{0,400}skipping auto-calc/);
+  });
+
+  it('🚨 the banner stops calling a partial restore a restore', () => {
+    const s = pageStripped();
+    expect(s).toMatch(/Partially restored/);
+    expect(s, 'the banner does not say WHICH equipment was not restored')
+      .toMatch(/PANEL and INVERTER/);
+  });
+
+  it('🚨 a multi-inverter design is rebuilt from the stored topology, not collapsed to one', () => {
+    const s = pageStripped();
+    expect(s, 'the restore never reads the snapshot inverter topology').toMatch(/_snapInverters/);
+    expect(s, 'the multi-inverter branch is missing').toMatch(/_snapInverters\.length > 1/);
+    // A partial topology is a different design, not a restored one.
+    expect(s).toMatch(/_rebuilt\.length === _snapInverters\.length/);
+  });
+
+  it('the route supplies what the page now reads — the two halves match', async () => {
+    // The page-side assertions above are source checks; this one is behavioural, and it is
+    // what ties them to reality: a run saved today reports a complete identity, so the
+    // refusal path is NOT what a current design hits.
+    await postSave(savePayload());
+    const bom = await fileRow('BOM_Fence_Co.csv');
+    const r = await getRunFromFile(String(bom.id));
+    expect(r.json.equipmentIdentity.complete).toBe(true);
+    expect(r.json.run.configSnapshot.inverters).toHaveLength(2);
+  });
+});

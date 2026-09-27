@@ -2422,26 +2422,58 @@ function EngineeringPageInner() {
         const panelCount: number = run.panelCount || 0;
         const roofPitch: number = run.roofPitch || snap.roofPitch || 20;
 
-        // Resolve inverterId: use stored id, fallback to first of type
-        let inverterId: string = run.inverterId || '';
-        if (!inverterId) {
-          inverterId = invType === 'micro'
-            ? (MICROINVERTERS[0]?.id ?? 'enphase-iq8plus')
-            : (STRING_INVERTERS[0]?.id ?? 'se-7600h');
-        }
+        // 🚨 THIS IS WHERE REOPENING A SAVED RUN USED TO SILENTLY RE-EQUIP THE DESIGN.
+        //
+        // `/api/engineering/save-outputs` never wrote `panel_id` or `inverter_id` — columns
+        // migration 009 created for exactly this purpose and two routes read — so
+        // `run.inverterId` and `run.panelId` were ALWAYS null, and these fallbacks always
+        // fired: the first inverter in the catalogue (`STRING_INVERTERS[0]` /
+        // `MICROINVERTERS[0]`) and `qcells-peak-duo-400`. The restored design was then
+        // recalculated, drawn, permitted, scheduled, billed and priced from equipment nobody
+        // chose — sitting in Client Files beside the stored BOM CSV and SLD that describe the
+        // equipment that WAS chosen, both attached to the same engineering_run.
+        //
+        // The write side is fixed, so any run saved from now on carries its identity. Runs
+        // saved BEFORE that cannot be restored faithfully, and the honest answer is to say so
+        // rather than substitute: `run-from-file` returns
+        // `equipmentIdentity.complete` / `.reason`, and when it is false the live design's own
+        // equipment is left alone and the banner tells the designer to re-run from the design
+        // instead of trusting what appears on screen.
+        const _identity = (data.equipmentIdentity ?? null) as
+          { panelId?: string | null; inverterId?: string | null; complete?: boolean; reason?: string | null } | null;
+        const _identityComplete = _identity?.complete === true;
 
-        // Resolve panelId: use stored id, fallback to wattage match
+        // Resolve inverterId from the run, then from the snapshot's own topology — never
+        // from the head of a catalogue list.
+        const _snapInverters: Array<{ inverterId?: string; type?: string; strings?: unknown[] }> =
+          Array.isArray(snap.inverters) ? snap.inverters as never[] : [];
+        let inverterId: string = run.inverterId || _snapInverters[0]?.inverterId || '';
+
+        // Resolve panelId from the run, then from the stored per-string record, then from a
+        // recorded wattage. Each of those is something the design actually stated.
         let panelId: string = run.panelId || '';
+        if (!panelId) {
+          const _storedPanelId = (run.stringConfig || [])
+            .map((s: any) => s?.panelId || s?.panel_id)
+            .find((v: unknown) => typeof v === 'string' && v);
+          if (_storedPanelId) panelId = _storedPanelId as string;
+        }
         if (!panelId && run.panelWattage) {
           const targetWatt = run.panelWattage;
           panelId = SOLAR_PANELS.reduce((b: any, pp: any) =>
             Math.abs(pp.watts - targetWatt) < Math.abs(b.watts - targetWatt) ? pp : b,
-            SOLAR_PANELS[0])?.id ?? 'qcells-peak-duo-400';
+            SOLAR_PANELS[0])?.id ?? '';
         }
-        // NON-DESTRUCTIVE DEFAULT: only if user has no panel selected, fall back by systemType
-        if (!panelId) {
-          const sysType = (run.systemType || patches.systemType || 'roof') as string;
-          panelId = sysType === 'fence' ? 'panel-fence-ps1' : 'qcells-peak-duo-400';
+
+        // 🚨 REFUSE, DO NOT SUBSTITUTE. If either piece of equipment is still unknown, this
+        // run predates identity capture. Restore everything else — the address, the service,
+        // the interconnection, the run lengths are all still true — and leave the EQUIPMENT
+        // to the live design, which at least reflects a choice somebody made.
+        const _equipmentUnrestorable = !inverterId || !panelId;
+        if (_equipmentUnrestorable) {
+          console.warn('[EngineeringPage] equipment identity incomplete on run', run.id,
+            '— panelId:', panelId || '(none)', 'inverterId:', inverterId || '(none)',
+            '— NOT substituting a catalogue default');
         }
 
         // Rebuild strings from stored string_config if available
@@ -2517,12 +2549,66 @@ function EngineeringPageInner() {
           }));
         }
 
-        patches.inverters = [_buildInvCfg({
-          existingId: 'inv-restored-0',
-          inverterId,
-          type:       invType,
-          strings,
-        })];
+        // 🚨 A MULTI-INVERTER DESIGN USED TO COLLAPSE TO ONE.
+        //
+        // This was unconditionally `[_buildInvCfg({ ... })]` — a single-element array — so a
+        // design with two or three inverters came back with one, carrying every string. The
+        // stored snapshot has always held the real topology (`config_snapshot.inverters`, one
+        // entry per inverter with its own strings) and this never read it; combined with
+        // `inverter_qty INTEGER DEFAULT 1`, which nothing wrote, there was no surviving record
+        // that the design had more than one device.
+        //
+        // So: rebuild from the snapshot's topology when it is there, and fall back to the
+        // single-inverter reconstruction only when it is not. And when the equipment could not
+        // be identified at all, write NO inverter patch — the live design keeps its own
+        // equipment rather than being handed a catalogue default.
+        if (_equipmentUnrestorable) {
+          // Everything else in `patches` still applies; only the equipment is withheld.
+        } else if (_snapInverters.length > 1) {
+          const _invStrings = (inv: { strings?: unknown[] }, invIdx: number): StringConfig[] => {
+            const raw = Array.isArray(inv.strings) ? inv.strings as any[] : [];
+            if (!raw.length) return [];
+            return raw.map((s: any, i: number) => ({
+              id:            s.id || `str-restored-${invIdx}-${i}`,
+              label:         s.label || `String ${i + 1}`,
+              panelCount:    Number(s.panelCount ?? s.panel_count ?? 0) || 1,
+              // The per-string panel is the design's own record; `panelId` is the fallback.
+              panelId:       s.panelId || s.panel_id || panelId,
+              tilt:          s.tilt ?? roofPitch,
+              azimuth:       s.azimuth ?? 180,
+              roofType:      (s.roofType || s.roof_type || 'shingle') as RoofType,
+              mountingSystem: s.mountingSystem || s.mounting_system || run.mountingId || 'ironridge-xr100',
+              wireGauge:     s.wireGauge || s.wire_gauge || run.wireGauge || '#10 AWG THWN-2',
+              wireLength:    s.wireLength || s.wire_length || 50,
+            })) as StringConfig[];
+          };
+          const _rebuilt = _snapInverters
+            .map((inv, idx) => {
+              const _id = inv.inverterId;
+              if (!_id) return null;
+              const _strings = _invStrings(inv, idx);
+              if (!_strings.length) return null;
+              return _buildInvCfg({
+                existingId: `inv-restored-${idx}`,
+                inverterId: _id,
+                type:       (inv.type || invType) as InverterType,
+                strings:    _strings,
+              });
+            })
+            .filter(Boolean) as InverterConfig[];
+          // Only adopt the multi-inverter restore if every entry survived — a partial
+          // topology is a different design, not a restored one.
+          patches.inverters = _rebuilt.length === _snapInverters.length
+            ? _rebuilt
+            : [_buildInvCfg({ existingId: 'inv-restored-0', inverterId, type: invType, strings })];
+        } else {
+          patches.inverters = [_buildInvCfg({
+            existingId: 'inv-restored-0',
+            inverterId,
+            type:       invType,
+            strings,
+          })];
+        }
 
         // Apply all patches
         if (Object.keys(patches).length > 0) {
@@ -2546,15 +2632,31 @@ function EngineeringPageInner() {
         const genDate = run.generatedAt
           ? new Date(run.generatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
           : 'previously';
+        // 🚨 SAY WHEN THE EQUIPMENT WAS NOT RESTORED. The old banner said "restored" whatever
+        // happened, which is how a silently re-equipped design read as a faithful one.
         setFileHydrationBanner(
-          `🔄 Engineering configuration restored from "${data.fileName}" (generated ${genDate}). You can edit and re-run the engineering engine.`
+          _equipmentUnrestorable
+            ? `⚠️ Partially restored from "${data.fileName}" (generated ${genDate}). `
+              + `The site, service and interconnection were restored, but the PANEL and INVERTER `
+              + `were NOT: ${_identity?.reason
+                  || 'this run was saved before the selected equipment was recorded on it.'} `
+              + `The equipment shown is your current design's, not the saved run's — check it `
+              + `before re-running, and re-save to record it.`
+            : `🔄 Engineering configuration restored from "${data.fileName}" (generated ${genDate}). You can edit and re-run the engineering engine.`
         );
 
-        // Auto-trigger calc after hydration
-        setTimeout(() => {
-          console.log('[EngineeringPage] Auto-triggering calc after reverse hydration');
-          runCalc();
-        }, 400);
+        // Auto-trigger calc after hydration.
+        // Not when the equipment could not be restored: an automatic recalculation would
+        // immediately produce a fresh SLD, BOM and permit input from a design the restore
+        // itself could not vouch for, and the designer has just been told to check it.
+        if (_equipmentUnrestorable) {
+          console.warn('[EngineeringPage] skipping auto-calc — equipment identity was not restorable');
+        } else {
+          setTimeout(() => {
+            console.log('[EngineeringPage] Auto-triggering calc after reverse hydration');
+            runCalc();
+          }, 400);
+        }
       })
       .catch(err => {
         console.warn('[engineering] reverse hydration failed:', err);
