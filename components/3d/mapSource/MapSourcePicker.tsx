@@ -13,7 +13,6 @@
 import React, { useState } from 'react';
 import DetailsDropdown from './DetailsDropdown';
 import SourceTabs from './SourceTabs';
-import SourcePicker from './SourcePicker';
 import ImageryToggle from './ImageryToggle';
 import { setSource, setTab, toggleLayer } from './constants';
 import type { MapLayer, MapPickerState, MapSource, MapTab } from './types';
@@ -22,14 +21,13 @@ interface MapSourcePickerProps {
   state: MapPickerState;
   onChange: (next: MapPickerState) => void;
   disabled?: boolean;
-  showAttribution?: boolean;
   className?: string;
 }
 
 type OpenMenu = 'details' | 'source' | null;
 
 export default function MapSourcePicker({
-  state, onChange, disabled, showAttribution = true, className,
+  state, onChange, disabled, className,
 }: MapSourcePickerProps) {
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null);
 
@@ -73,15 +71,13 @@ export default function MapSourcePicker({
         {/* 🚨 BOTH IMAGERY CHOICES, VISIBLE, IN THE 3D WORKSPACE. Ray could not find Nearmap in
             3D because the only thing that said the word was inside a closed dropdown — see the
             header of ImageryToggle.tsx. Same state, same onChange as the dropdown below. */}
+        {/* 🚨 ONE IMAGERY CONTROL, NOT TWO THAT BOTH SAY "NEARMAP".
+            The provider dropdown used to sit here as well, and with the segmented control beside
+            it the bar read "… IMAGERY Native 3D | 🛰 Nearmap | 🛰 Nearmap ▾" — the same choice
+            offered twice, one of them behind a menu. It also offered Bing and Mapbox, which reach
+            no imagery code in this viewer at all. `SourcePicker` is kept in the tree for the
+            LiDAR/Street-View work it was designed alongside; it is not mounted here. */}
         <ImageryToggle source={state.source} onChange={handleSourceChange} disabled={disabled} />
-        <SourcePicker
-          source={state.source}
-          onChange={handleSourceChange}
-          open={openMenu === 'source'}
-          onOpenChange={v => setOpenMenu(v ? 'source' : null)}
-          disabled={disabled}
-          showAttribution={showAttribution}
-        />
       </div>
     </div>
   );

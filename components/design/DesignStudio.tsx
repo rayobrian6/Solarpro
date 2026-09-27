@@ -177,6 +177,21 @@ type SolarE2EState = {
     obstructions?: PlacedObstruction[];
     measurements?: LayoutMeasurement[];
   }) => void;
+  /** Put already-fetched provider tiles in the shared cache, exactly as `loadTiles` commits
+   *  them. SETUP ONLY, and the narrowest possible seam: the behaviour under test is what the 3D
+   *  studio does with tiles the session has ALREADY paid for, and on a box with no NEARMAP_API_KEY
+   *  the real fetch 403s and `tryEsri()` substitutes — so without this the flat-imagery path could
+   *  only ever be asserted in its unavailable branch. Resolves when every tile has decoded, or the
+   *  spec would race the cache. */
+  seedProviderTiles: (t: {
+    provider: string;
+    z: number;
+    x0: number;
+    y0: number;
+    size: number;
+    /** Data URL drawn into every tile. */
+    dataUrl: string;
+  }) => Promise<number>;
 };
 
 declare global {
@@ -2489,6 +2504,31 @@ export default function DesignStudio({ project, onSave }: Props) {
         }
         if (d.obstructions) setPlacedObstructions(d.obstructions);
         if (d.measurements) setMeasurements(d.measurements);
+      },
+      // 🚨 THE SAME COMMIT `loadTiles` MAKES, AND NOTHING MORE.
+      // Key from `tileKey`, `_loaded` and `_source` stamped the way `commitTile` stamps them,
+      // `evictTileCache` run after. It fetches from the caller's data URL, so no provider is
+      // contacted and no credit is spent. Everything downstream — the composite, the georeference,
+      // the drape, the mesh switch — is the product's own code path.
+      seedProviderTiles: async (t) => {
+        let n = 0;
+        await Promise.all(Array.from({ length: t.size * t.size }, (_, i) => {
+          const x = t.x0 + (i % t.size), y = t.y0 + Math.floor(i / t.size);
+          return new Promise<void>(resolve => {
+            const img = new Image();
+            img.onload = () => {
+              (img as unknown as { _loaded: boolean })._loaded = true;
+              (img as unknown as { _source: string })._source = t.provider;
+              TILE_CACHE.set(tileKey(t.provider, t.z, x, y), img);
+              n++;
+              resolve();
+            };
+            img.onerror = () => resolve();
+            img.src = t.dataUrl;
+          });
+        }));
+        evictTileCache();
+        return n;
       },
     };
     // 🚨 TEAR THE HOOK DOWN. Without this, an unmounted studio leaves its last

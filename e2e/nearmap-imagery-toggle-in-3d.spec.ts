@@ -165,12 +165,11 @@ test.describe('Nearmap is reachable from the 3D Design Studio', () => {
       await expect(shown).toContainText(/no new imagery was purchased/i);
     }
 
-    // A provider that reaches no imagery code must not be offered as a choice.
-    await page.getByRole('button', { name: /Source:/i }).click();
-    await expect(page.getByTestId('map-source-option-bing'),
-      'Bing is selectable although nothing in the viewer renders it').toBeDisabled();
-    await expect(page.getByTestId('map-source-option-mapbox')).toBeDisabled();
-    await expect(page.getByTestId('map-source-option-nearmap')).toBeEnabled();
+    // A provider that reaches no imagery code must not be offered as a choice at all. The
+    // dropdown that offered Bing and Mapbox — neither of which this viewer renders — is no
+    // longer mounted; the two real choices are the two buttons asserted above. See
+    // e2e/nearmap-is-the-flat-tracing-surface.spec.ts for the "offered once, not twice" check.
+    await expect(page.getByRole('button', { name: /Source:/i })).toHaveCount(0);
   });
 
   test('🚨 geometry can still be edited with Nearmap on, and survives the switch back', async ({ page }) => {

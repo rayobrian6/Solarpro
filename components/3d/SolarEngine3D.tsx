@@ -302,7 +302,7 @@ import {
 // `composeCachedTiles` reads the SAME tile cache the 2D canvas fills and issues no request of
 // any kind; `groundResolutionCmPerPx` comes from lib/map/webMercator, which is the one Web
 // Mercator implementation in this codebase — lib/aerial/nearmap.ts (server-only) re-exports it.
-import { composeCachedTiles } from '@/lib/map/tileCache';
+import { composeCachedTiles, usableTilesByZoom } from '@/lib/map/tileCache';
 import { groundResolutionCmPerPx } from '@/lib/map/webMercator';
 
 // v65 (camera-tilt): Aurora-parity camera presets — default 3D view at -45° pitch
@@ -1934,6 +1934,35 @@ function SolarEngine3D({
    */
   const aerialRefCacheRef = useRef<{ projectId: string; data: AerialReference | null } | null>(null);
   const aerialOverlayRef = useRef<any>(null);
+
+  /**
+   * 🚨 FLAT IMAGERY MODE — the Google-Earth fallback, on purpose instead of by accident.
+   *
+   * Ray, after the first version of the Nearmap toggle shipped: "I really am not wanting nearmap
+   * to be built into 3d. The imagery looks like shit. When I switch to nearmap I want to treat it
+   * like my google fallback and be able to use the building button to draw my polygons."
+   *
+   * He is describing a mode this engine ALREADY HAS. When Google Photorealistic 3D Tiles fail to
+   * load, the scene keeps `globe.show = true` with flat satellite imagery on the ellipsoid, and
+   * `plane3d` / `mark_plane` enter FLAT TRACE — corners collected as lat/lng, the face built from
+   * the footprint plus a pitch. That is "my bad but usable google earth fallback", and it is the
+   * workflow he wants Nearmap to join.
+   *
+   * The first version did the opposite: it draped the photo over the 3D mesh with
+   * `ClassificationType.BOTH`, so every blobby tree and melted roof in the mesh smeared the
+   * orthophoto across its own geometry. Crisp pixels, painted onto bad shapes.
+   *
+   * So choosing Nearmap now HIDES the mesh, shows the globe, and drapes the photo on the flat
+   * terrain — and this flag is what tells the trace tools the mesh is not available to pick
+   * against, exactly as if the address had no tiles at all. One flag, one meaning, read in the
+   * one place that already asks the question.
+   */
+  const flatImageryRef = useRef(false);
+  const [flatImagery, setFlatImagery] = useState(false);
+  /** The picker state as a ref, so the E2E hook (installed once at `stage === 'done'`) reports
+   *  the CURRENT source rather than the one frozen into that render. */
+  const mapPickerStateRef = useRef<MapPickerState>(DEFAULT_PICKER_STATE);
+  useEffect(() => { mapPickerStateRef.current = mapPickerState; }, [mapPickerState]);
   const [aerialRefStatus, setAerialRefStatus] = useState<
     { state: 'off' } | { state: 'loading' } | { state: 'shown'; ref: AerialReference }
     | { state: 'unavailable'; reason: string }
@@ -2907,8 +2936,19 @@ function SolarEngine3D({
     // behaviour. Without them → v66 flat trace instead of the old refusal.
     // (Layer C lives in handlePlane3DClick — per-click pickMethod check.)
     if ((placementMode === 'plane3d' || placementMode === 'mark_plane') && prevMode !== placementMode) {
-      if (!tilesetRef.current) {
-        const isLoading = tileStatus === 'loading';
+      // 🚨 AND FLAT IMAGERY MODE COUNTS AS "NO MESH", BECAUSE THERE IS NO MESH TO PICK.
+      //
+      // Ray: "When I switch to nearmap I want to treat it like my google fallback and be able to
+      // use the building button to draw my polygons." Choosing Nearmap hides the Photorealistic
+      // tileset and drapes the orthophoto on the flat globe, so every corner click lands on the
+      // ellipsoid exactly as it does at an address with no tiles at all. Without this the gate
+      // would see a non-null `tilesetRef` and take the 3D-mesh path: `pickPosition` would return
+      // nothing (the mesh is hidden), and the trace would collect no corners.
+      //
+      // One condition, in the one place that already asks the question — not a second flat-trace
+      // system beside the existing one.
+      if (!tilesetRef.current || flatImageryRef.current) {
+        const isLoading = tileStatus === 'loading' && !flatImageryRef.current;
         if (isLoading) {
           // Tiles may still arrive. Don't commit to flat trace yet — bounce out
           // and let the user re-enter once loading settles, exactly as before.
@@ -3235,6 +3275,53 @@ function SolarEngine3D({
                          row: p.arrayRow ?? p.row ?? 0, col: p.col ?? 0,
                          tilt: p.tilt, azimuth: p.azimuth })),
         }));
+      },
+      /* 🚨 SUPPLY THE ONE PRECONDITION THIS MACHINE CANNOT: A LOADED 3D MESH.
+       *
+       * Everything about flat imagery mode is a statement about what happens WHEN THERE IS A MESH
+       * — it gets hidden, and the trace tools stop picking against it. A box with no
+       * GOOGLE_MAPS_API_KEY never loads one, so `tilesetRef` is null, `!tilesetRef.current` is
+       * already true, and both assertions pass whether or not the code under test exists. Proved
+       * that the hard way: removing the flat-imagery condition from the trace gate left the spec
+       * GREEN.
+       *
+       * So this installs a stand-in carrying exactly the two properties the code under test
+       * touches — it is truthy, and it has a `show` flag. Nothing is added to the scene and no
+       * behaviour is simulated: the hiding, the mode switch and the trace path are all the
+       * product's own. It refuses to replace a real tileset, so it can never mask one. */
+      simulateMeshLoaded: () => {
+        if (process.env.NEXT_PUBLIC_E2E !== '1') return false;
+        if (tilesetRef.current) return false;
+        tilesetRef.current = { show: true, __e2eStub: true };
+        try { if (viewerRef.current) viewerRef.current.scene.globe.show = false; } catch { /* ignore */ }
+        return true;
+      },
+      /* 🚨 WHAT THE SCENE IS ACTUALLY SHOWING, so a spec can tell flat imagery mode from a
+       * reference photo painted on top of the mesh. Ray's whole correction was that the second
+       * one is not what he wants: "I really am not wanting nearmap to be built into 3d... treat
+       * it like my google fallback and be able to use the building button to draw my polygons."
+       * `meshVisible` and `globeVisible` are read off Cesium, not off React state, because the
+       * claim being made is about the scene. */
+      imagery: () => {
+        const v = viewerRef.current;
+        let meshVisible: boolean | null = null, globeVisible: boolean | null = null;
+        try { meshVisible = tilesetRef.current ? !!tilesetRef.current.show : false; } catch { /* ignore */ }
+        try { globeVisible = v ? !!v.scene.globe.show : null; } catch { /* ignore */ }
+        // How many Nearmap tiles THIS module instance can see. A browser spec that seeds the
+        // cache through DesignStudio and then finds zero here is looking at a second copy of the
+        // module, which would be a real defect: the whole point is that both views share one
+        // cache. Counted through the product's own selector.
+        let cachedNearmapTiles = 0;
+        try { usableTilesByZoom('nearmap').forEach(g => { cachedNearmapTiles += g.size; }); } catch { /* ignore */ }
+        return {
+          source: mapPickerStateRef.current.source,
+          flatImagery: flatImageryRef.current,
+          flatTrace: flatTraceRef.current,
+          referenceShown: !!aerialOverlayRef.current,
+          cachedNearmapTiles,
+          meshVisible,
+          globeVisible,
+        };
       },
       /* 🚨 THE STRUCTURE AS IT IS ACTUALLY RENDERED — piles, strongbacks, rails, braces.
        *
@@ -3734,9 +3821,45 @@ function SolarEngine3D({
       }
     };
 
-    if (!wantNearmap) {
-      // Back to native: remove the reference layer and nothing else.
+    /**
+     * Put the 3D mesh back and leave flat imagery mode.
+     *
+     * The mesh is HIDDEN, never unloaded: `tileset.show = false` keeps the tiles in memory so
+     * switching back is instant and costs no Google requests. `globe.show` goes back to false for
+     * the same reason it is false whenever tiles exist — the flat ellipsoid base map is rendered
+     * at height 0 and pokes up through the real terrain at low-lying sites.
+     */
+    const enterNativeMesh = () => {
       dropOverlay();
+      try { if (tilesetRef.current) { tilesetRef.current.show = true; viewer.scene.globe.show = false; } } catch { /* ignore */ }
+      if (flatImageryRef.current) {
+        flatImageryRef.current = false;
+        setFlatImagery(false);
+      }
+      try { viewer.scene.requestRender(); } catch { /* ignore */ }
+    };
+
+    /**
+     * 🚨 THE MESH GOES AWAY AND THE PHOTO BECOMES THE GROUND.
+     *
+     * "The imagery looks like shit" was the mesh's fault, not the imagery's: a `ClassificationType
+     * .BOTH` drape paints the orthophoto onto whatever geometry is under it, so every melted tree
+     * and lumpy roof in the Photorealistic mesh smeared the picture over its own shape. On the
+     * flat globe the same pixels are a clean top-down photograph, which is what a polygon is
+     * traced against.
+     */
+    const enterFlatImagery = () => {
+      try { if (tilesetRef.current) { tilesetRef.current.show = false; } } catch { /* ignore */ }
+      try { viewer.scene.globe.show = true; } catch { /* ignore */ }
+      if (!flatImageryRef.current) {
+        flatImageryRef.current = true;
+        setFlatImagery(true);
+      }
+    };
+
+    if (!wantNearmap) {
+      // Back to native: restore the mesh, remove the reference layer, and nothing else.
+      enterNativeMesh();
       setAerialRefStatus({ state: 'off' });
       return;
     }
@@ -3776,6 +3899,9 @@ function SolarEngine3D({
       if (cancelled) return;
       dropOverlay();
       try {
+        // 🚨 MESH OFF FIRST. The photo is the ground from here, and the drape below classifies
+        // TERRAIN — with the mesh still showing it would have nothing to land on.
+        enterFlatImagery();
         const rect = C.Rectangle.fromDegrees(
           ref.bounds.west, ref.bounds.south, ref.bounds.east, ref.bounds.north);
         const geometry = new C.RectangleGeometry({
@@ -3791,19 +3917,25 @@ function SolarEngine3D({
         const prim = new C.GroundPrimitive({
           geometryInstances: new C.GeometryInstance({ geometry }),
           appearance,
-          // BOTH, so it lands on the Google 3D mesh when there is one and on the terrain when
-          // there is not — the fallback-geometry case this feature exists for.
-          classificationType: C.ClassificationType.BOTH,
+          // 🚨 TERRAIN, NOT BOTH. `BOTH` also paints the Photorealistic mesh, which is what made
+          // the first version look wrong: the orthophoto was draped over melted trees and lumpy
+          // roofs and took their shape. The mesh is hidden in this mode, so the only surface left
+          // is the flat globe — and a flat photo on flat ground is exactly the fallback Ray
+          // traces polygons on today.
+          classificationType: C.ClassificationType.TERRAIN,
           asynchronous: false,
         });
         viewer.scene.primitives.add(prim);
         aerialOverlayRef.current = prim;
         try { viewer.scene.requestRender(); } catch { /* ignore */ }
         setAerialRefStatus({ state: 'shown', ref });
-        addLog('IMAGERY', `reference layer shown — source=${ref.source} `
+        addLog('IMAGERY', `flat imagery mode — source=${ref.source} `
           + `res=${ref.resolutionCmPerPx ? ref.resolutionCmPerPx.toFixed(1) + 'cm/px' : 'unknown'} `
-          + `date=${ref.captureDateKnown ? ref.captureDate : 'unavailable'} (reused, no acquisition)`);
+          + `date=${ref.captureDateKnown ? ref.captureDate : 'unavailable'} (reused, no acquisition); `
+          + '3D mesh hidden, trace tools use the flat-trace path');
       } catch (e: unknown) {
+        // The mesh must not be left hidden with no photo under it — that is a blank world.
+        enterNativeMesh();
         setAerialRefStatus({
           state: 'unavailable',
           reason: `The stored aerial could not be drawn: ${(e as Error).message}`,
@@ -3815,6 +3947,9 @@ function SolarEngine3D({
     const useSessionOr = (reason: string) => {
       const s = fromSessionCache();
       if (s) { draw(s); return; }
+      // 🚨 NO PHOTO MEANS NO FLAT MODE. Hiding the mesh with nothing to put in its place would
+      // leave an empty world and no surface to trace on — a worse answer than saying so.
+      enterNativeMesh();
       setAerialRefStatus({ state: 'unavailable', reason });
     };
 
@@ -3881,6 +4016,14 @@ function SolarEngine3D({
     if (viewer && aerialOverlayRef.current) {
       try { viewer.scene.primitives.remove(aerialOverlayRef.current); } catch { /* ignore */ }
       aerialOverlayRef.current = null;
+    }
+    // 🚨 AND PUT THE MESH BACK. Flat imagery mode hides the tileset and shows the globe; leaving
+    // that state behind on unmount would hand the next mount a scene with no 3D at all and no
+    // record of why. `show3D` is a CONDITIONAL MOUNT in DesignStudio, so this runs on every
+    // 3D → 2D switch.
+    if (viewer && flatImageryRef.current) {
+      try { if (tilesetRef.current) { tilesetRef.current.show = true; viewer.scene.globe.show = false; } } catch { /* ignore */ }
+      flatImageryRef.current = false;
     }
   }, []);
 
@@ -17098,9 +17241,32 @@ function SolarEngine3D({
                 ? ' · reused from this project’s stored aerial, no new imagery was purchased'
                 : ' · reused from the tiles this session already loaded, no new imagery was purchased'}
               <br />
-              <span style={{ color: '#7c8aa5' }}>
-                Reference only — your geometry is unchanged.
-              </span>
+              {/* 🚨 SAY THAT THE MESH IS OFF AND THAT TRACING WORKS. This is the whole point of
+                   the mode: "treat it like my google fallback and be able to use the building
+                   button to draw my polygons." */}
+              {flatImagery ? (
+                <span data-testid="imagery-flat-mode" style={{ color: '#7dd3fc' }}>
+                  📐 3D mesh hidden — flat photo. Trace roof faces on it with 3D Plane / Mark
+                  Plane, then Building.
+                </span>
+              ) : (
+                <span style={{ color: '#7c8aa5' }}>Reference only — your geometry is unchanged.</span>
+              )}
+              {/* 🚨 HOW TO GET SHARPER PIXELS, SAID PLAINLY, BECAUSE THE ANSWER IS FREE.
+                   The composite is built from whatever zoom the 2D canvas happened to fetch.
+                   Nearmap Vert is native at z21 (~6 cm/px here); a composite from z19 tiles is
+                   four times coarser, and the only way to improve it without buying anything is
+                   to have loaded sharper tiles in the first place. */}
+              {aerialRefStatus.ref.origin === 'session'
+                && (aerialRefStatus.ref.resolutionCmPerPx ?? 0) > 12 ? (
+                  <>
+                    <br />
+                    <span data-testid="imagery-sharper-hint" style={{ color: '#fbbf24' }}>
+                      Coarse: these are the zoom level the 2D map was at. Zoom the 2D map further
+                      in with Nearmap HD selected, then come back — those tiles are reused free.
+                    </span>
+                  </>
+                ) : null}
             </span>
           )}
         </div>
