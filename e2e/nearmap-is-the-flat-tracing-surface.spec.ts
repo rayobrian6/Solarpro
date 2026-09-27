@@ -40,6 +40,9 @@ import { expect, test, type Page } from '@playwright/test';
 const T = 90_000;
 const MPD = 111_320;
 const SITE = { lat: 38.6657, lng: -90.2266 };
+/** The site's ground elevation. The camera and every projection here work at it, because the
+ *  trace resolves on the ground and not on the ellipsoid. */
+const GROUND_M = 128.4;
 const Z = 21;
 
 type Imagery = {
@@ -58,6 +61,7 @@ type E2EWin = Window & {
   __solarEngineE2E?: {
     imagery?: () => Imagery;
     simulateMeshLoaded?: () => boolean;
+    simulateGroundElevation?: (m: number) => boolean;
     assemblies?: () => Array<{ modules: Array<{ id: string; lat: number; lng: number; height: number }> }>;
   };
 };
@@ -82,6 +86,20 @@ async function withMesh(page: Page) {
     'no mesh could be put in the scene, so "the mesh is hidden" and "the trace stops picking '
     + 'against it" would both pass vacuously').toBe(true);
   await page.waitForTimeout(300);
+}
+
+/**
+ * The site's ground elevation, which the Google Elevation API supplies and cannot here.
+ *
+ * Tracing on the reference photo now REFUSES when the site datum is unresolved — a face authored
+ * against an unknown datum is built at the ellipsoid, which is the whole of the site's elevation
+ * away from every other object. See e2e/traced-geometry-lands-on-the-site-datum.spec.ts, where
+ * that number is measured at three elevations.
+ */
+async function withGroundDatum(page: Page, metres = 128.4) {
+  const ok = await page.evaluate(m =>
+    (window as unknown as E2EWin).__solarEngineE2E?.simulateGroundElevation?.(m) ?? false, metres);
+  expect(ok, 'the ground-datum seam is missing').toBe(true);
 }
 
 const imagery = (page: Page) => page.evaluate(() =>
@@ -165,23 +183,25 @@ async function boot(page: Page) {
 /**
  * Point the camera straight down at the ground plane the trace happens on.
  *
- * 🚨 NEEDED, AND MEASURED: flat trace collects corners on the ELLIPSOID (h = 0), while the
- * studio's camera is framed on the site's ground elevation ~140 m above it. Every corner
- * projected off-canvas and the spec reported "0 of 4 corners on screen" — a harness failure that
- * would read exactly like the trace tool being dead. The camera move is a test-side stand-in for
- * the operator scrolling to their roof; nothing in the trace path is bypassed by it.
+ * 🚨 AND IT LOOKS DOWN FROM ABOVE THE SITE'S GROUND, NOT FROM ABOVE THE ELLIPSOID.
+ *
+ * A trace now resolves on the ground datum. A camera placed at 120 m ellipsoidal is BELOW a
+ * 128.4 m ground plane, and `pickEllipsoid` from inside the expanded ellipsoid returns the far
+ * side of the planet — measured once as a traced face in the southern hemisphere. The camera move
+ * is a test-side stand-in for the operator scrolling to their roof; nothing in the trace path is
+ * bypassed by it.
  */
 async function frameGround(page: Page) {
-  await page.evaluate(({ lat, lng }) => {
+  await page.evaluate(({ lat, lng, h }) => {
     const v = (window as unknown as E2EWin).__solarViewerE2E as any;
     const C = (window as any).Cesium;
     if (!v || !C) return;
     v.camera.setView({
-      destination: C.Cartesian3.fromDegrees(lng, lat, 120),
+      destination: C.Cartesian3.fromDegrees(lng, lat, h + 120),
       orientation: { heading: 0, pitch: -C.Math.toRadians(89.9), roll: 0 },
     });
     v.scene.requestRender();
-  }, { lat: SITE.lat, lng: SITE.lng });
+  }, { lat: SITE.lat, lng: SITE.lng, h: GROUND_M });
   await page.waitForTimeout(800);
 }
 
@@ -264,6 +284,9 @@ test.describe('Nearmap is the FLAT tracing surface, not a skin on the 3D mesh', 
 
     const planesBefore = await roofPlaneCount(page);
 
+    // The site datum, re-asserted here because the elevation lookup re-runs when the geocode
+    // moves the site. Without it the trace correctly refuses.
+    await withGroundDatum(page);
     // Arm Mark Plane — "ONE roof face, no panels... Click 3+ corners, right-click to finish".
     // Through the real tool spine: open the Place group, then click the tool, exactly as an
     // operator does. (The spine collapses its groups, so the tool button does not exist until
@@ -296,7 +319,7 @@ test.describe('Nearmap is the FLAT tracing surface, not a skin on the 3D mesh', 
       await frameGround(page);
       clicked = 0;
       for (const c of corners) {
-        const px = await screenFor(page, c.lat, c.lng, 0);
+        const px = await screenFor(page, c.lat, c.lng, GROUND_M);
         if (!px) continue;
         await page.mouse.click(px.x, px.y);
         await page.waitForTimeout(450);
@@ -308,7 +331,7 @@ test.describe('Nearmap is the FLAT tracing surface, not a skin on the 3D mesh', 
       + 'this is a harness failure rather than a product one').toBe(4);
 
     // Right-click finalises the face.
-    const mid = await screenFor(page, SITE.lat, SITE.lng, 0);
+    const mid = await screenFor(page, SITE.lat, SITE.lng, GROUND_M);
     expect(mid, 'the site centre is off screen').toBeTruthy();
     await page.mouse.click(mid!.x, mid!.y, { button: 'right' });
     await page.waitForTimeout(2_000);

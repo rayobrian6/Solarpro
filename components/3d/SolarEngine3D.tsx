@@ -1959,6 +1959,32 @@ function SolarEngine3D({
    */
   const flatImageryRef = useRef(false);
   const [flatImagery, setFlatImagery] = useState(false);
+  /** The last few surface picks: which branch answered, at what height, against what ground. */
+  const pickTraceRef = useRef<Array<{ method: string; height: number; groundElevM: number }>>([]);
+  /** The ellipsoidal height the reference photo is drawn at. Null when none is shown. */
+  const aerialSurfaceHeightRef = useRef<number | null>(null);
+  /**
+   * 🚨 A RENDER-VISIBLE MIRROR OF THE SITE GROUND DATUM.
+   *
+   * `cesiumGroundElevRef` is a ref, so nothing re-runs when it resolves — and the elevation
+   * lookup finishes AFTER boot and again after a geocode moves the site. Measured in the browser:
+   * the datum read resolved, then unresolved, then resolved again within one session, and the
+   * reference photo drawn in between was anchored at the ellipsoid while every pick resolved at
+   * the real ground. The imagery effect depends on this so the picture re-anchors when the number
+   * it is drawn from changes.
+   */
+  const [groundDatumM, setGroundDatumM] = useState<number | null>(null);
+  /** Write the site datum in one place, so the mirror can never drift from the ref. */
+  const setGroundDatum = useCallback((metres: number | null) => {
+    if (metres === null || !Number.isFinite(metres)) {
+      cesiumGroundElevResolvedRef.current = false;
+      setGroundDatumM(null);
+      return;
+    }
+    cesiumGroundElevRef.current = metres;
+    cesiumGroundElevResolvedRef.current = true;
+    setGroundDatumM(metres);
+  }, []);
   /** The picker state as a ref, so the E2E hook (installed once at `stage === 'done'`) reports
    *  the CURRENT source rather than the one frozen into that render. */
   const mapPickerStateRef = useRef<MapPickerState>(DEFAULT_PICKER_STATE);
@@ -2967,6 +2993,30 @@ function SolarEngine3D({
           // is unknown, and height is exactly what pitch + azimuth supplies.
           // So enter the mode, collect the footprint, and build the face from
           // the outline instead of from the mesh.
+          //
+          // 🚨 EXCEPT WHEN THE SITE'S OWN ELEVATION IS UNKNOWN AND A MESH EXISTS.
+          //
+          // In FLAT IMAGERY mode the Photorealistic mesh is hidden but still there, and every
+          // other object on the site is referenced to the real ground. A face traced against a
+          // reference photo is authored at whatever height the picks resolve to — so if the site
+          // datum never resolved, that height is the ellipsoid, and the face lands the whole of
+          // the site's elevation away from everything else. Ray saw the result: "the resulting 3D
+          // geometry appeared roughly 200 ft in the air."
+          //
+          // "No green answer from unknown data." Refusing names the reason; authoring against a
+          // datum nobody resolved would hide it until the geometry was already wrong. The
+          // no-coverage fallback is NOT affected: there the globe IS the scene's ground and every
+          // object shares it, so the trace is self-consistent.
+          if (flatImageryRef.current && !cesiumGroundElevResolvedRef.current) {
+            setStatusMsg(
+              '⛔ Cannot trace on the reference photo yet — this site\'s ground elevation has not '
+              + 'resolved, so a traced face would be built at the ellipsoid instead of on the '
+              + 'ground. Switch to Native 3D to trace against the mesh, or retry once the '
+              + 'elevation lookup succeeds.');
+            addLog('PLANE3D', 'Flat-imagery trace REFUSED — site ground datum unresolved');
+            onPlacementModeChange('select');
+            return;
+          }
           flatTraceRef.current = true;
           setFlatTrace(true);
           enterTopDownForFlatTrace();
@@ -3276,6 +3326,26 @@ function SolarEngine3D({
                          tilt: p.tilt, azimuth: p.azimuth })),
         }));
       },
+      /* 🚨 THE VERTICAL FRAME, AND WHAT THE LAST PICKS ACTUALLY HIT.
+       *
+       * "The resulting 3D geometry appeared roughly 200 ft in the air... I wouldn't panic about
+       * the concept. Somewhere, the Z reference is coming from the wrong frame." This reports the
+       * frames so the answer is measured rather than guessed: the site's own ground datum, what
+       * surfaces are in the scene, where the reference photo is drawn, and the height each of the
+       * last picks resolved to together with WHICH branch answered. */
+      datum: () => {
+        const v = viewerRef.current;
+        let globeShown: boolean | null = null;
+        try { globeShown = v ? !!v.scene.globe.show : null; } catch { /* ignore */ }
+        return {
+          groundElevM: cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : null,
+          groundResolved: cesiumGroundElevResolvedRef.current,
+          globeShown,
+          meshVisible: tilesetRef.current ? !!tilesetRef.current.show : false,
+          referenceSurfaceHeightM: aerialSurfaceHeightRef.current,
+          picks: [...pickTraceRef.current],
+        };
+      },
       /* 🚨 SUPPLY THE ONE PRECONDITION THIS MACHINE CANNOT: A LOADED 3D MESH.
        *
        * Everything about flat imagery mode is a statement about what happens WHEN THERE IS A MESH
@@ -3294,6 +3364,23 @@ function SolarEngine3D({
         if (tilesetRef.current) return false;
         tilesetRef.current = { show: true, __e2eStub: true };
         try { if (viewerRef.current) viewerRef.current.scene.globe.show = false; } catch { /* ignore */ }
+        return true;
+      },
+      /* 🚨 SUPPLY THE SITE'S GROUND ELEVATION, WHICH IS NORMALLY FETCHED AND CANNOT BE HERE.
+       *
+       * `cesiumGroundElevRef` is the canonical site datum and it comes from the Google Elevation
+       * API plus a geoid correction. Without a key it never resolves, and a vertical-datum claim
+       * tested against an UNRESOLVED datum proves nothing — worse, every height would read 0,
+       * which is the exact value the defect produces.
+       *
+       * This writes the same two fields the fly effect writes, nothing else, so the elevation can
+       * be varied across a run: the requirement is "a low-elevation property, a moderate one, a
+       * high one — a constant offset that happens to fix this address is a failure", and that is
+       * not testable with one hard-coded site. Gated on NEXT_PUBLIC_E2E. */
+      simulateGroundElevation: (metres: number) => {
+        if (process.env.NEXT_PUBLIC_E2E !== '1') return false;
+        if (!Number.isFinite(metres)) return false;
+        setGroundDatum(metres);
         return true;
       },
       /* 🚨 WHAT THE SCENE IS ACTUALLY SHOWING, so a spec can tell flat imagery mode from a
@@ -3817,6 +3904,7 @@ function SolarEngine3D({
       if (aerialOverlayRef.current) {
         try { viewer.scene.primitives.remove(aerialOverlayRef.current); } catch { /* already gone */ }
         aerialOverlayRef.current = null;
+        aerialSurfaceHeightRef.current = null;
         try { viewer.scene.requestRender(); } catch { /* ignore */ }
       }
     };
@@ -3902,10 +3990,25 @@ function SolarEngine3D({
         // 🚨 MESH OFF FIRST. The photo is the ground from here, and the drape below classifies
         // TERRAIN — with the mesh still showing it would have nothing to land on.
         enterFlatImagery();
+        // 🚨 THE PHOTO IS DRAWN AT THE SITE'S OWN GROUND ELEVATION, NOT AT THE ELLIPSOID.
+        //
+        // This is the other half of the "200 ft in the air" defect. A `GroundPrimitive` classifies
+        // whatever surface is beneath it, and with the mesh hidden that is the globe — which
+        // renders at height ZERO. The reference photo therefore sat at the ellipsoid, about 93 m
+        // below the ground at an Illinois address and 1.6 km below it in Denver, while every
+        // authored object sat at the real ground. Whichever of the two you trust, the other one
+        // looks wrong by the whole of the site's elevation.
+        //
+        // An explicit `height` on the rectangle puts the picture exactly where the
+        // `ellipsoid@ground` pick above resolves to, so what the operator clicks and what they see
+        // are the same plane. The number comes from the site datum, never from a constant — which
+        // is what makes it hold at sea level, at 130 m and at 1600 m alike.
+        const surfaceH = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
         const rect = C.Rectangle.fromDegrees(
           ref.bounds.west, ref.bounds.south, ref.bounds.east, ref.bounds.north);
         const geometry = new C.RectangleGeometry({
           rectangle: rect,
+          height: surfaceH,
           vertexFormat: C.EllipsoidSurfaceAppearance.VERTEX_FORMAT,
         });
         const mat = C.Material.fromType('Image', {
@@ -3914,19 +4017,32 @@ function SolarEngine3D({
         });
         const appearance = new C.MaterialAppearance({ translucent: false, flat: true });
         appearance.material = mat;
-        const prim = new C.GroundPrimitive({
+        const prim = new C.Primitive({
           geometryInstances: new C.GeometryInstance({ geometry }),
           appearance,
-          // 🚨 TERRAIN, NOT BOTH. `BOTH` also paints the Photorealistic mesh, which is what made
-          // the first version look wrong: the orthophoto was draped over melted trees and lumpy
-          // roofs and took their shape. The mesh is hidden in this mode, so the only surface left
-          // is the flat globe — and a flat photo on flat ground is exactly the fallback Ray
-          // traces polygons on today.
-          classificationType: C.ClassificationType.TERRAIN,
+          // 🚨 NOT PICKABLE. `scene.pick` is the FIRST branch of `getWorldPosition`, and anything
+          // it finds is treated as the Photorealistic mesh — `pickPosition` is then read from the
+          // depth buffer and believed. A reference photo answering that pick would make every
+          // click's height come from the picture rather than from the site datum, which is the
+          // same class of defect this whole slice is about. The photo is scenery.
+          allowPicking: false,
           asynchronous: false,
         });
         viewer.scene.primitives.add(prim);
         aerialOverlayRef.current = prim;
+        // 🚨 REPORT THE HEIGHT THE GEOMETRY WAS ACTUALLY BUILT AT, NOT THE ONE WE MEANT.
+        //
+        // This first recorded `surfaceH` — the variable passed in — and a browser test asserting
+        // "the photo is at the site datum" then PASSED with `height` deleted from the rectangle
+        // options, because the reading came from the intent rather than from the geometry. The
+        // bounding sphere of the created geometry is the rendered article: drop the height and it
+        // returns to the ellipsoid and the assertion fires.
+        try {
+          const built = C.RectangleGeometry.createGeometry(geometry);
+          const c = built?.boundingSphere?.center;
+          const carto = c ? C.Cartographic.fromCartesian(c) : null;
+          aerialSurfaceHeightRef.current = carto ? carto.height : null;
+        } catch { aerialSurfaceHeightRef.current = null; }
         try { viewer.scene.requestRender(); } catch { /* ignore */ }
         setAerialRefStatus({ state: 'shown', ref });
         addLog('IMAGERY', `flat imagery mode — source=${ref.source} `
@@ -4008,7 +4124,10 @@ function SolarEngine3D({
     return () => { cancelled = true; };
     // `lat`/`lng` are in here because the session-cache composite is grown around the site
     // centre: moving the site must not leave a reference photo of the previous one on screen.
-  }, [mapPickerState.source, projectId, stage, lat, lng]);
+    // `groundDatumM` is in here because the photo is DRAWN AT that elevation: the lookup resolves
+    // after boot and again after a geocode, and a photo anchored before it lands sits at the
+    // ellipsoid while every pick resolves at the real ground. Watched that happen in the browser.
+  }, [mapPickerState.source, projectId, stage, lat, lng, groundDatumM]);
 
   // Drop the reference layer if the component is going away, so a remount starts clean.
   useEffect(() => () => {
@@ -4243,7 +4362,7 @@ function SolarEngine3D({
     //   • customLayoutDir/Origin → null: a stale grid axis/origin from a prior
     //     Set-Direction/Origin would skew the next address's grid.
     //   • clearPlane3DPreview: drop any in-progress 3D-plane click points.
-    cesiumGroundElevResolvedRef.current = false;
+    setGroundDatum(null);
     customLayoutDirRef.current   = null;
     customLayoutOriginRef.current = null;
     try { clearPlane3DPreview(viewer); } catch {}
@@ -4315,11 +4434,10 @@ function SolarEngine3D({
       const geoidApprox = geoidUndulationM(lat);
       const flyDatum = resolveGroundDatum(newTwin.elevation, lat);
       if (flyDatum.resolved) {
-        cesiumGroundElevRef.current = flyDatum.ellipsoidalM;
-        cesiumGroundElevResolvedRef.current = true;
+        setGroundDatum(flyDatum.ellipsoidalM);
         addLog('FLY', `cesiumGroundElev updated: ${flyDatum.ellipsoidalM.toFixed(1)}m (geoidApprox: ${geoidApprox.toFixed(1)}m) [no terrain sample]`);
       } else {
-        cesiumGroundElevResolvedRef.current = false;
+        setGroundDatum(null);
         addLog('WARN', `ground elevation UNRESOLVED for ${lat.toFixed(5)}, ${lng.toFixed(5)} (${flyDatum.reason}) — roof auto-detection held off`);
       }
       // Defensive: keep the redundant ellipsoid globe hidden after navigation so
@@ -4977,11 +5095,10 @@ function SolarEngine3D({
       // hand-modelled 2D path is NOT, and lands 80 m under the real roof.
       const bootDatum = resolveGroundDatum(googleGroundElev, lat);
       if (bootDatum.resolved) {
-        cesiumGroundElevRef.current = bootDatum.ellipsoidalM;
-        cesiumGroundElevResolvedRef.current = true;
+        setGroundDatum(bootDatum.ellipsoidalM);
         addLog('BOOT', `cesiumGroundElev: ${bootDatum.ellipsoidalM.toFixed(1)}m (Google: ${bootDatum.orthometricM.toFixed(1)}m, geoidApprox: ${geoidApproxBoot.toFixed(1)}m) [skipped sampleTerrainMostDetailed for speed]`);
       } else {
-        cesiumGroundElevResolvedRef.current = false;
+        setGroundDatum(null);
         addLog('WARN', `ground elevation UNRESOLVED (${bootDatum.reason}) — roof auto-detection is held off and 2D-traced faces cannot be placed against an absolute datum`);
       }
       terrainReadyRef.current = true;
@@ -9099,6 +9216,34 @@ function SolarEngine3D({
    * @returns Object with { cartesian: Cartesian3, pickMethod: string } or null if all methods fail
    */
   function getWorldPosition(viewer: any, C: any, screenPos: any): { cartesian: any; pickMethod: string } | null {
+    const out = getWorldPositionInner(viewer, C, screenPos);
+    // 🚨 EVERY PICK, ON THE RECORD — WHICH BRANCH ANSWERED AND AT WHAT HEIGHT.
+    //
+    // "I traced/built a polygon on top of Nearmap and the resulting 3D geometry appeared roughly
+    // 200 ft in the air." A vertical-datum report is unanswerable without knowing which of four
+    // surfaces the click actually hit: the mesh, the globe, the ellipsoid, or the ellipsoid
+    // expanded to the site's ground elevation. They differ by the whole of the site's elevation,
+    // and the only visible symptom is geometry in the wrong place much later.
+    //
+    // A short ring buffer, read by the E2E hook and by nothing else, so the question is answered
+    // with measurements instead of arithmetic done by eye.
+    try {
+      if (out) {
+        const carto = C.Cartographic.fromCartesian(out.cartesian);
+        pickTraceRef.current.push({
+          method: out.pickMethod,
+          height: carto ? carto.height : NaN,
+          groundElevM: cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : NaN,
+        });
+      } else {
+        pickTraceRef.current.push({ method: 'null', height: NaN, groundElevM: NaN });
+      }
+      if (pickTraceRef.current.length > 32) pickTraceRef.current.shift();
+    } catch { /* diagnostics must never break a pick */ }
+    return out;
+  }
+
+  function getWorldPositionInner(viewer: any, C: any, screenPos: any): { cartesian: any; pickMethod: string } | null {
     let cartesian: any = null;
     let pickMethod = 'none';
 
@@ -9130,7 +9275,25 @@ function SolarEngine3D({
     // point (far underground) that still passes the magnitude check, poisoning
     // plane/fence/roof placement. Skip straight to the deterministic ellipsoid
     // pick when the globe is hidden.
-    if (!cartesian && viewer.scene.globe.show) {
+    //
+    // 🚨 AND NOT IN FLAT IMAGERY MODE, WHERE THE GLOBE IS A BACKDROP AND NOT THE WORKING SURFACE.
+    //
+    // MEASURED, on a Nearmap trace: every one of nine corner picks took this branch and returned
+    // h = -0.001 m. The globe renders on the WGS84 ellipsoid with `EllipsoidTerrainProvider`, so
+    // "terrain" here means height ZERO — and zero is the ellipsoid, which at Ray's Illinois
+    // address is about 93 m below the ground and in Denver about 1.6 km below it. The face is
+    // then authored at that height while the Photorealistic mesh, and every other object on the
+    // site, lives at the real one. That is the "polygon roughly 200 ft in the air" report: the
+    // geometry and the reference surface are in two different vertical frames.
+    //
+    // The branch below — `ellipsoid@ground` — exists precisely to answer at the site's own
+    // elevation, and its own note records the 420 px / 966 px error it was written to fix. It was
+    // unreachable here only because showing the globe let this branch answer first.
+    //
+    // So in flat imagery mode the globe keeps rendering, for context outside the photo, and stops
+    // being picked. The working surface is the reference photo, which is drawn at the same site
+    // datum this pick resolves to.
+    if (!cartesian && viewer.scene.globe.show && !flatImageryRef.current) {
       try {
         const ray = viewer.camera.getPickRay(screenPos);
         if (ray) {
