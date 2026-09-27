@@ -114,11 +114,52 @@ export async function stitchAndCropTiles(
  * Server-only (uses the key directly + sharp). Tries zooms in order, first with
  * enough real tiles wins. Fails safe → null so callers fall back to Google.
  */
+// 🚨 AN IMAGERY REFUSAL IS REMEMBERED, so one over-quota address cannot re-storm the tile
+// endpoint on every subsequent call in this process.
+//
+// The AI half of this module has had a durable guard for a while — `lib/aerial/nearmapCache.ts`
+// writes an EMPTY_SENTINEL so "no coverage / error" never retries — and the IMAGERY half was
+// never given one: no cache read, no cache write, no env freeze, no coverage gate. So a refused
+// address repeated its whole tile storm on every permit generate.
+//
+// This is deliberately IN-PROCESS and therefore not the finished article: a durable negative
+// cache needs a table, no table anywhere stores Nearmap imagery state, and a migration cannot
+// reach the database while the batch runner halts at 003. Recorded as the follow-up. Within one
+// server process this still converts "storm on every call" into "storm once per TTL", and it
+// fails CLOSED, which is the rule a metered external must obey.
+const REFUSAL_TTL_MS = 15 * 60 * 1000;
+const _imageryRefusals = new Map<string, { at: number; kinds: string }>();
+const refusalKey = (lat: number, lng: number) => `${lat.toFixed(5)},${lng.toFixed(5)}`;
+
+function noteRefusal(lat: number, lng: number, kinds: string): void {
+  _imageryRefusals.set(refusalKey(lat, lng), { at: Date.now(), kinds });
+}
+
+/** The live refusal for this location, or null. Exported so a caller can explain a fallback. */
+export function nearmapImageryRefusal(lat: number, lng: number): { kinds: string; ageMs: number } | null {
+  const hit = _imageryRefusals.get(refusalKey(lat, lng));
+  if (!hit) return null;
+  const ageMs = Date.now() - hit.at;
+  if (ageMs > REFUSAL_TTL_MS) { _imageryRefusals.delete(refusalKey(lat, lng)); return null; }
+  return { kinds: hit.kinds, ageMs };
+}
+
+/** Test seam: forget every remembered refusal. */
+export function _resetNearmapImageryRefusals(): void { _imageryRefusals.clear(); }
+
 export async function fetchNearmapStaticAerial(
   lat: number, lng: number,
   opts: { zoom?: number; sizePx?: number; widthPx?: number; heightPx?: number } = {},
 ): Promise<NearmapStaticAerial | null> {
   const key = process.env.NEARMAP_API_KEY;
+  // Fail closed on a remembered refusal — no tiles are requested at all.
+  const priorRefusal = nearmapImageryRefusal(lat, lng);
+  if (priorRefusal) {
+    console.warn(`[nearmap] SKIPPING imagery fetch — this location was refused `
+      + `(${priorRefusal.kinds}) ${Math.round(priorRefusal.ageMs / 1000)}s ago → Google fallback. `
+      + `A metered external must not be re-stormed after a refusal.`);
+    return null;
+  }
   // Diagnostics so a Google fallback is never silent — the Vercel logs now say
   // WHY (missing key / auth-quota / coverage gap / timeout) instead of nothing.
   if (!key) {
@@ -156,6 +197,30 @@ export async function fetchNearmapStaticAerial(
       for (const s of statuses) counts[s] = (counts[s] ?? 0) + 1;
       const statusStr = Object.entries(counts).map(([s, n]) => `${s}×${n}`).join(' ') || 'no-response';
       zoomDiag.push(`z${z}: ${composites.length}/${grid.tiles.length} ok [${statusStr}${blank ? ` blank×${blank}` : ''}${threw ? ` timeout×${threw}` : ''}]`);
+
+      // 🚨 A REFUSAL IS NOT A ZOOM PROBLEM. Do not escalate.
+      //
+      // This used to `continue` on any empty result, so the loop retried at z20 and then z19.
+      // The two comments at the bottom of this function already know the other causes —
+      // "403 = key invalid/unauthorized for Vert tiles; 429 = over quota/rate limit" — and a
+      // 403 or 429 makes `r.ok` false for every tile, so `composites.length === 0` and the
+      // retry fired. A 1440×810 frame is a 6×4 grid at worst 7×5, i.e. 24–35 tiles, so being
+      // OVER QUOTA triggered two more full grids: up to ~105 live paid tile GETs on a request
+      // that had already been refused. And `fetchAerialRoofData` is called twice per permit
+      // generate, so up to ~210.
+      //
+      // `lib/providers/types.ts` states the rule this broke: a metered external must never
+      // fail open. A coverage gap (blank or 404 tiles) IS a zoom problem and still escalates;
+      // an authorization or quota refusal stops here.
+      const refused = statuses.filter(s => s === 401 || s === 403 || s === 429);
+      if (composites.length === 0 && refused.length > 0) {
+        const kinds = [...new Set(refused)].join('/');
+        console.warn(`[nearmap] REFUSED (${kinds}) at z${z} — NOT retrying lower zooms. `
+          + `${kinds.includes('429') ? 'Over quota or rate limited' : 'Key invalid or unauthorized for Vert tiles'}. `
+          + `Detail: ${zoomDiag.join(' | ')}`);
+        noteRefusal(lat, lng, kinds);
+        return null;
+      }
       if (composites.length === 0) continue;
 
       const out = await stitchAndCropTiles(sharp, grid, composites);

@@ -65,6 +65,7 @@ import { RecommendationCard, type RecommendationValue } from '@/components/recom
 // Phase 2I: PVWatts-quality local production calc for reactive quick estimate
 import { calculateProductionLocal } from '@/lib/pvwatts';
 import { v4 as uuidv4 } from 'uuid';
+import { tileKey, parseTileKey } from '@/lib/map/tileKey';
 import SolarEngine3D, { type PlacementMode } from '../3d/SolarEngine3D';
 import { useToast } from '@/components/ui/Toast';
 import { localSaveLayout } from '@/lib/clientStorage';
@@ -187,10 +188,27 @@ const E2E_ENABLED = process.env.NEXT_PUBLIC_E2E === '1';
 
 const TILE_SIZE = 256;
 
-// ─── Module-level tile cache (survives re-renders, cleared on location/provider change) ─
-// Keyed as "zoom/x/y" → loaded HTMLImageElement. Module-level means tiles fetched
+// ─── Module-level tile cache (survives re-renders, cleared on location change) ─
+// Keyed as "provider/zoom/x/y" → loaded HTMLImageElement. Module-level means tiles fetched
 // during one pan are instantly available on the next without re-fetching from network.
+//
+// 🚨 THE PROVIDER IS IN THE KEY, AND THAT IS WHAT STOPS A DISPLAY TOGGLE RE-BUYING IMAGERY.
+//
+// The key used to be "zoom/x/y" with no provider component, so switching provider HAD to clear
+// the whole cache or Google tiles would have been drawn as Nearmap. That made
+// Nearmap → Google → Nearmap discard every Nearmap tile and re-request all of them: `loadTiles`
+// only skips a key it already has, and the clear had removed it. On a 1600×900 canvas the
+// needed[] grid is (ceil(W/256)+3) × (ceil(H/256)+3) = 10 × 7, so ~70 tile requests per
+// toggle-back — against a METERED, PAID endpoint. The only thing standing between that and 70
+// paid calls was the proxy's `Cache-Control: private, max-age=86400`, a per-browser HTTP cache
+// defeated by a hard reload, devtools "Disable cache", a private window, eviction, or a second
+// viewer — and invisible to any quota accounting.
+//
+// With the provider in the key, tiles from different providers coexist, nothing has to be
+// thrown away to switch, and the redraw simply skips keys that are not the active provider's.
+// `tileKey` / `parseTileKey` live in lib/map/tileKey.ts so they can be tested directly.
 const TILE_CACHE: Map<string, HTMLImageElement> = new Map();
+
 const TILE_INFLIGHT: Set<string> = new Set();  // prevents duplicate in-flight requests
 const TILE_CACHE_MAX = 512;                    // LRU eviction above this count
 
@@ -2691,7 +2709,7 @@ export default function DesignStudio({ project, onSave }: Props) {
     const needed: string[] = [];
     for (let dx = -Math.floor(tilesX / 2); dx <= Math.floor(tilesX / 2); dx++) {
       for (let dy = -Math.floor(tilesY / 2); dy <= Math.floor(tilesY / 2); dy++) {
-        needed.push(`${fetchZoom}/${tileX + dx}/${tileY + dy}`);
+        needed.push(tileKey(tileProvider, fetchZoom, tileX + dx, tileY + dy));
       }
     }
 
@@ -2716,7 +2734,9 @@ export default function DesignStudio({ project, onSave }: Props) {
       // ✓ Request already in-flight — avoid duplicates
       if (TILE_INFLIGHT.has(key)) return;
 
-      const [fz, ftx, fty] = key.split('/').map(Number);
+      const _pk = parseTileKey(key);
+      if (!_pk) return;
+      const { z: fz, x: ftx, y: fty } = _pk;
 
       const img = new Image();
       img.crossOrigin = 'anonymous';
@@ -2850,7 +2870,12 @@ export default function DesignStudio({ project, onSave }: Props) {
 
     mapTilesRef.current.forEach((img, key) => {
       if (!(img as any)._loaded || img.naturalWidth === 0) return;
-      const [fz, ftx, fty] = key.split('/').map(Number);
+      const _pk = parseTileKey(key);
+      if (!_pk) return;
+      const { provider: kp, z: fz, x: ftx, y: fty } = _pk;
+      // Tiles of other providers stay cached but are not drawn — that coexistence is what
+      // lets a toggle back reuse paid imagery instead of re-fetching it.
+      if (kp !== tileProvider) return;
       if (fz !== fetchZoom) return;
 
       // World position of this tile at fetch zoom
@@ -5401,8 +5426,11 @@ export default function DesignStudio({ project, onSave }: Props) {
                 <button
                   key={p}
                   onClick={() => {
+                    // 🚨 NO CACHE CLEAR. The provider is part of the tile key now, so tiles
+                    // from every provider coexist and switching back reuses what was already
+                    // fetched — Nearmap is metered, and this click used to re-buy ~70 tiles.
+                    // `loadTiles` has `tileProvider` in its deps, so the reload still fires.
                     setTileProvider(p);
-                    TILE_CACHE.clear(); TILE_INFLIGHT.clear(); setMapTiles(new Map());
                   }}
                   className={`px-2 py-1 text-[10px] font-semibold transition-colors ${
                     tileProvider === p
