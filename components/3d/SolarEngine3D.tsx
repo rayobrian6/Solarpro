@@ -269,6 +269,12 @@ import { HelpPanel } from './help/HelpPanel';
 // (LiDAR, INSTRUCTIONS, Sun, etc.). Header becomes a grab cursor;
 // drag persists offset to localStorage. See components/3d/DraggablePanel.tsx.
 import { DraggablePanel } from './DraggablePanel';
+// A ground mount is ONE assembly. The arithmetic for its edits lives in a pure module so it can
+// be proved without a viewer — same reason as lib/3d/vertexMove.ts.
+import {
+  assemblyPanels, assemblyFrame, setAssemblyAzimuth, setAssemblyTilt,
+  setAssemblyRowPitch, duplicateAssembly, removeAssembly, replaceAssembly,
+} from '@/lib/3d/groundMountAssembly';
 
 // v65 (camera-tilt): Aurora-parity camera presets — default 3D view at -45° pitch
 // (tilted aerial) instead of -65° (top-down-ish). See lib/3d/cameraPresets.ts.
@@ -2302,6 +2308,20 @@ function SolarEngine3D({
   const selectedPanelIdRef = useRef<string | null>(null);
   // v48.12: Multi-select — Set of panel IDs currently highlighted
   const [selectedPanelIds, setSelectedPanelIds] = useState<Set<string>>(new Set());
+  /**
+   * 🚨 THE GROUND MOUNT THE OPERATOR HAS SELECTED, as an assembly rather than a bag of modules.
+   *
+   * Reported from live use: "A placed ground mount is still treated as fragmented rows. I can
+   * select only one row at a time. I cannot select the entire ground mount as one object."
+   *
+   * The selection SET is still `selectedPanelIds`, because the existing grab-to-move and
+   * grab-to-rotate gestures already transform that set rigidly about a shared centroid — there
+   * is no second manipulation system here, and there must not be. This is the assembly IDENTITY
+   * alongside it, so the contextual inspector can name the object and offer the controls that
+   * belong to a ground mount rather than to a module.
+   */
+  const [selectedGroundArrayId, setSelectedGroundArrayId] = useState<string | null>(null);
+  const selectedGroundArrayIdRef = useRef<string | null>(null);
   const selectedPanelIdsRef = useRef<Set<string>>(new Set());
   // v62: Array group-selection drill state. null = top level → a click selects the
   // WHOLE array (all panels sharing a group key). When set to a group key, we've
@@ -3132,6 +3152,35 @@ function SolarEngine3D({
       sizeDragAnchor: () => {
         const sz = objectSizeDragRef.current;
         return sz ? { lat: sz.lat, lng: sz.lng, dragged: sz.dragged } : null;
+      },
+      /* 🚨 WHAT IS SELECTED, READ-ONLY, FROM THE REFS THE PRODUCT ITSELF USES.
+       *
+       * Live acceptance failed on "I can select only one row at a time. I cannot select the
+       * entire ground mount as one object", so a browser spec has to be able to say WHICH
+       * modules a click selected and whether the engine considers them one assembly. Neither is
+       * visible on screen — and could not be asserted from a screenshot anyway, because software
+       * WebGL rasterises nothing here.
+       *
+       * Getters over the refs, returning copies, so there is nothing for a spec to write and no
+       * second source of the selection. `groundArrayId` is the assembly identity the inspector
+       * renders from, so if this says one id the operator is looking at one ground mount. */
+      selection: () => ({
+        groundArrayId: selectedGroundArrayIdRef.current,
+        panelIds: [...selectedPanelIdsRef.current],
+      }),
+      /* The assemblies present, and which modules belong to each — enough for a spec to prove
+       * that moving one mount left the other exactly where it was. */
+      assemblies: () => {
+        const all = panelsRef.current ?? [];
+        const ids = [...new Set(all.filter(p => p.systemType === 'ground' && p.arrayId)
+          .map(p => p.arrayId as string))];
+        return ids.map(id => ({
+          arrayId: id,
+          modules: all.filter(p => p.systemType === 'ground' && p.arrayId === id)
+            .map(p => ({ id: p.id, lat: p.lat, lng: p.lng, height: p.height ?? 0,
+                         row: p.arrayRow ?? p.row ?? 0, col: p.col ?? 0,
+                         tilt: p.tilt, azimuth: p.azimuth })),
+        }));
       },
     };
     return () => {
@@ -10708,6 +10757,12 @@ function SolarEngine3D({
     setSelectedPanelIds(new Set());
     selectedPanelIdRef.current = null;
     setSelectedPanelId(null);
+    // The assembly identity clears with the set it describes. Leaving it behind would keep the
+    // ground-mount inspector open over an empty selection, and its controls would edit an
+    // assembly the operator had stopped pointing at — the same class of stale-scope defect the
+    // roof-face selection note above records.
+    selectedGroundArrayIdRef.current = null;
+    setSelectedGroundArrayId(null);
     hideRotateHandle(); // v62: drop the floating rotate knob when selection clears
   }
 
@@ -10931,11 +10986,37 @@ function SolarEngine3D({
     return { foundId, foundEntity };
   }
 
-  // v62: a panel's "array" key. Roof arrays group by planeId; fence/ground arrays
-  // group by layoutId (those have no planeId). Falls back to the panel's own id so a
-  // lone panel is still a (1-panel) group. Used for whole-array group selection.
-  const groupKeyOf = (p?: PlacedPanel | null): string | null =>
-    p ? (((p as any).planeId ?? (p as any).layoutId ?? p.id) || null) : null;
+  // v62: a panel's "array" key. Roof arrays group by planeId; fence arrays group by
+  // layoutId (those have no planeId). Falls back to the panel's own id so a lone panel is
+  // still a (1-panel) group. Used for whole-array group selection.
+  //
+  // 🚨 A GROUND MOUNT IS ONE ASSEMBLY, AND `layoutId` IS ONE ROW OF IT.
+  //
+  // This is why a ground mount could only ever be selected one row at a time — reported from
+  // live use: "I can select only one row at a time. I cannot select the entire ground mount as
+  // one object. I cannot move the entire ground mount."
+  //
+  // The selection machinery was never the problem. `handleSelectClick` already selects the
+  // WHOLE group by this key and hands it to the existing grab-to-move and grab-to-rotate
+  // gestures, which compute a shared centroid, normal and eave axis and transform every
+  // selected panel rigidly about them. What was wrong is what it was told a group IS:
+  // `placeGroundArrayRow` stamps `layoutId: \`ground-row-${Date.now()}\`` — a fresh id PER ROW
+  // — so a two-row mount was two groups, and a drag moved one row out of its own array.
+  //
+  // `arrayId` is the assembly. It is minted once at the first click of a ground mount
+  // (`groundArrayKeyPrefixRef`), written to every panel of every row, and it round-trips
+  // through persistence because `panels` is stored as verbatim JSONB. Two ground mounts have
+  // two ids, so selecting one cannot touch the other.
+  //
+  // Scoped to ground on purpose: roof keeps grouping by `planeId` and fence by `layoutId`,
+  // because for a fence each segment genuinely IS its own run. And a ground panel with no
+  // `arrayId` — placed before it was written — falls through to today's per-row behaviour
+  // rather than being merged with a neighbouring mount on a guess.
+  const groupKeyOf = (p?: PlacedPanel | null): string | null => {
+    if (!p) return null;
+    if (p.systemType === 'ground' && p.arrayId) return p.arrayId;
+    return (((p as any).planeId ?? (p as any).layoutId ?? p.id) || null);
+  };
 
   /**
    * v66: which Building roof face is under the cursor, or null.
@@ -11520,7 +11601,23 @@ function SolarEngine3D({
       selectedPanelIdRef.current = foundId;
       setSelectedPanelId(foundId);
       showRotateHandle(viewer, C); // floating ⟳ knob to grab-rotate the array
-      setStatusMsg(`📐 Array selected — ${ids.size} panel${ids.size !== 1 ? 's' : ''} · DRAG to move · drag the ⟳ knob to rotate · double-click to edit one panel`);
+
+      // 🚨 NAME WHAT WAS SELECTED. A ground mount is a physical assembly the operator
+      // recognises — a table of rows on pylons — and calling it "Array selected — 26 panels"
+      // described the modules rather than the object. The whole live complaint was that the
+      // product exposed rows instead of the thing standing in the field, so when the selection
+      // IS a ground mount, say so and publish it for the inspector below.
+      const gm = panel.systemType === 'ground' && panel.arrayId ? panel.arrayId : null;
+      selectedGroundArrayIdRef.current = gm;
+      setSelectedGroundArrayId(gm);
+      if (gm) {
+        const rows = new Set(arrayPanels.map(p => p.arrayRow ?? p.row ?? 0)).size;
+        setStatusMsg(`🏗️ Ground mount selected — ${rows} row${rows !== 1 ? 's' : ''}, `
+          + `${ids.size} module${ids.size !== 1 ? 's' : ''} · DRAG to move the whole assembly · `
+          + `drag the ⟳ knob to rotate it · double-click to edit one module`);
+      } else {
+        setStatusMsg(`📐 Array selected — ${ids.size} panel${ids.size !== 1 ? 's' : ''} · DRAG to move · drag the ⟳ knob to rotate · double-click to edit one panel`);
+      }
       try { viewer.scene.requestRender(); } catch {}
     } catch (err: unknown) { addLog('ERROR', `handleSelectClick: ${(err as Error).message}`); }
   }
@@ -18768,6 +18865,163 @@ function SolarEngine3D({
              It is the same panel for every roof object, because a vent, a
              chimney and a tree differ in their numbers and not in the act of
              editing them. Only the fields that mean something are shown. */}
+      {/* 🚨 THE GROUND MOUNT INSPECTOR — the object, not its modules.
+
+           Live acceptance failed on exactly this: "I cannot select the entire ground mount as
+           one object. I cannot move the entire ground mount." Selecting the assembly was the
+           first half (see `groupKeyOf`); this is the second — a contextual panel that NAMES the
+           thing standing in the field and offers the edits that belong to it.
+
+           Move and rotate are deliberately NOT buttons here. They are already gestures: drag
+           the assembly to move it, drag the ⟳ knob to rotate it, and both already transform the
+           whole selected set rigidly about a shared centroid. Adding a second way to do them
+           would be a second manipulation system, which is what the ruling forbids. The panel
+           says so instead, because a capability nobody can find is not a capability.
+
+           Every edit goes through lib/3d/groundMountAssembly.ts, where the arithmetic is proved
+           without a viewer (tests/groundMountIsOneAssembly.test.ts). */}
+      {stage === 'done' && selectedGroundArrayId ? (
+        <DraggablePanel id="ground-mount-inspector" zIndex={OVERLAY_Z.INSPECTOR}>
+          <div
+            data-testid="ground-mount-inspector"
+            style={{
+              position: 'absolute', right: 12, top: 96, width: 248,
+              background: 'rgba(10,14,24,0.94)', border: '1px solid rgba(148,163,184,0.3)',
+              borderRadius: 10, padding: '10px 11px', color: '#e2e8f0', fontSize: 11,
+              boxShadow: '0 8px 26px rgba(0,0,0,0.45)', cursor: 'grab', touchAction: 'none',
+            }}
+          >
+            {(() => {
+              const arrayId = selectedGroundArrayId;
+              const all = panelsRef.current ?? [];
+              const members = assemblyPanels(all, arrayId);
+              if (!members.length) {
+                return <div style={{ color: '#9aa8bd' }}>That ground mount is no longer here.</div>;
+              }
+              const frame = assemblyFrame(members);
+              const rows = frame?.rows.length ?? 1;
+              const kw = (members.reduce((s, p) => s + (p.wattage ?? 0), 0) / 1000);
+
+              /** Apply a pure assembly edit, commit once, and redraw the structure with it. */
+              const edit = (fn: (m: PlacedPanel[]) => PlacedPanel[], msg: string) => {
+                const next = replaceAssembly(all, arrayId, fn(members));
+                // The ref first and synchronously — the same discipline the obstruction
+                // inspector's `patch` uses, and for the same reason: two edits made before a
+                // round trip completes would otherwise both merge onto one stale list.
+                panelsRef.current = next;
+                onPanelsChange(next);
+                const v = viewerRef.current, Cs = (window as any).Cesium;
+                // A full rebuild, because a ground edit moves the PYLONS and RAILS too and the
+                // full-rebuild branch is what re-solves them (`rebuildGroundRacking`).
+                if (v && Cs) { try { renderAllPanels(v, Cs, next, true); } catch { /* logged inside */ } }
+                setStatusMsg(msg);
+              };
+
+              const num = (
+                label: string, unit: string, value: number, testId: string,
+                min: number, max: number, step: number, onSet: (v: number) => void,
+              ) => (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 5 }}>
+                  <span style={{ color: '#cfd8e6', fontSize: 10.5, minWidth: 86 }}>{label}</span>
+                  <input
+                    type="number" data-no-drag data-testid={testId}
+                    step={step} min={min} max={max}
+                    value={Number.isFinite(value) ? Number(value.toFixed(2)) : 0}
+                    onChange={e => {
+                      const v = parseFloat(e.target.value);
+                      if (isFinite(v)) onSet(Math.max(min, Math.min(max, v)));
+                    }}
+                    style={{
+                      width: 66, background: 'rgba(0,0,0,0.42)', color: '#fff',
+                      border: '1px solid rgba(255,255,255,0.18)', borderRadius: 5,
+                      padding: '2px 5px', fontSize: 11, fontWeight: 700, textAlign: 'right',
+                    }}
+                  />
+                  <span style={{ color: '#7c8aa5', fontSize: 10 }}>{unit}</span>
+                </div>
+              );
+              const btn = (label: string, testId: string, onClick: () => void, danger = false) => (
+                <button
+                  data-no-drag data-testid={testId} onClick={onClick}
+                  style={{
+                    flex: 1, padding: '4px 6px', fontSize: 10.5, fontWeight: 700, borderRadius: 6,
+                    cursor: 'pointer', color: danger ? '#fca5a5' : '#cfe6ff',
+                    background: danger ? 'rgba(239,68,68,0.18)' : 'rgba(59,130,246,0.18)',
+                    border: `1px solid ${danger ? 'rgba(239,68,68,0.4)' : 'rgba(59,130,246,0.4)'}`,
+                  }}
+                >{label}</button>
+              );
+
+              return (
+                <>
+                  <div data-testid="ground-mount-title" style={{ fontWeight: 800, fontSize: 12.5, marginBottom: 1 }}>
+                    🏗️ Ground Mount
+                  </div>
+                  <div data-testid="ground-mount-summary" style={{ color: '#9aa8bd', fontSize: 10, marginBottom: 5 }}>
+                    {rows} row{rows !== 1 ? 's' : ''} · {members.length} module{members.length !== 1 ? 's' : ''}
+                    {kw > 0 ? ` · ${kw.toFixed(2)} kW` : ''} · one assembly
+                  </div>
+                  <div style={{ color: '#7c8aa5', fontSize: 9.5, marginBottom: 6, lineHeight: 1.35 }}>
+                    Drag the array to move the whole mount · drag the ⟳ knob to rotate it
+                  </div>
+
+                  {num('Azimuth', '°', frame?.azimuthDeg ?? 180, 'ground-mount-azimuth', 0, 359, 1,
+                    v => edit(m => setAssemblyAzimuth(m, v), `↻ Ground mount pointed at ${Math.round(v)}°`))}
+                  {num('Tilt', '°', frame?.tiltDeg ?? 20, 'ground-mount-tilt', 0, 60, 1,
+                    v => edit(m => setAssemblyTilt(m, v), `⛰️ Ground mount tilted to ${Math.round(v)}°`))}
+                  {rows > 1 && frame?.rowPitchM
+                    ? num('Row pitch', 'm', frame.rowPitchM, 'ground-mount-row-pitch', 0.5, 20, 0.1,
+                        v => edit(m => setAssemblyRowPitch(m, v), `↔ Row pitch set to ${v.toFixed(2)} m`))
+                    : null}
+
+                  <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                    {btn('Duplicate', 'ground-mount-duplicate', () => {
+                      const newId = `ga${Date.now().toString(36)}_`;
+                      const copy = duplicateAssembly(members, newId);
+                      const next = [...all, ...copy];
+                      panelsRef.current = next;
+                      onPanelsChange(next);
+                      const v = viewerRef.current, Cs = (window as any).Cesium;
+                      if (v && Cs) {
+                        try { renderAllPanels(v, Cs, next, true); } catch { /* logged inside */ }
+                        // Select the COPY — "duplicate, then move it" is the whole point, and
+                        // leaving the original selected would send the next drag to the wrong one.
+                        const ids = new Set(copy.map(p => p.id));
+                        selectedPanelIdsRef.current = ids;
+                        setSelectedPanelIds(ids);
+                        selectedGroundArrayIdRef.current = newId;
+                        setSelectedGroundArrayId(newId);
+                        // Same selection colour the click path paints, built here because the
+                        // constant is local to that handler.
+                        const SEL = new Cs.ColorMaterialProperty(
+                          Cs.Color.fromCssColorString('#ff3333').withAlpha(0.92));
+                        for (const p of copy) {
+                          const ent = panelMapRef.current.get(p.id);
+                          if (ent?.box) ent.box.material = SEL;
+                        }
+                        try { showRotateHandle(v, Cs); } catch { /* ignore */ }
+                      }
+                      setStatusMsg(`📋 Ground mount duplicated — ${copy.length} modules · the COPY is selected, drag to place it`);
+                    })}
+                    {btn('Delete', 'ground-mount-delete', () => {
+                      const next = removeAssembly(all, arrayId);
+                      const v = viewerRef.current;
+                      if (v) { for (const p of members) { try { removePanelEntities(v, p.id); } catch { /* ignore */ } } }
+                      panelsRef.current = next;
+                      onPanelsChange(next);
+                      clearPanelSelection();
+                      const Cs = (window as any).Cesium;
+                      if (v && Cs) { try { renderAllPanels(v, Cs, next, true); } catch { /* logged inside */ } }
+                      setStatusMsg(`🗑️ Ground mount deleted — ${members.length} modules removed`);
+                    }, true)}
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+        </DraggablePanel>
+      ) : null}
+
       {stage === 'done' && selectedObstructionId ? (
         <DraggablePanel id="obstruction-inspector" zIndex={OVERLAY_Z.INSPECTOR}>
           <div
