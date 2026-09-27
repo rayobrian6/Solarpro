@@ -32,6 +32,21 @@ export interface PanelShadeInput {
   col: number;         // column index (0-based)
   lat?: number;        // panel lat (use system lat if absent)
   lng?: number;        // panel lng (use system lng if absent)
+  /**
+   * 🚨 THE MODULE'S ELEVATION. WITHOUT IT, INTER-ROW SELF-SHADING IS GUESSWORK.
+   *
+   * Whether the row behind is shaded depends entirely on whether it STARTS where the row in
+   * front ENDS (one continuous tilted plane — a roof array, or a two-high ground table) or at
+   * ground level again (two separate tables). Those two arrangements are identical in plan and
+   * opposite in shading, and the only thing that tells them apart is height.
+   */
+  height?: number;
+  /** Which physical array this module belongs to — a roof plane id or a ground `arrayId`. Rows
+   *  are only compared within one group, or two mounts on opposite sides of a site would be
+   *  treated as rows of each other. */
+  groupId?: string;
+  /** The module's along-slope dimension in metres (portrait: its long side). */
+  slopeLengthM?: number;
 }
 
 export interface ObstructionProfile {
@@ -193,31 +208,136 @@ function isSunBlocked(sunElev: number, sunAz: number, horizonMask: number[]): bo
 
 // ── Inter-row self-shading model ──────────────────────────────────────────────
 
-/**
- * Simple inter-row shading model.
- * Returns the sun elevation angle below which a given row is shaded by the row in front of it.
- *
- * @param panelHeightM  Vertical panel dimension (meters). Default: 1.134m (60-cell portrait)
- * @param rowSpacingM   Row-to-row spacing (meters). Default: 1.5m typical
- * @param tiltDeg       Panel tilt angle (degrees)
- * @param rowIndex      0 = back/south row (shades rows behind it); higher rows are further back
- * @param totalRows     Total number of rows
- */
-function getInterRowShadeElevation(params: {
-  panelHeightM: number;
-  rowSpacingM: number;
+/** The measured arrangement of two consecutive rows of ONE array. */
+export interface RowGeometry {
+  /** Horizontal centre-to-centre distance between the two rows, metres. */
+  pitchM: number;
+  /** How much higher the BACK row's centre sits than the front row's, metres. */
+  riseM: number;
+  /** The module's along-slope dimension, metres. */
+  slopeLengthM: number;
   tiltDeg: number;
-}): number {
-  const { panelHeightM, rowSpacingM, tiltDeg } = params;
-  const tilt = toRad(tiltDeg);
-  // Vertical rise of panel
-  const panelVerticalRise = panelHeightM * Math.sin(tilt);
-  // Row pitch (distance between panel fronts)
-  const rowPitch = rowSpacingM;
-  if (rowPitch <= 0 || panelVerticalRise <= 0) return 0;
-  // Sun elevation angle below which front row shades back row
-  return toDeg(Math.atan2(panelVerticalRise, rowPitch));
 }
+
+/**
+ * 🚨 THE SUN ELEVATION BELOW WHICH THE ROW IN FRONT SHADES THIS ONE. ZERO MEANS NEVER.
+ *
+ * ═══ WHY THIS REPLACED A ONE-LINE FORMULA ═══
+ *
+ * Ray, live, on an open-field ground mount with nothing near it: "Idk if that shade callout is
+ * accurate!! At high noon there is no shade on these panels." The product said **43.0% annual
+ * loss, 17 of 34 modules shaded** — the whole back row, every hour.
+ *
+ * The old model was `atan(L·sinβ / rowSpacingM)`, and `rowSpacingM` came straight from the Design
+ * Studio's **Row Spacing** slider, which on that design read **0.02 m**. But that slider is the
+ * GAP between adjacent panel rows on a roof — two centimetres of air between modules lying on the
+ * same plane. It is not, and has never been, the centre-to-centre pitch between separate tilted
+ * tables. Substituted into the formula:
+ *
+ *     atan(1.134·sin20° / 0.02) = atan(0.388 / 0.02) = 87.0°
+ *
+ * The sun at 38.6°N never exceeds ~75°, so the back row was declared shaded for every daylight
+ * hour with the sun anywhere in the southern half of the sky. Half the modules losing ~86% of
+ * their year is 43% of the system. The number was not noise; it was that arithmetic.
+ *
+ * ═══ WHAT ACTUALLY DECIDES IT ═══
+ *
+ * Not the spacing — the STEP. A module rises `L·sinβ` from its lower edge to its upper edge. The
+ * row behind is shaded only if its lower edge sits BELOW that upper edge, and by how much:
+ *
+ *     step = L·sinβ − rise      (rise = how much higher the back row's centre already sits)
+ *     gap  = pitch − L·cosβ     (the clear horizontal run between them)
+ *     threshold = atan(step / gap)
+ *
+ * Two arrangements are identical in plan and opposite in shading, and only height separates them:
+ *
+ *   · ONE CONTINUOUS PLANE — a roof array, or the two-high table a PLP ground mount actually is.
+ *     The back row starts exactly where the front row ended, so `rise = L·sinβ`, `step = 0`, and
+ *     the answer is ZERO. This is also the fix for the long-open roof defect where coplanar flush
+ *     modules were charged 0.967 instead of 1.0.
+ *   · SEPARATE TABLES on the ground — each starts at its own ground level, so `rise = 0`,
+ *     `step = L·sinβ`, and the classic profile-angle result falls out. Real, and correctly small
+ *     at a real pitch: 1.722 m portrait at 20° with a 5 m pitch gives 12.9°, not 87°.
+ *
+ * A roof array with a GAP between rows gives `step < 0` — the row behind starts ABOVE the row in
+ * front's top edge — which is still zero. Nothing is ever charged for air.
+ */
+export function interRowShadeElevation(g: RowGeometry): number {
+  const { pitchM, riseM, slopeLengthM, tiltDeg } = g;
+  if (![pitchM, riseM, slopeLengthM, tiltDeg].every(Number.isFinite)) return 0;
+  if (!(slopeLengthM > 0) || tiltDeg <= 0) return 0;
+  const beta = toRad(tiltDeg);
+  const step = slopeLengthM * Math.sin(beta) - riseM;
+  // 2 cm of tolerance: a measured row of real modules is never coplanar to the millimetre, and
+  // charging a year of production to rounding noise is exactly what this function exists to stop.
+  if (step <= 0.02) return 0;
+  const gap = pitchM - slopeLengthM * Math.cos(beta);
+  // Rows physically overlapping in plan: the geometry is not a valid array, and inventing a
+  // threshold from it would be inventing a loss. Refuse rather than return 90°.
+  if (!(gap > 0.05)) return 0;
+  return toDeg(Math.atan2(step, gap));
+}
+
+/**
+ * Measure each array's row arrangement FROM THE MODULES, not from a slider.
+ *
+ * Returns a threshold per (groupId, row) — the sun elevation below which that row is shaded by
+ * the one in front of it. A group whose modules carry no heights is absent from the map, and the
+ * caller charges nothing: with no height there is no way to tell one continuous plane from two
+ * separate tables, and guessing is how 43% happened.
+ */
+export function deriveInterRowThresholds(panels: PanelShadeInput[]): Map<string, number> {
+  const out = new Map<string, number>();
+  const groups = new Map<string, PanelShadeInput[]>();
+  for (const p of panels) {
+    const k = p.groupId ?? '__all__';
+    const g = groups.get(k);
+    if (g) g.push(p); else groups.set(k, [p]);
+  }
+
+  groups.forEach((members, key) => {
+    // Every module must carry a height, or this group's arrangement is unknown.
+    if (!members.every(m => Number.isFinite(m.height))) return;
+    const rows = new Map<number, PanelShadeInput[]>();
+    for (const m of members) {
+      const r = rows.get(m.row);
+      if (r) r.push(m); else rows.set(m.row, [m]);
+    }
+    const rowIdx = [...rows.keys()].sort((a, b) => a - b);
+    if (rowIdx.length < 2) return;
+
+    const mean = (xs: number[]) => xs.reduce((s, x) => s + x, 0) / xs.length;
+    const centre = (ms: PanelShadeInput[]) => ({
+      lat: mean(ms.map(m => m.lat ?? 0)),
+      lng: mean(ms.map(m => m.lng ?? 0)),
+      h: mean(ms.map(m => m.height as number)),
+      tilt: mean(ms.map(m => m.tilt)),
+      slope: mean(ms.map(m => m.slopeLengthM ?? DEFAULT_SLOPE_LENGTH_M)),
+    });
+
+    for (let i = 1; i < rowIdx.length; i++) {
+      const front = centre(rows.get(rowIdx[i - 1])!);
+      const back = centre(rows.get(rowIdx[i])!);
+      const cosLat = Math.cos(((front.lat + back.lat) / 2) * Math.PI / 180);
+      const pitchM = Math.hypot(
+        (back.lat - front.lat) * METRES_PER_DEG_LAT,
+        (back.lng - front.lng) * METRES_PER_DEG_LNG * cosLat);
+      const t = interRowShadeElevation({
+        pitchM,
+        riseM: back.h - front.h,
+        slopeLengthM: back.slope,
+        tiltDeg: back.tilt,
+      });
+      if (t > 0) out.set(`${key}\u0000${rowIdx[i]}`, t);
+    }
+  });
+  return out;
+}
+
+const METRES_PER_DEG_LAT = 111_132;
+const METRES_PER_DEG_LNG = 111_320;
+/** A 72-cell module stood portrait — the along-slope dimension when nothing says otherwise. */
+const DEFAULT_SLOPE_LENGTH_M = 1.722;
 
 // ── Main analysis function ────────────────────────────────────────────────────
 
@@ -249,8 +369,18 @@ export function computeShadeAnalysis(
    * caller is unchanged.
    */
   obstruction?: ObstructionProfile | ((panelId: string) => ObstructionProfile | null),
-  rowSpacingM = 1.5,
-  panelHeightM = 1.134,
+  /**
+   * 🚨 NO LONGER READ. KEPT SO EVERY CALLER STILL COMPILES WHILE IT STOPS BEING BELIEVED.
+   *
+   * Both production callers passed the Design Studio's **Row Spacing** slider here — the GAP
+   * between panel rows on a roof, 0.02 m on the design Ray reported. Read as a row PITCH it made
+   * `atan(0.388 / 0.02) = 87°` and cost an open-field ground mount 43% of its year. Row
+   * arrangement is now MEASURED from the modules' own positions and heights by
+   * `deriveInterRowThresholds`, which can tell one continuous tilted plane from two separate
+   * tables. Nothing supplied by a caller can reintroduce the substitution.
+   */
+  _rowSpacingM_unused = 1.5,
+  _panelHeightM_unused = 1.134,
   year?: number,
 ): ShadeAnalysisResult {
   if (panels.length === 0) {
@@ -275,9 +405,9 @@ export function computeShadeAnalysis(
     ? null
     : (obstruction ? buildHorizonMask(obstruction as ObstructionProfile) : FLAT_HORIZON);
 
-  // Compute inter-row shade elevation threshold per panel
-  // Panels in later rows (higher row index) are shaded by earlier rows
-  const maxRow = Math.max(...panels.map(p => p.row));
+  // Inter-row self-shading thresholds, measured from the modules' own geometry. One pass for the
+  // whole array rather than a recomputation inside the per-sample loop.
+  const interRowThresholds = deriveInterRowThresholds(panels);
 
   // Compute per-panel shade factor
   const panelShadeFactors: Record<string, number> = {};
@@ -374,16 +504,16 @@ export function computeShadeAnalysis(
         // when sun is low. Row 0 = front row = least shaded by inter-row.
         // rowIndex > 0 panels have the threshold elevation applied.
         let interRowBlocked = false;
-        if (panel.row > 0 && panel.tilt > 5) {
-          const shadeThresholdElevation = getInterRowShadeElevation({
-            panelHeightM,
-            rowSpacingM,
-            tiltDeg: panel.tilt,
-          });
+        // 🚨 THE THRESHOLD IS MEASURED FROM THE ARRAY, NOT ASSUMED FROM A SLIDER.
+        // Absent from the map means one of: row 0, a single-row array, a group whose modules
+        // carry no heights, or — most often — rows that lie on ONE continuous plane and cannot
+        // shade each other at all. In every one of those cases nothing is charged.
+        const threshold = interRowThresholds.get(`${panel.groupId ?? '__all__'}\u0000${panel.row}`);
+        if (threshold && panel.tilt > 5) {
           // Only block when sun is roughly aligned with the row direction (near row azimuth)
           // Sun in azimuth within ±90° of panel facing direction is the critical zone
           const azDiff = Math.abs(((sunPos.azimuth - panel.azimuth + 540) % 360) - 180);
-          if (azDiff < 90 && sunPos.elevation < shadeThresholdElevation) {
+          if (azDiff < 90 && sunPos.elevation < threshold) {
             interRowBlocked = true;
           }
         }

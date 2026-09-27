@@ -5118,9 +5118,19 @@ export default function DesignStudio({ project, onSave }: Props) {
     });
     const byId = new Map(live.map(p => [p.id, p]));
     const result = computeShadeAnalysis(
+      // 🚨 HEIGHT, GROUP AND THE MODULE'S REAL LENGTH — the three things inter-row self-shading
+      // actually depends on. Without height there is no way to tell one continuous tilted plane
+      // (a roof array, or the two-high table a PLP ground mount is) from two separate tables, and
+      // the two are identical in plan and opposite in shading. This call used to pass neither,
+      // and the model fell back to the Row Spacing SLIDER — 0.02 m of roof gap read as a row
+      // pitch, which charged an open-field ground mount 43% of its year.
       live.map(p => ({
         id: p.id, tilt: p.tilt ?? 0, azimuth: p.azimuth ?? 180,
-        row: p.row ?? 0, col: p.col ?? 0, lat: p.lat, lng: p.lng,
+        row: p.arrayRow ?? p.row ?? 0, col: p.col ?? 0, lat: p.lat, lng: p.lng,
+        height: p.height,
+        groupId: p.arrayId ?? p.planeId ?? undefined,
+        slopeLengthM: ((p as { orientation?: string }).orientation === 'landscape'
+          ? p.widthFeet : p.heightFeet) * 0.3048 || undefined,
       })),
       mapCenterRef.current?.lat ?? 0,
       mapCenterRef.current?.lng ?? 0,

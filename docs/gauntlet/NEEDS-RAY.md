@@ -88,6 +88,32 @@ imagery's own frame. `lib/fieldMeasurement/permitAccess.ts` already reads that e
 another purpose. That is a complete, already-acquired, correctly-georeferenced reference image —
 **the cheapest possible source for the 3D layer, and it costs nothing to display again.**
 
+## R20 — 🚨 Ground-mount proposals already issued carry a ~43% phantom shade derate
+
+**Found 2026-09-27 from your own report:** "Idk if that shade callout is accurate!! At high noon
+there is no shade on these panels." It was not accurate. `computeShadeAnalysis` was given the
+Design Studio's **Row Spacing** slider — the 2 cm GAP between roof panel rows — as the row PITCH
+between separate tilted tables, which made `atan(0.388 / 0.02) = 87°` and blocked the entire back
+row of every ground mount for every daylight hour. Running HEAD's own code on a 2 × 17 table at
+your site reproduces **17 of 34 modules** exactly, at 47–48%.
+
+**The model is fixed and the fix is committed.** What is yours to decide is the exposure already
+out of the door:
+
+`lib/pvwatts.ts` multiplies production by the mean `annualShadeFactor`, and
+`lib/proposal/buildCanonicalProposal.ts` derives annual savings, payback and the 25-year figure
+from it. So every GROUND-MOUNT design with two or more rows that had Shade run on it has been
+under-reporting production by roughly the back row's share — about 43% on a two-row table, less on
+a three-row one.
+
+| | |
+|---|---|
+| **Roof arrays** | Affected much less, but not zero: coplanar flush rows were charged 0.967 instead of 1.0. The same fix closes it. |
+| **What I did NOT do** | Touch any stored proposal, production row or design. Re-running Shade on an affected design now produces the correct number; re-issuing anything is your call. |
+| **How to find them** | Any design with `systemType = 'ground'`, two or more rows, and a non-null `annualShadeFactor` below ~0.9 on half its modules. |
+
+---
+
 ### R18 — who may see it
 
 `app/api/admin/nearmap-tile/[z]/[x]/[y]/route.ts` starts with `requireAdminApi`. For any

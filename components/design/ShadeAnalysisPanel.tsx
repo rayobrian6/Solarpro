@@ -59,14 +59,21 @@ export default function ShadeAnalysisPanel({
     try {
       const { computeShadeAnalysis } = await import('@/lib/shadeAnalysis');
 
+      // 🚨 THE SAME THREE FIELDS THE OTHER CALLER NOW PASSES — height, group, module length.
+      // Inter-row self-shading is measured from them; without them nothing is charged, which is
+      // the honest answer for an array whose arrangement is unknown. See lib/shadeAnalysis.ts.
       const panelInputs = panels.map(p => ({
         id:      p.id,
         tilt:    p.tilt    ?? 20,
         azimuth: p.azimuth ?? 180,
-        row:     p.row     ?? 0,
+        row:     p.arrayRow ?? p.row ?? 0,
         col:     p.col     ?? 0,
         lat:     p.lat,
         lng:     p.lng,
+        height:  p.height,
+        groupId: p.arrayId ?? p.planeId ?? undefined,
+        slopeLengthM: ((p as { orientation?: string }).orientation === 'landscape'
+          ? p.widthFeet : p.heightFeet) * 0.3048 || undefined,
       }));
 
       const obstructionProfile = obstructions.length > 0
