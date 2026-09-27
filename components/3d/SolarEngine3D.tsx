@@ -4091,9 +4091,35 @@ function SolarEngine3D({
     setAerialRefStatus({ state: 'loading' });
     (async () => {
       try {
-        const res = await fetch(`/api/projects/${projectId}/aerial-reference`);
-        const data = await res.json();
+        let res = await fetch(`/api/projects/${projectId}/aerial-reference`);
+        let data = await res.json();
         if (cancelled) return;
+
+        // 🚨 ACQUIRE THE PROJECT'S OWN WORKZONE — ONCE — RATHER THAN SENDING THE USER TO 2D.
+        //
+        // "Starting directly in Design Studio 3D with a valid address must be enough. I must NOT
+        // have to: switch to 2D → choose Nearmap → switch back to 3D."
+        //
+        // So when the project has nothing stored, the imagery layer asks for it itself. The POST
+        // is address-gated on the server by the same `workzoneGate` rule, acquires ONE bounded
+        // 1440x810 frame centred on the project, and stores it — so this runs at most once per
+        // project and every later selection is the free GET above. A project that cannot be
+        // stored to is refused server-side, because acquiring something that cannot be kept means
+        // buying it again on the next toggle.
+        if (res.ok && data?.success && !data.available) {
+          const acq = await fetch(`/api/projects/${projectId}/aerial-reference`, { method: 'POST' });
+          const acqData = await acq.json().catch(() => null);
+          if (cancelled) return;
+          if (acqData?.acquired || acqData?.available) {
+            res = await fetch(`/api/projects/${projectId}/aerial-reference`);
+            data = await res.json();
+            if (cancelled) return;
+          } else if (acqData?.reason) {
+            // The gate's own words — "Select a project address to load Nearmap imagery." — not a
+            // paraphrase invented here.
+            data = { ...data, reason: acqData.reason };
+          }
+        }
         if (!res.ok || !data?.success) {
           aerialRefCacheRef.current = { projectId, data: null };
           useSessionOr(data?.error || `The aerial reference could not be read (HTTP ${res.status}).`);

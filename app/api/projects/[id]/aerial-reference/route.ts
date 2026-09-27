@@ -43,10 +43,24 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
 import { getDbReady, handleRouteDbError } from '@/lib/db-neon';
-import { nearmapImageBounds, groundResolutionCmPerPx } from '@/lib/aerial/nearmap';
+import { nearmapImageBounds, groundResolutionCmPerPx, fetchNearmapStaticAerial } from '@/lib/aerial/nearmap';
+import {
+  workzoneGate, isStoredWorkzone, WORKZONE_FILE_NAME,
+  WORKZONE_WIDTH_PX, WORKZONE_HEIGHT_PX, type StoredWorkzone,
+} from '@/lib/aerial/projectWorkzone';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
+
+/** `file_data` is a JSON/bytea column; read it back without trusting its shape. */
+function parseStored(raw: unknown): StoredWorkzone | null {
+  try {
+    const json = raw instanceof Buffer ? raw.toString('utf8')
+      : typeof raw === 'string' ? raw : JSON.stringify(raw);
+    const v = JSON.parse(json);
+    return isStoredWorkzone(v) ? v : null;
+  } catch { return null; }
+}
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   try {
@@ -66,6 +80,46 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     `;
     if ((owned as unknown[]).length === 0) {
       return NextResponse.json({ success: false, error: 'Project not found' }, { status: 404 });
+    }
+
+    // 🚨 THE PROJECT'S OWN ACQUIRED WORKZONE COMES FIRST.
+    //
+    // Before this existed, the only Nearmap imagery a project could have was whatever the PERMIT
+    // generator happened to buy — which is why Nearmap could not be reached without first driving
+    // another part of the product. A workzone acquired by POST below is stored here and is the
+    // project's imagery from then on; `permit_input.json` remains a valid source because that
+    // image is equally paid for and equally the project's.
+    const wz = await sql`
+      SELECT file_data FROM project_files
+      WHERE project_id = ${projectId} AND file_name = ${WORKZONE_FILE_NAME}
+      ORDER BY created_at DESC
+      LIMIT 1
+    `;
+    const wzRaw = (wz as Array<{ file_data: unknown }>)[0]?.file_data;
+    if (wzRaw) {
+      const stored = parseStored(wzRaw);
+      if (stored) {
+        const bounds = nearmapImageBounds(
+          stored.lat, stored.lng, stored.zoom, stored.imageWidth, stored.imageHeight);
+        if (bounds) {
+          return NextResponse.json({
+            success: true, available: true,
+            source: 'nearmap',
+            imageDataUrl: stored.imageBase64,
+            bounds,
+            zoom: stored.zoom,
+            widthPx: stored.imageWidth,
+            heightPx: stored.imageHeight,
+            resolutionCmPerPx: groundResolutionCmPerPx(stored.lat, stored.zoom),
+            // R19: the tile API supplies no capture date, so none is reported. `acquiredAt` is
+            // when SolarPro fetched it and is deliberately NOT presented as a capture date.
+            captureDate: null,
+            captureDateKnown: false,
+            acquisition: 'reused',
+            acquiredAt: stored.acquiredAt ?? null,
+          });
+        }
+      }
     }
 
     const rows = await sql`
@@ -149,5 +203,120 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     });
   } catch (err: unknown) {
     return handleRouteDbError('[GET /api/projects/[id]/aerial-reference]', err);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// POST — ACQUIRE THIS PROJECT'S NEARMAP WORKZONE. ONCE.
+//
+// 🚨 THE LIVE DEFECT THIS CLOSES. "I still have to enter the old 2D environment first and select
+// Nearmap before I can effectively get Nearmap into the 3D workflow... Find why the old 2D
+// workflow is currently the only thing that initializes/fetches/populates the aerial state. Move
+// that acquisition/state authority to the project/imagery layer, not to the 2D UI."
+//
+// It was true: the only two things that had ever bought Nearmap imagery were the 2D canvas's tile
+// fetcher (a component lifecycle) and the permit generator (a different workflow entirely).
+// Neither belongs to the project, so the studio had nothing of its own to show.
+//
+// THE GATE IS `workzoneGate`, and it is the SAME pure function the picker uses to decide whether
+// to disable itself — so the reason the button gives and the reason the server gives cannot drift:
+//   · a project that exists and belongs to the caller
+//   · with a RESOLVED lat/lng — the address gate. "Do not make an imagery request before the
+//     location gate passes."
+//   · that can be stored to, or a toggle would re-buy on every switch.
+//
+// THE BOUND is one 1440x810 frame centred on the project — about 84 m x 47 m at z21, the same
+// extent the permit site plan has always acquired. Panning does not extend it.
+//
+// ACQUIRE ONCE: if a workzone is already stored, this returns it and calls nothing. The
+// underlying `fetchNearmapStaticAerial` additionally refuses outright for 15 minutes after a
+// 401/403/429 at this location, so a refusal cannot be re-stormed.
+// ═══════════════════════════════════════════════════════════════════════════
+export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  try {
+    const { id: projectId } = await ctx.params;
+    const user = await getUserFromRequest(req);
+    if (!user) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+
+    const sql = await getDbReady();
+    const owned = await sql`
+      SELECT id, lat, lng FROM projects
+      WHERE id = ${projectId} AND user_id = ${user.id} AND deleted_at IS NULL
+    `;
+    const project = (owned as Array<{ id: string; lat: number | null; lng: number | null }>)[0] ?? null;
+
+    // A project row IS the storable thing, so `storable` is exactly "the row exists".
+    const gate = workzoneGate(project, !!project);
+    if (!gate.ok) {
+      // 200, not an error: "no address yet" is a state the UI renders, not a failure.
+      return NextResponse.json({
+        success: true, available: false, acquired: false,
+        code: gate.code, reason: gate.reason,
+      });
+    }
+
+    // Already bought? Then nothing is bought again.
+    const existing = await sql`
+      SELECT file_data FROM project_files
+      WHERE project_id = ${projectId} AND file_name = ${WORKZONE_FILE_NAME}
+      ORDER BY created_at DESC
+      LIMIT 1
+    `;
+    if (parseStored((existing as Array<{ file_data: unknown }>)[0]?.file_data)) {
+      return NextResponse.json({
+        success: true, available: true, acquired: false, acquisition: 'reused',
+        reason: 'This project already has its Nearmap workzone.',
+      });
+    }
+
+    const loc = gate.location!;
+    const aerial = await fetchNearmapStaticAerial(loc.lat, loc.lng, {
+      widthPx: WORKZONE_WIDTH_PX, heightPx: WORKZONE_HEIGHT_PX,
+    });
+    if (!aerial || !aerial.imageBase64) {
+      // 🚨 NO SUBSTITUTION. The fetcher returns null for a missing key, a refusal, or a genuine
+      // coverage gap. Saying so is the whole of R18's "never masquerade one provider as another" —
+      // the caller keeps showing the native imagery and is told why.
+      return NextResponse.json({
+        success: true, available: false, acquired: false,
+        code: 'unavailable',
+        reason: 'Nearmap returned no imagery for this location. Nothing has been substituted for '
+          + 'it — the native imagery is still what is on screen.',
+      });
+    }
+
+    const record: StoredWorkzone = {
+      imageSource: 'nearmap',
+      imageBase64: aerial.imageBase64,
+      imageWidth: aerial.imageWidth,
+      imageHeight: aerial.imageHeight,
+      zoom: aerial.zoom,
+      lat: loc.lat,
+      lng: loc.lng,
+      // When SolarPro fetched it. NOT a capture date — the tile API supplies none (R19).
+      acquiredAt: new Date().toISOString(),
+    };
+    const buf = Buffer.from(JSON.stringify(record), 'utf8');
+    await sql`
+      INSERT INTO project_files
+        (project_id, client_id, user_id, file_name, file_type, file_size, mime_type, file_data, notes)
+      VALUES
+        (${projectId}, ${null}, ${user.id},
+         ${WORKZONE_FILE_NAME}, 'aerial_workzone', ${buf.length},
+         'application/json', ${buf}, 'Nearmap project workzone — acquired once, reused')
+      ON CONFLICT (project_id, user_id, file_name)
+      DO UPDATE SET
+        file_size   = EXCLUDED.file_size,
+        file_data   = EXCLUDED.file_data,
+        upload_date = NOW()
+    `;
+
+    return NextResponse.json({
+      success: true, available: true, acquired: true, acquisition: 'acquired',
+      zoom: aerial.zoom,
+      resolutionCmPerPx: groundResolutionCmPerPx(loc.lat, aerial.zoom),
+    });
+  } catch (err: unknown) {
+    return handleRouteDbError('[POST /api/projects/[id]/aerial-reference]', err);
   }
 }
