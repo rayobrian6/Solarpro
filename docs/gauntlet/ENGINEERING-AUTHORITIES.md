@@ -96,6 +96,17 @@ the standard, never against the other copy. Two agreeing copies can both be wron
 
 **Smallest repair.** Take the busbar rating and the main breaker as two inputs and call the same helper lib/electrical-calc.ts:976 uses, or import a single exported maxLoadSideBackfeedA(busA, mainA). When panel_rating_amps is absent, return the interconnection type as unresolved rather than deriving it from 200 A — the report already has a complianceNotes channel (line 271-276) to say so.
 
+### ✅ **FIXED** (`557fbaa6` write side, `802c0b51` read side) — 🔥 A saved engineering run could not say which equipment built it, so reopening one replaced the saved inverter with catalogue item #1 and collapsed a multi-inverter design to one
+
+`app/api/engineering/save-outputs/route.ts` never wrote `panel_id` / `inverter_id` — columns
+`migrations/009_engineering_runs.sql` created for exactly this purpose and two routes read — so
+the restore always substituted `STRING_INVERTERS[0]` / `MICROINVERTERS[0]` and
+`qcells-peak-duo-400`, auto-recalculated 400 ms later, and showed a green "restored" banner. Both
+halves are shipped: the identity is now persisted, the readers stop inventing `'grid-tied'` and
+`1`, and the restore refuses and says "Partially restored" rather than substituting. 19 cases on
+real PostgreSQL in `tests/engineeringRunRemembersItsEquipment.postgres.test.ts`. Kept in this file
+because Ray asked for the finding to be retained; it is retained as CLOSED, not open.
+
 ### 🔥 The survey's NEC 705.12 interconnection recommendation is a tautology: it fabricates the solar breaker as exactly the 120% allowance, so 'high confidence, source: nec' can never fail
 
 `lib/survey/prefillComputations.ts`:167 — copies disagree: `True`, wrong vs standard: `True`
@@ -299,6 +310,51 @@ the standard, never against the other copy. Two agreeing copies can both be wron
 
 **Smallest repair.** Give generateElectricalEngineering the thermal basis (the DesignSnapshot already carries stateCode — it is used for getNecVersion at line 272 — so `getThermalDesignBasis({ state: snap.stateCode })` is available) and replace `panelVoc * 1.25` with the shared cold-Voc law, falling back to x1.25 only when the module record has no tempCoeffVoc, exactly as lib/permit/utils/panelSpecs.ts:135 already does. Report `stringVoc` as the corrected value (or return both, labelled). The 20-panel clamp should come from the inverter/brand record's maxPanelsPerString, not a literal.
 
+
+---
+
+## micro-branch callouts — OPEN, peer-owned
+
+### 🔥 The microinverter branch callout is a hardcoded `#10 AWG` for BOTH the conductor and the EGC, two lines after the branch OCPD was actually computed
+
+`lib/computed-system.ts`:1375 — confirmed on `dev`, 2026-09-26. Raised by the peer session
+working on gateway multiplicity; **the fix is theirs** (that file is one of their 35 and they have
+a task chip filed for it). Recorded here so it survives the session.
+
+```ts
+const ocpd = BRANCH_BREAKER_SIZES.find(s => s >= branchCurrent * 1.25) ?? maxBranchOcpdA;
+...
+const gaugeNum = '#10 AWG'.replace('#', '').replace(' AWG', '');
+microBranches.push({
+  ...
+  conductorCallout: `2×#${gaugeNum} THWN-2
+1×#${gaugeNum} GRN EGC`,
+```
+
+**What is wrong.** One literal, used twice, for two different conductors sized by two different
+rules. The branch OCPD — the thing 250.122 sizes an EGC from — is computed on the line above and
+never reaches the callout. Neither does ambient or rooftop derating, the run length, or the
+voltage drop. `#10` for the phase conductors and `#10` for the equipment ground is a coincidence
+of one branch size, not a derivation, and it does not move when the branch does.
+
+**Consequence.** `microBranches[].conductorCallout` is what the drawing prints — the SLD renderer
+takes it verbatim (`b.conductorCallout ?? …`, `lib/sld-professional-renderer.ts`:4485). So every
+micro branch on every micro SLD reads `2×#10 THWN-2 / 1×#10 GRN EGC` whatever the branch OCPD is.
+At a 20 A branch that happens to be conservative (#10 Cu is 30 A at 75 °C, and 250.122 asks only
+for #12). At a larger branch OCPD it is the other direction, and nothing in the callout would
+change to say so.
+
+**Direction.** INCONSISTENT, and unsafe at the top of the range: the printed conductor is
+independent of the breaker protecting it.
+
+**Smallest repair (for the owning session).** The callout is built two lines after `ocpd` is
+known, so both halves are already in scope: size the phase conductors from the branch OCPD through
+the same ampacity path the other segments use, and the EGC through `getEGCGauge(ocpd)` /
+`lib/nec/table250_122` rather than reusing the phase gauge. There is a second `#10` fallback chain
+in `lib/sld-professional-renderer.ts` (:3194, :4140, :4485, :4493, :4504 —
+`input.branchWireGauge ?? '#10 AWG'`) that should stop being reachable once the callout is real;
+its EGC sibling at :2825 falls back to the FEEDER's EGC, which that file's own comment
+(:2818-2822) records as a defect already fixed once for the open-air Q-Cable segment.
 
 ---
 
