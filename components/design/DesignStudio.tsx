@@ -102,6 +102,21 @@ import { enqueueLayoutWrite } from '@/lib/design/layoutWriteQueue';
 interface Props {
   project: Project;
   onSave?: (layout: Layout) => void;
+  /**
+   * 🚨 THE QUICK DESIGN JUST BECAME A REAL PROJECT — ADOPT IT.
+   *
+   * A Quick Design is an in-memory object with a `demo-…` id, and paid imagery cannot be bought
+   * into something ephemeral: it would be bought again on the next toggle. Rather than disabling
+   * Nearmap for the flow Ray actually works in, the studio PROMOTES the design through the
+   * persistence that already exists (`POST /api/projects`, which geocodes the address and writes
+   * the row) the first time imagery is needed.
+   *
+   * The owner swaps its `project` for the returned one, so the whole studio moves to the durable
+   * id at once. Without this callback the promotion would leave two identities in play — the
+   * `demo-…` the studio keeps using and the UUID the imagery was stored under — which is exactly
+   * the "one project, one identity" rule this is meant to satisfy.
+   */
+  onProjectPromoted?: (project: Project) => void;
 }
 
 type SolarE2EState = {
@@ -618,7 +633,7 @@ function reshapeMovedIt(
   return false;
 }
 
-export default function DesignStudio({ project, onSave }: Props) {
+export default function DesignStudio({ project, onSave, onProjectPromoted }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const toast = useToast();
@@ -4975,6 +4990,69 @@ export default function DesignStudio({ project, onSave }: Props) {
    */
   const isRealProject =
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(project.id);
+
+  /**
+   * 🚨 GIVE THIS DESIGN A DURABLE IDENTITY, ONCE, BEFORE ANY PAID IMAGERY IS BOUGHT.
+   *
+   * Ray: "Do not buy Nearmap imagery into an ephemeral object. Instead give a resolved-address
+   * Quick Design a durable design identity before the first paid Nearmap acquisition. Prefer
+   * existing draft/project/session persistence if it already exists. Do not create a parallel
+   * Nearmap-only database."
+   *
+   * `POST /api/projects` IS that persistence, unchanged: it validates the name and system type,
+   * geocodes the address into `lat`/`lng` and writes the row — which is exactly the address gate
+   * the imagery route then applies. Nothing new is stored and no second table is created.
+   *
+   * It runs only when the design is not already durable and only when there is an address to
+   * resolve; a design with neither returns null, and then nothing is acquired. Promotion is
+   * reported upwards so the studio moves to the new id rather than keeping two.
+   */
+  const promotingRef = useRef<Promise<string | null> | null>(null);
+  /**
+   * 🚨 ONE ATTEMPT PER DESIGN, NOT ONE PER CLICK.
+   *
+   * Measured in the browser: with the promotion allowed to retry, four further source changes
+   * issued two more project-creation requests. A studio that silently re-posts on every toggle is
+   * a studio that hammers its own API whenever the environment cannot save — so a failed
+   * promotion is remembered, and the imagery readout says the design could not be saved rather
+   * than quietly trying again. The explicit Save control remains the way to retry.
+   */
+  const promotionFailedRef = useRef(false);
+  const ensureDurableProject = useCallback(async (): Promise<string | null> => {
+    if (isRealProject) return project.id;
+    if (promotingRef.current) return promotingRef.current;     // one promotion, not one per click
+    if (promotionFailedRef.current) return null;
+    const address = (project.address || '').trim();
+    if (!address) return null;
+    const run = (async () => {
+      try {
+        const res = await fetch('/api/projects', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: project.name || `Design — ${address}`,
+            systemType: project.systemType || 'roof',
+            address,
+            notes: 'Saved automatically so this design could keep its imagery.',
+          }),
+        });
+        const data = await res.json().catch(() => null);
+        const created = data?.data ?? data?.project ?? null;
+        if (!res.ok || !data?.success || !created?.id) { promotionFailedRef.current = true; return null; }
+        toast.info('Design saved', 'Saved as a project so its Nearmap imagery is kept and reused.');
+        onProjectPromoted?.(created as Project);
+        return created.id as string;
+      } catch {
+        promotionFailedRef.current = true;
+        return null;
+      } finally {
+        promotingRef.current = null;
+      }
+    })();
+    promotingRef.current = run;
+    return run;
+  }, [isRealProject, project.id, project.address, project.name, project.systemType,
+      onProjectPromoted, toast]);
   const [engineDeletion, setEngineDeletion] = useState<{
     token: number; scope: string;
     faceIds: string[]; obstructionIds: string[]; panelIds: string[];
@@ -5711,6 +5789,7 @@ export default function DesignStudio({ project, onSave }: Props) {
                 (project.client ? [project.client.address, project.client.city, project.client.state].filter(Boolean).join(', ') : '')
               }
               projectId={project.id}
+              onNeedDurableProject={ensureDurableProject}
               placementMode={placementMode3D}
               onPlacementModeChange={setPlacementMode3D}
               showShade={showShade3D}

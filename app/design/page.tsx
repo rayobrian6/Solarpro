@@ -334,7 +334,11 @@ function DesignPageInner() {
           </span>
         </div>
         <div className="flex-1 min-h-0">
-          <DesignStudio project={activeProject} />
+          {/* 🚨 ADOPT THE PROMOTED PROJECT. When the studio saves a Quick Design so it can keep
+              its Nearmap imagery, the whole page moves to the durable project — otherwise the
+              studio would go on using the `demo-…` id while the imagery lived under a UUID, which
+              is two identities for one design. */}
+          <DesignStudio project={activeProject} onProjectPromoted={setActiveProject} />
         </div>
       </div>
     );

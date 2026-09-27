@@ -52,11 +52,30 @@ import {
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
+/**
+ * Read a `bytea` column back as text.
+ *
+ * 🚨 A `Buffer` CHECK ALONE IS NOT ENOUGH. `file_data` is bytea, and what a driver hands back for
+ * it is not fixed: node-postgres gives a `Buffer`, and PGlite gives a plain `Uint8Array` — which
+ * is NOT an instance of Buffer. The previous shape (`raw instanceof Buffer ? … : String(raw)`)
+ * turned a Uint8Array into "123,34,105,…" and the record silently failed to parse, so a workzone
+ * that had just been written came back as "no imagery". Caught against a real Postgres.
+ */
+function bytesToText(raw: unknown): string | null {
+  if (raw == null) return null;
+  if (typeof raw === 'string') return raw;
+  if (typeof Buffer !== 'undefined' && Buffer.isBuffer(raw)) return raw.toString('utf8');
+  if (raw instanceof Uint8Array) return new TextDecoder().decode(raw);
+  // Some drivers parse a json/jsonb column into an object before it ever reaches here.
+  if (typeof raw === 'object') { try { return JSON.stringify(raw); } catch { return null; } }
+  return null;
+}
+
 /** `file_data` is a JSON/bytea column; read it back without trusting its shape. */
 function parseStored(raw: unknown): StoredWorkzone | null {
   try {
-    const json = raw instanceof Buffer ? raw.toString('utf8')
-      : typeof raw === 'string' ? raw : JSON.stringify(raw);
+    const json = bytesToText(raw);
+    if (!json) return null;
     const v = JSON.parse(json);
     return isStoredWorkzone(v) ? v : null;
   } catch { return null; }
@@ -139,7 +158,9 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
       });
     }
 
-    const json = raw instanceof Buffer ? raw.toString('utf8') : String(raw);
+    // Same decoder as the workzone above, for the same reason: `String(uint8Array)` produces
+    // "123,34,105,…" and the stored aerial reads as absent.
+    const json = bytesToText(raw) ?? '';
     let input: { aerialData?: Record<string, unknown> } | null = null;
     try { input = JSON.parse(json); } catch {
       return NextResponse.json({

@@ -175,6 +175,15 @@ async function traceAt(page: Page, groundM: number) {
   expect(mid, 'the site centre is off screen').toBeTruthy();
   await page.mouse.click(mid!.x, mid!.y, { button: 'right' });
   await page.waitForTimeout(1_800);
+
+  // 🚨 REPORT THE DATUM THE TRACE ACTUALLY HAPPENED AGAINST.
+  //
+  // The elevation lookup re-runs when the geocode moves the site, and it can land mid-trace and
+  // reset the datum. Measured: one run of the cross-elevation comparison produced +12.80 m,
+  // −105.21 m, +12.80 m — the middle site's corners had resolved against a different datum than
+  // the one that was asked for. Comparing the face against the datum it was BUILT against, and
+  // failing when that is not the datum requested, turns a flaky number into a stated fact.
+  return (await datum(page)).groundElevM;
 }
 
 test.describe('a polygon traced on the reference photo lands on the site datum', () => {
@@ -252,9 +261,19 @@ test.describe('a polygon traced on the reference photo lands on the site datum',
     // different offsets here; a datum-derived one gives the same offset three times.
     const offsets: Array<{ m: number; above: number }> = [];
     for (const site of ELEVATIONS) {
-      await traceAt(page, site.m);
-      const planes = await planeHeights(page);
+      // One retry, and only for a datum that drifted mid-trace — never for a wrong height.
+      let usedDatum: number | null = null;
+      let planes: Awaited<ReturnType<typeof planeHeights>> = [];
+      for (let attempt = 0; attempt < 2; attempt++) {
+        usedDatum = await traceAt(page, site.m);
+        planes = await planeHeights(page);
+        if (usedDatum !== null && Math.abs(usedDatum - site.m) < 0.01 && planes.length === 1) break;
+      }
       expect(planes.length, `no face was built at ${site.name}`).toBe(1);
+      expect(usedDatum,
+        `the site datum drifted to ${usedDatum} m during the trace at ${site.name} (${site.m} m), `
+        + 'so the offset below would be measured against the wrong ground')
+        .toBeCloseTo(site.m, 2);
       offsets.push({ m: site.m, above: planes[0].height - site.m });
     }
     const spread = Math.max(...offsets.map(o => o.above)) - Math.min(...offsets.map(o => o.above));

@@ -749,9 +749,23 @@ interface Props {
   lat: number;
   lng: number;
   projectAddress?: string;
-  /** The project whose already-acquired aerial may be shown as a reference layer. Absent on a
-   *  Quick Design, which has no project row and therefore no stored imagery. */
+  /** The project whose already-acquired aerial may be shown as a reference layer. On a Quick
+   *  Design this is an ephemeral `demo-…` id until the design is promoted — see
+   *  `onNeedDurableProject`. */
   projectId?: string;
+  /**
+   * 🚨 MAKE THIS DESIGN DURABLE, BECAUSE PAID IMAGERY MUST HAVE SOMEWHERE TO LIVE.
+   *
+   * Ray: "Ray's actual working flow is Quick Design... Do not buy Nearmap imagery into an
+   * ephemeral object. Instead give a resolved-address Quick Design a durable design identity
+   * before the first paid Nearmap acquisition... Ray should not have to leave Design Studio and
+   * manually build a project merely to use Nearmap."
+   *
+   * The engine cannot create a project — the studio owns that — so it ASKS, once, at the moment
+   * the imagery is first needed, and carries on with whatever id comes back. Resolves to null if
+   * the design cannot be made durable, and then nothing is acquired.
+   */
+  onNeedDurableProject?: () => Promise<string | null>;
   panels: PlacedPanel[];
   onPanelsChange: (panels: PlacedPanel[]) => void;
   placementMode: PlacementMode;
@@ -1404,7 +1418,7 @@ export function laneASiteKey(lat: number, lng: number): string {
 }
 
 function SolarEngine3D({
-  lat, lng, projectAddress, projectId,
+  lat, lng, projectAddress, projectId, onNeedDurableProject,
   panels, onPanelsChange, roofPlanes,
   placementMode, onPlacementModeChange,
   systemType, tilt, azimuth, fenceHeight,
@@ -4069,12 +4083,48 @@ function SolarEngine3D({
       setAerialRefStatus({ state: 'unavailable', reason });
     };
 
+    /**
+     * 🚨 A QUICK DESIGN IS PROMOTED, NOT REFUSED.
+     *
+     * The first version of the cost rule said "a design that cannot keep what it buys may not buy
+     * anything", and disabled Nearmap for a Quick Design. The COST reasoning was right and the
+     * PRODUCT consequence was wrong: "Ray's actual working flow is Quick Design... Ray should not
+     * have to leave Design Studio and manually build a project merely to use Nearmap."
+     *
+     * So the rule becomes "a design must be durable BEFORE it buys", and the studio makes it
+     * durable through the persistence that already exists — `POST /api/projects`, which geocodes
+     * the address and writes the row. No Nearmap-only store, no second identity.
+     */
+    const DURABLE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const startId = projectId;
+    let liveId = startId;
+
+    (async () => {
+      if ((!liveId || !DURABLE.test(liveId)) && onNeedDurableProject) {
+        setAerialRefStatus({ state: 'loading' });
+        try {
+          const promoted = await onNeedDurableProject();
+          if (cancelled) return;
+          if (promoted && DURABLE.test(promoted)) liveId = promoted;
+        } catch { /* falls through to the refusal below */ }
+      }
+      if (cancelled) return;
+      // 🚨 NEVER ASK THE PROJECT ROUTE ABOUT AN EPHEMERAL ID. A `demo-…` design has no row, so
+      // `/api/projects/demo-…/aerial-reference` can only 404 — and the reply the user then saw
+      // was the generic "this project has no stored aerial", which is not what happened. What
+      // happened is that the design could not be made durable, and that is what it now says.
+      runWith(liveId && DURABLE.test(liveId) ? liveId : undefined);
+    })();
+
+    return () => { cancelled = true; };
+
+    function runWith(projectId: string | undefined) {
     if (!projectId) {
       useSessionOr(
-        'A Quick Design has no saved project, so there is no stored aerial to reuse, and this '
-        + 'session has not loaded any Nearmap tiles yet. Switch to the 2D map and choose '
-        + 'Nearmap HD there once — the tiles it fetches are then reused here for free.');
-      return () => { cancelled = true; };
+        'This design could not be saved as a project, so there is nowhere to keep imagery — '
+        + 'buying it would mean buying it again on every switch. Give it an address and use '
+        + 'Save & Calculate, then choose Nearmap again.');
+      return;
     }
 
     // Cached per project — a repeated toggle must not re-request anything.
@@ -4082,10 +4132,9 @@ function SolarEngine3D({
     if (cached && cached.projectId === projectId) {
       if (cached.data) draw(cached.data);
       else useSessionOr(
-        'This project has no stored aerial that can be georeferenced, and this session has not '
-        + 'loaded any Nearmap tiles yet. Switch to the 2D map and choose Nearmap HD there once — '
-        + 'the tiles it fetches are then reused here for free.');
-      return () => { cancelled = true; };
+        'This project has no Nearmap workzone that can be georeferenced, and none could be '
+        + 'acquired for it.');
+      return;
     }
 
     setAerialRefStatus({ state: 'loading' });
@@ -4127,9 +4176,7 @@ function SolarEngine3D({
         }
         if (!data.available) {
           aerialRefCacheRef.current = { projectId, data: null };
-          useSessionOr(`${data.reason || 'This project has no stored aerial.'} This session has `
-            + 'not loaded any Nearmap tiles either — choose Nearmap HD once on the 2D map and '
-            + 'they are reused here for free.');
+          useSessionOr(`${data.reason || 'This project has no stored aerial.'}`);
           return;
         }
         const ref: AerialReference = {
@@ -4146,14 +4193,13 @@ function SolarEngine3D({
         useSessionOr(`The aerial reference request failed: ${(e as Error).message}`);
       }
     })();
-
-    return () => { cancelled = true; };
+    }
     // `lat`/`lng` are in here because the session-cache composite is grown around the site
     // centre: moving the site must not leave a reference photo of the previous one on screen.
     // `groundDatumM` is in here because the photo is DRAWN AT that elevation: the lookup resolves
     // after boot and again after a geocode, and a photo anchored before it lands sits at the
     // ellipsoid while every pick resolves at the real ground. Watched that happen in the browser.
-  }, [mapPickerState.source, projectId, stage, lat, lng, groundDatumM]);
+  }, [mapPickerState.source, projectId, stage, lat, lng, groundDatumM, onNeedDurableProject]);
 
   // Drop the reference layer if the component is going away, so a remount starts clean.
   useEffect(() => () => {
