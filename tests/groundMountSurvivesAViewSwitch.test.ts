@@ -256,3 +256,114 @@ describe('🚨 the commit path returns what was drawn', () => {
       .toMatch(/groundArrayRowsRef\.current\s*=\s*groundArrayRowsRef\.current\.map/);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// THE THREE RESIDUAL DEFECTS an independent trace found after the first fix landed. Each is a
+// distinct way the assembly still came apart, and the first of them DEFEATED the first fix on
+// the default two-row path — the original version of this suite asserted only that the
+// write-back existed, not that its result survived.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** A named slice of the component, so an assertion cannot be satisfied from elsewhere. */
+function sliceOf(startNeedle: string, endNeedle: string, what: string): string {
+  const src = readFileSync(join(ROOT, 'components', '3d', 'SolarEngine3D.tsx'), 'utf8');
+  const from = src.indexOf(startNeedle);
+  expect(from, `${what} is gone — this assertion would pass vacuously`).toBeGreaterThan(-1);
+  const to = src.indexOf(endNeedle, from + startNeedle.length);
+  expect(to, `could not bound ${what}`).toBeGreaterThan(from);
+  // Comments quote the defects verbatim, so strip them before asserting on code.
+  return src.slice(from, to)
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n');
+}
+
+describe('🚨 the corrected rows are not thrown away again a frame later', () => {
+  const groundClick = () =>
+    sliceOf('const row1 = placeGroundArrayRow(', 'function placeGroundArrayRow(',
+      'the PLP two-row path');
+
+  it('🚨 the two-row PLP path APPENDS rather than rebuilding from the stale local', () => {
+    // `groundArrayRowsRef.current = [row1, row2]` rebuilt the list from `row1`, the array
+    // captured BEFORE the row-2 call — inside which the shared-plane block re-maps the earlier
+    // rows and writes them back to that very ref. The re-map was discarded, so row 0 was
+    // committed at its pre-unification position while its entity was drawn at the unified one.
+    const body = groundClick();
+    expect(body, 'the two-row path still rebuilds the row list from the stale row1 local')
+      .not.toMatch(/groundArrayRowsRef\.current\s*=\s*\[\s*row1\s*,\s*row2\s*\]/);
+    expect(body, 'the two-row path does not append to the written-back list')
+      .toMatch(/groundArrayRowsRef\.current\s*=\s*\[\s*\.\.\.groundArrayRowsRef\.current\s*,\s*row2\s*\]/);
+  });
+
+  it('and the panel total is counted from the list, not from the stale locals', () => {
+    // The arithmetic would still be right, but it reads the same stale objects and would
+    // disagree the moment the list is the authority.
+    expect(groundClick(), 'the total is still summed from the stale row locals')
+      .not.toMatch(/row1\.length\s*\+\s*row2\.length/);
+  });
+});
+
+describe('🚨 a view switch no longer deletes the racking and leaves the modules floating', () => {
+  it('🚨 the full-rebuild branch rebuilds ground racking, not only roof rails', () => {
+    // Ground racking members live in the SAME panelMapRef this branch clears, so clearing it
+    // removed every pylon, strongback and rail — and the branch then re-added only panels and
+    // roof rails. addGroundRacking was reachable from one call site, the single-panel ground
+    // click, so a 2D to 3D remount left the modules with no structure under them.
+    const body = sliceOf('function renderAllPanels(', '\n  function ', 'renderAllPanels');
+    expect(body, 'the branch that clears every entity still only rebuilds roof rails')
+      .toMatch(/rebuildGroundRacking\(/);
+    // The fix ADDS a rebuild; it must not have removed the clear or the rail rebuild.
+    expect(body).toMatch(/panelMapRef\.current\.clear\(\)/);
+    expect(body).toMatch(/renderRoofRails\(/);
+  });
+
+  it('the rebuild groups by assembly and derives its base plane from the grid, not a guess', () => {
+    const body = sliceOf('function rebuildGroundRacking(', 'function addGroundRacking(',
+      'rebuildGroundRacking');
+    // One racking solve per physical assembly, or two ground mounts get one spanning both.
+    expect(body, 'the rebuild does not group by assembly').toMatch(/p\.arrayId/);
+    // The base plane is the grid's own inverse, not an invented elevation.
+    expect(body).toMatch(/PLP_MIN_PANEL_CLEARANCE_M/);
+    expect(body).toMatch(/Math\.min\(\.\.\.heights\)/);
+    expect(body, 'a group with no usable height is not guarded').toMatch(/heights\.length === 0/);
+    // And it delegates rather than re-deriving geometry of its own.
+    expect(body, 'the rebuild computes its own racking instead of calling the existing path')
+      .toMatch(/addGroundRacking\(viewer, C, group, baseZ\)/);
+  });
+});
+
+describe('🚨 the assembly has an identity, using the field that already existed', () => {
+  it('arrayId and arrayRow are DECLARED on PlacedPanel', () => {
+    const t = readFileSync(join(ROOT, 'types', 'index.ts'), 'utf8');
+    expect(t).toMatch(/arrayId\?:\s*string;/);
+    expect(t, 'arrayRow is still an ad-hoc property a clone can drop')
+      .toMatch(/arrayRow\?:\s*number;/);
+  });
+
+  it('🚨 placement writes both, so the array is addressable as one object', () => {
+    const body = sliceOf('function placeGroundArrayRow(', 'function finalizeGroundArray(',
+      'placeGroundArrayRow');
+    expect(body, 'the assembly id is still never written').toMatch(/p\.arrayId\s*=/);
+    expect(body, 'the row index is still stamped as an untyped property')
+      .not.toMatch(/\(p as any\)\.arrayRow\s*=/);
+    expect(body).toMatch(/p\.arrayRow\s*=\s*arrayRowIndex/);
+    // designSnapshot counts rows with new Set(p.row).size, and for a ground panel the grid row
+    // within one placed row is always 0 — so `row` carried no information.
+    expect(body).toMatch(/p\.row\s*=\s*arrayRowIndex/);
+  });
+
+  it('every existing consumer of arrayId is still reached by that write', () => {
+    // The field was read in four places and written in none, so every ground mount on a site
+    // collapsed into one id. Named here so a rename breaks this instead of silently
+    // re-collapsing them.
+    const consumers: Array<[string[], string]> = [
+      [['lib', 'engineering', 'designSnapshot.ts'], 'the engineering snapshot rowCount'],
+      [['lib', 'cad', 'ground', 'groundCAD.ts'], 'the CAD ground array grouping'],
+      [['lib', 'permit', 'utils', 'drawing.ts'], 'the permit array label'],
+      [['lib', 'drafting', 'templates', 'hybridOverlay.ts'], 'the hybrid overlay label'],
+    ];
+    for (const [f, what] of consumers) {
+      expect(readFileSync(join(ROOT, ...f), 'utf8'), `${what} (${f.join('/')}) no longer reads arrayId`)
+        .toMatch(/arrayId/);
+    }
+  });
+});

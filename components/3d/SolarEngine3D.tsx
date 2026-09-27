@@ -179,6 +179,7 @@ import {
   MOUNT_HEIGHT_M as GME_MOUNT_HEIGHT_M,
   PLP_ROW_COUNT,
   XR_ROW_COUNT,
+  PLP_MIN_PANEL_CLEARANCE_M,
   type GroundPanel,
   type BuildRackingOptions,
   type GroundClickTrace,
@@ -6919,6 +6920,24 @@ function SolarEngine3D({
       lastRenderedPanelsRef.current = panelList;
       // Phase 2: rebuild roof rails after full panel rebuild
       try { renderRoofRails(viewer, C, panelList); } catch (e) { handleCesiumError('renderRoofRails full', e, true); }
+      // 🚨 AND REBUILD THE GROUND RACKING, which this branch used to delete and never replace.
+      //
+      // Ground racking members are keyed into the SAME `panelMapRef` as the panels, so the
+      // clear above removes every pylon, strongback and rail of every ground array — and this
+      // branch then re-added only panels and only roof rails. `addGroundRacking` was reachable
+      // from exactly one call site, the single-panel ground click, so nothing rebuilt them.
+      //
+      // That is the other half of what Ray reported. A 2D → 3D remount takes this branch, so
+      // the modules came back with NO STRUCTURE UNDER THEM until the array was placed again —
+      // which reads as the array having fallen apart just as much as a row moving does.
+      //
+      // Grouped by `arrayId`, so two separate ground mounts get two racking solves instead of
+      // one spanning both; `arrayId` is written at placement time now. `baseZ` is the grid's own
+      // inverse and needs no new stored field: the grid sets a panel's height to
+      // `originZ + nsM·tan(tilt)` with `originZ = groundZ + clearance`, and row 0's offset is
+      // `rowDepth/2 = (panelH·cos t)/2`, so `groundZ = min(height) − clearance − (panelH/2)·sin t`.
+      try { rebuildGroundRacking(viewer, C, panelList); }
+      catch (e) { handleCesiumError('rebuildGroundRacking full', e, true); }
       refreshEquipment(viewer, C, panelList); // v63
       publishE2EDiagnostics();
       try { viewer.scene.requestRender(); } catch {}
@@ -9441,8 +9460,24 @@ function SolarEngine3D({
             const newEnd2   = { lat: C.Math.toDegrees(newCarto2_2.latitude), lng: C.Math.toDegrees(newCarto2_2.longitude), height: pt.height };
             const row2 = placeGroundArrayRow(viewer, C, newStart2, newEnd2, rowAzDeg, 1);
             if (row2.length > 0) {
-              groundArrayRowsRef.current = [row1, row2];
-              const totalPanels2 = row1.length + row2.length;
+              // 🚨 APPEND, DO NOT REBUILD FROM THE STALE LOCAL. This read
+              // `groundArrayRowsRef.current = [row1, row2]`, and `row1` is the array captured
+              // before the call above — inside which the shared-plane block re-maps the earlier
+              // rows onto the unified corrected plane and writes them back to this very ref.
+              // Reassigning from `row1` threw that re-map away, so `finalizeGroundArray` would
+              // commit row 0 at its pre-unification position while its entity was drawn at the
+              // unified one: the defect this whole change removes, reintroduced for row 1, on
+              // the DEFAULT two-row PLP path.
+              //
+              // The two values coincide today, because `solveClearancePlane` derives its origin
+              // from the constant PLP row count and `buildPanelGrid` back-projects from the same
+              // anchor, so the one-row and two-row solves give row 0 the same offset. But the
+              // write-back exists precisely because the comment above it asserts they can
+              // differ, and the moment that becomes true this line would silently undo it.
+              // `[...groundArrayRowsRef.current, row2]` is the shape the third-row path at the
+              // bottom of this handler already uses.
+              groundArrayRowsRef.current = [...groundArrayRowsRef.current, row2];
+              const totalPanels2 = groundArrayRowsRef.current.reduce((s, r) => s + r.length, 0);
               setGroundArrayRowCount(2);
               setGroundArrayPanelCount(totalPanels2);
               const kw2 = (totalPanels2 * (selectedPanelRef.current?.wattage ?? 400) / 1000).toFixed(1);
@@ -9562,8 +9597,35 @@ function SolarEngine3D({
       return [];
     }
 
-    // Stamp array row index for racking engine row detection
-    panels.forEach(p => { (p as any).arrayRow = arrayRowIndex; });
+    // 🚨 THE ASSEMBLY'S IDENTITY, which was never written down.
+    //
+    // `arrayRow` was stamped as an ad-hoc `(p as any)` property and is the ONLY row identity
+    // the reality engine reads (`sortRows`, the anchor selection, and the per-panel `nsM`).
+    // Any clone that copies known fields instead of spreading dropped it, and the fallback in
+    // `addGroundRacking` then reads `p.row` — which `placePanelGrid` sets to 0 for every
+    // independently placed ground row. All panels would report row 0, every row would be given
+    // the same `nsM`, and the whole array would fuse onto one line at one height. So it is a
+    // declared optional field on PlacedPanel now, and it survives a spread or a clone.
+    //
+    // `arrayId` needed no new field either — `PlacedPanel.arrayId` has existed all along and
+    // the studio simply never wrote it for ground panels. Four consumers already read it and
+    // were all silently collapsing every ground mount on the site into one:
+    // `lib/engineering/designSnapshot.ts` (`panel.arrayId || 'ground-0'`, so its reported
+    // rowCount was 1 for every array), `lib/cad/ground/groundCAD.ts`,
+    // `lib/permit/utils/drawing.ts` (`p.arrayId || 'A1'`) and
+    // `lib/drafting/templates/hybridOverlay.ts`. The value is the per-array key prefix minted
+    // at the first click, so one physical ground mount is one id — which is also what makes it
+    // addressable as a single assembly rather than a bag of modules.
+    //
+    // `row` is set to the array row index for the same reason: for a ground panel the grid row
+    // within a single placed row is always 0, so `row` carried no information, and
+    // designSnapshot counts rows with `new Set(p.row).size`.
+    const _arrayId = groundArrayKeyPrefixRef.current || `ga${Date.now().toString(36)}_`;
+    panels.forEach(p => {
+      p.arrayRow = arrayRowIndex;
+      p.arrayId  = _arrayId;
+      p.row      = arrayRowIndex;
+    });
 
     addLog('GROUND', `[v49.2] STRUCTURE-FIRST row${arrayRowIndex}: ${panels.length} panels style=${style}`);
 
@@ -9574,7 +9636,7 @@ function SolarEngine3D({
     const castExisting: GroundPanel[] = existingRows.map(p => ({
       id: p.id, lat: p.lat, lng: p.lng, height: p.height,
       tilt: p.tilt, azimuth: p.azimuth,
-      arrayRow: (p as any).arrayRow ?? 0,
+      arrayRow: p.arrayRow ?? 0,
       col: p.col, row: p.row,
       systemType: 'ground' as const,
       orientation: orient,
@@ -11908,6 +11970,51 @@ function SolarEngine3D({
    * - IronRidge XR: EXACTLY 4 landscape rows, 3.66m bay spans
    * - basePlaneZ LOCKED at first click — never re-sampled from terrain
    */
+  /**
+   * 🚨 REBUILD THE RACKING FOR EVERY GROUND ARRAY ALREADY IN THE SCENE.
+   *
+   * Called from `renderAllPanels`' full-rebuild branch — the branch a 2D → 3D remount takes.
+   * Before this existed that branch cleared `panelMapRef` (which holds the racking members as
+   * well as the panels) and re-added only panels and roof rails, so every pylon, strongback and
+   * rail of every ground mount disappeared on a view switch and nothing put them back.
+   *
+   * It adds no new sizing or geometry of its own: it groups the committed panels by the
+   * `arrayId` written at placement time and hands each group to the existing
+   * `addGroundRacking`, which routes through the same `buildGroundRacking` /
+   * `renderGroundRackingOutput` path as placement. So the structure a remount draws is the
+   * structure placement drew.
+   */
+  function rebuildGroundRacking(viewer: any, C: any, panelList: PlacedPanel[]) {
+    if (!showRackingRef.current) return;
+    const ground = panelList.filter(p => p.systemType === 'ground');
+    if (ground.length === 0) return;
+
+    // One group per physical assembly. A panel with no arrayId predates the id being written;
+    // those are grouped together rather than dropped, which is the same treatment they get in
+    // designSnapshot and groundCAD.
+    const byArray = new Map<string, PlacedPanel[]>();
+    for (const p of ground) {
+      const key = p.arrayId || 'ground-legacy';
+      const g = byArray.get(key);
+      if (g) g.push(p); else byArray.set(key, [p]);
+    }
+
+    for (const [key, group] of byArray) {
+      // The grid's inverse — see the note at the call site. Guarded so a group with no usable
+      // height is skipped rather than drawing structure at an invented elevation.
+      const heights = group.map(p => p.height).filter((h): h is number => typeof h === 'number' && Number.isFinite(h));
+      if (heights.length === 0) {
+        addLog('GROUND', `[REBUILD] array ${key}: no panel heights — racking not rebuilt`);
+        continue;
+      }
+      const tiltDeg = group[0]?.tilt ?? gTiltRef.current ?? 20;
+      const { ph } = panelDims(((group[0] as any).orientation ?? panelOrientationRef.current ?? 'portrait') as PanelOrientation);
+      const baseZ = Math.min(...heights) - PLP_MIN_PANEL_CLEARANCE_M - (ph / 2) * Math.sin(tiltDeg * Math.PI / 180);
+      addGroundRacking(viewer, C, group, baseZ);
+      addLog('GROUND', `[REBUILD] array ${key}: ${group.length} panels, baseZ=${baseZ.toFixed(3)} tilt=${tiltDeg}`);
+    }
+  }
+
   function addGroundRacking(
     viewer: any,
     C: any,
@@ -11932,7 +12039,9 @@ function SolarEngine3D({
         height:      p.height,
         tilt:        p.tilt,
         azimuth:     p.azimuth,
-        arrayRow:    (p as any).arrayRow ?? p.row ?? 0,
+        // `arrayRow` is a declared field now, so a clone cannot silently drop it. The
+        // `p.row` fallback stays for panels placed before it was written.
+        arrayRow:    p.arrayRow ?? p.row ?? 0,
         col:         p.col,
         row:         p.row,
         systemType:  'ground' as const,

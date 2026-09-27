@@ -322,7 +322,27 @@ export interface PlacedPanel {
   pitch?: number;              // degrees tilt from horizontal
   roll?: number;               // degrees roll
   systemType?: 'roof' | 'ground' | 'fence';
+  /**
+   * The physical assembly this module belongs to. For a ground mount it is the per-array key
+   * minted at the first click, so one ground mount is one id — which is what makes it
+   * addressable as a single object rather than a bag of modules.
+   * Read by lib/engineering/designSnapshot.ts, lib/cad/ground/groundCAD.ts,
+   * lib/permit/utils/drawing.ts and lib/drafting/templates/hybridOverlay.ts.
+   */
   arrayId?: string;
+  /**
+   * 🚨 THE ROW WITHIN THAT ASSEMBLY, and it is DECLARED rather than stamped.
+   *
+   * This was an ad-hoc `(p as any).arrayRow` property, and it is the only row identity
+   * lib/3d/ground/groundMountRealityEngine.ts reads — `sortRows`, the grid anchor selection,
+   * and each panel's own along-tilt offset all key on it. As an undeclared property it was
+   * dropped by any clone that copied known fields instead of spreading, and the engine's
+   * fallback (`(p as any).arrayRow ?? p.row ?? 0`) then read `p.row`, which is 0 for every
+   * independently placed ground row. Every row would report 0, every row would be given the
+   * same offset, and the array would fuse onto one line at one height — the catastrophic form
+   * of the row-split defect rather than the visible one.
+   */
+  arrayRow?: number;
   // v30.9: Panel orientation (portrait = tall, landscape = wide)
   orientation?: 'portrait' | 'landscape' | 'hybrid';
   // v47.93: Architecture stabilization -- dual placement system
