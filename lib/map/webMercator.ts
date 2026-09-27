@@ -95,6 +95,52 @@ export function tileRangeBounds(
   };
 }
 
+export interface TilePlacement { z: number; x: number; y: number; left: number; top: number; }
+export interface TileGrid {
+  tiles: TilePlacement[];       // tile coords + composite offset within the full tile canvas
+  tx0: number; ty0: number;     // top-left tile index of the canvas
+  canvasW: number; canvasH: number;
+  cropLeft: number; cropTop: number;   // where to extract the centred WxH image
+  W: number; H: number;
+}
+
+/**
+ * Tiles needed to render a W×H image centred on (lat,lng) at zoom z, plus the crop offset into the
+ * whole-tile canvas. Pure — no I/O.
+ *
+ * 🚨 THIS FUNCTION IS ALSO THE COST MODEL, WHICH IS WHY IT LIVES HERE AND NOT IN THE SERVER-ONLY
+ * FETCHER. `tiles.length` is exactly the number of paid GETs an acquisition will make — one
+ * `api.nearmap.com/tiles/v3/Vert/{z}/{x}/{y}.jpg` request per entry, and nothing else in the
+ * Nearmap imagery path is metered. `lib/aerial/workzonePlan.ts` therefore prices a workzone by
+ * calling this, and `lib/aerial/nearmap.ts` re-exports it so every existing importer is unchanged.
+ * One implementation: the thing that PLANS the spend and the thing that SPENDS cannot disagree.
+ */
+export function nearmapTileGrid(lat: number, lng: number, z: number, W: number, H: number): TileGrid {
+  const cx = lngToGlobalPx(lng, z), cy = latToGlobalPx(lat, z);
+  const left = cx - W / 2, top = cy - H / 2;
+  const tx0 = Math.floor(left / TILE_SIZE), ty0 = Math.floor(top / TILE_SIZE);
+  const tx1 = Math.floor((left + W - 1) / TILE_SIZE), ty1 = Math.floor((top + H - 1) / TILE_SIZE);
+  const tiles: TilePlacement[] = [];
+  for (let x = tx0; x <= tx1; x++) {
+    for (let y = ty0; y <= ty1; y++) {
+      tiles.push({ z, x, y, left: (x - tx0) * TILE_SIZE, top: (y - ty0) * TILE_SIZE });
+    }
+  }
+  return {
+    tiles, tx0, ty0,
+    canvasW: (tx1 - tx0 + 1) * TILE_SIZE, canvasH: (ty1 - ty0 + 1) * TILE_SIZE,
+    cropLeft: Math.round(left - tx0 * TILE_SIZE), cropTop: Math.round(top - ty0 * TILE_SIZE),
+    W, H,
+  };
+}
+
+/** Metres of ground per image pixel at a latitude and zoom. The basis of every extent below. */
+export function metresPerPixel(lat: number, z: number): number | null {
+  if (!Number.isFinite(lat) || !Number.isFinite(z) || Math.abs(lat) > 85) return null;
+  const m = (156543.03392 * Math.cos((lat * Math.PI) / 180)) / 2 ** z;
+  return m > 0 ? m : null;
+}
+
 /**
  * Ground resolution of an image, centimetres per pixel, at its own centre latitude.
  *
@@ -104,7 +150,6 @@ export function tileRangeBounds(
  * This is derivable from the zoom and the latitude, so it can be stated truthfully.
  */
 export function groundResolutionCmPerPx(lat: number, z: number): number | null {
-  if (!Number.isFinite(lat) || !Number.isFinite(z) || Math.abs(lat) > 85) return null;
-  const metresPerPx = (156543.03392 * Math.cos((lat * Math.PI) / 180)) / 2 ** z;
-  return metresPerPx > 0 ? metresPerPx * 100 : null;
+  const m = metresPerPixel(lat, z);
+  return m === null ? null : m * 100;
 }

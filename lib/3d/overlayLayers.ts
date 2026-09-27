@@ -182,6 +182,7 @@ export const OVERLAY_VISIBILITY: Readonly<Record<string, OverlayLifetime>> = {
   // ── Contextual ───────────────────────────────────────────────────────────
   'section-inspector':   'contextual', // needs a roof; empty-states politely
   'obstruction-inspector': 'contextual', // needs a selected obstruction
+  'ground-mount-inspector': 'contextual', // needs a selected ground-mount assembly
   'undo-redo-toolbar':   'contextual', // needs an undoable history
   'save-create-design':  'contextual', // needs a design to save
   'legend-strings':      'contextual', // needs string colouring or equipment on

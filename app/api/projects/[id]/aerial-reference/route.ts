@@ -45,9 +45,12 @@ import { getUserFromRequest } from '@/lib/auth';
 import { getDbReady, handleRouteDbError } from '@/lib/db-neon';
 import { nearmapImageBounds, groundResolutionCmPerPx, fetchNearmapStaticAerial } from '@/lib/aerial/nearmap';
 import {
-  workzoneGate, isStoredWorkzone, WORKZONE_FILE_NAME,
-  WORKZONE_WIDTH_PX, WORKZONE_HEIGHT_PX, type StoredWorkzone,
+  workzoneGate, isStoredWorkzone, workzoneLayers, missingWorkzoneRoles, WORKZONE_FILE_NAME,
+  type StoredWorkzone, type StoredWorkzoneLayer,
 } from '@/lib/aerial/projectWorkzone';
+import {
+  planWorkzone, describeWorkzoneCost, WORKZONE_TILE_CEILING, type WorkzoneLayerRole,
+} from '@/lib/aerial/workzonePlan';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -79,6 +82,22 @@ function parseStored(raw: unknown): StoredWorkzone | null {
     const v = JSON.parse(json);
     return isStoredWorkzone(v) ? v : null;
   } catch { return null; }
+}
+
+/** One acquired image, georeferenced. `null` when its rectangle cannot be recovered. */
+function describeLayer(stored: StoredWorkzone, l: StoredWorkzoneLayer) {
+  const bounds = nearmapImageBounds(stored.lat, stored.lng, l.zoom, l.imageWidth, l.imageHeight);
+  if (!bounds) return null;
+  return {
+    role: l.role,
+    imageDataUrl: l.imageBase64,
+    bounds,
+    zoom: l.zoom,
+    widthPx: l.imageWidth,
+    heightPx: l.imageHeight,
+    resolutionCmPerPx: groundResolutionCmPerPx(stored.lat, l.zoom),
+    tilesFetched: Number.isFinite(l.tilesFetched) ? l.tilesFetched : null,
+  };
 }
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -118,24 +137,43 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     if (wzRaw) {
       const stored = parseStored(wzRaw);
       if (stored) {
-        const bounds = nearmapImageBounds(
-          stored.lat, stored.lng, stored.zoom, stored.imageWidth, stored.imageHeight);
-        if (bounds) {
+        // 🚨 EVERY LAYER THE PROJECT OWNS, CORE FIRST. A workzone is a high-resolution design core
+        // plus a lower-resolution neighbourhood ring; a workzone bought before the split is a core
+        // on its own. `workzoneLayers` normalises both, so this route has one code path and an
+        // already-paid-for legacy frame is never mistaken for "no imagery".
+        const layers = workzoneLayers(stored)
+          .map(l => describeLayer(stored, l))
+          .filter((l): l is NonNullable<typeof l> => l !== null);
+        if (layers.length > 0) {
+          const core = layers.find(l => l.role === 'core') ?? layers[0];
+          // What is planned for this location but not owned — the input to an explicit
+          // "Expand imagery area". Reported, never acted on here.
+          const plan = planWorkzone(stored.lat, stored.lng);
+          const missing = plan
+            ? missingWorkzoneRoles(stored, plan.layers.map(l => l.role as WorkzoneLayerRole))
+            : [];
           return NextResponse.json({
             success: true, available: true,
             source: 'nearmap',
-            imageDataUrl: stored.imageBase64,
-            bounds,
-            zoom: stored.zoom,
-            widthPx: stored.imageWidth,
-            heightPx: stored.imageHeight,
-            resolutionCmPerPx: groundResolutionCmPerPx(stored.lat, stored.zoom),
+            layers,
+            // The CORE, also at top level: a consumer that wants one picture gets the one that is
+            // actually the design surface, not whichever happened to be stored first.
+            imageDataUrl: core.imageDataUrl,
+            bounds: core.bounds,
+            zoom: core.zoom,
+            widthPx: core.widthPx,
+            heightPx: core.heightPx,
+            resolutionCmPerPx: core.resolutionCmPerPx,
             // R19: the tile API supplies no capture date, so none is reported. `acquiredAt` is
             // when SolarPro fetched it and is deliberately NOT presented as a capture date.
             captureDate: null,
             captureDateKnown: false,
             acquisition: 'reused',
             acquiredAt: stored.acquiredAt ?? null,
+            expandableRoles: missing,
+            expandCost: missing.length && plan
+              ? describeWorkzoneCost(planWorkzone(stored.lat, stored.lng, missing))
+              : null,
           });
         }
       }
@@ -206,21 +244,39 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     const captureDate = typeof captureDateRaw === 'string' && captureDateRaw.trim()
       ? captureDateRaw.trim() : null;
 
+    const resolutionCmPerPx = groundResolutionCmPerPx(lat, zoom);
     return NextResponse.json({
       success: true,
       available: true,
       source,
+      // The permit aerial is a single high-resolution frame centred on the project, which is
+      // exactly what a core layer is. Reported in the same shape so the studio draws every
+      // provenance the same way and nothing downstream has to know where the picture came from.
+      layers: [{
+        role: 'core' as const,
+        imageDataUrl, bounds, zoom, widthPx, heightPx, resolutionCmPerPx,
+        tilesFetched: null,
+      }],
       imageDataUrl,
       bounds,
       zoom,
       widthPx,
       heightPx,
       // Computed, so it can be stated truthfully. Null when the latitude or zoom make it unknowable.
-      resolutionCmPerPx: groundResolutionCmPerPx(lat, zoom),
+      resolutionCmPerPx,
       captureDate,
       captureDateKnown: captureDate !== null,
       // Said out loud, because the whole point of this route is that pressing the toggle is free.
       acquisition: 'reused',
+      // 🚨 AND THIS PROJECT CAN STILL REACH THE PRECISION WORKZONE.
+      //
+      // The permit aerial is one frame from a different workflow — about 84 m x 47 m — and until
+      // this was here a project that had generated a permit was stuck with it: the frame made the
+      // route report `available`, so the studio never asked for an acquisition and the neighbourhood
+      // could never be bought. Offered, priced, and bought only on an explicit press. The permit
+      // aerial is not touched; a stored workzone simply takes precedence over it from then on.
+      expandableRoles: planWorkzone(lat, lng)?.layers.map(l => l.role) ?? [],
+      expandCost: describeWorkzoneCost(planWorkzone(lat, lng)),
     });
   } catch (err: unknown) {
     return handleRouteDbError('[GET /api/projects/[id]/aerial-reference]', err);
@@ -246,11 +302,18 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
 //     location gate passes."
 //   · that can be stored to, or a toggle would re-buy on every switch.
 //
-// THE BOUND is one 1440x810 frame centred on the project — about 84 m x 47 m at z21, the same
-// extent the permit site plan has always acquired. Panning does not extend it.
+// THE BOUND is `planWorkzone` — a high-resolution design CORE plus a lower-resolution neighbourhood
+// CONTEXT ring, each sized in metres of ground and each capped by a hard tile budget, so one
+// project's whole imagery acquisition can never exceed WORKZONE_TILE_CEILING paid tile GETs at any
+// latitude on earth. Panning does not extend it and neither does zooming; see below.
 //
-// ACQUIRE ONCE: if a workzone is already stored, this returns it and calls nothing. The
-// underlying `fetchNearmapStaticAerial` additionally refuses outright for 15 minutes after a
+// ACQUIRE ONCE: if a workzone is already stored, this returns it and calls nothing — including when
+// the stored workzone has FEWER layers than the plan. Ray: "Never silently extend the paid workzone
+// merely because the camera crosses its edge... If extension is supported, require an explicit
+// Expand imagery area action." That action is POST { expand: true }, which buys exactly the missing
+// layers and nothing else.
+//
+// The underlying `fetchNearmapStaticAerial` additionally refuses outright for 15 minutes after a
 // 401/403/429 at this location, so a refusal cannot be re-stormed.
 // ═══════════════════════════════════════════════════════════════════════════
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -276,25 +339,100 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       });
     }
 
-    // Already bought? Then nothing is bought again.
+    // 🚨 EXPANSION IS A DECISION, NOT A SIDE EFFECT. Only an explicit `{ expand: true }` may buy a
+    // layer for a project that already owns imagery. Everything else — a mode switch, a pan, a
+    // zoom, a reload, a second tab — reaches the branch below and buys nothing.
+    let expand = false;
+    try {
+      const body = await req.json();
+      expand = (body as { expand?: unknown } | null)?.expand === true;
+    } catch { /* no body is the normal case */ }
+
     const existing = await sql`
       SELECT file_data FROM project_files
       WHERE project_id = ${projectId} AND file_name = ${WORKZONE_FILE_NAME}
       ORDER BY created_at DESC
       LIMIT 1
     `;
-    if (parseStored((existing as Array<{ file_data: unknown }>)[0]?.file_data)) {
+    const stored = parseStored((existing as Array<{ file_data: unknown }>)[0]?.file_data);
+
+    const loc = gate.location!;
+    const plan = planWorkzone(loc.lat, loc.lng);
+    if (!plan) {
       return NextResponse.json({
-        success: true, available: true, acquired: false, acquisition: 'reused',
-        reason: 'This project already has its Nearmap workzone.',
+        success: true, available: false, acquired: false,
+        code: 'unavailable',
+        reason: 'No imagery workzone can be planned for this location.',
       });
     }
 
-    const loc = gate.location!;
-    const aerial = await fetchNearmapStaticAerial(loc.lat, loc.lng, {
-      widthPx: WORKZONE_WIDTH_PX, heightPx: WORKZONE_HEIGHT_PX,
-    });
-    if (!aerial || !aerial.imageBase64) {
+    // What is planned and not already owned. For a fresh project that is every layer; for a
+    // project that already has a workzone it is whatever the plan has added since.
+    const missing = missingWorkzoneRoles(stored, plan.layers.map(l => l.role));
+
+    if (stored && (missing.length === 0 || !expand)) {
+      // Already bought. Nothing is bought again — not even the layers this project does not have.
+      return NextResponse.json({
+        success: true, available: true, acquired: false, acquisition: 'reused',
+        reason: missing.length === 0
+          ? 'This project already has its Nearmap workzone.'
+          : 'This project already has Nearmap imagery. Widening the paid area is an explicit '
+            + 'action.',
+        expandableRoles: missing,
+        expandCost: missing.length
+          ? describeWorkzoneCost(planWorkzone(loc.lat, loc.lng, missing))
+          : null,
+      });
+    }
+
+    const toBuy = plan.layers.filter(l => missing.includes(l.role));
+    if (toBuy.length === 0) {
+      return NextResponse.json({
+        success: true, available: Boolean(stored), acquired: false, acquisition: 'reused',
+        reason: 'There is nothing left to acquire for this project.',
+      });
+    }
+
+    // Said out loud BEFORE the money is spent, in the unit that is metered, so a surprising bill
+    // has a matching line in the server log.
+    const intent = { lat: loc.lat, lng: loc.lng, layers: toBuy.map(l => l.role) };
+    console.log('[workzone] acquiring', JSON.stringify(intent), '—',
+      describeWorkzoneCost({ ...plan, layers: toBuy, totalTiles: toBuy.reduce((n, l) => n + l.tiles, 0) }),
+      `(ceiling ${WORKZONE_TILE_CEILING})`);
+
+    const acquired: StoredWorkzoneLayer[] = [];
+    for (const l of toBuy) {
+      // 🚨 THE CORE KEEPS THE ZOOM LADDER; THE CONTEXT DOES NOT.
+      //
+      // `fetchNearmapStaticAerial` escalates 21 → 20 → 19 when a zoom has a coverage gap, and only
+      // when no zoom is passed. The core wants that: a rural address with no z21 coverage should
+      // still get a design surface, one band coarser and correspondingly wider, and the stored zoom
+      // records what actually came back so the bounds and the resolution are computed from the
+      // truth. The context is DEFINED by its zoom — it exists to be cheap — so it asks for exactly
+      // one and accepts no imagery rather than silently buying a 4x-more-expensive band.
+      const aerial = await fetchNearmapStaticAerial(loc.lat, loc.lng, {
+        widthPx: l.widthPx, heightPx: l.heightPx,
+        ...(l.role === 'core' ? {} : { zoom: l.zoom }),
+      });
+      if (!aerial || !aerial.imageBase64) {
+        // 🚨 NO SUBSTITUTION, AND NO PARTIAL LIE. A missing context ring is a smaller workzone,
+        // which the studio shows honestly. A missing CORE is no design surface at all.
+        if (l.role === 'core') break;
+        console.warn(`[workzone] no ${l.role} layer for this location — `
+          + 'the workzone is smaller, and nothing has been substituted for it');
+        continue;
+      }
+      acquired.push({
+        role: l.role,
+        imageBase64: aerial.imageBase64,
+        imageWidth: aerial.imageWidth,
+        imageHeight: aerial.imageHeight,
+        zoom: aerial.zoom,
+        tilesFetched: aerial.tilesFetched,
+      });
+    }
+
+    if (acquired.length === 0) {
       // 🚨 NO SUBSTITUTION. The fetcher returns null for a missing key, a refusal, or a genuine
       // coverage gap. Saying so is the whole of R18's "never masquerade one provider as another" —
       // the caller keeps showing the native imagery and is told why.
@@ -306,16 +444,16 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       });
     }
 
+    // An expansion ADDS to what the project owns; it never replaces it, because the layers already
+    // there are paid for.
+    const kept = workzoneLayers(stored).filter(l => !acquired.some(a => a.role === l.role));
     const record: StoredWorkzone = {
       imageSource: 'nearmap',
-      imageBase64: aerial.imageBase64,
-      imageWidth: aerial.imageWidth,
-      imageHeight: aerial.imageHeight,
-      zoom: aerial.zoom,
       lat: loc.lat,
       lng: loc.lng,
       // When SolarPro fetched it. NOT a capture date — the tile API supplies none (R19).
       acquiredAt: new Date().toISOString(),
+      layers: [...kept, ...acquired],
     };
     const buf = Buffer.from(JSON.stringify(record), 'utf8');
     await sql`
@@ -332,10 +470,19 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
         upload_date = NOW()
     `;
 
+    const core = acquired.find(l => l.role === 'core') ?? acquired[0];
+    const tilesPaid = acquired.reduce((n, l) => n + (l.tilesFetched ?? 0), 0);
+    console.log(`[workzone] acquired ${acquired.map(l => `${l.role}@z${l.zoom}`).join(' + ')} `
+      + `for ${tilesPaid} paid tile GETs`);
     return NextResponse.json({
-      success: true, available: true, acquired: true, acquisition: 'acquired',
-      zoom: aerial.zoom,
-      resolutionCmPerPx: groundResolutionCmPerPx(loc.lat, aerial.zoom),
+      success: true, available: true, acquired: true,
+      acquisition: expand ? 'expanded' : 'acquired',
+      // What was bought, and what it cost. The whole cost invariant is auditable from this.
+      acquiredRoles: acquired.map(l => l.role),
+      tilesPaid,
+      tileCeiling: WORKZONE_TILE_CEILING,
+      zoom: core.zoom,
+      resolutionCmPerPx: groundResolutionCmPerPx(loc.lat, core.zoom),
     });
   } catch (err: unknown) {
     return handleRouteDbError('[POST /api/projects/[id]/aerial-reference]', err);

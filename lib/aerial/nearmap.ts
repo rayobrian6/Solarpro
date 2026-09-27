@@ -38,46 +38,22 @@ const TIMEOUT_MS = 30000;
 // the projection in a client module — which is how an imagery layer ends up disagreeing with the
 // imagery fetcher about where a photo is. Every existing importer, including
 // tests/nearmapImageBounds.test.ts, keeps working through this file.
+// The tile GRID moved with it, for a second reason: `grid.tiles.length` IS the number of paid GETs
+// an acquisition makes, so it is the cost model as well as the stitch plan, and the browser-side
+// planner (`lib/aerial/workzonePlan.ts`) must price a workzone with the same arithmetic that buys
+// it. Re-exported here, so `fetchNearmapStaticAerial` below and every existing importer are
+// unchanged.
 import {
-  TILE_SIZE, lngToGlobalPx, latToGlobalPx, globalPxToLng, globalPxToLat,
-  nearmapImageBounds, groundResolutionCmPerPx, type ImageBounds,
+  lngToGlobalPx, latToGlobalPx, globalPxToLng, globalPxToLat,
+  nearmapImageBounds, groundResolutionCmPerPx, metresPerPixel, nearmapTileGrid,
+  type ImageBounds, type TileGrid, type TilePlacement,
 } from '@/lib/map/webMercator';
 
 export {
   lngToGlobalPx, latToGlobalPx, globalPxToLng, globalPxToLat,
-  nearmapImageBounds, groundResolutionCmPerPx,
+  nearmapImageBounds, groundResolutionCmPerPx, metresPerPixel, nearmapTileGrid,
 };
-export type { ImageBounds };
-
-export interface TilePlacement { z: number; x: number; y: number; left: number; top: number; }
-export interface TileGrid {
-  tiles: TilePlacement[];       // tile coords + composite offset within the full tile canvas
-  tx0: number; ty0: number;     // top-left tile index of the canvas
-  canvasW: number; canvasH: number;
-  cropLeft: number; cropTop: number;   // where to extract the centred WxH image
-  W: number; H: number;
-}
-
-/** Tiles needed to render a W×H image centred on (lat,lng) at zoom z, plus the
- *  crop offset into the whole-tile canvas. Pure — no I/O (testable). */
-export function nearmapTileGrid(lat: number, lng: number, z: number, W: number, H: number): TileGrid {
-  const cx = lngToGlobalPx(lng, z), cy = latToGlobalPx(lat, z);
-  const left = cx - W / 2, top = cy - H / 2;
-  const tx0 = Math.floor(left / TILE_SIZE), ty0 = Math.floor(top / TILE_SIZE);
-  const tx1 = Math.floor((left + W - 1) / TILE_SIZE), ty1 = Math.floor((top + H - 1) / TILE_SIZE);
-  const tiles: TilePlacement[] = [];
-  for (let x = tx0; x <= tx1; x++) {
-    for (let y = ty0; y <= ty1; y++) {
-      tiles.push({ z, x, y, left: (x - tx0) * TILE_SIZE, top: (y - ty0) * TILE_SIZE });
-    }
-  }
-  return {
-    tiles, tx0, ty0,
-    canvasW: (tx1 - tx0 + 1) * TILE_SIZE, canvasH: (ty1 - ty0 + 1) * TILE_SIZE,
-    cropLeft: Math.round(left - tx0 * TILE_SIZE), cropTop: Math.round(top - ty0 * TILE_SIZE),
-    W, H,
-  };
-}
+export type { ImageBounds, TileGrid, TilePlacement };
 
 export interface NearmapStaticAerial {
   imageBase64: string;

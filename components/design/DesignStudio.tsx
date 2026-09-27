@@ -208,6 +208,22 @@ type SolarE2EState = {
     /** Data URL drawn into every tile. */
     dataUrl: string;
   }) => Promise<number>;
+  /**
+   * Hand the 3D studio a reference-imagery payload, as the aerial-reference route would.
+   *
+   * 🚨 SETUP ONLY, AND IT REPLACES THE NETWORK — NOTHING ELSE. A multi-layer workzone (a
+   * high-resolution design core inside a lower-resolution neighbourhood ring) only exists once a
+   * project has ACQUIRED one, which needs a database and a NEARMAP_API_KEY. This box has neither,
+   * so without this seam the core+context renderer — the polygon-with-a-hole ring, the workzone
+   * boundary, the datum read-back across two geometry types — could only ever be exercised in its
+   * single-layer branch.
+   *
+   * What it does NOT stand in for: the gate, the acquisition, the persistence or the cost. Those
+   * run against a real PostgreSQL with a counted paid-fetch double in
+   * tests/nearmapWorkzoneRoundTrip.postgres.test.ts. Everything after this payload — draw, ring,
+   * boundary, datum, mode switch, camera pose — is the product's own code.
+   */
+  seedAerialWorkzone: (payload: AerialReferencePayload | null) => void;
 };
 
 declare global {
@@ -2549,6 +2565,9 @@ export default function DesignStudio({ project, onSave, onProjectPromoted }: Pro
         evictTileCache();
         return n;
       },
+      // Stored in a ref, so `loadAerialReference` reads it without this bridge having to be
+      // rebuilt — and so the seam cannot go stale, which is what the note below is about.
+      seedAerialWorkzone: (payload) => { e2eAerialRef.current = payload; },
     };
     // 🚨 TEAR THE HOOK DOWN. Without this, an unmounted studio leaves its last
     // state frozen on `window` — and this page DOES unmount: an unauthenticated
@@ -5022,6 +5041,8 @@ export default function DesignStudio({ project, onSave, onProjectPromoted }: Pro
    * than quietly trying again. The explicit Save control remains the way to retry.
    */
   const promotionFailedRef = useRef(false);
+  /** The E2E imagery seam's payload, when one has been seeded. Null in production, always. */
+  const e2eAerialRef = useRef<AerialReferencePayload | null>(null);
   const ensureDurableProject = useCallback(async (): Promise<string | null> => {
     if (isRealProject) return project.id;
     if (promotingRef.current) return promotingRef.current;     // one promotion, not one per click
@@ -5076,7 +5097,13 @@ export default function DesignStudio({ project, onSave, onProjectPromoted }: Pro
    *
    * It returns the imagery or the REASON there is none, and the engine shows that verbatim.
    */
-  const loadAerialReference = useCallback(async (): Promise<AerialReferencePayload | null> => {
+  const loadAerialReference = useCallback(async (
+    opts?: { expand?: boolean },
+  ): Promise<AerialReferencePayload | null> => {
+    // The E2E imagery seam, and only under NEXT_PUBLIC_E2E. See `seedAerialWorkzone`: it replaces
+    // the network for the RENDERING path; the gate, the acquisition and the cost are proved against
+    // a real PostgreSQL elsewhere.
+    if (E2E_ENABLED && e2eAerialRef.current) return e2eAerialRef.current;
     const id = await ensureDurableProject();
     if (!id) {
       return {
@@ -5092,10 +5119,25 @@ export default function DesignStudio({ project, onSave, onProjectPromoted }: Pro
       return { ok: res.ok, status: res.status, data };
     };
     let r = await read();
-    if (r.ok && r.data?.success && !r.data.available) {
-      // Nothing stored: acquire the bounded workzone. The route applies the address gate, buys
-      // one 1440x810 frame centred on the project, stores it, and refuses to buy twice.
-      const acq = await fetch(`/api/projects/${id}/aerial-reference`, { method: 'POST' });
+    // 🚨 TWO REASONS TO POST, AND ONLY TWO.
+    //
+    //   · the project has NO imagery at all — the first acquisition;
+    //   · the operator PRESSED "Expand imagery area" — a deliberate widening.
+    //
+    // Everything else reads. Ray: "Never silently extend the paid workzone merely because the
+    // camera crosses its edge." A mode switch, a pan, a zoom and a reload all land on the read.
+    const acquire = opts?.expand === true || (r.ok && r.data?.success && !r.data.available);
+    if (acquire) {
+      // The route applies the address gate, plans a high-resolution design core plus a
+      // lower-resolution neighbourhood ring inside a hard tile budget, stores them, and refuses to
+      // buy anything it already owns. `expand` is the only thing that lets it add to a workzone
+      // that already exists.
+      const acq = await fetch(`/api/projects/${id}/aerial-reference`, {
+        method: 'POST',
+        ...(opts?.expand
+          ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify({ expand: true }) }
+          : {}),
+      });
       const acqData = await acq.json().catch(() => null);
       if (acqData?.acquired || acqData?.available) r = await read();
       else if (acqData?.reason) return { available: false, reason: acqData.reason };
@@ -5110,11 +5152,17 @@ export default function DesignStudio({ project, onSave, onProjectPromoted }: Pro
     return {
       available: true,
       source: r.data.source,
+      // Every layer the project owns, core first. Passed straight through: the studio decides
+      // WHETHER imagery exists, the engine decides how to draw it.
+      layers: Array.isArray(r.data.layers) ? r.data.layers : undefined,
       imageDataUrl: r.data.imageDataUrl,
       bounds: r.data.bounds,
       resolutionCmPerPx: r.data.resolutionCmPerPx ?? null,
       captureDate: r.data.captureDate ?? null,
       captureDateKnown: Boolean(r.data.captureDateKnown),
+      // What this location has a plan for and this project does not own yet, and its price.
+      expandableRoles: Array.isArray(r.data.expandableRoles) ? r.data.expandableRoles : [],
+      expandCost: r.data.expandCost ?? null,
     };
   }, [ensureDurableProject]);
   const [engineDeletion, setEngineDeletion] = useState<{

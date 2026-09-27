@@ -25,25 +25,62 @@ import { MapSourcePicker, DEFAULT_PICKER_STATE, type MapPickerState } from '@/co
  * none — a refusal the operator can read is the whole of "never masquerade one provider as
  * another", and the engine must not have to infer it.
  */
+export interface AerialLayerPayload {
+  /**
+   * 'core'    the high-resolution design surface: the parcel and its immediate neighbours, at the
+   *           full ~6 cm/px. This is what roofs are traced on.
+   * 'context' the neighbourhood, one zoom band down and about nine times the area for a third of
+   *           the tiles. Coherence and orientation, NOT a tracing surface.
+   *
+   * 🚨 WHY THERE ARE TWO. Ray rejected the single frame live: "A rectangular Nearmap orthophoto is
+   * effectively being placed into that fallback world... once the camera moves, it becomes obvious
+   * that this is not a coherent design environment." The arithmetic that makes two layers the
+   * answer is in `lib/aerial/workzonePlan.ts`.
+   */
+  role: 'core' | 'context';
+  imageDataUrl: string;
+  bounds: { north: number; south: number; east: number; west: number };
+  resolutionCmPerPx?: number | null;
+  zoom?: number | null;
+}
+
 export interface AerialReferencePayload {
   available: boolean;
   source?: 'nearmap' | 'google' | 'unknown';
+  /** Every layer the project owns, core first. */
+  layers?: AerialLayerPayload[];
   imageDataUrl?: string;
   bounds?: { north: number; south: number; east: number; west: number };
   resolutionCmPerPx?: number | null;
   captureDate?: string | null;
   captureDateKnown?: boolean;
+  /**
+   * Layers this location has a plan for and this project does NOT own.
+   *
+   * 🚨 REPORTED, NEVER ACTED ON. Ray: "Never silently extend the paid workzone merely because the
+   * camera crosses its edge... If extension is supported, require an explicit Expand imagery area
+   * action." So this is what the control is enabled by, and `expandCost` is what it prints before
+   * the operator presses it.
+   */
+  expandableRoles?: string[];
+  /** What expanding would cost, in the unit that is metered. */
+  expandCost?: string | null;
   /** Why there is none. Shown verbatim. */
   reason?: string;
 }
 
 interface AerialReference {
   source: 'nearmap' | 'google' | 'unknown';
+  /** Core first. Always at least one — a reference with no layers is not a reference. */
+  layers: AerialLayerPayload[];
   imageDataUrl: string;
   bounds: { north: number; south: number; east: number; west: number };
   resolutionCmPerPx: number | null;
   captureDate: string | null;
   captureDateKnown: boolean;
+  /** What more this location has a plan for, and what buying it would cost. */
+  expandableRoles?: string[];
+  expandCost?: string | null;
   /**
    * WHERE THESE PIXELS CAME FROM — stated, never inferred.
    *
@@ -782,7 +819,9 @@ interface Props {
    * the imagery is first needed, and carries on with whatever id comes back. Resolves to null if
    * the design cannot be made durable, and then nothing is acquired.
    */
-  onLoadAerialReference?: () => Promise<AerialReferencePayload | null>;
+  onLoadAerialReference?: (
+    opts?: { expand?: boolean },
+  ) => Promise<AerialReferencePayload | null>;
   panels: PlacedPanel[];
   onPanelsChange: (panels: PlacedPanel[]) => void;
   placementMode: PlacementMode;
@@ -1964,7 +2003,74 @@ function SolarEngine3D({
    * Cached in a ref keyed by project, so Nearmap → Native → Nearmap reuses one fetch.
    */
   const aerialRefCacheRef = useRef<{ projectId: string; data: AerialReference | null } | null>(null);
-  const aerialOverlayRef = useRef<any>(null);
+  /**
+   * Every primitive drawn for the reference imagery — one per layer. Removed as a set.
+   *
+   * `kind` is read back off the GEOMETRY that was constructed, not from the branch that chose it:
+   * 'ring' means the built geometry really does carry a hole. A boolean recorded by the code that
+   * decided would pass with the ring removed, which is the blind-assertion trap this file has been
+   * caught by twice.
+   */
+  const aerialOverlayRef = useRef<Array<{ prim: any; role: string; kind: 'rect' | 'ring' }>>([]);
+
+  // ══════════════════════════════════════════════════════════════════════════
+  //  THE PRECISION DESIGN WORLD — SolarPro owns the ground, not ESRI
+  // ══════════════════════════════════════════════════════════════════════════
+  //
+  // 🚨 THE LIVE REJECTION THIS EXISTS FOR. Ray: "The underlying world in Nearmap mode looks like
+  // the ESRI/fallback environment. A rectangular Nearmap orthophoto is effectively being placed
+  // into that fallback world. Straight overhead it can look acceptable. Once the camera moves, it
+  // becomes obvious that this is not a coherent design environment. The current implementation is
+  // technically valid but functionally wrong."
+  //
+  // He is exactly right about the mechanism. `enterFlatImagery` hides the Google mesh and shows the
+  // globe — and the globe carries the ArcGIS World Imagery layer added at boot. So the scene was
+  // somebody else's photograph of the whole planet, with one paid rectangle laid on it.
+  //
+  // The rule he gave: "In Nearmap mode, SolarPro owns the world presentation... Outside the Nearmap
+  // workzone use an intentional neutral design surface: clean ground/grid, property/parcel
+  // boundaries where available, project/workzone boundary." So this mode:
+  //
+  //   · hides the ESRI layer rather than removing it     (see esriLayerRef)
+  //   · paints the globe a neutral drafting colour        (globe.baseColor)
+  //   · turns off the ground atmosphere                   (or the flat colour hazes to blue)
+  //   · lays a PROCEDURAL grid over the design area       (drawn, not downloaded — no imagery faked)
+  //   · draws the paid workzone at the site datum
+  //   · outlines the workzone, so its edge is intentional rather than an accident
+  //
+  // and puts every one of those back on the way out.
+
+  /** The ESRI base map, captured at boot so it can be HIDDEN and shown again — never re-created. */
+  const esriLayerRef = useRef<any>(null);
+  /** The procedural drafting grid. Drawn by Cesium's Grid material: no tiles, no provider, no cost. */
+  const designSurfaceRef = useRef<any>(null);
+  /** The workzone edge, as entities. Ray: "show an intentional boundary or neutral environment." */
+  const workzoneBoundaryRef = useRef<any[]>([]);
+  /**
+   * What the globe looked like before this mode took it over, so leaving restores it EXACTLY.
+   *
+   * Null when the precision world is not active. Captured on entry, consumed on exit — not written
+   * twice, because a second capture would record this mode's own values as the thing to restore.
+   */
+  const nativeWorldRef = useRef<{ baseColor: any; groundAtmosphere: boolean; esriShown: boolean } | null>(null);
+
+  /**
+   * 🚨 WHERE THE CAMERA WAS, PER MODE.
+   *
+   * Ray: "Preserve separate camera poses so Precision Design → Native 3D → Precision Design returns
+   * the user to where they were working." Two poses, captured on the way out of a mode and re-applied
+   * on the way back in. `null` means "never been there" — the first entry into precision design gets
+   * the drafting view instead.
+   */
+  type ImageryPose = {
+    targetLat: number; targetLng: number; targetAlt: number;
+    heading: number; pitch: number; radius: number;
+  };
+  const modePoseRef = useRef<{ native: ImageryPose | null; precision: ImageryPose | null }>({
+    native: null, precision: null,
+  });
+  /** Which world the camera currently belongs to, so the pose is filed under the mode it came from. */
+  const poseModeRef = useRef<'native' | 'precision'>('native');
 
   /**
    * 🚨 FLAT IMAGERY MODE — the Google-Earth fallback, on purpose instead of by accident.
@@ -1990,6 +2096,17 @@ function SolarEngine3D({
    */
   const flatImageryRef = useRef(false);
   const [flatImagery, setFlatImagery] = useState(false);
+  /**
+   * 🚨 AN EXPANSION IS A BUTTON PRESS, AND NOTHING ELSE CAN SET IT.
+   *
+   * Ray: "Never silently extend the paid workzone merely because the camera crosses its edge... If
+   * extension is supported, require an explicit Expand imagery area action." The ref is written by
+   * exactly one onClick and cleared the moment the request is issued, so no re-render, no camera
+   * move and no retry can carry a purchase with it.
+   */
+  const expandRequestRef = useRef(false);
+  const [imageryReloadToken, setImageryReloadToken] = useState(0);
+  const [expandingImagery, setExpandingImagery] = useState(false);
   /** The last few surface picks: which branch answered, at what height, against what ground. */
   const pickTraceRef = useRef<Array<{ method: string; height: number; groundElevM: number }>>([]);
   /** The ellipsoidal height the reference photo is drawn at. Null when none is shown. */
@@ -3431,14 +3548,54 @@ function SolarEngine3D({
         // cache. Counted through the product's own selector.
         let cachedNearmapTiles = 0;
         try { usableTilesByZoom('nearmap').forEach(g => { cachedNearmapTiles += g.size; }); } catch { /* ignore */ }
+        // 🚨 AND WHETHER THE WORLD UNDER THE PHOTO IS SOLARPRO'S OR ESRI'S. That is the whole of
+        // Ray's second rejection — "the underlying world in Nearmap mode looks like the
+        // ESRI/fallback environment" — so a spec has to be able to ask it directly. Read off the
+        // live Cesium objects, not off React state, because the claim is about the scene.
+        let esriVisible: boolean | null = null, baseColorCss: string | null = null;
+        let groundAtmosphere: boolean | null = null;
+        try { esriVisible = esriLayerRef.current ? !!esriLayerRef.current.show : null; } catch { /* ignore */ }
+        try {
+          const b = v?.scene?.globe?.baseColor;
+          baseColorCss = b ? b.toCssHexString() : null;
+        } catch { /* ignore */ }
+        try { groundAtmosphere = v ? !!v.scene.globe.showGroundAtmosphere : null; } catch { /* ignore */ }
         return {
           source: mapPickerStateRef.current.source,
           flatImagery: flatImageryRef.current,
           flatTrace: flatTraceRef.current,
-          referenceShown: !!aerialOverlayRef.current,
+          referenceShown: aerialOverlayRef.current.length > 0,
+          /** One entry per drawn imagery layer — 2 for a core + context workzone. */
+          referenceLayers: aerialOverlayRef.current.length,
+          /** `role:kind` per layer, kind read off the built geometry — 'context:ring' has a hole. */
+          referenceKinds: aerialOverlayRef.current.map(o => `${o.role}:${o.kind}`),
           cachedNearmapTiles,
           meshVisible,
           globeVisible,
+          esriVisible,
+          baseColorCss,
+          groundAtmosphere,
+          designSurface: !!designSurfaceRef.current,
+          /** The elevation the drafting grid was BUILT at. Must track the photo's. */
+          designSurfaceHeightM: designSurfaceRef.current?.__datumM ?? null,
+          /** The elevation the reference photo was BUILT at — the plane a trace resolves on. */
+          referenceSurfaceHeightM: aerialSurfaceHeightRef.current,
+          workzoneBoundary: workzoneBoundaryRef.current.length,
+          /** Which world the camera's pose is filed under, and which poses are remembered. */
+          poseMode: poseModeRef.current,
+          savedPoses: {
+            native: !!modePoseRef.current.native,
+            precision: !!modePoseRef.current.precision,
+          },
+          pose: (() => {
+            try {
+              const o = orbitRef.current;
+              return o ? {
+                targetLat: o.targetLat, targetLng: o.targetLng,
+                heading: o.heading, pitch: o.pitch, radius: o.radius,
+              } : null;
+            } catch { return null; }
+          })(),
         };
       },
       /* 🚨 THE STRUCTURE AS IT IS ACTUALLY RENDERED — piles, strongbacks, rails, braces.
@@ -3932,12 +4089,217 @@ function SolarEngine3D({
     const wantNearmap = mapPickerState.source === 'nearmap';
 
     const dropOverlay = () => {
-      if (aerialOverlayRef.current) {
-        try { viewer.scene.primitives.remove(aerialOverlayRef.current); } catch { /* already gone */ }
-        aerialOverlayRef.current = null;
+      if (aerialOverlayRef.current.length > 0) {
+        for (const o of aerialOverlayRef.current) {
+          try { viewer.scene.primitives.remove(o.prim); } catch { /* already gone */ }
+        }
+        aerialOverlayRef.current = [];
         aerialSurfaceHeightRef.current = null;
         try { viewer.scene.requestRender(); } catch { /* ignore */ }
       }
+      for (const e of workzoneBoundaryRef.current) {
+        try { viewer.entities.remove(e); } catch { /* ignore */ }
+      }
+      workzoneBoundaryRef.current = [];
+    };
+
+    // ── CAMERA POSES, ONE PER WORLD ─────────────────────────────────────────
+    //
+    // 🚨 THROUGH THE CONTROLLER, NEVER THROUGH CESIUM. Cesium's own camera input is disabled in
+    // this viewer; `orbitRef` is the authority and `applyOrbit` is the only thing that moves the
+    // camera. A raw `camera.setView` would look right for one frame and then be undone by the next
+    // wheel notch, because nothing reads the Cesium camera back into the orbit state. And the
+    // fields are ASSIGNED, not replaced — the pointer handlers close over the orbit object itself.
+    const capturePose = (): ImageryPose | null => {
+      const o = orbitRef.current;
+      if (!o || !Number.isFinite(o.radius)) return null;
+      return {
+        targetLat: o.targetLat, targetLng: o.targetLng, targetAlt: o.targetAlt,
+        heading: o.heading, pitch: o.pitch, radius: o.radius,
+      };
+      // Deliberately NOT the drag bookkeeping: a restored `dragging: true` would leave the
+      // controller believing a gesture is still live.
+    };
+    const applyPose = (p: ImageryPose) => {
+      const o = orbitRef.current;
+      if (!o) return;
+      o.targetLat = p.targetLat; o.targetLng = p.targetLng; o.targetAlt = p.targetAlt;
+      o.heading = p.heading; o.pitch = p.pitch; o.radius = p.radius;
+      try { applyOrbitRef.current?.(); } catch { /* boot not finished */ }
+    };
+    /** File the current view under the world it belongs to, then adopt the new world's. */
+    const switchPoseTo = (next: 'native' | 'precision') => {
+      if (poseModeRef.current === next) return;
+      const here = capturePose();
+      if (here) modePoseRef.current[poseModeRef.current] = here;
+      poseModeRef.current = next;
+      const saved = modePoseRef.current[next];
+      if (saved) { applyPose(saved); return; }
+      if (next !== 'precision') return;
+      // 🚨 FIRST ENTRY OPENS ON A DRAFTING VIEW. Ray: "Precision Design should open from a useful
+      // drafting view." Near-nadir, not exact: `applyOrbit` clamps an exact -90 pitch because the
+      // look-direction heading is undefined there, so the value that survives is the one
+      // `enterTopDownForFlatTrace` already uses.
+      const o = orbitRef.current;
+      if (!o) return;
+      applyPose({
+        targetLat: lat, targetLng: lng,
+        targetAlt: cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0,
+        heading: 0, pitch: -Math.PI / 2 + 0.02,
+        radius: Math.min(o.radius, 160),
+      });
+    };
+
+    // ── THE PRECISION DESIGN WORLD ──────────────────────────────────────────
+
+    /**
+     * 🚨 SOLARPRO OWNS THE GROUND IN THIS MODE. ESRI DOES NOT.
+     *
+     * Ray: "Do not use ESRI as the visual world underneath Nearmap. Do not present a Nearmap
+     * rectangle floating over unrelated imagery." Hiding the layer is the whole fix for the world;
+     * the three lines after it are what stops the result being a blue planet:
+     *
+     *   · `baseColor` — with no imagery layer the globe renders this everywhere, and Cesium's
+     *     default is a deep blue. A neutral graphite is the drafting ground.
+     *   · `showGroundAtmosphere` — defaults TRUE, and hazes the flat colour to blue-white toward
+     *     the horizon. A design surface does not have weather.
+     *   · the GRID — Ray's "clean ground/grid". Cesium's `Grid` material is PROCEDURAL: lines
+     *     computed in a shader. No tiles, no provider, no request, nothing faked and nothing
+     *     stretched. It sits just under the imagery so the photo always wins where there is one,
+     *     and extends past the workzone so crossing the edge lands on SolarPro's own surface
+     *     rather than on somebody else's photograph.
+     */
+    const enterPrecisionWorld = () => {
+      const globe = viewer.scene.globe;
+      if (!nativeWorldRef.current) {
+        nativeWorldRef.current = {
+          baseColor: globe.baseColor,
+          groundAtmosphere: !!globe.showGroundAtmosphere,
+          esriShown: esriLayerRef.current ? !!esriLayerRef.current.show : true,
+        };
+      }
+      try { if (esriLayerRef.current) esriLayerRef.current.show = false; } catch { /* ignore */ }
+      try { globe.baseColor = C.Color.fromCssColorString('#20242b'); } catch { /* ignore */ }
+      try { globe.showGroundAtmosphere = false; } catch { /* ignore */ }
+      addDesignSurface();
+      try { viewer.scene.requestRender(); } catch { /* ignore */ }
+    };
+
+    /** Everything `enterPrecisionWorld` changed, put back — including the things it ADDED. */
+    const leavePrecisionWorld = () => {
+      const globe = viewer.scene.globe;
+      const saved = nativeWorldRef.current;
+      if (saved) {
+        try { if (esriLayerRef.current) esriLayerRef.current.show = saved.esriShown; } catch { /* ignore */ }
+        try { globe.baseColor = saved.baseColor; } catch { /* ignore */ }
+        try { globe.showGroundAtmosphere = saved.groundAtmosphere; } catch { /* ignore */ }
+        nativeWorldRef.current = null;
+      }
+      if (designSurfaceRef.current) {
+        try { viewer.scene.primitives.remove(designSurfaceRef.current); } catch { /* ignore */ }
+        designSurfaceRef.current = null;
+      }
+      try { viewer.scene.requestRender(); } catch { /* ignore */ }
+    };
+
+    /**
+     * The drafting grid: one translucent, procedural, non-pickable plane at the site datum.
+     *
+     * Sized generously (about 3 km) so panning inside the design area never runs off it, and drawn
+     * 4 cm BELOW the datum so the imagery above it wins the depth test instead of z-fighting with
+     * it. `allowPicking: false` for the same reason the photo is not pickable: `scene.pick` is the
+     * first branch of `getWorldPosition`, and scenery that answers a pick makes the operator's
+     * click take its height from the decoration.
+     */
+    function addDesignSurface() {
+      const datum = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
+      // 🚨 AND IT MOVES WHEN THE DATUM DOES.
+      //
+      // This used to early-return if a surface already existed, and the site datum resolves AFTER
+      // boot — so the grid was pinned at whatever elevation was known when it was first drawn while
+      // the photo, which is redrawn on every datum change, moved to the real ground. Caught in a
+      // screenshot: at Ray's site the grid sat at the ellipsoid and the imagery 128 m above it, and
+      // tilting the camera showed a drafting grid with no photograph anywhere near it. The datum it
+      // was BUILT at is recorded, so the comparison is against the rendered article.
+      if (designSurfaceRef.current) {
+        if (Math.abs((designSurfaceRef.current.__datumM ?? 0) - datum) < 0.01) return;
+        try { viewer.scene.primitives.remove(designSurfaceRef.current); } catch { /* ignore */ }
+        designSurfaceRef.current = null;
+      }
+      try {
+        const halfDeg = 0.0135;                        // ~1.5 km at mid latitudes
+        const rect = C.Rectangle.fromDegrees(
+          lng - halfDeg, lat - halfDeg * 0.75, lng + halfDeg, lat + halfDeg * 0.75);
+        const geometry = new C.RectangleGeometry({
+          rectangle: rect,
+          height: datum - 0.04,
+          vertexFormat: C.EllipsoidSurfaceAppearance.VERTEX_FORMAT,
+        });
+        const mat = C.Material.fromType('Grid', {
+          color: C.Color.fromCssColorString('#4a5568').withAlpha(0.55),
+          cellAlpha: 0.06,
+          lineCount: new C.Cartesian2(48, 36),
+          lineThickness: new C.Cartesian2(1.0, 1.0),
+        });
+        const appearance = new C.MaterialAppearance({ translucent: true, flat: true });
+        appearance.material = mat;
+        const prim = new C.Primitive({
+          geometryInstances: new C.GeometryInstance({ geometry }),
+          appearance,
+          allowPicking: false,
+          asynchronous: false,
+        });
+        viewer.scene.primitives.add(prim);
+        // Read off the geometry that was built, not off the variable that was meant — the same
+        // rule the reference photo's height read-back follows, for the same reason.
+        //
+        // 🚨 A VERTEX, NOT THE BOUNDING SPHERE. This surface is about 3 km across, and the centre
+        // of the bounding sphere of a curved patch that size sits 0.25 m BELOW the patch itself —
+        // measured, when the first version of this read-back disagreed with the photo by exactly
+        // that. A vertex is on the surface at any extent.
+        try {
+          const built = C.RectangleGeometry.createGeometry(geometry);
+          const v = built?.attributes?.position?.values;
+          prim.__datumM = v && v.length >= 3
+            ? C.Cartographic.fromCartesian(new C.Cartesian3(v[0], v[1], v[2])).height + 0.04
+            : datum;
+        } catch { prim.__datumM = datum; }
+        designSurfaceRef.current = prim;
+      } catch (e) {
+        // A missing grid is a plainer world, not a broken one. Never fail the mode over decoration.
+        addLog('WARN', `design surface not drawn: ${(e as Error).message}`);
+      }
+    }
+
+    /**
+     * 🚨 THE EDGE OF THE PAID AREA IS DRAWN, NOT DISCOVERED.
+     *
+     * Ray: "Never silently extend the paid workzone merely because the camera crosses its edge. At
+     * the edge: show an intentional boundary or neutral environment." So the workzone states where
+     * it ends, from the same four numbers the photo is drawn from — an outline computed from
+     * anything else could disagree with the pixels it is outlining.
+     */
+    const drawWorkzoneBoundary = (b: { north: number; south: number; east: number; west: number }) => {
+      try {
+        const h = (cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0) + 0.12;
+        const corners = [
+          [b.west, b.south], [b.east, b.south], [b.east, b.north], [b.west, b.north], [b.west, b.south],
+        ].map(([x, y]) => C.Cartesian3.fromDegrees(x, y, h));
+        const e = viewer.entities.add({
+          name: '[WORKZONE] imagery boundary',
+          polyline: {
+            positions: corners,
+            width: 2,
+            material: new C.PolylineDashMaterialProperty({
+              color: C.Color.fromCssColorString('#7dd3fc').withAlpha(0.8),
+              dashLength: 14,
+            }),
+            clampToGround: false,
+            arcType: C.ArcType.NONE,
+          },
+        });
+        workzoneBoundaryRef.current.push(e);
+      } catch { /* an unlabelled edge is better than no imagery */ }
     };
 
     /**
@@ -3950,11 +4312,13 @@ function SolarEngine3D({
      */
     const enterNativeMesh = () => {
       dropOverlay();
+      leavePrecisionWorld();
       try { if (tilesetRef.current) { tilesetRef.current.show = true; viewer.scene.globe.show = false; } } catch { /* ignore */ }
       if (flatImageryRef.current) {
         flatImageryRef.current = false;
         setFlatImagery(false);
       }
+      switchPoseTo('native');
       try { viewer.scene.requestRender(); } catch { /* ignore */ }
     };
 
@@ -3966,18 +4330,35 @@ function SolarEngine3D({
      * and lumpy roof in the Photorealistic mesh smeared the picture over its own shape. On the
      * flat globe the same pixels are a clean top-down photograph, which is what a polygon is
      * traced against.
+     *
+     * And the globe under it is SolarPro's, not ESRI's — that is what `enterPrecisionWorld` is for.
      */
     const enterFlatImagery = () => {
       try { if (tilesetRef.current) { tilesetRef.current.show = false; } } catch { /* ignore */ }
       try { viewer.scene.globe.show = true; } catch { /* ignore */ }
+      enterPrecisionWorld();
       if (!flatImageryRef.current) {
         flatImageryRef.current = true;
         setFlatImagery(true);
       }
+      switchPoseTo('precision');
+      // 🚨 THE ORBIT CENTRE BELONGS ON THE GROUND, AND THE GROUND MOVES WHEN THE DATUM RESOLVES.
+      //
+      // The datum lands after boot, so a pose adopted before it orbits a point at the ellipsoid —
+      // 128 m below the surface being designed on here, 1.6 km below it in Denver. Only the centre
+      // is corrected; heading, pitch and radius are the operator's and are left exactly as they are.
+      if (cesiumGroundElevResolvedRef.current) {
+        const o = orbitRef.current;
+        if (o && Math.abs((o.targetAlt ?? 0) - cesiumGroundElevRef.current) > 0.5) {
+          o.targetAlt = cesiumGroundElevRef.current;
+          try { applyOrbitRef.current?.(); } catch { /* boot not finished */ }
+        }
+      }
     };
 
     if (!wantNearmap) {
-      // Back to native: restore the mesh, remove the reference layer, and nothing else.
+      // Back to native: restore the mesh and the native world, remove the reference layers, and
+      // nothing else. No geometry is touched in either direction.
       enterNativeMesh();
       setAerialRefStatus({ state: 'off' });
       return;
@@ -4002,11 +4383,17 @@ function SolarEngine3D({
       try {
         const comp = composeCachedTiles('nearmap', { lat, lng });
         if (!comp) return null;
+        const res = groundResolutionCmPerPx(lat, comp.zoom);
         return {
           source: 'nearmap',
+          // Session tiles are one composite at one zoom, so they are a core and nothing else.
+          layers: [{
+            role: 'core', imageDataUrl: comp.dataUrl, bounds: comp.bounds,
+            resolutionCmPerPx: res, zoom: comp.zoom,
+          }],
           imageDataUrl: comp.dataUrl,
           bounds: comp.bounds,
-          resolutionCmPerPx: groundResolutionCmPerPx(lat, comp.zoom),
+          resolutionCmPerPx: res,
           captureDate: null,
           captureDateKnown: false,
           origin: 'session',
@@ -4035,32 +4422,93 @@ function SolarEngine3D({
         // are the same plane. The number comes from the site datum, never from a constant — which
         // is what makes it hold at sea level, at 130 m and at 1600 m alike.
         const surfaceH = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
-        const rect = C.Rectangle.fromDegrees(
-          ref.bounds.west, ref.bounds.south, ref.bounds.east, ref.bounds.north);
-        const geometry = new C.RectangleGeometry({
-          rectangle: rect,
-          height: surfaceH,
-          vertexFormat: C.EllipsoidSurfaceAppearance.VERTEX_FORMAT,
-        });
-        const mat = C.Material.fromType('Image', {
-          image: ref.imageDataUrl,
-          color: new C.Color(1.0, 1.0, 1.0, 1.0),
-        });
-        const appearance = new C.MaterialAppearance({ translucent: false, flat: true });
-        appearance.material = mat;
-        const prim = new C.Primitive({
-          geometryInstances: new C.GeometryInstance({ geometry }),
-          appearance,
-          // 🚨 NOT PICKABLE. `scene.pick` is the FIRST branch of `getWorldPosition`, and anything
-          // it finds is treated as the Photorealistic mesh — `pickPosition` is then read from the
-          // depth buffer and believed. A reference photo answering that pick would make every
-          // click's height come from the picture rather than from the site datum, which is the
-          // same class of defect this whole slice is about. The photo is scenery.
-          allowPicking: false,
-          asynchronous: false,
-        });
-        viewer.scene.primitives.add(prim);
-        aerialOverlayRef.current = prim;
+
+        const layers = (ref.layers && ref.layers.length > 0)
+          ? ref.layers
+          : [{ role: 'core' as const, imageDataUrl: ref.imageDataUrl, bounds: ref.bounds,
+               resolutionCmPerPx: ref.resolutionCmPerPx, zoom: null }];
+        const core = layers.find(l => l.role === 'core') ?? layers[0];
+
+        /** Does `inner` sit strictly inside `outer`? Decides ring vs plain rectangle. */
+        const encloses = (
+          outer: { north: number; south: number; east: number; west: number },
+          inner: { north: number; south: number; east: number; west: number },
+        ) => inner.west > outer.west && inner.east < outer.east
+          && inner.south > outer.south && inner.north < outer.north;
+
+        const drawn: Array<{ role: string; geometry: any }> = [];
+        for (const l of layers) {
+          if (!l?.imageDataUrl || !l.bounds) continue;
+          const rect = C.Rectangle.fromDegrees(
+            l.bounds.west, l.bounds.south, l.bounds.east, l.bounds.north);
+
+          // 🚨 THE CONTEXT RING IS A RING, NOT A SECOND PHOTO UNDER THE FIRST.
+          //
+          // Both layers belong at the same height — the site datum — so drawing them as two
+          // overlapping rectangles would z-fight, and the coarse pixels would flicker over the
+          // fine ones exactly where the design happens. Cutting the core out of the context makes
+          // them disjoint: every square metre of ground is painted by exactly one layer, at the
+          // best resolution that layer has, with no pixel drawn twice, nothing stretched and
+          // nothing repeated. `PolygonGeometry` takes its texture coordinates from the polygon's
+          // bounding rectangle, so the ring's image still lands exactly where its own bounds say.
+          const isRing = l.role === 'context' && core !== l
+            && !!core?.bounds && encloses(l.bounds, core.bounds);
+          const geometry = isRing
+            ? new C.PolygonGeometry({
+                polygonHierarchy: new C.PolygonHierarchy(
+                  C.Cartesian3.fromDegreesArray([
+                    l.bounds.west, l.bounds.south, l.bounds.east, l.bounds.south,
+                    l.bounds.east, l.bounds.north, l.bounds.west, l.bounds.north,
+                  ]),
+                  [new C.PolygonHierarchy(C.Cartesian3.fromDegreesArray([
+                    core.bounds.west, core.bounds.south, core.bounds.east, core.bounds.south,
+                    core.bounds.east, core.bounds.north, core.bounds.west, core.bounds.north,
+                  ]))],
+                ),
+                height: surfaceH,
+                vertexFormat: C.EllipsoidSurfaceAppearance.VERTEX_FORMAT,
+              })
+            : new C.RectangleGeometry({
+                rectangle: rect,
+                height: surfaceH,
+                vertexFormat: C.EllipsoidSurfaceAppearance.VERTEX_FORMAT,
+              });
+          const mat = C.Material.fromType('Image', {
+            image: l.imageDataUrl,
+            color: new C.Color(1.0, 1.0, 1.0, 1.0),
+          });
+          const appearance = new C.MaterialAppearance({ translucent: false, flat: true });
+          appearance.material = mat;
+          const prim = new C.Primitive({
+            geometryInstances: new C.GeometryInstance({ geometry }),
+            appearance,
+            // 🚨 NOT PICKABLE. `scene.pick` is the FIRST branch of `getWorldPosition`, and anything
+            // it finds is treated as the Photorealistic mesh — `pickPosition` is then read from the
+            // depth buffer and believed. A reference photo answering that pick would make every
+            // click's height come from the picture rather than from the site datum, which is the
+            // same class of defect this whole slice is about. The photo is scenery.
+            allowPicking: false,
+            asynchronous: false,
+          });
+          viewer.scene.primitives.add(prim);
+          // Read off the constructed geometry: does it actually have a hole in it?
+          const holes = (geometry as { _polygonHierarchy?: { holes?: unknown[] } })
+            ._polygonHierarchy?.holes;
+          aerialOverlayRef.current.push({
+            prim, role: l.role,
+            kind: Array.isArray(holes) && holes.length > 0 ? 'ring' : 'rect',
+          });
+          drawn.push({ role: l.role, geometry });
+        }
+        if (drawn.length === 0) throw new Error('no layer of this reference could be drawn');
+
+        // The outer edge of everything paid for — that is where the neutral surface begins.
+        const outer = layers.reduce((a, l) => ({
+          north: Math.max(a.north, l.bounds.north), south: Math.min(a.south, l.bounds.south),
+          east: Math.max(a.east, l.bounds.east), west: Math.min(a.west, l.bounds.west),
+        }), { ...layers[0].bounds });
+        drawWorkzoneBoundary(outer);
+
         // 🚨 REPORT THE HEIGHT THE GEOMETRY WAS ACTUALLY BUILT AT, NOT THE ONE WE MEANT.
         //
         // This first recorded `surfaceH` — the variable passed in — and a browser test asserting
@@ -4068,18 +4516,25 @@ function SolarEngine3D({
         // options, because the reading came from the intent rather than from the geometry. The
         // bounding sphere of the created geometry is the rendered article: drop the height and it
         // returns to the ellipsoid and the assertion fires.
+        //
+        // It is the CORE's height that is reported, because the core is the plane the operator
+        // traces on — the ring is scenery at the same datum.
         try {
-          const built = C.RectangleGeometry.createGeometry(geometry);
+          const coreDrawn = drawn.find(d => d.role === 'core') ?? drawn[0];
+          const built = coreDrawn.geometry instanceof C.RectangleGeometry
+            ? C.RectangleGeometry.createGeometry(coreDrawn.geometry)
+            : C.PolygonGeometry.createGeometry(coreDrawn.geometry);
           const c = built?.boundingSphere?.center;
           const carto = c ? C.Cartographic.fromCartesian(c) : null;
           aerialSurfaceHeightRef.current = carto ? carto.height : null;
         } catch { aerialSurfaceHeightRef.current = null; }
         try { viewer.scene.requestRender(); } catch { /* ignore */ }
         setAerialRefStatus({ state: 'shown', ref });
-        addLog('IMAGERY', `flat imagery mode — source=${ref.source} `
+        addLog('IMAGERY', `precision design mode — source=${ref.source} `
+          + `layers=${drawn.map(d => d.role).join('+')} `
           + `res=${ref.resolutionCmPerPx ? ref.resolutionCmPerPx.toFixed(1) + 'cm/px' : 'unknown'} `
           + `date=${ref.captureDateKnown ? ref.captureDate : 'unavailable'} (reused, no acquisition); `
-          + '3D mesh hidden, trace tools use the flat-trace path');
+          + 'ESRI base map hidden, 3D mesh hidden, trace tools use the flat-trace path');
       } catch (e: unknown) {
         // The mesh must not be left hidden with no photo under it — that is a blank world.
         enterNativeMesh();
@@ -4120,17 +4575,32 @@ function SolarEngine3D({
         return;
       }
       setAerialRefStatus({ state: 'loading' });
+      // 🚨 CONSUMED HERE, AND ONLY HERE. The flag is cleared before the request goes out, so a
+      // re-run of this effect for any other reason — a datum resolving, a geocode, a remount —
+      // cannot inherit a purchase that was authorised for one press.
+      const wantExpand = expandRequestRef.current;
+      expandRequestRef.current = false;
       try {
-        const payload = await onLoadAerialReference();
+        const payload = await onLoadAerialReference(wantExpand ? { expand: true } : undefined);
         if (cancelled) return;
+        setExpandingImagery(false);
         if (payload && payload.available && payload.imageDataUrl && payload.bounds) {
+          // Every layer the project owns. A payload from before layers existed carries only the
+          // single image, and the core-only fallback inside `draw` handles it.
+          const layers = (payload.layers ?? []).filter(l => l?.imageDataUrl && l?.bounds);
           draw({
             source: payload.source ?? 'unknown',
+            layers: layers.length > 0 ? layers : [{
+              role: 'core', imageDataUrl: payload.imageDataUrl, bounds: payload.bounds,
+              resolutionCmPerPx: payload.resolutionCmPerPx ?? null, zoom: null,
+            }],
             imageDataUrl: payload.imageDataUrl,
             bounds: payload.bounds,
             resolutionCmPerPx: payload.resolutionCmPerPx ?? null,
             captureDate: payload.captureDate ?? null,
             captureDateKnown: Boolean(payload.captureDateKnown),
+            expandableRoles: payload.expandableRoles ?? [],
+            expandCost: payload.expandCost ?? null,
             origin: 'stored',
           });
           return;
@@ -4139,6 +4609,7 @@ function SolarEngine3D({
           || 'No Nearmap workzone could be loaded or acquired for this design.');
       } catch (e: unknown) {
         if (cancelled) return;
+        setExpandingImagery(false);
         useSessionOr(`The aerial reference request failed: ${(e as Error).message}`);
       }
     })();
@@ -4149,20 +4620,41 @@ function SolarEngine3D({
     // `groundDatumM` is in here because the photo is DRAWN AT that elevation: the lookup resolves
     // after boot and again after a geocode, and a photo anchored before it lands sits at the
     // ellipsoid while every pick resolves at the real ground. Watched that happen in the browser.
-  }, [mapPickerState.source, projectId, stage, lat, lng, groundDatumM, onLoadAerialReference]);
+    // `imageryReloadToken` is bumped by the explicit Expand imagery area button and by nothing
+    // else — it is how a deliberate purchase re-enters this one lifecycle instead of getting a
+    // second acquisition path of its own.
+  }, [mapPickerState.source, projectId, stage, lat, lng, groundDatumM, imageryReloadToken,
+      onLoadAerialReference]);
 
   // Drop the reference layer if the component is going away, so a remount starts clean.
   useEffect(() => () => {
     const viewer = viewerRef.current;
-    if (viewer && aerialOverlayRef.current) {
-      try { viewer.scene.primitives.remove(aerialOverlayRef.current); } catch { /* ignore */ }
-      aerialOverlayRef.current = null;
+    if (viewer) {
+      for (const o of aerialOverlayRef.current) {
+        try { viewer.scene.primitives.remove(o.prim); } catch { /* ignore */ }
+      }
+      aerialOverlayRef.current = [];
+      for (const e of workzoneBoundaryRef.current) {
+        try { viewer.entities.remove(e); } catch { /* ignore */ }
+      }
+      workzoneBoundaryRef.current = [];
+      if (designSurfaceRef.current) {
+        try { viewer.scene.primitives.remove(designSurfaceRef.current); } catch { /* ignore */ }
+        designSurfaceRef.current = null;
+      }
     }
-    // 🚨 AND PUT THE MESH BACK. Flat imagery mode hides the tileset and shows the globe; leaving
-    // that state behind on unmount would hand the next mount a scene with no 3D at all and no
-    // record of why. `show3D` is a CONDITIONAL MOUNT in DesignStudio, so this runs on every
-    // 3D → 2D switch.
+    // 🚨 AND PUT THE MESH BACK, AND THE WORLD WITH IT. Precision Design mode hides the tileset,
+    // shows the globe, hides the ESRI layer and repaints the globe; leaving any of that behind on
+    // unmount would hand the next mount a scene with no 3D at all and no record of why. `show3D`
+    // is a CONDITIONAL MOUNT in DesignStudio, so this runs on every 3D → 2D switch.
     if (viewer && flatImageryRef.current) {
+      const saved = nativeWorldRef.current;
+      if (saved) {
+        try { if (esriLayerRef.current) esriLayerRef.current.show = saved.esriShown; } catch { /* ignore */ }
+        try { viewer.scene.globe.baseColor = saved.baseColor; } catch { /* ignore */ }
+        try { viewer.scene.globe.showGroundAtmosphere = saved.groundAtmosphere; } catch { /* ignore */ }
+        nativeWorldRef.current = null;
+      }
       try { if (tilesetRef.current) { tilesetRef.current.show = true; viewer.scene.globe.show = false; } } catch { /* ignore */ }
       flatImageryRef.current = false;
     }
@@ -4969,9 +5461,14 @@ function SolarEngine3D({
       });
 
       // Add imagery - ArcGIS directly (no Ion auth delay)
+      //
+      // 🚨 THE HANDLE IS KEPT. Precision Design mode has to make this layer go away, and the only
+      // correct way is `layer.show = false`: `removeAll()` destroys it, and re-adding builds a new
+      // provider that re-requests tiles and re-registers its credit. One layer, created once,
+      // toggled — so "restore the fallback exactly" means restoring a boolean.
       try {
         viewer.imageryLayers.removeAll();
-        viewer.imageryLayers.addImageryProvider(new C.UrlTemplateImageryProvider({
+        esriLayerRef.current = viewer.imageryLayers.addImageryProvider(new C.UrlTemplateImageryProvider({
           url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
           maximumLevel: 19,
           credit: 'Esri, Maxar, GeoEye',
@@ -17431,12 +17928,61 @@ function SolarEngine3D({
                    button to draw my polygons." */}
               {flatImagery ? (
                 <span data-testid="imagery-flat-mode" style={{ color: '#7dd3fc' }}>
-                  📐 3D mesh hidden — flat photo. Trace roof faces on it with 3D Plane / Mark
-                  Plane, then Building.
+                  📐 Precision Design — 3D mesh and base map hidden. Trace roof faces on the photo
+                  with 3D Plane / Mark Plane, then Building.
                 </span>
               ) : (
                 <span style={{ color: '#7c8aa5' }}>Reference only — your geometry is unchanged.</span>
               )}
+              {/* 🚨 WHICH LAYER YOU ARE OVER, BECAUSE THEY ARE NOT THE SAME RESOLUTION.
+                   The core is the design surface at ~6 cm/px; the ring around it is one zoom band
+                   down. Printing one resolution for the whole frame would claim design resolution
+                   for the neighbourhood, which is the "do not overstate the imagery" rule (R19)
+                   applied to extent instead of to dates. */}
+              {(aerialRefStatus.ref.layers?.length ?? 0) > 1 ? (
+                <>
+                  <br />
+                  <span data-testid="imagery-workzone-layers" style={{ color: '#9fb3c8' }}>
+                    Workzone: {aerialRefStatus.ref.layers.map(l =>
+                      `${l.role === 'core' ? 'design core' : 'neighbourhood'} `
+                      + `${l.resolutionCmPerPx ? l.resolutionCmPerPx.toFixed(1) + ' cm/px' : 'unknown'}`
+                    ).join(' · ')}. Outside it is SolarPro&apos;s design surface, not imagery.
+                  </span>
+                </>
+              ) : null}
+              {/* 🚨 WIDENING THE PAID AREA IS A PRESS, WITH ITS PRICE ON IT.
+                   "Never silently extend the paid workzone merely because the camera crosses its
+                   edge... If extension is supported, require an explicit Expand imagery area
+                   action." The cost is printed in the unit that is actually metered. */}
+              {(aerialRefStatus.ref.expandableRoles?.length ?? 0) > 0 ? (
+                <>
+                  <br />
+                  <button
+                    type="button"
+                    data-testid="imagery-expand-workzone"
+                    disabled={expandingImagery}
+                    onClick={() => {
+                      expandRequestRef.current = true;
+                      setExpandingImagery(true);
+                      setImageryReloadToken(t => t + 1);
+                    }}
+                    style={{
+                      marginTop: 4, padding: '3px 8px', fontSize: 11,
+                      background: expandingImagery ? '#334155' : '#1e3a5f',
+                      color: '#e2e8f0', border: '1px solid #3b5a7f', borderRadius: 4,
+                      cursor: expandingImagery ? 'wait' : 'pointer',
+                    }}
+                    title={aerialRefStatus.ref.expandCost ?? undefined}
+                  >
+                    {expandingImagery ? 'Acquiring…' : 'Expand imagery area'}
+                  </button>
+                  {aerialRefStatus.ref.expandCost ? (
+                    <span style={{ color: '#fbbf24', marginLeft: 6 }}>
+                      {aerialRefStatus.ref.expandCost}
+                    </span>
+                  ) : null}
+                </>
+              ) : null}
               {/* 🚨 HOW TO GET SHARPER PIXELS, SAID PLAINLY, BECAUSE THE ANSWER IS FREE.
                    The composite is built from whatever zoom the 2D canvas happened to fetch.
                    Nearmap Vert is native at z21 (~6 cm/px here); a composite from z19 tiles is
@@ -18038,7 +18584,12 @@ function SolarEngine3D({
                   { icon: '\u21BA', tip: 'Start Over: empty this property and begin again',
                     action: () => onRequestDelete?.('design'), danger: true },
                 ] as { icon: string; tip: string; action: () => void; danger?: boolean }[]).map(({ icon, tip, action, danger }) => (
+                  // 🚨 THESE BUTTONS HAD NO ACCESSIBLE NAME. Their only content is an emoji and the
+                  // tip goes into a custom hover tooltip, so a screen reader read "🔭" and nothing
+                  // could address them by name — the tool rows below already carry `aria-label`,
+                  // and these five did not. Same value the tooltip shows, so there is one string.
                   <button key={tip}
+                    aria-label={tip}
                     onMouseEnter={(e) => { const r=(e.currentTarget as HTMLButtonElement).getBoundingClientRect(); setTooltipInfo({text:tip,x:r.left+r.width/2,y:r.top-8}); }}
                     onMouseLeave={() => setTooltipInfo(null)}
                     onClick={action}
