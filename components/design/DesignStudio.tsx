@@ -5667,6 +5667,7 @@ export default function DesignStudio({ project, onSave }: Props) {
                 project.address ||
                 (project.client ? [project.client.address, project.client.city, project.client.state].filter(Boolean).join(', ') : '')
               }
+              projectId={project.id}
               placementMode={placementMode3D}
               onPlacementModeChange={setPlacementMode3D}
               showShade={showShade3D}

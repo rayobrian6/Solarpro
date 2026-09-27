@@ -18,6 +18,16 @@
 
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { MapSourcePicker, DEFAULT_PICKER_STATE, type MapPickerState } from '@/components/3d/mapSource';
+
+/** What /api/projects/[id]/aerial-reference reports about a project's stored aerial. */
+interface AerialReference {
+  source: 'nearmap' | 'google' | 'unknown';
+  imageDataUrl: string;
+  bounds: { north: number; south: number; east: number; west: number };
+  resolutionCmPerPx: number | null;
+  captureDate: string | null;
+  captureDateKnown: boolean;
+}
 import { buildDigitalTwin, enrichDigitalTwinWithDsm, type DigitalTwinData, type RoofSegment } from '@/lib/digitalTwin';
 import { filterToSubjectBuilding, dropDetectedPlanesOverlappingManual } from '@/lib/aerial/subjectBuildingCrop';
 import { autoLayoutScope, panelsAutoRoofOwns, mergeAutoRoofPanels } from '@/lib/3d/autoLayoutScope';
@@ -720,6 +730,9 @@ interface Props {
   lat: number;
   lng: number;
   projectAddress?: string;
+  /** The project whose already-acquired aerial may be shown as a reference layer. Absent on a
+   *  Quick Design, which has no project row and therefore no stored imagery. */
+  projectId?: string;
   panels: PlacedPanel[];
   onPanelsChange: (panels: PlacedPanel[]) => void;
   placementMode: PlacementMode;
@@ -1372,7 +1385,7 @@ export function laneASiteKey(lat: number, lng: number): string {
 }
 
 function SolarEngine3D({
-  lat, lng, projectAddress,
+  lat, lng, projectAddress, projectId,
   panels, onPanelsChange, roofPlanes,
   placementMode, onPlacementModeChange,
   systemType, tilt, azimuth, fenceHeight,
@@ -1884,6 +1897,28 @@ function SolarEngine3D({
   // the actual Cesium imagery swap is the integration step that the next
   // session wires up via the onChange callback.
   const [mapPickerState, setMapPickerState] = useState<MapPickerState>(DEFAULT_PICKER_STATE);
+  /**
+   * 🚨 THE IMAGERY TOGGLE, WHICH WAS A WRITE-ONLY SHELL.
+   *
+   * `mapPickerState` was declared, rendered, and read by NOTHING — components/3d/mapSource/DESIGN.md
+   * says so itself: "Switching calls onChange with the new MapSource; the actual imagery swap is the
+   * integration step handled by SolarEngine3D." That step was never done, so selecting Nearmap in
+   * the 3D studio changed a variable and nothing else. Reported live: "I still cannot access
+   * Nearmap from the 3D Design Studio."
+   *
+   * What it shows is the project's ALREADY-ACQUIRED aerial, served by
+   * /api/projects/[id]/aerial-reference, which acquires nothing: the permit route already stored a
+   * stitched, georeferenced orthophoto per project and nothing read the image back out. So the
+   * toggle is free to press — the rule was "Do not make the visual toggle a billing event."
+   *
+   * Cached in a ref keyed by project, so Nearmap → Native → Nearmap reuses one fetch.
+   */
+  const aerialRefCacheRef = useRef<{ projectId: string; data: AerialReference | null } | null>(null);
+  const aerialOverlayRef = useRef<any>(null);
+  const [aerialRefStatus, setAerialRefStatus] = useState<
+    { state: 'off' } | { state: 'loading' } | { state: 'shown'; ref: AerialReference }
+    | { state: 'unavailable'; reason: string }
+  >({ state: 'off' });
 
   // ── v47.126: Layout direction + origin control refs ─────────────────────
   // customLayoutDirRef: user-defined u-axis ENU vector {x,y} (null = use longest edge)
@@ -3605,6 +3640,155 @@ function SolarEngine3D({
   }, [obstructions, showShadeLocal, stage]);
   // v50.11: sync prop → local state (parent can also drive the toggle)
   useEffect(() => { setShowIrradianceLocal(showIrradiance); }, [showIrradiance]);
+
+  // ══════════════════════════════════════════════════════════════════════════
+  //  THE IMAGERY REFERENCE LAYER — Native 3D | Nearmap, inside the 3D studio
+  // ══════════════════════════════════════════════════════════════════════════
+  //
+  // 🚨 IMAGERY SOURCE IS NOT GEOMETRY AUTHORITY. The ruling is explicit: switching Native ↔
+  // Nearmap "must never mutate property boundary, sections, roof faces, walls, trees,
+  // obstructions, panels, ground mounts, electrical equipment, conduit. It is a reference-layer
+  // change only."
+  //
+  // So this effect adds and removes ONE primitive and touches nothing else. It does not read or
+  // write panels, roof planes, obstructions or any design state, and it is deliberately NOT in the
+  // dependency graph of anything that does.
+  //
+  // WHY A GroundPrimitive AND NOT AN IMAGERY LAYER. The note on the irradiance overlay above
+  // records the measured reason: "imageryLayers only reach the globe ellipsoid and are always
+  // hidden under the Google Photorealistic 3D tile mesh." A reference photo that disappears
+  // whenever the 3D mesh loads is not a reference photo. `GroundPrimitive` with
+  // `ClassificationType.BOTH` paints onto the 3D tiles AND the terrain, so it is visible in both
+  // the native-mesh case and the custom/fallback-geometry case Ray is actually working in.
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    const C = (window as any).Cesium;
+    if (!viewer || !C || stage !== 'done') return;
+
+    const wantNearmap = mapPickerState.source === 'nearmap';
+
+    const dropOverlay = () => {
+      if (aerialOverlayRef.current) {
+        try { viewer.scene.primitives.remove(aerialOverlayRef.current); } catch { /* already gone */ }
+        aerialOverlayRef.current = null;
+        try { viewer.scene.requestRender(); } catch { /* ignore */ }
+      }
+    };
+
+    if (!wantNearmap) {
+      // Back to native: remove the reference layer and nothing else.
+      dropOverlay();
+      setAerialRefStatus({ state: 'off' });
+      return;
+    }
+
+    if (!projectId) {
+      setAerialRefStatus({
+        state: 'unavailable',
+        reason: 'A Quick Design has no saved project, so it has no stored aerial to reuse.',
+      });
+      return;
+    }
+
+    let cancelled = false;
+
+    const draw = (ref: AerialReference) => {
+      if (cancelled) return;
+      dropOverlay();
+      try {
+        const rect = C.Rectangle.fromDegrees(
+          ref.bounds.west, ref.bounds.south, ref.bounds.east, ref.bounds.north);
+        const geometry = new C.RectangleGeometry({
+          rectangle: rect,
+          vertexFormat: C.EllipsoidSurfaceAppearance.VERTEX_FORMAT,
+        });
+        const mat = C.Material.fromType('Image', {
+          image: ref.imageDataUrl,
+          color: new C.Color(1.0, 1.0, 1.0, 1.0),
+        });
+        const appearance = new C.MaterialAppearance({ translucent: false, flat: true });
+        appearance.material = mat;
+        const prim = new C.GroundPrimitive({
+          geometryInstances: new C.GeometryInstance({ geometry }),
+          appearance,
+          // BOTH, so it lands on the Google 3D mesh when there is one and on the terrain when
+          // there is not — the fallback-geometry case this feature exists for.
+          classificationType: C.ClassificationType.BOTH,
+          asynchronous: false,
+        });
+        viewer.scene.primitives.add(prim);
+        aerialOverlayRef.current = prim;
+        try { viewer.scene.requestRender(); } catch { /* ignore */ }
+        setAerialRefStatus({ state: 'shown', ref });
+        addLog('IMAGERY', `reference layer shown — source=${ref.source} `
+          + `res=${ref.resolutionCmPerPx ? ref.resolutionCmPerPx.toFixed(1) + 'cm/px' : 'unknown'} `
+          + `date=${ref.captureDateKnown ? ref.captureDate : 'unavailable'} (reused, no acquisition)`);
+      } catch (e: unknown) {
+        setAerialRefStatus({
+          state: 'unavailable',
+          reason: `The stored aerial could not be drawn: ${(e as Error).message}`,
+        });
+      }
+    };
+
+    // Cached per project — a repeated toggle must not re-request anything.
+    const cached = aerialRefCacheRef.current;
+    if (cached && cached.projectId === projectId) {
+      if (cached.data) draw(cached.data);
+      else setAerialRefStatus({
+        state: 'unavailable',
+        reason: 'This project has no stored aerial that can be georeferenced.',
+      });
+      return () => { cancelled = true; };
+    }
+
+    setAerialRefStatus({ state: 'loading' });
+    (async () => {
+      try {
+        const res = await fetch(`/api/projects/${projectId}/aerial-reference`);
+        const data = await res.json();
+        if (cancelled) return;
+        if (!res.ok || !data?.success) {
+          aerialRefCacheRef.current = { projectId, data: null };
+          setAerialRefStatus({
+            state: 'unavailable',
+            reason: data?.error || `The aerial reference could not be read (HTTP ${res.status}).`,
+          });
+          return;
+        }
+        if (!data.available) {
+          aerialRefCacheRef.current = { projectId, data: null };
+          setAerialRefStatus({ state: 'unavailable', reason: data.reason || 'No stored aerial.' });
+          return;
+        }
+        const ref: AerialReference = {
+          source: data.source, imageDataUrl: data.imageDataUrl, bounds: data.bounds,
+          resolutionCmPerPx: data.resolutionCmPerPx ?? null,
+          captureDate: data.captureDate ?? null,
+          captureDateKnown: Boolean(data.captureDateKnown),
+        };
+        aerialRefCacheRef.current = { projectId, data: ref };
+        draw(ref);
+      } catch (e: unknown) {
+        if (cancelled) return;
+        setAerialRefStatus({
+          state: 'unavailable',
+          reason: `The aerial reference request failed: ${(e as Error).message}`,
+        });
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [mapPickerState.source, projectId, stage]);
+
+  // Drop the reference layer if the component is going away, so a remount starts clean.
+  useEffect(() => () => {
+    const viewer = viewerRef.current;
+    if (viewer && aerialOverlayRef.current) {
+      try { viewer.scene.primitives.remove(aerialOverlayRef.current); } catch { /* ignore */ }
+      aerialOverlayRef.current = null;
+    }
+  }, []);
 
   // v50.16: Irradiance heatmap — roof (masked) + ground/fence (unmasked, panel bbox)
   // GroundPrimitive with ClassificationType.CESIUM_3D_TILE paints directly onto
@@ -16552,6 +16736,69 @@ function SolarEngine3D({
         disabled={stage !== 'done' && stage !== 'error'}
       />
       </DraggablePanel>
+
+      {/* 🚨 NEVER SAY NEARMAP WHILE SHOWING SOMETHING ELSE.
+           The ruling: "Do not make a button say Nearmap HD while silently rendering ESRI. If
+           Nearmap is unavailable to the current user/project, say so explicitly. Never masquerade
+           one provider as another." The 2D canvas does exactly that today — a non-admin's Nearmap
+           request 403s, `img.onerror` swaps in ESRI, and the button stays lit as "Nearmap HD".
+           So this states what is actually on screen, including when the answer is "nothing".
+
+           And R19: the capture date is printed ONLY if the stored record carries one, the
+           resolution ONLY as computed from the zoom and latitude. No 7.5 cm/px brand claim. */}
+      {stage === 'done' && aerialRefStatus.state !== 'off' ? (
+        <div
+          data-testid="imagery-reference-status"
+          style={{
+            position: 'absolute', left: 12, bottom: 84, maxWidth: 330, zIndex: OVERLAY_Z.BASEMAP,
+            background: 'rgba(10,14,24,0.92)',
+            border: `1px solid ${aerialRefStatus.state === 'unavailable' ? 'rgba(251,191,36,0.45)' : 'rgba(148,163,184,0.3)'}`,
+            borderRadius: 9, padding: '7px 9px', color: '#e2e8f0', fontSize: 10.5, lineHeight: 1.4,
+          }}
+        >
+          {aerialRefStatus.state === 'loading' ? (
+            <span data-testid="imagery-reference-loading">🛰️ Loading the project&apos;s stored aerial…</span>
+          ) : aerialRefStatus.state === 'unavailable' ? (
+            <span data-testid="imagery-reference-unavailable">
+              <strong style={{ color: '#fbbf24' }}>⚠️ Nearmap reference unavailable.</strong>{' '}
+              {aerialRefStatus.reason} The native imagery is still shown — nothing has been
+              substituted for Nearmap.
+            </span>
+          ) : (
+            <span data-testid="imagery-reference-shown">
+              <strong>
+                {aerialRefStatus.ref.source === 'nearmap' ? '🛰️ Nearmap reference imagery'
+                  : aerialRefStatus.ref.source === 'google' ? '🛰️ Google reference imagery'
+                  : '🛰️ Reference imagery'}
+              </strong>
+              {aerialRefStatus.ref.source !== 'nearmap' ? (
+                <>
+                  {' '}<span style={{ color: '#fbbf24' }}>
+                    — this project&apos;s stored aerial came from{' '}
+                    {aerialRefStatus.ref.source === 'google' ? 'Google' : 'an unrecorded provider'},
+                    not Nearmap.
+                  </span>
+                </>
+              ) : null}
+              <br />
+              {aerialRefStatus.ref.resolutionCmPerPx
+                ? `${aerialRefStatus.ref.resolutionCmPerPx.toFixed(1)} cm/px`
+                : 'Resolution unknown'}
+              {' · '}
+              <span data-testid="imagery-reference-date">
+                {aerialRefStatus.ref.captureDateKnown
+                  ? `Captured ${aerialRefStatus.ref.captureDate}`
+                  : 'Capture date unavailable'}
+              </span>
+              {' · reused, no new imagery was purchased'}
+              <br />
+              <span style={{ color: '#7c8aa5' }}>
+                Reference only — your geometry is unchanged.
+              </span>
+            </span>
+          )}
+        </div>
+      ) : null}
 
       {/* v70: Aurora-style Save / Undo / Redo toolbar (top-left chip).
        * Renders the three icon+label buttons from lib/state/Buttons.tsx.
