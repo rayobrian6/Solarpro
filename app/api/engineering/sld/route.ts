@@ -33,7 +33,7 @@ import { getInverterById, MICROINVERTERS } from '@/lib/equipment-db';
 import { resolveIntegratedEquipment, planLandingDevice } from '@/lib/equipment/integratedBos';
 import { readProductionMeterFlag } from '@/lib/equipment/currentTransformers';
 import { resolveDesignMetering } from '@/lib/equipment/designMetering';
-import { hybridLaneMetering, standaloneGatewayFieldsFor } from '@/lib/equipment/sldCombinerFields';
+import { hybridLaneMetering, sldGatewayFieldsOf, standaloneGatewayFieldsFor } from '@/lib/equipment/sldCombinerFields';
 import { computeSystem, type ComputedSystemInput, type ComputedSystem } from '@/lib/computed-system';
 import { buildPermitSystemModel, type PermitSystemModel } from '@/lib/plan-set/permit-system-model';
 import {
@@ -218,6 +218,9 @@ export async function POST(req: NextRequest) {
           // The lanes with their CTs attached (a lane that meters nothing is
           // the same object sanitizeClientSourceBranches returned).
           sources:                 _mlMetering.lanes,
+          // The gateways that are not one whole lane (two arrays sharing one, or
+          // an array too big for one), each with its CTs.
+          ...(_mlMetering.gateways.length ? { gateways: _mlMetering.gateways } : {}),
         };
         const _mlSvg = renderSLDProfessional(_mlInput);
         console.log(`[SLD] Wave 5A multi-lane server render: lanes=${_sources.length} keys=${_sources.map(s => s.key).join('+')} backfeed=${_mlInput.backfeedAmps}A metering=${_mlMetering.metered.map(m => `${m.key}${m.isPrimary ? '*' : ''}`).join('+') || 'none'}`);
@@ -964,7 +967,12 @@ export async function POST(req: NextRequest) {
           consumptionCtLocation: typeof body.consumptionCtLocation === 'string' ? body.consumptionCtLocation : null,
           systemVoltage: Number(body.systemVoltage) || 240,
         });
-        return { meteringChannels: _met.scheduleValue, meteringDrawing: _met.drawing ?? undefined };
+        // More than one IQ Combiner / Envoy (Ray, 2026-09-26: capacity decides
+        // how many): each with its branches and CTs — the renderer draws one
+        // combiner per entry. Absent when one carries the design.
+        const _gws = isMicro ? sldGatewayFieldsOf(_bosPlan, _met.drawing) : undefined;
+        return { meteringChannels: _met.scheduleValue, meteringDrawing: _met.drawing ?? undefined,
+          ...(_gws ? { gateways: _gws } : {}) };
       })(),
       ocpdPerString:           isMicro ? 0 : (systemModel?.stringOcpdAmps ?? stringResult?.ocpdPerString),
       dcAcRatio:               isMicro ? undefined : (stringResult ? calcDcAcRatio(stringResult.totalDcPower / 1000, acOutputKw) : undefined),

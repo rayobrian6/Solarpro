@@ -6,7 +6,7 @@
 import type { PermitInput } from '../types';
 import type { CADModel } from '@/lib/cad/types';
 import { titleBlock, buildConstructionNotes } from '../utils/titleBlock';
-import { buildIntegratedEquipment, planLandingDevice, permitStandaloneGateway } from '../utils/integratedEquipment';
+import { buildIntegratedEquipment, planLandingDevice, permitSharedGatewayPanel, permitStandaloneGateway } from '../utils/integratedEquipment';
 import { escapeH } from '../utils/drawing';
 import { sysTypeLabel, topologyDisplayLabel, resolveInverterCount, utilityDisplayName, interconnectionLabel, isSupplySideInterconnection, roofTypeLabel, pv2Title, pv3Title, necNextStandardOcpd, hasRealBattery, resolveEquipmentBySubSystem, type SysType } from '../utils/helpers';
 import { hybridSheetSections, SUB_LABEL } from './subSystemSheets';
@@ -351,7 +351,13 @@ export function pageCoverSheet(input: PermitInput, cad: CADModel, pageNum: numbe
           return tagRow('N', `${_base} — STANDALONE${_sg.partNumber ? ` (${_sg.partNumber})` : ''}, ${_sg.supplyBreakerA}A 2P SUPPLY IN PV PANEL`);
         }
         return tagRow('N', _base);
-      });
+      }).concat((() => {
+        // More than one gateway: their outputs land in one shared PV AC panel.
+        const _panel = permitSharedGatewayPanel(input, cad, _plan);
+        return _panel && _plan.gatewayMultiplicity
+          ? [tagRow('N', `1 × ${_panel.model.toUpperCase()} — SHARED PANEL FOR THE ${_plan.gatewayMultiplicity.count} GATEWAY OUTPUTS`)]
+          : [];
+      })());
     })(),
     hasBattery && batteryDisplay
       ? tagRow('N', `${project.batteryCount} × ${batteryDisplay} — BATTERY STORAGE`)

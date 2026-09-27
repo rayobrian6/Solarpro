@@ -257,6 +257,9 @@ export async function POST(req: NextRequest) {
       // breaker in the panel named above) — the adapter states it only on that
       // topology, and the export draws what the screen draws.
       ...(_combiner.standaloneGateway ? { standaloneGateway: _combiner.standaloneGateway } : {}),
+      // More than one IQ Combiner / Envoy (capacity decides how many): each with
+      // its branches and CTs — the export draws what the screen draws.
+      ...(_combiner.gateways ? { gateways: _combiner.gateways } : {}),
       // The four fields above are the RESOLVED single-lane combiner. This is
       // the selection itself, and it is needed because a hybrid export attaches
       // `input.sources` below and switches to the multi-lane renderer, which
@@ -358,6 +361,10 @@ export async function POST(req: NextRequest) {
           ? buildInput.consumptionCtLocation : null,
       });
       input.sources = _pdfMetering.lanes;
+      // A hybrid's gateways are the collection's (pooled by topology), never the
+      // single-lane answer above.
+      if (_pdfMetering.gateways.length) input.gateways = _pdfMetering.gateways;
+      else delete input.gateways;
       console.log(`[SLD PDF] Wave 5A multi-lane export: lanes=${_pdfSources.length} keys=${_pdfSources.map(s2 => s2.key).join('+')} metering=${_pdfMetering.metered.map(m => `${m.key}${m.isPrimary ? '*' : ''}`).join('+') || 'none'}`);
     }
 

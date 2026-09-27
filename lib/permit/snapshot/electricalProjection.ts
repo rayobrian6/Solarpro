@@ -1831,7 +1831,19 @@ export function projectE1PhysicalSchedule(snap: PermitDesignSnapshot | null | un
       compliance,
     });
   };
-  runRow('COMBINER_TO_DISCO_RUN', 'COMBINER FEEDER → AC DISCONNECT', 'RW-COMBINER_TO_DISCO_RUN');
+  // More than one IQ Combiner / Envoy (Ray, 2026-09-26: capacity determines the
+  // count): each gateway's own output circuit into the shared PV AC combiner
+  // panel is a run of its own, and the whole-system feeder then leaves that
+  // panel. Only such a design has GW{n}_FEEDER_RUN segments; every other
+  // schedule is unchanged.
+  const _gwFeeders = (elec.routeSegments ?? [])
+    .map(r => r.segmentId)
+    .filter(id => /^GW\d+_FEEDER_RUN$/.test(String(id)))
+    .sort((a, b) => Number(/\d+/.exec(String(a))?.[0]) - Number(/\d+/.exec(String(b))?.[0]));
+  for (const id of _gwFeeders) {
+    runRow(String(id), `GATEWAY ${/\d+/.exec(String(id))?.[0]} OUTPUT → PV AC COMBINER PANEL`);
+  }
+  runRow('COMBINER_TO_DISCO_RUN', _gwFeeders.length ? 'PV AC PANEL FEEDER → AC DISCONNECT' : 'COMBINER FEEDER → AC DISCONNECT', 'RW-COMBINER_TO_DISCO_RUN');
 
   // ── THE DISCONNECT↔TAP SPAN — ONE SECTION, NOT TWO ──────────────────────
   // E-1 used to print this physical run TWICE: once as the DISCO_TO_METER_RUN

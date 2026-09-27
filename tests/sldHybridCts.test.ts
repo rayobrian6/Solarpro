@@ -95,13 +95,22 @@ function hybrid(raw: SLDSourceBranch[], o: { sel?: string | null; byLane?: Recor
   return { input, lanes: r.lanes };
 }
 /** The same input with every lane's metering taken off — what the sheet drew before. */
+// A hybrid's CTs ride on its lanes — and, where a gateway is not one whole lane
+// (two arrays sharing one, an array too big for one; Ray, 2026-09-26), on the
+// gateways the composer returns. Bare strips both.
 const bare = (i: SLDProfessionalInput): SLDProfessionalInput => ({
   ...i,
   sources: i.sources!.map(l => {
     const { meteringDrawing: _m, standaloneGateway: _g, ...rest } = l as MeteredSourceBranch;
     return rest;
   }),
+  ...(i.gateways ? { gateways: i.gateways.map(({ meteringDrawing: _m, standaloneGateway: _g, ...rest }) => rest) } : {}),
 });
+/** Every place a hybrid input carries metering: its lanes and its gateways. */
+const meteringCarriers = (i: SLDProfessionalInput) => [
+  ...i.sources!.map(l => l as MeteredSourceBranch),
+  ...(i.gateways ?? []),
+];
 const E1 = { suppressTitleBlock: true, suppressScheduleBand: true, suppressCalcBand: true } as const;
 
 // ── Geometry readers (the schematic's own frame: leads, rings and terminals
@@ -165,15 +174,16 @@ describe('a hybrid with no lane metering is drawn exactly as before', () => {
   const matrix = buildSldVariantMatrix().filter(v => v.family === 'hybrid');
 
   it('the matrix really exercises metered lanes (a stripped copy would prove nothing otherwise)', () => {
-    expect(matrix.length).toBe(12);
-    for (const v of matrix) expect(v.build().sources!.some(l => (l as MeteredSourceBranch).meteringDrawing), v.id).toBe(true);
+    expect(matrix.length).toBe(20);
+    for (const v of matrix) expect(meteringCarriers(v.build()).some(c => c.meteringDrawing), v.id).toBe(true);
   });
 
   for (const v of matrix) {
     it(`${v.id}: no metering fields ⇒ no CT ink, and absent ≡ undefined`, () => {
       const input = bare(applyRenderMode(v.build(), v.mode));
       const svg = renderSLDProfessional(input);
-      const undef = { ...input, sources: input.sources!.map(l => ({ ...l, meteringDrawing: undefined, standaloneGateway: undefined })) };
+      const undef = { ...input, sources: input.sources!.map(l => ({ ...l, meteringDrawing: undefined, standaloneGateway: undefined })),
+        ...(input.gateways ? { gateways: input.gateways.map(g => ({ ...g, meteringDrawing: undefined, standaloneGateway: undefined })) } : {}) };
       expect(renderSLDProfessional(undef)).toBe(svg);
       expect(svg).not.toContain(CT);
       for (const s of ['MONITORING GATEWAY', 'STANDALONE GATEWAY', 'Consumption CTs', 'INTEGRATED GATEWAY / MONITORING']) {
@@ -198,7 +208,7 @@ describe('every hybrid in the legibility matrix: the CTs add no collision', () =
       const input = applyRenderMode(v.build(), v.mode);
       const svg = renderSLDProfessional(input);
       expect(worseThanBare(svg, renderSLDProfessional(bare(input)))).toEqual([]);
-      const sg = input.sources!.map(l => (l as MeteredSourceBranch).standaloneGateway).find(Boolean);
+      const sg = meteringCarriers(input).map(c => c.standaloneGateway).find(Boolean);
       expect(ctInkFindings(svg, sg ? gatewayTexts(sg) : []).map(describeFinding)).toEqual([]);
     });
   }

@@ -151,6 +151,9 @@ describe('every caller now resolves the SAME device', () => {
     'app/api/engineering/sld/route.ts',
     'lib/bom-engine-v4.ts',
     'lib/equipment/integratedBos.ts',
+    // The engine resolves the combiner too since 2026-09-26: it sizes one output
+    // circuit per IQ Combiner / Envoy the design needs (capacity decides how many).
+    'lib/computed-system.ts',
   ];
 
   it('no construction of a micro SystemBosContext omits the pairing', () => {

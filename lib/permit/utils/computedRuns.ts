@@ -327,6 +327,12 @@ export function buildComputedRunsForPermit(
       // The REAL interconnecting breakers, when this design has MORE THAN ONE.
       // One (or none) ⇒ the engine's own derivation, unchanged.
       ...(_fleetCircuitAmps.length > 1 ? { interconnectingCircuitAmps: _fleetCircuitAmps } : {}),
+      // The recorded combiner / Envoy pick — the engine counts the gateways the
+      // design needs through the same resolver every sheet and the BOM use.
+      // A per-subsystem pass never counts: a hybrid's gateways are counted over
+      // every lane sharing a topology (resolveHybridAcCollection).
+      combinerSelectionId: input.project.selectedCombinerId ?? null,
+      ...(opts?.subSystemKey ? { countGatewayInstances: false } : {}),
       // Wave 2a pass-through (both undefined on the legacy path — I-1):
       ...(opts?.subSystemKey ? { subSystemKey: opts.subSystemKey } : {}),
       ...(opts?.emitSharedServiceRuns === false ? { emitSharedServiceRuns: false } : {}),

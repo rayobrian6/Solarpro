@@ -20,7 +20,7 @@ import {
   TopologyManagerContext,
   BOMStageDefinition,
 } from './topology-manager';
-import { resolveIntegratedEquipment, type IntegratedEquipmentPlan } from './equipment/integratedBos';
+import { planGatewayInstances, planSharedPanel, resolveIntegratedEquipment, type IntegratedEquipmentPlan } from './equipment/integratedBos';
 import {
   resolveMeteringRequirement,
   ungroundedConductorsForService,
@@ -1458,11 +1458,15 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     for (const d of _bosPlan.devices) {
       const cat = d.kind === 'gateway' ? 'gateway' : 'combiner';
       _bosEmitted.add(cat);
+      // As many as the design physically needs (Ray, 2026-09-26: capacity
+      // determines the count) — the quantity the drawings draw, never a literal 1.
+      const _q = Math.max(1, d.quantity || 1);
+      const _why = _q > 1 && _bosPlan.gatewayMultiplicity ? ` — ${_bosPlan.gatewayMultiplicity.explanation}` : '';
       items.push(addItem(cat === 'gateway' ? 'monitoring' : 'inverter', cat, d.brand, d.model,
-        d.partNumber ?? '—', `Integrated ${d.roleSummary}`, 1, 'ea',
-        (d.necRefs && d.necRefs[0]) ?? 'NEC 690.4', 'integrated-bos', '1', true));
+        d.partNumber ?? '—', `Integrated ${d.roleSummary}${_why}`, _q, 'ea',
+        (d.necRefs && d.necRefs[0]) ?? 'NEC 690.4', 'integrated-bos', String(_q), true));
       log.push({ stageId: cat === 'gateway' ? 'monitoring' : 'inverter', category: cat, item: d.model,
-        quantity: 1, derivedFrom: 'integrated-bos resolver', formula: '1', necReference: (d.necRefs && d.necRefs[0]) });
+        quantity: _q, derivedFrom: 'integrated-bos resolver', formula: String(_q), necReference: (d.necRefs && d.necRefs[0]) });
     }
     // The metering hardware that device needs and does not contain.
     {
@@ -1475,6 +1479,12 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
       }
       if (_ct.blockerMessage) warnings.push(_ct.blockerMessage);
     }
+  }
+  // More than one gateway: the shared PV AC combiner panel their outputs land in,
+  // and one backfed breaker per gateway output — what E-1 draws after them.
+  for (const it of sharedGatewayPanelBom(_bosPlan)) {
+    items.push(it);
+    log.push(bomLogEntryOf(it));
   }
 
   // Gateway (optimizer or microinverter topology)
@@ -2901,6 +2911,14 @@ function generateBOMV4PerSubSystem(
       isMicro: true,
       totalDevices,
       branchCount, // REAL summed branch count (legacy passed hardcoded 0)
+      // The gateways are counted over each array's OWN branches — the loads the
+      // drawings' collection solves — so the BOM buys the count E-1 draws.
+      ...(group.length > 1 ? {
+        branchSources: group.map(s => ({
+          laneKey: s.key, inverterModel: s.model ?? '', deviceCount: s.deviceCount,
+          branchCount: s.trunkPlan?.branchCount ?? Math.max(1, Math.ceil(s.deviceCount / 13)),
+        })),
+      } : {}),
       hasBattery: group.some(s => !!s.eq.batteryId || (s.eq.batteryCount ?? 0) > 0),
       // Same pairing the drawings resolve — see the note on the other call site.
       compatibleCombinerIds: combinerCompatibilityFor(group[0].brand, group[0].model),
@@ -2936,11 +2954,14 @@ function generateBOMV4PerSubSystem(
       for (const d of plan.devices) {
         const cat = d.kind === 'gateway' ? 'gateway' : 'combiner';
         emitted.add(cat);
+        // As many as the group's arrays physically need — one per gateway.
+        const _q = Math.max(1, d.quantity || 1);
         push(stamp, addItem(cat === 'gateway' ? 'monitoring' : 'inverter', cat, d.brand, d.model,
-          d.partNumber ?? '—', `Integrated ${d.roleSummary} — ${group[0].brand} ecosystem (${branchCount} AC branch(es))`,
-          1, 'ea', (d.necRefs && d.necRefs[0]) ?? 'NEC 690.4', 'integrated-bos (per brand group)', `branches=${branchCount}`, true));
+          d.partNumber ?? '—', `Integrated ${d.roleSummary} — ${group[0].brand} ecosystem (${branchCount} AC branch(es))`
+            + (_q > 1 && plan.gatewayMultiplicity ? ` — ${plan.gatewayMultiplicity.explanation}` : ''),
+          _q, 'ea', (d.necRefs && d.necRefs[0]) ?? 'NEC 690.4', 'integrated-bos (per brand group)', `branches=${branchCount}${_q > 1 ? `; gateways=${_q}` : ''}`, true));
         log.push({ stageId: cat === 'gateway' ? 'monitoring' : 'inverter', category: cat, item: d.model,
-          quantity: 1, derivedFrom: `integrated-bos resolver (${group[0].brand} group, ${branchCount} branches)`, formula: '1', necReference: (d.necRefs && d.necRefs[0]) });
+          quantity: _q, derivedFrom: `integrated-bos resolver (${group[0].brand} group, ${branchCount} branches)`, formula: String(_q), necReference: (d.necRefs && d.necRefs[0]) });
       }
       // Same metering hardware question, per brand group. On a hybrid job this
       // per-sub emission is the authoritative one, so omitting it here would ship
@@ -3853,6 +3874,12 @@ export function standaloneGatewayBom(
   const sub = opts.subSystem;
   const basis = STANDALONE_GATEWAY_BOM_BASIS;
   const branches = Math.max(0, Math.floor(opts.branchCount || 0));
+  // How many gateway topologies (Ray, 2026-09-26: capacity determines the
+  // count): each is a landing panel + a gateway on its own supply breaker, with
+  // its own supply conductors — the branch breakers stay one per branch, and the
+  // site's consumption CTs stay one set.
+  const n = Math.max(1, plan.gatewayMultiplicity?.count ?? 1);
+  const perGw = n > 1 ? ` (× ${n} — one per gateway: ${plan.gatewayMultiplicity!.explanation})` : '';
   const items: BOMLineItemV4[] = [];
 
   // ── What the ONE metering composer says about this gateway's CTs ──
@@ -3881,14 +3908,16 @@ export function standaloneGatewayBom(
   const feeds = opts.requiresACDisconnect === false
     ? 'feeds the service point of interconnection (no separate AC disconnect in this design)'
     : 'feeds the AC disconnect';
-  const breakerSumA = branchA * branches + supplyA;
+  // The largest instance sizes the panel model every instance uses.
+  const perLanding = n > 1 ? Math.max(...(plan.gatewayMultiplicity!.instances.map(i => i.branches.length))) : branches;
+  const breakerSumA = branchA * perLanding + supplyA;
   items.push(addItem('inverter', 'combiner', panel.brand, panel.model, panel.partNumber ?? '—',
     `PV AC combiner panel — the ${branches} AC branch circuit(s) land here on 2P ${branchA} A breakers, `
       + `plus the ${gw.model}'s 2P ${supplyA} A supply breaker (${panel.branchSlots ?? '—'} positions, `
-      + `${panel.maxContinuousA ?? '—'} A busbar); ${feeds}. Generic size class — `
+      + `${panel.maxContinuousA ?? '—'} A busbar); ${n > 1 ? 'feeds the shared PV AC combiner panel' : feeds}${perGw}. Generic size class — `
       + 'select the panel and FIELD-VERIFY the SKU.',
-    1, 'ea', panel.necRefs?.[0] ?? 'NEC 705.12(B)', basis,
-    `2P ${branchA}A × ${branches} + 2P ${supplyA}A × 1 = ${breakerSumA} A of breakers`, true,
+    n, 'ea', panel.necRefs?.[0] ?? 'NEC 705.12(B)', basis,
+    `${n > 1 ? `${n} × (` : ''}2P ${branchA}A × ${perLanding} + 2P ${supplyA}A × 1 = ${breakerSumA} A of breakers${n > 1 ? ')' : ''}`, true,
     undefined, undefined, undefined, sub,
     {
       quantitySource: 'count-derived',
@@ -3918,7 +3947,7 @@ export function standaloneGatewayBom(
   items.push(addItem('inverter', 'breaker', 'Generic', `2P ${supplyA}A Circuit Breaker — ${gw.model} supply`, '—',
     `2-pole ${supplyA} A breaker in the PV AC combiner panel feeding the ${gw.model} on its own circuit `
       + '(Enphase: a 2-pole breaker of 20 A maximum). Match the panel manufacturer and type — FIELD VERIFY.',
-    1, 'ea', 'NEC 240.4(D)', basis, `1 per ${gw.model}`, true,
+    n, 'ea', 'NEC 240.4(D)', basis, `1 per ${gw.model}${n > 1 ? ` × ${n}` : ''}`, true,
     undefined, undefined, undefined, sub,
     {
       quantitySource: 'per-installation-constant',
@@ -3953,12 +3982,12 @@ export function standaloneGatewayBom(
     items.push(addItem('inverter', 'wire', 'Southwire', `#${gauge} AWG THWN-2`, `THWN2-${gauge}`,
       `#${gauge} AWG Cu THWN-2 — ${gw.model} supply circuit L1, L2, N (3 conductors) from the `
         + `2P ${supplyA} A breaker in the PV AC combiner panel; ${runLabel}.`,
-      conduitLength(runFt * 3), 'ft', 'NEC 310.15', basis,
-      `${runFt} ft × 3 conductors (L1, L2, N) × 1.15`, true,
+      conduitLength(runFt * 3 * n), 'ft', 'NEC 310.15', basis,
+      `${runFt} ft × 3 conductors (L1, L2, N)${n > 1 ? ` × ${n} gateways` : ''} × 1.15`, true,
       undefined, undefined, undefined, sub, conductorHint('Supply conductor')));
     items.push(addItem('inverter', 'wire', 'Southwire', `#${gauge} AWG THWN-2 Green EGC`, `THWN2-GRN-${gauge}`,
       `#${gauge} AWG green THWN-2 equipment grounding conductor — ${gw.model} supply circuit; ${runLabel}.`,
-      conduitLength(runFt), 'ft', 'NEC 250.122', basis, `${runFt} ft × 1 × 1.15`, true,
+      conduitLength(runFt * n), 'ft', 'NEC 250.122', basis, `${runFt} ft × 1${n > 1 ? ` × ${n} gateways` : ''} × 1.15`, true,
       undefined, undefined, undefined, sub, conductorHint('EGC')));
   } else {
     // A conductor callout this cannot read is carried verbatim, never guessed.
@@ -3981,8 +4010,8 @@ export function standaloneGatewayBom(
     : '';
   items.push(addItem('monitoring', 'gateway', gw.brand, gw.model, gw.partNumber ?? '—',
     `Standalone ${gw.model} — ${gw.roleSummary}. Its own enclosure beside the PV AC combiner panel, `
-      + `fed from the 2P ${supplyA} A breaker there (L1, L2, N).${pctSaid}`,
-    1, 'ea', gw.necRefs?.[0] ?? 'NEC 690.4', basis, '1', true,
+      + `fed from the 2P ${supplyA} A breaker there (L1, L2, N).${pctSaid}${perGw}`,
+    n, 'ea', gw.necRefs?.[0] ?? 'NEC 690.4', basis, String(n), true,
     undefined, undefined, undefined, sub));
 
   // ── Outdoors, an indoor-rated gateway needs a NEMA 3R box ──
@@ -3992,7 +4021,7 @@ export function standaloneGatewayBom(
     items.push(addItem('monitoring', 'enclosure', 'Generic', `NEMA 3R Enclosure — ${gw.model}`, '—',
       `IF MOUNTED OUTDOORS — FIELD VERIFY. The ${gw.model} is rated for indoor mounting (DIN rail); `
         + 'outdoors it must be housed in a NEMA 3R enclosure. Not needed when it mounts indoors.',
-      1, 'ea', 'NEC 110.28', basis, '1 if outdoors', false,
+      n, 'ea', 'NEC 110.28', basis, n > 1 ? `1 per gateway if outdoors × ${n}` : '1 if outdoors', false,
       undefined, undefined, undefined, sub,
       {
         quantitySource: 'per-installation-constant',
@@ -4013,6 +4042,54 @@ export function standaloneGatewayBom(
   if (ct.blockerMessage) warnings.push(ct.blockerMessage);
 
   return { items, warnings };
+}
+
+/** Every row sharedGatewayPanelBom emits carries this basis — how the permit
+ *  reconcile finds (and replaces) them. */
+export const SHARED_GATEWAY_PANEL_BOM_BASIS =
+  'integrated-bos resolver — gateway multiplicity (shared PV AC combiner panel)';
+
+/**
+ * The shared PV AC combiner panel a SINGLE system's gateways land in when it
+ * needs more than one (Ray, 2026-09-26: capacity determines the count), and one
+ * backfed 2P breaker per gateway output — the panel E-1 draws after them, sized
+ * by the one resolver rule (planSharedPanel). Empty for a design one gateway
+ * carries. (A hybrid's shared panel is the AC collection's, bought by the
+ * permit reconcile from that collection.)
+ */
+export function sharedGatewayPanelBom(plan: IntegratedEquipmentPlan, subSystem?: BOMSystemType): BOMLineItemV4[] {
+  const panel = planSharedPanel(plan);
+  const inst = planGatewayInstances(plan);
+  if (!panel || inst.length < 2) return [];
+  const basis = SHARED_GATEWAY_PANEL_BOM_BASIS;
+  const items: BOMLineItemV4[] = [addItem('inverter', 'combiner', panel.brand, panel.model, panel.partNumber ?? '—',
+    `Shared PV AC combiner panel — the ${inst.length} gateway outputs land here on backfed 2P breakers `
+      + `(${inst.map(g => `${g.label} ${g.outputOcpdA} A`).join(', ')}); ${panel.busbarA} A busbar ≥ Σ ${inst.reduce((s, g) => s + g.outputOcpdA, 0)} A `
+      + '(NEC 705.12(B)); feeds the AC disconnect. Generic size class — select the panel and FIELD-VERIFY the SKU.',
+    1, 'ea', panel.necRefs?.[0] ?? 'NEC 705.12(B)', basis, `1 per design with ${inst.length} gateways`, true,
+    undefined, undefined, undefined, subSystem,
+    {
+      quantitySource: 'count-derived',
+      authorityStateHint: 'CANDIDATE_NON_ORDERABLE',
+      authorityStateHintReason:
+        'GENERIC PV AC COMBINER PANEL — the catalogue row is a size class (busbar and positions), not a '
+        + 'product: no manufacturer, no SKU. Select the panel being installed and FIELD-VERIFY it, then re-derive.',
+    })];
+  const byRating = new Map<number, string[]>();
+  for (const g of inst) byRating.set(g.outputOcpdA, [...(byRating.get(g.outputOcpdA) ?? []), g.label]);
+  for (const [a, labels] of byRating) {
+    items.push(addItem('inverter', 'breaker', 'Generic', `2P ${a}A Circuit Breaker — gateway output (backfed)`, '—',
+      `2-pole ${a} A backfed breaker in the shared PV AC combiner panel — the output circuit of ${labels.join(', ')}. `
+        + 'Match the panel manufacturer and type — FIELD VERIFY.',
+      labels.length, 'ea', 'NEC 705.12(B)', basis, `1 per gateway output rated ${a} A × ${labels.length}`, true,
+      undefined, undefined, undefined, subSystem,
+      {
+        quantitySource: 'topology-derived',
+        authorityStateHint: 'CANDIDATE_NON_ORDERABLE',
+        authorityStateHintReason: MATCH_PANEL_REASON,
+      }));
+  }
+  return items;
 }
 
 /** One CT line → one BOM row. The producer's procurement state travels with it:

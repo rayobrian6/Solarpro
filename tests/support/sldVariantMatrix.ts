@@ -164,15 +164,17 @@ export const CT_LOCATIONS: Record<Interconnection, Array<ConsumptionCtLocation |
   SUPPLY_SIDE_TAP: [null, 'main-breaker-load-side', 'sec-line-side-of-main'],
   MAIN_BREAKER_DERATE: [null, 'main-breaker-load-side'],
 };
-/** 1 branch of 11; 3 of 11/11/10 (Ray's screenshot); 5 of 12/12/12/11/11. */
-const DEVICES_FOR_BRANCHES: Record<number, number> = { 1: 11, 3: 32, 5: 58 };
+/** 1 branch of 11; 3 of 11/11/10 (Ray's screenshot); 5 of 12/12/12/11/11;
+ *  8 of 13×4 + 12×4 — past one gateway on every topology (Ray, 2026-09-26:
+ *  capacity determines multiplicity). */
+export const DEVICES_FOR_BRANCHES: Record<number, number> = { 1: 11, 3: 32, 4: 47, 5: 58, 8: 100, 9: 112 };
 const IQ8PLUS = { inverterManufacturer: 'Enphase', inverterModel: 'IQ8+', inverterId: 'enphase-iq8plus', kw: 0.29, amps: 1.21 };
 
 export interface MicroOptions {
   combiner: CombinerKey;
   interconnection: Interconnection;
   ct: ConsumptionCtLocation | null;
-  branches: 1 | 3 | 5;
+  branches: 1 | 3 | 4 | 5 | 8 | 9;
   battery?: boolean;
   mode: SldRenderMode;
 }
@@ -187,6 +189,7 @@ export function microInput(o: MicroOptions): SLDProfessionalInput {
     inverterAcKw: IQ8PLUS.kw, inverterAcCurrentMax: IQ8PLUS.amps, inverterMaxDcV: 60, inverterMpptVmin: 27, inverterMpptVmax: 45,
     inverterMaxInputCurrentPerMppt: 14, inverterMpptChannels: 1, inverterBranchLimit: 13,
     interconnectionMethod: o.interconnection, branchCount: o.branches, ...bat,
+    combinerSelectionId: COMBINERS[o.combiner],
   }), o.interconnection);
   const f = combinerFields.sldCombinerFields({
     inverterManufacturer: IQ8PLUS.inverterManufacturer, inverterModel: IQ8PLUS.inverterModel, inverterId: IQ8PLUS.inverterId,
@@ -199,6 +202,9 @@ export function microInput(o: MicroOptions): SLDProfessionalInput {
   const met = resolveDesignMetering({
     plan: f.plan, interconnectionRaw: o.interconnection, consumptionCtLocation: o.ct, systemVoltage: 240,
   });
+  // More than one IQ Combiner / Envoy: the route's `gateways` (sldGatewayFieldsOf,
+  // with the drawing it composed) — absent when one carries the design.
+  const gateways = combinerFields.sldGatewayFieldsOf(f.plan, met.drawing);
   return {
     ...PROJECT,
     topologyType: 'MICROINVERTER', totalModules: n, totalStrings: 0,
@@ -224,6 +230,7 @@ export function microInput(o: MicroOptions): SLDProfessionalInput {
     combinerSelectionIsDecided: f.combinerSelectionIsDecided,
     ...(f.standaloneGateway ? { standaloneGateway: f.standaloneGateway } : {}),
     meteringChannels: met.scheduleValue, meteringDrawing: met.drawing ?? undefined,
+    ...(gateways ? { gateways } : {}),
     ocpdPerString: 0, systemModel: model, egcGauge: model.egcGauge,
     selectedBrand: 'enphase', ecosystemTopology: 'micro', integratedDcDisconnect: false,
   } as SLDProfessionalInput;
@@ -325,10 +332,50 @@ const THREE_LANES = (): SLDSourceBranch[] => [
   },
 ];
 
+/** An Enphase IQ8+ array lane of `devices` micros on `branches` balanced branches. */
+const ENPHASE_LANE = (key: 'roof' | 'ground' | 'fence', devices: number, branches: number): SLDSourceBranch => {
+  const base = Math.floor(devices / branches);
+  const extra = devices % branches;
+  const microBranches = Array.from({ length: branches }, (_, i) => {
+    const n = base + (i < extra ? 1 : 0);
+    return { branchIndex: i, deviceCount: n, branchCurrentA: +(n * 1.21).toFixed(2), ocpdAmps: 20,
+      conductorCallout: '2×#12 THWN-2\n1×#12 GRN EGC', necReference: 'NEC 690.8(B)' };
+  });
+  const amps = +(devices * 1.21).toFixed(2);
+  const ocpd = [15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80, 90, 100, 110, 125].find(a => a >= amps * 1.25) ?? 125;
+  return {
+    key, label: `${key.toUpperCase()} — ${devices} × ${PANEL.panelModel}`, topologyType: 'MICROINVERTER', systemType: key,
+    totalModules: devices, deviceCount: devices, panelModel: PANEL.panelModel, panelWatts: PANEL.panelWatts,
+    panelVoc: PANEL.panelVoc, panelIsc: PANEL.panelIsc, inverterManufacturer: 'Enphase', inverterModel: 'IQ8+',
+    acKwPerDevice: 0.29, acOutputKw: +(devices * 0.29).toFixed(2), acOutputAmps: amps, acOCPD: ocpd, backfeedAmps: ocpd,
+    microBranches, rapidShutdownIntegrated: key === 'roof' ? true : false,
+  } as unknown as SLDSourceBranch;
+};
+/** Two small Enphase arrays on one topology — ONE gateway, the site's only source (no shared panel). */
+const POOLED_LANES = (): SLDSourceBranch[] => [ENPHASE_LANE('roof', 26, 2), ENPHASE_LANE('ground', 13, 1)];
+/** …plus a string array: one gateway and the string inverter land on the shared panel. */
+const POOLED_STRING_LANES = (): SLDSourceBranch[] => [
+  ENPHASE_LANE('roof', 26, 2), ENPHASE_LANE('ground', 13, 1),
+  { ...(TWO_LANES()[1] as object), key: 'fence', systemType: 'fence' } as unknown as SLDSourceBranch,
+];
+/** A roof array too big for one 5C (5 branches) and a ground array that shares its second gateway. */
+const SPLIT_POOL_LANES = (): SLDSourceBranch[] => [ENPHASE_LANE('roof', 65, 5), ENPHASE_LANE('ground', 13, 1)];
+export type HybridLaneSet = 'two' | 'three' | 'pooled' | 'pooledstr' | 'splitpool';
+const LANE_SETS: Record<HybridLaneSet, () => SLDSourceBranch[]> = {
+  two: TWO_LANES, three: THREE_LANES, pooled: POOLED_LANES, pooledstr: POOLED_STRING_LANES, splitpool: SPLIT_POOL_LANES,
+};
+const LANE_SET_TITLE: Record<HybridLaneSet, string> = {
+  two: 'roof IQ8M micro + ground SE7600H',
+  three: 'roof IQ8M + ground Solis + SolFence',
+  pooled: 'roof IQ8+ ×26 + ground IQ8+ ×13 — ONE shared gateway, no panel',
+  pooledstr: 'roof IQ8+ ×26 + ground IQ8+ ×13 (one shared gateway) + fence SE7600H',
+  splitpool: 'roof IQ8+ ×65 (5 br, two gateways) + ground IQ8+ ×13 joining gateway 2',
+};
+
 type HybridMeteringFn = (i: {
   lanes: readonly SLDSourceBranch[]; selectedCombinerId?: string | null; interconnectionRaw: string | null;
   consumptionCtLocation?: string | null; systemVoltage?: number | null;
-}) => { lanes: SLDSourceBranch[] };
+}) => { lanes: SLDSourceBranch[]; gateways?: SLDProfessionalInput['gateways'] };
 
 /**
  * The lanes as the hybrid route hands them to the renderer. When the hybrid
@@ -338,18 +385,26 @@ type HybridMeteringFn = (i: {
  * Looked up by name so this matrix never has to change when it lands.
  */
 export function hybridLanes(lanes: SLDSourceBranch[], selectedCombinerId: string | null, interconnection: Interconnection): SLDSourceBranch[] {
+  return hybridComposed(lanes, selectedCombinerId, interconnection).lanes;
+}
+/** The composer's whole answer: the lanes, and the gateways that are not one
+ *  whole lane (two arrays sharing one, or an array too big for one). */
+export function hybridComposed(lanes: SLDSourceBranch[], selectedCombinerId: string | null, interconnection: Interconnection)
+  : { lanes: SLDSourceBranch[]; gateways: NonNullable<SLDProfessionalInput['gateways']> } {
   const fn = (combinerFields as unknown as Record<string, unknown>).hybridLaneMetering as HybridMeteringFn | undefined;
-  if (typeof fn !== 'function') return lanes;
-  return fn({ lanes, selectedCombinerId, interconnectionRaw: interconnection, consumptionCtLocation: null, systemVoltage: 240 }).lanes;
+  if (typeof fn !== 'function') return { lanes, gateways: [] };
+  const r = fn({ lanes, selectedCombinerId, interconnectionRaw: interconnection, consumptionCtLocation: null, systemVoltage: 240 });
+  return { lanes: r.lanes, gateways: r.gateways ?? [] };
 }
 export const hybridMeteringComposerPresent = (): boolean =>
   typeof (combinerFields as unknown as Record<string, unknown>).hybridLaneMetering === 'function';
 
-export function hybridInput(o: { lanes: 'two' | 'three'; selected: CombinerKey | null; interconnection: Interconnection;
+export function hybridInput(o: { lanes: HybridLaneSet; selected: CombinerKey | null; interconnection: Interconnection;
   battery?: boolean; mode: SldRenderMode }): SLDProfessionalInput {
-  const raw = o.lanes === 'two' ? TWO_LANES() : THREE_LANES();
+  const raw = LANE_SETS[o.lanes]();
   const selectedCombinerId = o.selected ? COMBINERS[o.selected] : null;
-  const sources = hybridLanes(raw, selectedCombinerId, o.interconnection);
+  const composed = hybridComposed(raw, selectedCombinerId, o.interconnection);
+  const sources = composed.lanes;
   const sumBackfeed = sources.reduce((s, b) => s + (b.backfeedAmps ?? b.acOCPD ?? 0), 0);
   // route.ts `_mlInput`, field for field, with the page's usual body values.
   return {
@@ -370,6 +425,7 @@ export function hybridInput(o: { lanes: 'two' | 'three'; selected: CombinerKey |
     ...(o.battery ? { batteryBrand: 'Enphase', batteryCount: 2, batteryBackfeedA: 20,
       backupInterfaceBrand: 'Enphase', backupInterfaceModel: 'IQ System Controller 3' } : {}),
     sources,
+    ...(composed.gateways.length ? { gateways: composed.gateways } : {}),
   } as SLDProfessionalInput;
 }
 
@@ -385,8 +441,28 @@ export function roofPermitJob(combiner: CombinerKey, interconnection: Interconne
   p.project.interconnectionMethod = interconnection;
   return p;
 }
-export function permitCase(which: 'roof' | 'ground' | 'fence', combiner: CombinerKey = '5c',
+/** 60 IQ8M on the roof: 6 branches of 10 (11 max per branch) — past a 5C's 4
+ *  positions, so TWO gateways (Ray, 2026-09-26: capacity determines the count). */
+export function bigRoofPermit() {
+  const p = clone(roofProject) as typeof roofProject & { project: Record<string, unknown>; system: any };
+  const N = 60;
+  p.project.panelPositions = Array.from({ length: N }, (_, i) => ({
+    id: `roof-panel-${i + 1}`,
+    lat: 33.4484 + Math.floor(i / 10) * 0.00002, lng: -112.0740 + (i % 10) * 0.00002,
+    x: (i % 10) * 1.1, y: Math.floor(i / 10) * 1.8, tilt: 22, azimuth: 180, wattage: 430,
+    row: Math.floor(i / 10), col: i % 10, systemType: 'roof', orientation: 'portrait',
+  }));
+  p.project.selectedCombinerId = COMBINERS['5c'];
+  p.project.interconnectionMethod = 'SUPPLY_SIDE_TAP';
+  p.system.totalPanels = N;
+  p.system.totalDcKw = +(N * 0.43).toFixed(2);
+  p.system.totalAcKw = +(N * 0.33).toFixed(2);
+  p.system.inverters[0].strings[0].panelCount = N;
+  return p;
+}
+export function permitCase(which: 'roof' | 'ground' | 'fence' | 'bigroof', combiner: CombinerKey = '5c',
   interconnection: Interconnection = 'SUPPLY_SIDE_TAP'): { input: typeof roofProject; cad: CADModel } {
+  if (which === 'bigroof') { const b = bigRoofPermit(); return { input: b, cad: generateCADLayout(b as never) }; }
   if (which === 'roof') return { input: roofPermitJob(combiner, interconnection), cad: ROOF_CAD };
   const fx = which === 'ground' ? groundProject : fenceProject;
   return { input: clone(fx), cad: generateCADLayout(fx as never) };
@@ -431,6 +507,10 @@ export function buildSldVariantMatrix(): SldVariant[] {
       for (const ic of ['LOAD_SIDE', 'SUPPLY_SIDE_TAP'] as Interconnection[]) micro({ combiner, interconnection: ic, ct: null, branches });
     }
   }
+  // 2b. Past one gateway (Ray, 2026-09-26): 8 branches on every topology.
+  for (const combiner of ['5c', '6c', 'gw'] as CombinerKey[]) {
+    for (const ic of ['LOAD_SIDE', 'SUPPLY_SIDE_TAP'] as Interconnection[]) micro({ combiner, interconnection: ic, ct: null, branches: 8 }, ' · TWO GATEWAYS');
+  }
   // 3. Battery + backup interface.
   for (const combiner of ['5c', 'gw'] as CombinerKey[]) {
     for (const ic of ['LOAD_SIDE', 'SUPPLY_SIDE_TAP'] as Interconnection[]) micro({ combiner, interconnection: ic, ct: null, branches: 3, battery: true });
@@ -445,12 +525,13 @@ export function buildSldVariantMatrix(): SldVariant[] {
       title: 'Fronius Primo 7.6-1 · 2 strings × 10 · external DC disconnect · LOAD_SIDE', build: () => stringInverterInput('LOAD_SIDE', mode) });
   }
   // 5. Hybrid multi-lane.
-  const hybrid = (lanes: 'two' | 'three', selected: CombinerKey | null, ic: Interconnection, battery = false) => {
+  const LANE_CODE: Record<HybridLaneSet, string> = { two: '2lane', three: '3lane', pooled: 'pooled', pooledstr: 'pooledstr', splitpool: 'splitpool' };
+  const hybrid = (lanes: HybridLaneSet, selected: CombinerKey | null, ic: Interconnection, battery = false) => {
     for (const mode of MODES) {
       out.push({
-        id: `hybrid-${lanes === 'two' ? '2lane' : '3lane'}-${selected ?? 'paired'}-${IC_CODE[ic]}${battery ? '-bat' : ''}-${mode}`,
+        id: `hybrid-${LANE_CODE[lanes]}-${selected ?? 'paired'}-${IC_CODE[ic]}${battery ? '-bat' : ''}-${mode}`,
         family: 'hybrid', mode,
-        title: `Hybrid ${lanes === 'two' ? 'roof IQ8M micro + ground SE7600H' : 'roof IQ8M + ground Solis + SolFence'} · `
+        title: `Hybrid ${LANE_SET_TITLE[lanes]} · `
           + `${selected ? COMBINER_NAME[selected] : 'combiner by pairing'} · ${ic}${battery ? ' · IQ Battery 5P ×2 + IQ SC3' : ''}`,
         build: () => hybridInput({ lanes, selected, interconnection: ic, battery, mode }),
       });
@@ -461,8 +542,13 @@ export function buildSldVariantMatrix(): SldVariant[] {
   }
   hybrid('two', null, 'LOAD_SIDE', true);
   hybrid('three', null, 'LOAD_SIDE');
+  // Gateway pooling and splitting (Ray, 2026-09-26).
+  hybrid('pooled', '5c', 'LOAD_SIDE');
+  hybrid('pooled', 'gw', 'SUPPLY_SIDE_TAP');
+  hybrid('pooledstr', '5c', 'LOAD_SIDE');
+  hybrid('splitpool', '5c', 'SUPPLY_SIDE_TAP');
   // 6. The permit path, through buildSLDInputFromPermit.
-  const permit = (id: string, title: string, mode: SldRenderMode, which: 'roof' | 'ground' | 'fence',
+  const permit = (id: string, title: string, mode: SldRenderMode, which: 'roof' | 'ground' | 'fence' | 'bigroof',
     combiner: CombinerKey = '5c', ic: Interconnection = 'SUPPLY_SIDE_TAP') => out.push({
     id: `permit-${id}-${mode}`, family: 'permit', mode, title: `PERMIT ${mode === 'e11' ? 'E-1.1' : 'E-1'} · ${title}`,
     build: () => { const c = permitCase(which, combiner, ic); return buildSLDInputFromPermit(c.input as never, c.cad); },
@@ -473,5 +559,8 @@ export function buildSldVariantMatrix(): SldVariant[] {
   permit('roof-6c-derate', 'roofProject · IQ Combiner 6C · MAIN_BREAKER_DERATE (backfed MSP)', 'e1', 'roof', '6c', 'MAIN_BREAKER_DERATE');
   permit('ground', 'groundProject · SolarEdge SE7600H string', 'e1', 'ground');
   permit('fence', 'fenceProject · Enphase IQ8A SolFence', 'e1', 'fence');
+  // Past one gateway on the permit path (Ray, 2026-09-26): 60 IQ8M → two 5Cs.
+  permit('bigroof-5c-tap', 'roofProject ×60 IQ8M · TWO IQ Combiner 5C · SUPPLY_SIDE_TAP', 'e1', 'bigroof');
+  permit('bigroof-5c-tap', 'roofProject ×60 IQ8M · TWO IQ Combiner 5C · SUPPLY_SIDE_TAP', 'e11', 'bigroof');
   return out;
 }

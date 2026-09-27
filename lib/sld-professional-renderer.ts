@@ -20,12 +20,13 @@
 import type { RunSegment, MicroBranch } from './computed-system';
 import type { SldMeteringDrawing } from '@/lib/equipment/designMetering';
 import type { ConsumptionCtLocation } from '@/lib/equipment/currentTransformers';
-import type { StandaloneGatewayFields } from '@/lib/equipment/sldCombinerFields';
+import type { SldGatewayFields, StandaloneGatewayFields } from '@/lib/equipment/sldCombinerFields';
 import { combinerCompatibilityFor } from '@/lib/equipment/combinerCompatibility';
 import { necNextStandardOcpd, unselectedInverterLabel, isInverterUnselectedMarker, BATTERY_CAPACITY_UNRESOLVED } from '@/lib/permit/utils/helpers';
 import { wireGaugeForOcpd } from '@/lib/permit/utils/conductorAuthority';
 import { resolveAcDisconnect } from '@/lib/electrical/acDisconnect';
 import { getEGCSize } from '@/lib/manufacturer-specs';
+import { NEC_AWG_ORDER } from '@/lib/nec/ampacity';
 import { microBranchCount, microMaxPerBranch } from '@/lib/permit/utils/branching';
 import { getBuildBadge } from './version';
 import { isGroundingConductor, type ConductorBundle } from './segment-schedule';
@@ -34,7 +35,8 @@ import { SLD_SYMBOL_MAP } from './sld-symbols';
 import { emitBrandEmblem } from './sld-brand-emblems';
 import { resolveDeviceIllustration, forPrintedSheet, illustrationBox, type DeviceIllustration } from './sld-device-illustrations';
 import type { Conductor, WireRun, ConductorType, WireEnvironment } from './sld-types';
-import { getBosDevice, resolveHybridAcCollection, type HybridAcCollectionPlan } from '@/lib/equipment/integratedBos';
+import { getBosDevice, laneCombinerSelection, resolveHybridAcCollection, type HybridAcCollectionPlan, type HybridGatewayInstance } from '@/lib/equipment/integratedBos';
+import { branchRangeText } from '@/lib/equipment/enphaseGatewayMultiplicity';
 import { combinerBasisIsDecided } from '@/lib/combinerSelection/service';
 
 // ── Canvas ──────────────────────────────────────────────────────────────────
@@ -560,6 +562,18 @@ export interface SLDProfessionalInput {
    * before. Micro single-lane path only.
    */
   standaloneGateway?:      StandaloneGatewayFields;
+  /**
+   * 🚨 EVERY IQ COMBINER / ENVOY WHEN THE DESIGN NEEDS MORE THAN ONE (Ray,
+   * 2026-09-26: "capacity determines multiplicity") — `sldCombinerFields()
+   * .gateways` on a single system, `hybridLaneMetering().gateways` on a hybrid
+   * (there: only the gateways that are not one whole lane). Each entry carries
+   * its CTs, drawn verbatim. A single system with more than one entry is drawn
+   * on the multi-source sheet, one combiner per gateway.
+   *
+   * ABSENT on every design one gateway per array carries, and absence draws
+   * exactly what it drew before.
+   */
+  gateways?:               SldGatewayFields[];
   ocpdPerString?:          number;
   dcAcRatio?:              number;
   stringConfigWarnings?:   string[];
@@ -1924,6 +1938,10 @@ function renderCombiner(
            *  under the nameplate. Undefined ⇒ the caller did not answer and the
            *  symbol is drawn exactly as before. */
           selectionUnresolved?: boolean;
+          /** Which of several gateways this is, and the branches that land on
+           *  it ('GATEWAY 2 — PV-R B5–B6') — printed under the nameplate, where
+           *  the block is laid out clear of the CT leads and the header. */
+          gatewayLine?: string;
           /** The feeder leaving this combiner carries a neutral (the IQ
            *  Gateway inside is powered line-to-neutral). Draws the N terminal
            *  and the gateway's neutral reference. */
@@ -2115,6 +2133,9 @@ function renderCombiner(
   const _lbl0 = by2+H2+(opts?.labelPitch ? 13 : 10);
   let _lblY = _lbl0;
   p.push(txt(cx, _lblY, esc(label), {sz:F.tiny, anc:'middle', italic:true})); _lblY += _lp;
+  if (opts?.gatewayLine) {
+    p.push(txt(cx, _lblY, esc(opts.gatewayLine), {sz:F.tiny, anc:'middle', bold:true, fill:'#1A237E'})); _lblY += _lp;
+  }
   // The qualifier rides directly under the nameplate it qualifies, so the model
   // and "nobody chose this" can never be read apart. Red + ⚠, same as the
   // unselected-inverter nameplate two symbols away on the same sheet.
@@ -2321,8 +2342,10 @@ function renderMSPLoad(
   // type height — so the box covered its lower half, and the symbol's own
   // "200A" printed over it. The left side is the one nothing else uses (the CT
   // tag and bubble go right; 'MAIN BUS' sits below the breaker line).
-  p.push(txt(cx-19, mbY-1, `${mainAmps}A MAIN`, {sz:5.5, anc:'end', bold:true}));
-  p.push(txt(cx-19, mbY+7, 'BREAKER', {sz:5.5, anc:'end', bold:true}));
+  // 9 uu apart at the floored size: at 8 the two lines cleared by 1.8 uu at
+  // 1:1 and touched once a four-row multi-source sheet is fitted below it.
+  p.push(txt(cx-19, mbY-1.5, `${mainAmps}A MAIN`, {sz:5.5, anc:'end', bold:true}));
+  p.push(txt(cx-19, mbY+7.5, 'BREAKER', {sz:5.5, anc:'end', bold:true}));
   p.push(breakerSymbol(cx, mbY, 32, 14));
 
   // Main busbar
@@ -2711,6 +2734,12 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     const _lanes = normalizeSourceBranches(input.sources);
     if (_lanes.length > 1) return renderSLDMultiLane(input, _lanes);
   }
+  // More than one IQ Combiner / Envoy on a single system (Ray, 2026-09-26:
+  // "capacity determines multiplicity"): the multi-source sheet draws every
+  // gateway, the branches that land on it, its CTs and the shared PV AC panel
+  // their outputs land in. One gateway ⇒ `gateways` is absent and the
+  // single-source sheet below is drawn byte for byte.
+  if ((input.gateways?.length ?? 0) > 1) return renderSLDMultiLane(input, [singleSystemLane(input)], true);
   // [SLD SYMBOLS V2 ACTIVE] — hybrid realism v3.0 cabinet symbols
   if (typeof console !== 'undefined') {
     console.log('[SLD SYMBOLS V2 ACTIVE] renderSLDProfessional — hybrid realism v3.0');
@@ -4720,6 +4749,48 @@ export function normalizeSourceBranches(raw: SLDSourceBranch[] | undefined | nul
   return out;
 }
 
+/**
+ * A single micro system that needs more than one gateway, as the one lane the
+ * multi-source sheet draws: its whole array, its engine runs (bare ids) and the
+ * figures the single-source sheet prints for it.
+ */
+function singleSystemLane(input: SLDProfessionalInput): SLDSourceBranch {
+  const key: SLDSourceBranch['key'] =
+    input.systemType === 'ground' || input.systemType === 'fence' ? input.systemType : 'roof';
+  const panelModel = input.panelModel && input.panelModel !== '—' ? input.panelModel : `${input.panelWatts}W MODULE`;
+  return {
+    key,
+    label: `${key.toUpperCase()} — ${input.totalModules} × ${panelModel}`,
+    topologyType: 'MICROINVERTER',
+    systemType: key,
+    totalModules: input.totalModules,
+    panelModel,
+    panelWatts: input.panelWatts,
+    panelVoc: input.panelVoc,
+    panelIsc: input.panelIsc,
+    inverterManufacturer: input.inverterManufacturer,
+    inverterModel: input.inverterModel,
+    acOutputKw: input.acOutputKw,
+    acOutputAmps: input.acOutputAmps,
+    acOCPD: input.acOCPD,
+    backfeedAmps: input.backfeedAmps,
+    deviceCount: input.deviceCount,
+    microBranches: input.microBranches,
+    runs: input.runs,
+    ...(input.branchEgcGauge ? { branchEgcGauge: input.branchEgcGauge } : {}),
+    rapidShutdownIntegrated: input.rapidShutdownIntegrated,
+  };
+}
+
+/** 'PV-R B1–B4' / 'PV-R B5–B6 + PV-G B1' — the branch circuits one gateway takes. */
+function gatewayBranchText(branches: ReadonlyArray<{ laneKey: string; branchNumber: number }>): string {
+  const byLane = new Map<string, Array<{ branchNumber: number }>>();
+  for (const b of branches) byLane.set(b.laneKey, [...(byLane.get(b.laneKey) ?? []), b]);
+  return [...byLane.entries()]
+    .map(([k, bs]) => `PV-${LANE_TAG[k] ?? '?'} ${branchRangeText(bs)}`)
+    .join(' + ');
+}
+
 /** Lane topology from branch.topologyType (adapter-normalized). */
 function laneTopology(b: SLDSourceBranch): 'MICRO' | 'OPTIMIZER' | 'STRING' {
   const t = String(b.topologyType ?? '').toUpperCase();
@@ -4778,18 +4849,12 @@ function laneSelectedCombinerId(
   projectSelectedId: string | null | undefined,
   perLane: Record<string, string | null | undefined> | null | undefined,
 ): string | null {
-  const own = String(perLane?.[lane.key] ?? '').trim();
-  if (own) return own;
-  const sel = String(projectSelectedId ?? '').trim();
-  if (!sel) return null;
-  const device = getBosDevice(sel);
-  if (!device) return sel;                       // unresolvable — stays visible on every lane
-  const laneBrand = String(lane.inverterManufacturer ?? '').trim().toLowerCase();
-  const selBrand = String(device.brand ?? '').trim().toLowerCase();
-  // An unknown lane brand cannot be shown to match, so it does not claim the
-  // device either. "No answer for this lane" is a reportable state; a wrong
-  // nameplate is not.
-  return laneBrand && laneBrand === selBrand ? sel : null;
+  // The rule lives in integratedBos (laneCombinerSelection) so the permit
+  // conductor authority's POI pools gateways from exactly the same answer. An
+  // unknown lane brand cannot be shown to match, so it does not claim the
+  // device either: "no answer for this lane" is a reportable state; a wrong
+  // nameplate is not. An unresolvable id stays visible on every lane.
+  return laneCombinerSelection(lane, projectSelectedId, perLane);
 }
 
 export function acCollectionFromLanes(
@@ -4844,6 +4909,9 @@ interface CondTagRow {
   /** Engine RunSegment id backing this tag (R:/G:/F:-prefixed), when one exists. */
   runId?: string;
   gauge: string;        // e.g. '#8 AWG'
+  /** The one gauge the voltage-drop row computes with, when `gauge` names
+   *  several (a mixed branch plan, '#12/#10 AWG'): the lightest. */
+  vdGauge?: string;
   insul: string;        // 'THWN-2' | 'PV WIRE' | ...
   nCond: string;        // e.g. '3(L1,L2,N)' / '8(4+,4−)'
   conduitType: string;  // 'EMT' | 'N/A — FREE AIR' | ...
@@ -5020,7 +5088,7 @@ function fitColumns<C extends { label: string; w: number; align?: 'start' | 'mid
   }));
 }
 
-function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[]): string {
+function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[], singleSystem = false): string {
   console.log(`[SLD MULTI-LANE ACTIVE] wave5a lanes=${lanes.length} keys=${lanes.map(l => l.key).join('+')}`);
 
   const parts: string[] = [];
@@ -5068,8 +5136,12 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
   //    project-level id is not automatically every lane's answer (see
   //    laneSelectedCombinerId — an APsystems fence lane was being labelled with
   //    the Enphase combiner).
-  const acCollection = acCollectionFromLanes(
-    lanes, input.selectedCombinerId ?? null, input.selectedCombinerIdByLane ?? null);
+  // A single system with several gateways resolves its one lane against the
+  // topology the composer named (`gateways[].topologyId`) — never a second pick.
+  const acCollection = singleSystem
+    ? acCollectionFromLanes(lanes, null, { [lanes[0].key]: input.gateways?.[0]?.topologyId ?? null })
+    : acCollectionFromLanes(
+      lanes, input.selectedCombinerId ?? null, input.selectedCombinerIdByLane ?? null);
 
   // ── HYBRID METERING — "add CTs to the hybrid SLDs too" (Ray, 2026-09-26) ──
   // Each lane's CTs arrive ALREADY COMPOSED on the lane (`meteringDrawing`, the
@@ -5100,8 +5172,115 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
   });
   // A site has ONE service, so ONE set of consumption CTs, read by ONE lane's
   // gateway (the composer's primary lane). The first one given is the one drawn.
-  const consLaneIdx = laneMeters.findIndex(m => !!m?.md?.consumption);
-  const consMeter = consLaneIdx >= 0 ? laneMeters[consLaneIdx] : null;
+  // ── ROWS (Ray, 2026-09-26: "capacity determines multiplicity") ───────────
+  // One row per array — its PV, J-box and home-run — and one per gateway that
+  // no array row hosts: the second IQ Combiner of an array too big for one. A
+  // gateway two arrays share is drawn once, in its first array's row, and the
+  // other array's home-run joins it there. A row whose gateway is exactly one
+  // whole array — every hybrid before that ruling — is the lane row it always
+  // was, drawn by the same code.
+  const gwByIndex = new Map(acCollection.gateways.map(gw => [gw.index, gw] as const));
+  const reshaped = acCollection.gateways.some(gw => gw.wholeLaneKey == null);
+  interface DrawRow {
+    /** The array this row draws (PV, J-box, home-run) — null on a gateway's own row. */
+    lane: number | null;
+    /** The gateway whose combiner this row draws, when it is NOT one whole lane. */
+    gw: HybridGatewayInstance | null;
+    /** A lane exactly as before: its own combiner / inverter and its own feeder. */
+    legacy: boolean;
+    /** Its output's index in `acCollection.sources` (its panel pin); -1 ⇔ none. */
+    pin: number;
+  }
+  const pinOfGateway = (gi: number) =>
+    acCollection.sources.findIndex(src => src.kind === 'gateway' && src.gatewayIndex === gi);
+  const pinOfLane = (key: string) => acCollection.sources.findIndex(src =>
+    (src.kind === 'lane' && src.key === key)
+    || (src.kind === 'gateway' && gwByIndex.get(src.gatewayIndex)?.wholeLaneKey === key));
+  const rows: DrawRow[] = [];
+  const hostRowOf = new Map<number, number>();
+  const placed = new Set<number>();
+  const laneIdx = (i: number) => acCollection.perSource[i]?.gatewayIndexes ?? [];
+  const isWholeLane = (i: number) => {
+    const idx = laneIdx(i);
+    return idx.length === 1 && gwByIndex.get(idx[0])?.wholeLaneKey === lanes[i].key;
+  };
+  const placeLane = (i: number) => {
+    placed.add(i);
+    const b = lanes[i];
+    const idx = laneIdx(i);
+    if (!reshaped || !idx.length || isWholeLane(i)) {
+      rows.push({ lane: i, gw: null, legacy: true, pin: reshaped ? pinOfLane(b.key) : i });
+      if (idx.length) hostRowOf.set(idx[0], rows.length - 1);
+      return;
+    }
+    const host = idx.find(gi => !hostRowOf.has(gi));
+    rows.push({ lane: i, gw: host != null ? gwByIndex.get(host)! : null, legacy: false,
+      pin: host != null ? pinOfGateway(host) : -1 });
+    if (host != null) hostRowOf.set(host, rows.length - 1);
+    for (const gi of idx) {
+      const gw = gwByIndex.get(gi)!;
+      if (hostRowOf.has(gi) || gw.laneKeys[0] !== b.key) continue;
+      rows.push({ lane: null, gw, legacy: false, pin: pinOfGateway(gi) });
+      hostRowOf.set(gi, rows.length - 1);
+    }
+    // An array whose every gateway is now drawn goes directly under them, so
+    // its home-run joins without crossing another array's row.
+    for (let j = i + 1; j < lanes.length; j++) {
+      const jdx = laneIdx(j);
+      if (placed.has(j) || !jdx.length || isWholeLane(j) || !jdx.every(gi => hostRowOf.has(gi))) continue;
+      placeLane(j);
+    }
+  };
+  lanes.forEach((_, i) => { if (!placed.has(i)) placeLane(i); });
+  /** Lanes whose home-run joins a gateway drawn in another row. */
+  const joinLanes = rows.filter(rw => rw.lane != null && !rw.legacy).map(rw => rw.lane!);
+  /** A reshaped gateway's nameplate: the model, whether a human chose it, and
+   *  which gateway it is with its branches. */
+  const gatewayCombinerLabel = (gw: HybridGatewayInstance) =>
+    gw.combiner ? `${gw.combiner.brand} ${gw.combiner.model}` : gw.deviceLabel;
+  const gatewayDecided = (gw: HybridGatewayInstance): boolean | undefined => {
+    if (singleSystem) return input.combinerSelectionIsDecided;
+    const basis = acCollection.perSource.find(src => src.key === gw.laneKeys[0])?.combinerBasis;
+    return basis ? combinerBasisIsDecided(basis) : undefined;
+  };
+  const gatewayNameplateLine = (gw: HybridGatewayInstance) => `${gw.label} — ${gatewayBranchText(gw.branches)}`;
+  /** Half the widest line a reshaped gateway's nameplate prints — a join must
+   *  pass left of it (the block is centred under the combiner). */
+  const npHalf = Math.max(0, ...acCollection.gateways.filter(gw => gw.wholeLaneKey == null).map(gw => Math.max(
+    textWidthUu(gatewayCombinerLabel(gw), F.tiny),
+    textWidthUu(gatewayNameplateLine(gw), F.tiny, true),
+    gatewayDecided(gw) === false ? textWidthUu(`${COMBINER_NOT_SELECTED} — DERIVED, NOT AN INSTALLER DECISION`, F.tiny, true) : 0,
+    textWidthUu('INTEGRATED GATEWAY / MONITORING', F.tiny),
+  ) / 2));
+  const pinCount = reshaped ? acCollection.sources.length : lanes.length;
+  /** The site's ONE gateway is its only source (two arrays share it): there is
+   *  no shared panel — its output runs on to the system disconnect. */
+  const noPanel = reshaped && acCollection.sources.length <= 1;
+  /** The gateways each lane's branches land on (site order). */
+  const laneGateways = (i: number): HybridGatewayInstance[] =>
+    (acCollection.perSource[i]?.gatewayIndexes ?? []).map(gi => gwByIndex.get(gi)!).filter(Boolean);
+  // A gateway's CTs, composed per gateway (sldCombinerFields: a single system's
+  // `gateways`, or hybridLaneMetering's) and drawn verbatim.
+  const gatewayMeter = (gi: number): LaneMeter | null => {
+    const f = input.gateways?.find(x => x.index === gi);
+    if (!f || (!f.meteringDrawing && !f.standaloneGateway)) return null;
+    const sg = f.standaloneGateway;
+    const integrated = !sg && gwByIndex.get(gi)?.plan.hasIntegratedGateway === true;
+    const md = f.meteringDrawing;
+    return { md, sg, integrated, drawnLeads: !!md?.leads?.length && (!!sg || integrated) };
+  };
+  const rowMeters: Array<LaneMeter | null> = rows.map(row =>
+    row.legacy ? laneMeters[row.lane!] : row.gw ? gatewayMeter(row.gw.index) : null);
+  // A site has ONE service, so ONE set of consumption CTs, read by ONE gateway
+  // (the composer's primary). The first one given is the one drawn.
+  const consRowIdx = rowMeters.findIndex(m => !!m?.md?.consumption);
+  const consMeter = consRowIdx >= 0 ? rowMeters[consRowIdx] : null;
+  // The ONE system AC disconnect's rating. A single system with several
+  // gateways keeps the engine's whole-system feeder OCPD — the breaker the MSP
+  // sees and the BOM buys; a hybrid's is the collection's Σ rule.
+  const sysDiscoA = singleSystem
+    ? (input.runs?.find(r => String(r.id) === 'COMBINER_TO_DISCO_RUN')?.ocpdAmps ?? input.acOCPD ?? acCollection.disconnectA)
+    : acCollection.disconnectA;
 
   const totalModules = input.totalModules || lanes.reduce((s, b) => s + (b.totalModules ?? 0), 0);
   // MULTI-LANE total AC = Σ of the lanes THIS sheet draws. input.acOutputKw is
@@ -5140,9 +5319,12 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
   // 1.5 uu higher than the single-lane title: '(MULTI-SOURCE)' has feet (the
   // parentheses descend), and at DY+16 they came within 1 uu of the address
   // line under it.
-  parts.push(txt(tcx, DY+14.5, 'SINGLE LINE DIAGRAM — PHOTOVOLTAIC SYSTEM (MULTI-SOURCE)', {sz:F.title, bold:true, anc:'middle'}));
+  parts.push(txt(tcx, DY+14.5, singleSystem ? 'SINGLE LINE DIAGRAM — PHOTOVOLTAIC SYSTEM' : 'SINGLE LINE DIAGRAM — PHOTOVOLTAIC SYSTEM (MULTI-SOURCE)', {sz:F.title, bold:true, anc:'middle'}));
+  const _nGw = acCollection.gateways.length;
   parts.push(txt(tcx, DY+26,
-    `${esc(input.address)}  |  ${lanes.length} PV SOURCES (${lanes.map(l => l.key.toUpperCase()).join(' + ')})  |  ${totalModules} MODULES  |  ${totalAcKw.toFixed(2)} kW AC`,
+    singleSystem
+      ? `${esc(input.address)}  |  ${_nGw} GATEWAYS  |  ${totalModules} MODULES  |  ${totalAcKw.toFixed(2)} kW AC`
+      : `${esc(input.address)}  |  ${lanes.length} PV SOURCES (${lanes.map(l => l.key.toUpperCase()).join(' + ')})${reshaped ? `  |  ${_nGw} GATEWAY${_nGw === 1 ? '' : 'S'}` : ''}  |  ${totalModules} MODULES  |  ${totalAcKw.toFixed(2)} kW AC`,
     {sz:F.sub, anc:'middle', fill:'#444'}));
 
   // ── Schematic border ──────────────────────────────────────────────────────
@@ -5213,6 +5395,7 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
     laneAcAmps: number; laneOcpd: number;
     // micro only
     nb: number; bocpd: number; brGauge: string; brGaugeTxt: string; brCur: number;
+    brLightGauge: string; brHeavyGauge: string;
     /** PV → first node (J-box, DC disconnect or inverter), the lane's middle
      *  run (J-box → combiner, DC disconnect → inverter; absent otherwise) and
      *  its feeder to the shared panel. */
@@ -5247,12 +5430,19 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
     const brGauge = wireGaugeForOcpd(bocpd);
     // Gauge text for the branch-trunk labels: the plan's own per-branch
     // callouts (mixed plans read "#12/#10"), never a hardcoded 20A gauge.
-    const brGaugeTxt = (() => {
-      const gs = [...new Set((b.microBranches ?? [])
-        .map(x => x.conductorCallout?.match(/#\d+(?:\/0)?/)?.[0])
-        .filter((g): g is string => !!g))];
-      return gs.length ? `${gs.join('/')} AWG` : brGauge;
-    })();
+    const brPlanGauges = [...new Set((b.microBranches ?? [])
+      .map(x => x.conductorCallout?.match(/#\d+(?:\/0)?/)?.[0])
+      .filter((g): g is string => !!g))];
+    const brGaugeTxt = brPlanGauges.length ? `${brPlanGauges.join('/')} AWG` : brGauge;
+    // The conductor schedule reads the SAME plan gauges the label prints — it
+    // used to take the 20 A ladder gauge, so a plan upsized to #10 drew "#10"
+    // and scheduled "#12" on one sheet. A mixed plan's one schedule row sizes
+    // its conduit on the heaviest gauge and its voltage drop on the lightest
+    // (the larger R — the conservative figure).
+    const _rank = (g: string) => (NEC_AWG_ORDER as readonly string[]).indexOf(`${g} AWG`);
+    const _bySize = [...brPlanGauges].sort((p, q) => _rank(p) - _rank(q));
+    const brLightGauge = _bySize.length ? `${_bySize[0]} AWG` : brGauge;
+    const brHeavyGauge = _bySize.length ? `${_bySize[_bySize.length - 1]} AWG` : brGauge;
     const brCur = b.microBranches?.length
       ? Math.max(...b.microBranches.map(x => x.branchCurrentA)) : bocpd / 1.25;
     const ns = b.totalStrings || 1;
@@ -5284,7 +5474,7 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
       mid = calloutSpec(laneRun(b, 'DC_DISCO_TO_INV_RUN'), [`${ns * 2}#10 THWN-2`, `+ EGC`, `IN ${b.acConduitType ?? 'EMT'}`], true);
     }
     return { tag, isFenceLane, modules, watts, panelModel, invUnselected, invMfr, invModel, laneLabel,
-      laneAcAmps, laneOcpd, nb, bocpd, brGauge, brGaugeTxt, brCur, first, mid, feeder };
+      laneAcAmps, laneOcpd, nb, bocpd, brGauge, brGaugeTxt, brCur, brLightGauge, brHeavyGauge, first, mid, feeder };
   });
 
   const LANE_PITCH = 330;
@@ -5302,9 +5492,9 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
   const GW_BAND = 160;
   /** How far the gateway enclosure's bottom stands above its panel's top. */
   const GW_RISE = 68;
-  const laneGwBand = (i: number) => (laneMeters[i]?.sg ? GW_BAND : 0);
-  const laneYs = lanes.map((_, i) =>
-    laneTop + i * LANE_PITCH + laneMeters.slice(0, i + 1).reduce((s, m) => s + (m?.sg ? GW_BAND : 0), 0));
+  const rowGwBand = (r: number) => (rowMeters[r]?.sg ? GW_BAND : 0);
+  const rowYs = rows.map((_, r) =>
+    laneTop + r * LANE_PITCH + rowMeters.slice(0, r + 1).reduce((s, m) => s + (m?.sg ? GW_BAND : 0), 0));
 
   // Pre-compute each lane's node X positions so the POI bus clears the
   // longest chain. Each gap is the longer of LANE_GAP and the span its callout
@@ -5339,6 +5529,26 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
   // tail now needs for callouts that fit their own runs; the sheet is fitted
   // to its width, so every uu a lane gives up is type size on paper).
   const LANE_GAP = 100;
+  // Reshaped only: room between a home-run and its combiner for the column where
+  // home-runs join a gateway drawn in another row — left of the widest line of
+  // the combiner's nameplate block (a join drops past it), 12 uu per lane.
+  // A join into a STANDALONE gateway's row also drops past that gateway's band
+  // above its combiner: its nameplate (right-aligned 33 uu left of the combiner
+  // centre) and its supply callout (right-aligned 34 uu right of it).
+  const sgLeft = Math.max(0, ...rowMeters.map((m, r) => {
+    const sg = m?.sg;
+    if (!sg || rows[r].legacy) return 0;
+    return Math.max(
+      33 + Math.max(textWidthUu(sg.label, F.tiny), sg.partNumber ? textWidthUu(`P/N ${sg.partNumber}`, F.tiny) : 0,
+        textWidthUu('NEMA 3R ENCL. IF OUTDOORS', F.tiny)),
+      -34 + Math.max(textWidthUu(`${sg.supplyBreakerA}A 2P — GATEWAY SUPPLY`, F.seg, true), textWidthUu(sg.supplyConductor, F.seg)),
+    );
+  }));
+  /** How far left of a combiner centre a join passes (nameplate, band, input). */
+  const joinClear = Math.max(W_COMB/2 + 20, npHalf + 10, sgLeft + 10);
+  const JOIN_GAP = reshaped
+    ? Math.max(40, Math.ceil(joinClear - W_COMB/2 - 4) + 12 * Math.max(0, joinLanes.length - 1))
+    : 0;
   const geoms: LaneGeom[] = lanes.map((b, i) => {
     const topo = laneTopology(b);
     const f = laneFacts[i];
@@ -5350,7 +5560,7 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
       // (PV → J-box: the run IS the gap; J-box → combiner: the gap less the
       // combiner's 10 uu input stub.)
       xJbox = nextCX(xPV, W_PV, W_JB, Math.max(90, calloutSpan(f.first)));
-      xMid1 = nextCX(xJbox, W_JB, W_COMB, Math.max(LANE_GAP, calloutSpan(f.mid!) + 10));
+      xMid1 = nextCX(xJbox, W_JB, W_COMB, Math.max(LANE_GAP, calloutSpan(f.mid!) + 10) + JOIN_GAP);
       xFeedRight = xMid1 + W_COMB/2;
     } else if (topo === 'OPTIMIZER' || b.integratedDcDisconnect) {
       xMid1 = nextCX(xPV, W_PV, W_INV, Math.max(LANE_GAP, calloutSpan(f.first) + 10));   // inverter (integrated DC disco)
@@ -5363,6 +5573,33 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
     // Every last node's output terminal is 10 uu out of its right edge.
     return { topo, xPV, xJbox, xMid1, xMid2, xFeedRight, feedX: xFeedRight + 10, feedSpan: calloutSpan(f.feeder) };
   });
+  // Reshaped: every micro lane's combiner on one column, so a home-run joins a
+  // gateway in another row square-on.
+  if (reshaped) {
+    const xC = Math.max(...geoms.filter(g => g.topo === 'MICRO').map(g => g.xMid1));
+    for (const g of geoms) {
+      if (g.topo !== 'MICRO') continue;
+      g.xMid1 = xC; g.xFeedRight = xC + W_COMB/2; g.feedX = g.xFeedRight + 10;
+    }
+  }
+  /** A gateway's output circuit: its engine run where the engine sized one
+   *  (GW{n}_FEEDER_RUN), else the conductor its breaker protects. */
+  const gwFeed = (gw: HybridGatewayInstance): CalloutSpec => {
+    const run = findSharedRun(`GW${gw.index}_FEEDER_RUN`);
+    const gauge = run?.wireGauge ?? wireGaugeForOcpd(gw.backfeedA);
+    return calloutSpec(run, [`3×${gauge} THWN-2`, '(L1,L2,N) + EGC', `${gw.backfeedA}A OCPD → ${noPanel ? 'DISCO' : 'PANEL'}`], false);
+  };
+  /** Each row's combiner column, and where its feeder starts + the span its callout needs. */
+  const rowComb = rows.map(row => geoms[row.lane ?? Math.max(0, lanes.findIndex(l => l.key === row.gw!.laneKeys[0]))].xMid1);
+  const rowFeed = rows.map((row, r) => {
+    if (row.legacy) return { x: geoms[row.lane!].feedX, span: geoms[row.lane!].feedSpan };
+    if (!row.gw) return null;
+    return { x: rowComb[r] + W_COMB/2 + 10, span: calloutSpan(gwFeed(row.gw)) };
+  });
+  /** The column each joining lane's home-run joins on: left of the combiner
+   *  input and of its nameplate block, 12 uu apart. */
+  const laneJoinX = (i: number) =>
+    geoms[i].xMid1 - joinClear - 12 * Math.max(0, joinLanes.indexOf(i));
 
   // Shared collection stage: every lane feeds ONE AC combiner panel → ONE system
   // AC disconnect → POI (no per-lane disconnect).
@@ -5382,15 +5619,15 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
   // label (it ran through 'PCT LEAD 5 FT — DO NOT EXTEND'). The label starts
   // 6 uu right of the lead, which rises from the PCT 18 uu in from the
   // combiner's right wall (see renderCombiner / THE GATEWAYS below).
-  const _gwLabelClear = lanes.map((_, i) => {
-    const m = laneMeters[i];
-    if (i === 0 || !m?.sg || geoms[i].topo !== 'MICRO') return -Infinity;
+  const _gwLabelClear = rows.map((row, r) => {
+    const m = rowMeters[r];
+    if (r === 0 || !m?.sg || (row.lane != null && geoms[row.lane].topo !== 'MICRO')) return -Infinity;
     const pl = m.md?.leads?.find(l => l.channel === 'production');
-    return geoms[i].xMid1 + W_COMB/2 - 18 + 6 + (pl ? textWidthUu(pl.label, F.tiny, true) : 0) + 4 + PANEL_STEP_IN;
+    return rowComb[r] + W_COMB/2 - 18 + 6 + (pl ? textWidthUu(pl.label, F.tiny, true) : 0) + 4 + PANEL_STEP_IN;
   });
   const xPanel = Math.max(
     Math.max(...geoms.map(g => g.xFeedRight)) + 90,
-    ...geoms.map(g => g.feedX + g.feedSpan + PANEL_STEP_IN),
+    ...rowFeed.map(f => (f ? f.x + f.span + PANEL_STEP_IN : -Infinity)),
     ..._gwLabelClear,
   ) + W_PANEL/2;
   const xPanelInX = xPanel - W_PANEL/2;
@@ -5400,19 +5637,22 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
   // Its three conductor runs (panel → disconnect → POI → MSP) are ONE conductor
   // set, and its callouts say so on three lines, so each can stack over a run
   // of ~100 uu; the service run to the meter carries the service conductors.
-  const _tailGauge = wireGaugeForOcpd(acCollection.disconnectA);
+  const _tailGauge = wireGaugeForOcpd(sysDiscoA);
   // (The system-tail conductors are protected by the tap OCPD — sized FROM it,
   // NEC 310.16. input.acWireGauge is the legacy single-system user field; on
   // Stowell it printed "#10 AWG ... 200A" on the Σ190A feeder, audit
   // 2026-07-16. 200A → #3/0 Cu via wireGaugeForOcpd.)
   const _tailRun = laneRun(lanes[0], 'DISCO_TO_METER_RUN');
-  const tailA = calloutSpec(_tailRun, [`3×${_tailGauge} THWN-2`, '(L1,L2,N) + EGC', `${acCollection.disconnectA}A`], false);
-  const tailB = calloutSpec(_tailRun, [`3×${_tailGauge} THWN-2`, '(L1,L2,N) + EGC', `${acCollection.disconnectA}A → POI`], false);
+  // A single system's panel → disconnect conductor IS its whole-system feeder
+  // (COMBINER_TO_DISCO_RUN, from the shared PV AC panel).
+  const _panelRun = singleSystem ? (findSharedRun('COMBINER_TO_DISCO_RUN') ?? _tailRun) : _tailRun;
+  const tailA = calloutSpec(_panelRun, [`3×${_tailGauge} THWN-2`, '(L1,L2,N) + EGC', `${sysDiscoA}A`], false);
+  const tailB = calloutSpec(_tailRun, [`3×${_tailGauge} THWN-2`, '(L1,L2,N) + EGC', `${sysDiscoA}A → POI`], false);
   // Same tap-OCPD sizing as the disco segments (was the user's legacy
   // single-system gauge; "SIZED AT Σ" reflects the true lane-sum amps).
   const tailC = calloutSpec(findSharedRun('DISCO_TO_METER_RUN'),
-    [`3×${wireGaugeForOcpd(acCollection.disconnectA)} THWN-2`, '(L1,L2,N) + EGC', `IN ${input.acConduitType ?? 'EMT'}`,
-     `SIZED AT Σ ${Math.round(totalAcKw * 1000 / 240)}A — ${acCollection.disconnectA}A TAP OCPD`], false);
+    [`3×${wireGaugeForOcpd(sysDiscoA)} THWN-2`, '(L1,L2,N) + EGC', `IN ${input.acConduitType ?? 'EMT'}`,
+     `SIZED AT Σ ${Math.round(totalAcKw * 1000 / 240)}A — ${sysDiscoA}A TAP OCPD`], false);
   const tailD = calloutSpec(findSharedRun('MSP_TO_UTILITY_RUN') ?? findSharedRun('DISCO_TO_METER_RUN'),
     [`SERVICE CONDUCTORS`, `${input.mainPanelAmps}A SERVICE`], false);
   const W_MSP = SLD_SYMBOL_MAP['msp'].width;
@@ -5454,17 +5694,17 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
   const xSingleDisco = _minDisco + _gapAdd;
   const xPOI = xSingleDisco + _minPOIFromDisco + _gapAdd;
   const xMSP = xPOI + _minMSPFromPOI + _gapAdd;
-  const panelInputs: Array<{ y: number; ocpd: number; tag: string }> = [];
+  const panelInputs: Array<{ y: number; ocpd: number; tag: string; label?: string }> = [];
   const xBUI = _hasBUI ? xMSP + _minBUIFromMSP + _gapAdd : xMSP + 130;
   const xUtil = (_hasBUI ? xBUI + W_BUI/2 : xMSP + W_MSP/2) + _minUtilFromSvc + _gapAdd;
   console.log(`[SLD MULTI-LANE TAIL] panel=${xPanel.toFixed(0)} disco=${xSingleDisco.toFixed(0)} poi=${xPOI.toFixed(0)} msp=${xMSP.toFixed(0)}${_hasBUI ? ` bui=${xBUI.toFixed(0)}` : ''} util=${xUtil.toFixed(0)} +${_gapAdd.toFixed(1)}/gap`);
-  const tailY = laneYs.length ? (laneYs[0] + laneYs[laneYs.length - 1]) / 2 : laneTop;
+  const tailY = rowYs.length ? (rowYs[0] + rowYs[rowYs.length - 1]) / 2 : laneTop;
   // Compact AC combiner panel geometry: a proportioned box centered on tailY
   // with the backfed breakers stacked tight — was a full-lane-height slab
   // (~750px, dwarfing the 120px disconnect). Each lane feed steps from its lane
   // Y into its breaker's pin Y.
   const PANEL_PIN_GAP = 46;
-  const _pinSpan = Math.max(0, (lanes.length - 1) * PANEL_PIN_GAP);
+  const _pinSpan = Math.max(0, (pinCount - 1) * PANEL_PIN_GAP);
   const yPanelTop = tailY - _pinSpan / 2 - 42;   // header + top padding
   const yPanelBot = tailY + _pinSpan / 2 + 26;   // bottom padding
   const panelPinY = (i: number): number => tailY - _pinSpan / 2 + i * PANEL_PIN_GAP;
@@ -5491,21 +5731,105 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
     modules: number; watts: number; nCircuits: number; perCircuit: string;
     isc: number; voc: number; pps: number; coeff: number | null;
     acAmps: number; acKw: number; ocpd: number; egc: string; feederGauge: string;
+    /** Set on an array whose output is its gateway's (reshaped): 'VIA GATEWAY 1'. */
+    feederText?: string;
   }
   const laneInfos: LaneInfo[] = [];
   // Where each METERING lane's combiner put its gateway-side connection points
   // — read by the CT-lead block below, after the MSP has drawn its CTs.
-  const laneGwPts: Array<{
+  const rowGwPts: Array<{
     cx: number; ty: number;
     prodCtTop?: {x:number; y:number};
     gatewayLeadIn?: {x:number; y:number};
     gatewaySupplyOut?: {x:number; y:number};
-  } | null> = lanes.map(() => null);
+  } | null> = rows.map(() => null);
+  /** Each row's combiner input (its left stub end) — where a joining home-run lands. */
+  const rowCombinerIn: Array<{ x: number; y: number } | null> = rows.map(() => null);
+
+  // ── A GATEWAY'S COMBINER / OUTPUT (reshaped rows) ─────────────────────────
+  /** The combiner of a gateway that is not one whole lane, with its own
+   *  branches, CTs and header — drawn exactly as a lane's combiner is. */
+  const drawGatewayCombiner = (gw: HybridGatewayInstance, x: number, y: number, r: number) => {
+    const m = rowMeters[r];
+    const clabel = gatewayCombinerLabel(gw);
+    const decided = gatewayDecided(gw);
+    const cr = renderCombiner(x, y, gw.branches.length, Math.max(...gw.branches.map(b => b.ocpdA)), clabel, ++calloutN,
+      {branchOcpds: gw.branches.map(b => b.ocpdA),
+       selectionUnresolved: decided === false,
+       gatewayLine: gatewayNameplateLine(gw),
+       neutral: true,
+       headerAbove: true,
+       ...(m ? {
+         integratedGateway: m.integrated,
+         productionCt: m.md?.production?.where,
+         ctLeadConnector: !!m.md?.lead,
+         drawnCtLeads: m.drawnLeads,
+         gatewayArt: resolveDeviceIllustration(clabel.split(/\s+/)[0] ?? '', 'gateway'),
+         gatewaySupplyBreakerA: m.sg?.supplyBreakerA,
+         ctTagGap: 7.5,
+       } : {}),
+       labelPitch: LBL_PITCH});
+    parts.push(cr.svg);
+    if (m) {
+      rowGwPts[r] = {cx: x, ty: cr.ty, prodCtTop: cr.prodCtTop,
+        gatewayLeadIn: cr.gatewayLeadIn, gatewaySupplyOut: cr.gatewaySupplyOut};
+    }
+    rowCombinerIn[r] = { x: cr.lx, y };
+    parts.push(txt(x, cr.ty-8, m?.sg ? 'AC COMBINER' : clabel.toUpperCase(), {sz:F.hdr, bold:true, anc:'middle'}));
+    return cr;
+  };
+  /** A gateway's output circuit → its breaker in the shared panel (or, as the
+   *  site's only source, on to the system disconnect). */
+  const drawGatewayFeeder = (row: DrawRow, fx: number, rowY: number) => {
+    const gw = row.gw!;
+    const spec = gwFeed(gw);
+    const { run, lines } = spec;
+    const pinY = noPanel ? tailY : panelPinY(row.pin);
+    const stepX = xPanelInX - PANEL_STEP_IN;
+    const y = resolveSegY(fx, stepX, rowY);
+    parts.push(fittedRun(buildWireRun(`GW${gw.index}_TO_PANEL`, fx, y, stepX, y, run, lines, false, 'RACEWAY', true),
+      spec, fx, stepX));
+    if (Math.abs(y - pinY) > 1) parts.push(ln(stepX, y, stepX, pinY, {sw:SW_MED}));
+    parts.push(ln(stepX, pinY, xPanelInX, pinY, {sw:SW_MED}));
+    if (!noPanel) panelInputs.push({ y: pinY, ocpd: gw.backfeedA, tag: `GW${gw.index}`, label: gw.label });
+    const gauge = run?.wireGauge ?? wireGaugeForOcpd(gw.backfeedA);
+    addTag((fx + stepX) / 2, y + 24, {
+      desc: `${gw.label} AC OUTPUT — COMBINER TO ${noPanel ? 'SYSTEM AC DISCONNECT' : 'PV AC PANEL'}`,
+      gauge, insul: 'THWN-2', nCond: '3(L1,L2,N)',
+      conduitType: run?.conduitType ?? input.acConduitType ?? 'EMT',
+      conduitSize: run?.conduitSize ?? conduitSizeForConductors(gauge, 4),
+      egc: run?.egcGauge ?? getEGCSize(gw.backfeedA),
+      currentA: gw.continuousCurrentA, baseVolts: 240,
+      runId: run ? prettyRunId(String(run.id)) : undefined,
+      lenFt: run?.onewayLengthFt ?? null,
+    });
+  };
+  /** A gateway's own row: no array — its combiner (the array above's home-run
+   *  joins it after the rows) and its output. */
+  const drawGatewayRow = (row: DrawRow, r: number) => {
+    const gw = row.gw!;
+    const y = rowYs[r];
+    const bandY = y - rowGwBand(r);
+    parts.push(txt(SCH_X + 16, bandY - 120, `${gw.label} · ${gatewayBranchText(gw.branches)}`, {sz:F.hdr, bold:true, fill:'#1A237E'}));
+    parts.push(ln(SCH_X + 16, bandY - 114, xPanelInX - 40, bandY - 114, {stroke:'#C5CAE9', sw:SW_HAIR}));
+    const cr = drawGatewayCombiner(gw, rowComb[r], y, r);
+    drawGatewayFeeder(row, cr.feederOutX, y);
+  };
+  /** ' → GATEWAY 1 (B1–B4) + GATEWAY 2 (B5–B6)' on an array's band (reshaped). */
+  const laneGatewayText = (i: number): string => {
+    const key = lanes[i].key;
+    return ' → ' + laneGateways(i)
+      .map(gw => `${gw.label} (${branchRangeText(gw.branches.filter(b => b.laneKey === key))})`).join(' + ');
+  };
 
   // ── Source lanes ──────────────────────────────────────────────────────────
-  lanes.forEach((b, i) => {
+  rows.forEach((row, r) => {
+    // A gateway's own row (no array): its combiner and its output.
+    if (row.lane == null) { drawGatewayRow(row, r); return; }
+    const i = row.lane;
+    const b = lanes[i];
     const g = geoms[i];
-    const laneY = laneYs[i];
+    const laneY = rowYs[r];
     const F_ = laneFacts[i];
     const { tag, isFenceLane, modules, watts, panelModel, invUnselected, invMfr, invModel, laneLabel,
       laneAcAmps, laneOcpd } = F_;
@@ -5513,13 +5837,13 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
 
     // Lane band label (left margin, above the PV array — and above the lane's
     // standalone gateway when it draws one, so the gateway sits in its band).
-    const bandY = laneY - laneGwBand(i);
-    parts.push(txt(SCH_X + 16, bandY - 120, `PV-${tag} · ${laneLabel}`, {sz:F.hdr, bold:true, fill:'#1A237E'}));
+    const bandY = laneY - rowGwBand(r);
+    parts.push(txt(SCH_X + 16, bandY - 120, `PV-${tag} · ${laneLabel}${row.legacy ? '' : laneGatewayText(i)}`, {sz:F.hdr, bold:true, fill:'#1A237E'}));
     // A lower lane's rule stops short of the shared panel: the shared tail
     // (panel → disconnect → POI → MSP) sits between the lanes, and a lower
     // lane's rule, run on to the POI, passed along the disconnect's bottom edge
     // and through its ground drop. The top lane's rule runs over the tail.
-    const bandRuleX = i > 0 ? xPanelInX - 40 : xPOI;
+    const bandRuleX = r > 0 ? xPanelInX - 40 : xPOI;
     parts.push(ln(SCH_X + 16, bandY - 114, bandRuleX, bandY - 114, {stroke:'#C5CAE9', sw:SW_HAIR}));
 
     // ── PV array node ──
@@ -5559,8 +5883,12 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
     // ── Middle chain ──
     let feedX = pvPt.x;   // running right-edge terminal toward the disco
     let feedStubY: number | null = null;   // an inverter's AC stub, when it is not on the lane
+    // The combiner this row draws (micro rows) — a reshaped row's gateway's, or
+    // none: an array whose branches land on a gateway drawn in another row.
+    let cr: ReturnType<typeof renderCombiner> | null = null;
     if (g.topo === 'MICRO') {
-      const { nb, bocpd, brGauge: _brGauge, brGaugeTxt: _brGaugeTxt, brCur: _brCur } = F_;
+      const { nb, bocpd, brGaugeTxt: _brGaugeTxt, brLightGauge: _brLight, brHeavyGauge: _brHeavy, brCur: _brCur } = F_;
+      const _brEgc = b.branchEgcGauge ?? getEGCSize(bocpd);
       // 🚨 PER-LANE, AND THE BASIS COMES WITH IT. A lane's combiner is resolved
       // against that lane's brand and that lane's recorded answer; a lane the
       // project selection does not cover now has NO device rather than the other
@@ -5568,14 +5896,17 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
       // false ⇒ whatever is printed was derived, so it is qualified on the
       // drawing — a fence lane reading "APsystems AC Combiner" must not look
       // like somebody chose it.
+      if (!row.legacy) {
+        if (row.gw) cr = drawGatewayCombiner(row.gw, g.xMid1, laneY, r);
+      } else {
       const _laneCollect = acCollection.perSource.find(s => s.key === b.key);
       const _laneCombiner = _laneCollect?.combiner;
       const _laneDecided = _laneCollect?.combinerBasis
         ? combinerBasisIsDecided(_laneCollect.combinerBasis)
         : undefined;
       const clabel = _laneCombiner ? `${_laneCombiner.brand} ${_laneCombiner.model}` : (b.combinerLabel ?? `${invMfr || 'PV'} AC Combiner`);
-      const _lm = laneMeters[i];
-      const cr = renderCombiner(g.xMid1, laneY, nb, bocpd, clabel, ++calloutN,
+      const _lm = rowMeters[r];
+      cr = renderCombiner(g.xMid1, laneY, nb, bocpd, clabel, ++calloutN,
         {branchOcpds: b.microBranches?.map(x => x.ocpdAmps),
          selectionUnresolved: _laneDecided === false,
          // The lane feeder is tagged 3(L1,L2,N): the gateway needs the neutral.
@@ -5604,7 +5935,7 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
          labelPitch: LBL_PITCH});
       parts.push(cr.svg);
       if (_lm) {
-        laneGwPts[i] = {cx: g.xMid1, ty: cr.ty, prodCtTop: cr.prodCtTop,
+        rowGwPts[r] = {cx: g.xMid1, ty: cr.ty, prodCtTop: cr.prodCtTop,
           gatewayLeadIn: cr.gatewayLeadIn, gatewaySupplyOut: cr.gatewaySupplyOut};
       }
       // Centred on the box. Under a standalone gateway the header is the box's
@@ -5616,6 +5947,7 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
       // as its header (tests/sldCombinerSheetAuthority.test.ts pins header +
       // nameplate).
       parts.push(txt(g.xMid1, cr.ty-8, _lm?.sg ? 'AC COMBINER' : clabel.toUpperCase(), {sz:F.hdr, bold:true, anc:'middle'}));
+      }
       // ── AC junction / transition box (Enphase SOP): the AC trunk runs
       //    OPEN-AIR across the array, transitions to CONDUIT at a roof-flashed
       //    junction box, then conduit to the IQ Combiner. Array → J-box (open
@@ -5642,11 +5974,16 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
         const y = resolveSegY(pvPt.x, _jbIn.x, laneY);
         parts.push(fittedRun(buildWireRun(`LANE_${tag}_PV_TO_JBOX`, pvPt.x, y, _jbIn.x, y, run, lines, false, b.key === 'roof' ? 'OPEN_AIR' : 'RACEWAY'),
           F_.first, pvPt.x, _jbIn.x));
+        // When the engine carries this run, its callout is what the diagram
+        // prints (runLines reads the run's bundle), so its row states that
+        // bundle; otherwise the plan's gauges, as printed.
+        const _hot = run?.conductorBundle?.find(c => !isGroundingConductor(c))?.gauge ?? run?.wireGauge;
+        const _gnd = run?.conductorBundle?.find(c => isGroundingConductor(c))?.gauge ?? run?.egcGauge;
         addTag((pvPt.x + _jbIn.x) / 2, y + 24, {
           desc: `PV-${tag} AC BRANCH CIRCUITS — ARRAY TRUNK (${nb} BRANCH${nb > 1 ? 'ES' : ''})`,
-          gauge: _brGauge, insul: 'THWN-2', nCond: `${2 * nb}(L1,L2)`,
+          gauge: _hot ?? _brGaugeTxt, vdGauge: _hot ?? _brLight, insul: 'THWN-2', nCond: `${2 * nb}(L1,L2)`,
           conduitType: 'N/A — FREE AIR', conduitSize: 'N/A',
-          egc: b.branchEgcGauge ?? getEGCSize(bocpd), currentA: _brCur, baseVolts: 240,
+          egc: _gnd ?? _brEgc, currentA: _brCur, baseVolts: 240,
           runId: run ? prettyRunId(String(run.id)) : undefined,
           lenFt: run?.onewayLengthFt ?? null,
         });
@@ -5655,16 +5992,21 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
         // J-box → combiner still carries the individual branch circuits at
         // their plan-sized gauges (F_.mid).
         const fb = F_.mid!.lines;
-        parts.push(fittedRun(buildWireRun(`LANE_${tag}_JBOX_TO_COMBINER`, _jbOut.x, laneY, cr.lx, laneY, undefined, fb, false, 'RACEWAY'),
-          F_.mid!, _jbOut.x, cr.lx));
-        addTag((_jbOut.x + cr.lx) / 2, laneY + 24, {
+        // Reshaped: the callout stops short of this lane's join column; an
+        // array with no combiner of its own ends its home-run there (the join
+        // to its gateway is drawn after the rows).
+        const _endX = cr ? cr.lx : laneJoinX(i);
+        const _fitEnd = cr && row.legacy ? cr.lx : laneJoinX(i) - 6;
+        parts.push(fittedRun(buildWireRun(`LANE_${tag}_JBOX_TO_COMBINER`, _jbOut.x, laneY, _endX, laneY, undefined, fb, false, 'RACEWAY'),
+          F_.mid!, _jbOut.x, _fitEnd));
+        addTag((_jbOut.x + _fitEnd) / 2, laneY + 24, {
           desc: `PV-${tag} AC BRANCH CIRCUITS — J-BOX TO COMBINER`,
-          gauge: _brGauge, insul: 'THWN-2', nCond: `${2 * nb}(L1,L2)`,
-          conduitType: 'EMT', conduitSize: conduitSizeForConductors(_brGauge, 2 * nb + 1),
-          egc: b.branchEgcGauge ?? getEGCSize(bocpd), currentA: _brCur, baseVolts: 240, lenFt: null,
+          gauge: _brGaugeTxt, vdGauge: _brLight, insul: 'THWN-2', nCond: `${2 * nb}(L1,L2)`,
+          conduitType: 'EMT', conduitSize: conduitSizeForConductors(_brHeavy, 2 * nb + 1),
+          egc: _brEgc, currentA: _brCur, baseVolts: 240, lenFt: null,
         });
       }
-      feedX = cr.feederOutX;
+      if (cr) feedX = cr.feederOutX;
     } else if (g.topo === 'OPTIMIZER' || b.integratedDcDisconnect) {
       const invBox = renderInverterBox(g.xMid1, laneY, invMfr, invModel,
         b.acOutputKw ?? 0, laneAcAmps,
@@ -5750,11 +6092,26 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
     // ── Feed this lane's AC output to the SHARED AC combiner panel ──
     //    No per-lane disconnect: the ONE system disconnect is after the panel;
     //    the per-source OCPD is the backfed breaker landing in the panel.
-    {
+    // A reshaped array's output is its gateway's (drawn with that gateway).
+    if (!row.legacy) {
+      if (row.gw && cr) drawGatewayFeeder(row, cr.feederOutX, laneY);
+      const _nb = b.microBranches?.length ?? microBranchCount(b.deviceCount ?? modules, invModel);
+      laneInfos.push({
+        tag, topo: g.topo, modules, watts,
+        nCircuits: _nb,
+        perCircuit: b.microBranches?.length ? `${Math.max(...b.microBranches.map(x => x.deviceCount))} MAX` : '—',
+        isc: b.panelIsc ?? 0, voc: b.panelVoc ?? 0,
+        pps: b.panelsPerString ?? Math.round(modules / Math.max(b.totalStrings || 1, 1)),
+        coeff: typeof b.panelTempCoeffVoc === 'number' ? b.panelTempCoeffVoc : null,
+        acAmps: laneAcAmps, acKw: b.acOutputKw ?? 0, ocpd: 0,
+        egc: b.egcGauge ?? getEGCSize(F_.bocpd), feederGauge: '—',
+        feederText: `VIA ${laneGateways(i).map(gw => gw.label).join(' + ')}`,
+      });
+    } else {
       // A micro lane's feeder is L1, L2 AND N (the gateway's neutral) — said
       // when there is no engine run to print (permit hybrid E-1). F_.feeder.
       const { run, lines } = F_.feeder;
-      const pinY = panelPinY(i);
+      const pinY = panelPinY(row.pin);
       const stepX = xPanelInX - PANEL_STEP_IN;
       const y = resolveSegY(feedX, stepX, laneY);
       // main horizontal run from the lane to the panel approach, then step
@@ -5797,6 +6154,44 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
     }
   });
 
+  // ── HOME-RUN JOINS (reshaped) — an array's home-run continues, square-on, to
+  //    every gateway of its drawn in another row: down to a gateway's own row
+  //    (an array too big for one gateway), or up onto the home-run of the array
+  //    whose row hosts the gateway they share. Each join names its branches. ──
+  // How many home-runs join each row: a gateway's own row that two arrays feed
+  // shows its junction (the second run meets the first's lead-in).
+  const _joinsInto = new Map<number, number>();
+  for (const i of joinLanes) {
+    const laneRow = rows.findIndex(rw => rw.lane === i);
+    for (const gw of laneGateways(i)) {
+      const hr = hostRowOf.get(gw.index);
+      if (hr != null && hr !== laneRow) _joinsInto.set(hr, (_joinsInto.get(hr) ?? 0) + 1);
+    }
+  }
+  for (const i of joinLanes) {
+    const laneRow = rows.findIndex(rw => rw.lane === i);
+    const x = laneJoinX(i);
+    const y0 = rowYs[laneRow];
+    const key = lanes[i].key;
+    for (const gw of laneGateways(i)) {
+      const hr = hostRowOf.get(gw.index);
+      if (hr == null || hr === laneRow) continue;
+      const tgt = rowCombinerIn[hr];
+      if (!tgt) continue;
+      parts.push(ln(x, y0, x, tgt.y, {sw:SW_MED}));
+      if (rows[laneRow].gw) parts.push(circ(x, y0, 3, {fill:BLK, sw:0}));
+      if (rows[hr].lane == null) {
+        parts.push(ln(x, tgt.y, tgt.x, tgt.y, {sw:SW_MED}));
+        if ((_joinsInto.get(hr) ?? 0) > 1) parts.push(circ(x, tgt.y, 3, {fill:BLK, sw:0}));
+      } else {
+        parts.push(circ(x, tgt.y, 3, {fill:BLK, sw:0}));
+      }
+      parts.push(txt(x - 6, (y0 + tgt.y) / 2,
+        `PV-${LANE_TAG[key]} ${branchRangeText(gw.branches.filter(bb => bb.laneKey === key))} → ${gw.label}`,
+        {sz:F.tiny, anc:'end', bold:true, fill:'#1A237E'}));
+    }
+  }
+
   // ── SHARED AC COMBINER PANEL → ONE SYSTEM DISCONNECT → POI ──────────────────
   // Every source lands on a backfed breaker in one panel (busbar sized to the
   // aggregate PV backfeed), which feeds ONE system AC disconnect — replaces the
@@ -5804,10 +6199,18 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
   {
     const yTop = yPanelTop;
     const yBot = yPanelBot;
+    if (noPanel) {
+      // One source only: its output runs straight on to the disconnect.
+      parts.push(ln(xPanelInX, tailY, panelOutX, tailY, {sw:SW_MED}));
+    } else {
     parts.push(rect(xPanelInX, yTop, W_PANEL, yBot - yTop, {fill:'#FAFAFA', stroke:BLK, sw:SW_MED}));
     const panelName = (acCollection.sharedPanel?.model ?? 'AC COMBINER PANEL').toUpperCase();
     parts.push(txt(xPanel, yTop - 10, panelName, {sz:F.hdr, bold:true, anc:'middle'}));
-    parts.push(txt(xPanel, yTop + 14, `${acCollection.sharedPanel?.busbarA ?? totalBackfeedAmps}A BUSBAR · Σ ${totalBackfeedAmps}A`, {sz:F.tiny, anc:'middle', fill:'#555'}));
+    // Σ of what lands on THIS busbar (NEC 705.12(B)): a single system's panel
+    // takes its gateways' breakers — its own output is the smaller PV breaker
+    // the MSP sees (totalBackfeedAmps).
+    const _panelSigma = singleSystem ? panelInputs.reduce((sum, pin) => sum + pin.ocpd, 0) : totalBackfeedAmps;
+    parts.push(txt(xPanel, yTop + 14, `${acCollection.sharedPanel?.busbarA ?? totalBackfeedAmps}A BUSBAR · Σ ${_panelSigma}A`, {sz:F.tiny, anc:'middle', fill:'#555'}));
     parts.push(callout(xPanelInX + W_PANEL - 8, yTop + 8, ++calloutN));
     // vertical busbar inside the panel
     parts.push(ln(xPanel, yTop + 22, xPanel, yBot - 8, {sw:SW_MED, stroke:'#777'}));
@@ -5819,12 +6222,13 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
       parts.push(rect(xPanelInX + 8, pin.y - 8, 22, 16, {fill:WHT, stroke:BLK, sw:SW_HAIR}));
       parts.push(txt(xPanelInX + 34, pin.y - 3, `${pin.ocpd}A`, {sz:F.tiny, anc:'start', bold:true, fill:'#1B5E20'}));
       parts.push(ln(xPanelInX + 30, pin.y, xPanel, pin.y, {sw:SW_HAIR, stroke:'#777'}));
-      parts.push(txt(xPanelInX + 8, pin.y - 12, `PV-${pin.tag}`, {sz:F.tiny, anc:'start', fill:'#555'}));
+      parts.push(txt(xPanelInX + 8, pin.y - 12, pin.label ?? `PV-${pin.tag}`, {sz:F.tiny, anc:'start', fill:'#555'}));
     }
     // panel feeder out → the ONE system AC disconnect
     parts.push(ln(xPanel, tailY, panelOutX, tailY, {sw:SW_MED}));
+    }
     // The system tail is tagged 3(L1,L2,N) — the neutral passes the switch.
-    const sysDisco = renderDisco(xSingleDisco, tailY, acCollection.disconnectA, ++calloutN, isSupplySide, true, LBL_PITCH);
+    const sysDisco = renderDisco(xSingleDisco, tailY, sysDiscoA, ++calloutN, isSupplySide, true, LBL_PITCH);
     parts.push(sysDisco.svg);
     // Over the enclosure AND its callout bubble: the name is wider than the
     // box, and at the bubble's height its last word ran into the bubble.
@@ -5847,9 +6251,12 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
       // tailB above, each fitted to its own run.
       const yA = resolveSegY(panelOutX, sysDisco.loadInX, tailY);
       // Clear of the disconnect's entry stubs, which rise from this line to its
-      // poles (and its neutral) in the last 10 uu before its wall.
-      parts.push(fittedRun(buildWireRun('PANEL_TO_SYSDISCO', panelOutX, yA, sysDisco.loadInX, yA, run, tailA.lines, false, 'RACEWAY', true),
-        tailA, panelOutX + 2, sysDisco.loadInX - 12));
+      // poles (and its neutral) in the last 10 uu before its wall. With no panel
+      // this is the gateway's own output circuit, already called out on its row.
+      parts.push(noPanel
+        ? ln(panelOutX, yA, sysDisco.loadInX, yA, {sw:SW_MED})
+        : fittedRun(buildWireRun('PANEL_TO_SYSDISCO', panelOutX, yA, sysDisco.loadInX, yA, _panelRun, tailA.lines, false, 'RACEWAY', true),
+          tailA, panelOutX + 2, sysDisco.loadInX - 12));
       const yB = resolveSegY(sysDisco.lineOutX, xPOI, tailY);
       parts.push(fittedRun(buildWireRun('SYSDISCO_TO_POI', sysDisco.lineOutX, yB, xPOI, yB, run, tailB.lines, false, 'RACEWAY', true),
         tailB, sysDisco.lineOutX + 12, xPOI - 6));
@@ -5857,16 +6264,16 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
       // ONE tag class for the combined tail (panel → disco → POI, same
       // conductors) — same number stamped on both segments.
       const _tailTag = addTag((sysDisco.lineOutX + xPOI) / 2, yB + 24, {
-        desc: 'COMBINED PV OUTPUT — AC PANEL / SYSTEM DISCONNECT TO POI',
+        desc: noPanel ? 'COMBINED PV OUTPUT — SYSTEM DISCONNECT TO POI' : 'COMBINED PV OUTPUT — AC PANEL / SYSTEM DISCONNECT TO POI',
         gauge: _tailGauge, insul: 'THWN-2', nCond: '3(L1,L2,N)',
         conduitType: input.acConduitType ?? 'EMT',
         conduitSize: conduitSizeForConductors(_tailGauge, 4),
-        egc: input.egcGauge ?? getEGCSize(acCollection.disconnectA),
+        egc: input.egcGauge ?? getEGCSize(sysDiscoA),
         currentA: Math.round((totalAcKw * 1000 / 240) * 10) / 10, baseVolts: 240,
         runId: run ? prettyRunId(String(run.id)) : undefined,
         lenFt: run?.onewayLengthFt ?? null,
       });
-      parts.push(hexTag((panelOutX + sysDisco.loadInX) / 2, yA + 24, _tailTag));
+      if (!noPanel) parts.push(hexTag((panelOutX + sysDisco.loadInX) / 2, yA + 24, _tailTag));
     }
   }
   // Anchor the POI title just above the POI node on the tail bus (it floated
@@ -5980,8 +6387,9 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
   const gridCY = tailY + mR + 48;
   parts.push(ln(xUtil, tailY+mR, xUtil, gridCY-16, {sw:SW_MED}));
   parts.push(circ(xUtil, gridCY, 16, {fill:WHT, sw:SW_MED}));
-  parts.push(txt(xUtil, gridCY-1, 'UTIL', {sz:5.5, bold:true, anc:'middle'}));
-  parts.push(txt(xUtil, gridCY+7, 'GRID', {sz:5, anc:'middle'}));
+  // 9 uu apart (not 8): this sheet may be fitted below 1:1 (four rows).
+  parts.push(txt(xUtil, gridCY-2.5, 'UTIL', {sz:5.5, bold:true, anc:'middle'}));
+  parts.push(txt(xUtil, gridCY+6.5, 'GRID', {sz:5, anc:'middle'}));
   // Its name beside the symbol. Under it, the symbol's own ground stub and
   // ground ran through 'UTILITY GRID' and the utility's name.
   const gridLblX = xUtil+22;
@@ -5999,7 +6407,9 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
   // so it rides directly under that block), its EGC, a generator the
   // multi-source sheet does not draw, then the metering (below).
   const _sigmaY = mspResult.lbl.bot + 2.5 + capUu(F.tiny);
-  parts.push(txt(xMSP, _sigmaY, `Σ BACKFEED ${totalBackfeedAmps}A — NEC 705.12(B) (Σ PER-INVERTER OCPDs)`, {sz:F.tiny, anc:'middle', fill:'#1B5E20'}));
+  parts.push(txt(xMSP, _sigmaY, singleSystem
+    ? `PV BACKFEED ${totalBackfeedAmps}A — NEC 705.12(B) (PV PANEL OUTPUT OCPD)`
+    : `Σ BACKFEED ${totalBackfeedAmps}A — NEC 705.12(B) (Σ PER-INVERTER OCPDs)`, {sz:F.tiny, anc:'middle', fill:'#1B5E20'}));
   let _noteY = Math.max(tailY + 145, _sigmaY + LBL_PITCH + 2.5);
   parts.push(txt(xMSP, _noteY, 'EGC — NEC 250.122 / 690.43', {sz:F.tiny, anc:'middle', fill:GRN}));
   let _lastNoteY = _noteY;
@@ -6033,17 +6443,18 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
   let _anyLeadDrawn = false;
   const _undrawnLeadLabels: string[] = [];
   let _leadInkTop = Infinity;          // the highest ink a drawn lead put down (fit box)
-  lanes.forEach((b, i) => {
-    const m = laneMeters[i], gp = laneGwPts[i];
+  rows.forEach((row, i) => {
+    const m = rowMeters[i], gp = rowGwPts[i];
     if (!m || !gp) return;
     const leads = m.drawnLeads ? (m.md?.leads ?? []) : [];
-    // Only the primary lane carries a consumption lead (the composer's rule);
-    // taking it from that lane alone keeps one set of CTs → one lead.
-    const consLead = i === consLaneIdx ? leads.find(l => l.channel === 'consumption') : undefined;
+    // Only the primary row carries a consumption lead (the composer's rule);
+    // taking it from that row alone keeps one set of CTs → one lead.
+    const consLead = i === consRowIdx ? leads.find(l => l.channel === 'consumption') : undefined;
     const prodLead = leads.find(l => l.channel === 'production');
     const exit = i === 0 ? mspResult.ctLeadExit : undefined;
-    // A lead stated rather than drawn names the lane whose gateway it runs to.
-    const stated = (label: string) => `PV-${LANE_TAG[b.key]}: ${label}`;
+    // A lead stated rather than drawn names the lane (or gateway) it runs to.
+    const stated = (label: string) =>
+      `${row.legacy ? `PV-${LANE_TAG[lanes[row.lane!].key]}` : row.gw!.label}: ${label}`;
     const leadLabel = (x: number, y: number, label: string) =>
       txt(x, y, esc(label), {sz:F.tiny, anc:'middle', bold:true, fill:CT_CLR});
 
@@ -6148,7 +6559,7 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
     // A consumption lead run over the top lane (and its label) is content too.
     if (Number.isFinite(_leadInkTop)) _sy0 = Math.min(_sy0, _leadInkTop - 6);
     // ...and so are the notes under the MSP.
-    const _sy1 = Math.max(laneYs[laneYs.length-1] + 170, gridCY + 44, _notesBottom + 8);
+    const _sy1 = Math.max(rowYs[rowYs.length-1] + 170, gridCY + 44, _notesBottom + 8);
     const _k = Math.min(
       (schW - 28) / Math.max(1, _sx1 - _sx0),
       (SCH_H - 32) / Math.max(1, _sy1 - _sy0),
@@ -6299,7 +6710,11 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
     ['ARRAY STC POWER', ...laneInfos.map(li => li.watts ? (li.modules * li.watts).toLocaleString() + ' W' : '—')],
     ['MAX AC CURRENT', ...laneInfos.map(li => li.acAmps.toFixed(1) + ' A')],
     ['MAX AC POWER', ...laneInfos.map(li => li.acKw ? Math.round(li.acKw * 1000).toLocaleString() + ' W' : '—')],
-    ['AC FEEDER / OCPD', ...laneInfos.map(li => li.feederGauge + ' / ' + li.ocpd + ' A')],
+    ['AC FEEDER / OCPD', ...laneInfos.map(li => li.feederText ?? (li.feederGauge + ' / ' + li.ocpd + ' A'))],
+    // Reshaped: which gateway(s) each array's branches land on.
+    ...(reshaped
+      ? [['GATEWAY(S)', ...lanes.map((_, i) => laneGateways(i).map(gw => gw.label.replace('GATEWAY ', 'GW ')).join(' + ') || '—')]]
+      : []),
     ['EGC — NEC 250.122', ...laneInfos.map(li => li.egc)],
     // A standalone gateway is its own piece of equipment on the diagram, so
     // the schedule lists it (the single-lane sheet's rule) — here, per source,
@@ -6365,11 +6780,12 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
   ];
   const b1rows: string[][] = condTagRows.map(t => {
     const L = t.lenFt ?? 25;
-    const R = rPerKft(t.gauge);
+    const vdGauge = t.vdGauge ?? t.gauge;
+    const R = rPerKft(vdGauge);
     const vd = (2 * L * t.currentA * R) / 1000;
     const pct = t.baseVolts > 0 && t.currentA > 0 ? (vd / t.baseVolts) * 100 : 0;
     return [
-      t.tag, t.gauge, t.desc,
+      t.tag, vdGauge, t.desc,
       String(L) + (t.lenFt == null ? ' *' : ''),
       t.currentA > 0 ? t.currentA.toFixed(1) + ' A' : '—',
       R.toFixed(3),
@@ -6391,9 +6807,16 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
   const _120pass = isSupplySide ? true : (input.poiRulePasses ?? (_busLimit >= input.mainPanelAmps + totalBackfeedAmps));
   const p2rows: string[][] = [
     ['Total AC Output', totalAcKw.toFixed(2) + ' kW / ' + Math.round(totalAcKw*1000/240) + ' A'],
-    ...lanes.map((b): string[] => ['PV-' + LANE_TAG[b.key] + ' Backfeed', laneBackfeed(b) + ' A']),
+    ...(singleSystem
+      // One PV breaker at the MSP (the PV panel's output); the gateways land in that panel.
+      ? acCollection.gateways.map((gw): string[] => [gw.label + ' Breaker (PV Panel)', gw.backfeedA + ' A'])
+      : reshaped
+        ? acCollection.sources.map((src): string[] => src.kind === 'gateway'
+            ? [gwByIndex.get(src.gatewayIndex)!.label + ' Backfeed', src.backfeedA + ' A']
+            : ['PV-' + LANE_TAG[src.key] + ' Backfeed', src.backfeedA + ' A'])
+        : lanes.map((b): string[] => ['PV-' + LANE_TAG[b.key] + ' Backfeed', laneBackfeed(b) + ' A'])),
     ...(_batBfA > 0 ? [['Battery Backfeed (incl.)', _batBfA + ' A']] : []),
-    ['Σ Backfeed (per-inverter OCPDs)', totalBackfeedAmps + ' A'],
+    [singleSystem ? 'PV Backfeed (PV panel output OCPD)' : 'Σ Backfeed (per-inverter OCPDs)', totalBackfeedAmps + ' A'],
     ['Main Breaker', input.mainPanelAmps + ' A'],
     ['Bus Rating', _busAmps + ' A'],
     ...(isSupplySide ? [
@@ -6403,7 +6826,7 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
       ['Bus 120% Limit', _busLimit.toFixed(0) + ' A'],
       ['120% Rule', _120pass ? 'PASS ✓' : 'FAIL ✗'],
     ]),
-    ['Basis', 'Σ per-inverter rounded OCPDs'],
+    ['Basis', singleSystem ? 'PV panel output OCPD' : 'Σ per-inverter rounded OCPDs'],
     // The site's consumption CTs — the single-lane schedule's row, the
     // composer's words verbatim. It sits HERE, with the service it measures,
     // because the equipment schedule's value column runs past E-1's border
@@ -6430,9 +6853,16 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
     ...lanes.map((b, i): string[] => ['PV-' + LANE_TAG[b.key] + ' Inverter', ((b.inverterManufacturer ?? '') + ' ' + (b.inverterModel ?? '')).trim() + (geoms[i].topo === 'MICRO' ? ' ×' + (b.deviceCount ?? b.totalModules ?? 0) : (b.inverterCount && b.inverterCount > 1 ? ' ×' + b.inverterCount : ''))]),
     ['System Size (DC)', dcKw.toFixed(2) + ' kW — ' + totalModules + ' modules'],
     ['System Size (AC)', totalAcKw.toFixed(2) + ' kW'],
-    ['AC Combiner Panel', (acCollection.sharedPanel?.busbarA ?? totalBackfeedAmps) + ' A busbar'],
-    ['System AC Disconnect', acCollection.disconnectA + ' A — NEC 690.13'],
-    ['System EGC', input.egcGauge ?? getEGCSize(acCollection.disconnectA)],
+    // Every gateway the design needs, by device (reshaped — otherwise each is its lane's).
+    ...(reshaped
+      ? [...new Set(acCollection.gateways.map(gw => gw.deviceLabel))].map((dl): string[] => {
+          const gs = acCollection.gateways.filter(gw => gw.deviceLabel === dl);
+          return ['Gateways', `${gs.length} × ${esc(dl)} (${gs.map(gw => gw.label.replace('GATEWAY ', 'GW ')).join(', ')})`];
+        })
+      : []),
+    ...(noPanel ? [] : [['AC Combiner Panel', (acCollection.sharedPanel?.busbarA ?? totalBackfeedAmps) + ' A busbar']]),
+    ['System AC Disconnect', sysDiscoA + ' A — NEC 690.13'],
+    ['System EGC', input.egcGauge ?? getEGCSize(sysDiscoA)],
     ['Main Panel', input.mainPanelAmps + ' A'],
     ['Utility', esc(input.utilityName)],
     ['Interconnection', esc(input.interconnection)],
@@ -6483,7 +6913,9 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
   // MULTI-SOURCE (PV-R + PV-G + PV-F)' is 191 uu at the printed size and its
   // title-block cell holds 186 — it ran through the block's right edge.
   parts.push(titleBlockSvg(
-    { ...input, topologyType: `HYBRID MULTI-SOURCE (${lanes.map(l => `PV-${LANE_TAG[l.key]}`).join('+')})` },
+    { ...input, topologyType: singleSystem
+      ? `MICROINVERTER — ${acCollection.gateways.length} GATEWAYS`
+      : `HYBRID MULTI-SOURCE (${lanes.map(l => `PV-${LANE_TAG[l.key]}`).join('+')})` },
     dcKw,
   ));
   parts.push('</svg>');

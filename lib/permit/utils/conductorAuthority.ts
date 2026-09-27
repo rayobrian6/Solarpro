@@ -29,7 +29,8 @@ import { getEGCSize } from '@/lib/manufacturer-specs';
 import { getEquipmentContext, getInverterTopology, topologyToLegacy } from '@/lib/system';
 import { balancedBranchSizes, microBranchCount, planMicroBranches, type BranchPlanPanel } from './branching';
 import { partitionSubSystems, toSubSystemKey, isSubSystemKey, effectiveInverterSubKey, type SubSystemKey, type SubSystemPanel } from './subSystems';
-import { nextStdRating } from '@/lib/equipment/integratedBos';
+import { laneCombinerSelection, nextStdRating, resolveHybridAcCollection } from '@/lib/equipment/integratedBos';
+import { combinerCompatibilityFor } from '@/lib/equipment/combinerCompatibility';
 
 export type ConductorTopology = 'MICRO' | 'STRING' | 'OPTIMIZER';
 
@@ -516,7 +517,8 @@ export function buildConductorAuthority(input: PermitInput, cad?: CADModel | nul
   // the subs sum to 190A backfeed → 200A tap). At N>1 the interface promises
   // every aggregate field derives from the set, so the feeder OCPD is
   // overridden with the POI tap OCPD (= E-1's system-disconnect rating).
-  const poi = buildPoiBlock(subSystems, acFeeder.ocpdAmps);
+  const poi = poolGatewaysIntoPoi(buildPoiBlock(subSystems, acFeeder.ocpdAmps), subSystems,
+    (project as { selectedCombinerId?: string | null }).selectedCombinerId ?? null);
   return {
     topology: primary.topology,
     isMicro: primary.isMicro,
@@ -529,6 +531,38 @@ export function buildConductorAuthority(input: PermitInput, cad?: CADModel | nul
     poi,
     isHybrid: true,
   };
+}
+
+/**
+ * Gateways are counted over every micro array that shares a topology (Ray,
+ * 2026-09-26) — the collection E-1 draws. When that RESHAPES the collection
+ * (two arrays share one gateway, or one array needs several), what lands on the
+ * POI's backfeed is each such gateway's own output breaker, not each array's
+ * feeder, so the Σ and the tap OCPD come from the collection — and the tap OCPD
+ * equals E-1's system-disconnect rating again. Every hybrid whose gateways are
+ * each one whole array returns the block untouched. Other lanes keep this
+ * block's own basis (their feeder OCPD).
+ */
+function poolGatewaysIntoPoi(
+  poi: ConductorAuthority['poi'],
+  subs: SubSystemConductorAuthority[],
+  projectSelectedId: string | null,
+): ConductorAuthority['poi'] {
+  if (!subs.some(s => s.isMicro)) return poi;
+  const c = resolveHybridAcCollection(subs.map(s => {
+    const mfr = s.equipment.inverterManufacturer !== '—' ? s.equipment.inverterManufacturer : '';
+    const model = s.equipment.inverterModel !== '—' ? s.equipment.inverterModel : '';
+    return {
+      key: s.key, inverterManufacturer: mfr, inverterModel: model, isMicro: s.isMicro,
+      branchCount: s.microBranches.length, deviceCount: s.deviceCount,
+      backfeedA: s.acSubFeeder.ocpdAmps ?? 0,
+      compatibleCombinerIds: combinerCompatibilityFor(mfr, model),
+      selectedCombinerId: laneCombinerSelection({ key: s.key, inverterManufacturer: mfr }, projectSelectedId, null),
+    };
+  }));
+  if (!c.gateways.some(g => g.wholeLaneKey == null)) return poi;
+  const sumOcpdA = c.aggregateBackfeedA;
+  return { ...poi, sumOcpdA, tapOcpdA: sumOcpdA > 0 ? nextStdRating(sumOcpdA) : 0 };
 }
 
 /** POI / supply-side tap block from the per-sub feeder set (see interface doc).

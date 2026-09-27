@@ -42,7 +42,8 @@ import {
 import { useToast } from '@/components/ui/Toast';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { SOLAR_PANELS, STRING_INVERTERS, MICROINVERTERS, RACKING_SYSTEMS, OPTIMIZERS, BATTERIES, GENERATORS, ATS_UNITS, getBatteryById, getGeneratorById, getATSById, getBackupInterfaceById, getMonitoringGatewayById, getEVChargerById, getOptimizerById, getMicroinverterById, getInverterById, resolveBatteryBranch } from '@/lib/equipment-db';
-import { listCombiners, planLandingDevice } from '@/lib/equipment/integratedBos';
+import { listCombiners, planGatewayCount, planLandingDevice, planSharedPanel } from '@/lib/equipment/integratedBos';
+import { gatewayCommissioningLines, gatewayScheduleRows } from '@/lib/equipment/gatewayStatements';
 import { resolveAcDisconnect } from '@/lib/electrical/acDisconnect';
 import { sldCombinerFields, hybridLaneMetering } from '@/lib/equipment/sldCombinerFields';
 import { consumptionCtLocationLabel } from '@/lib/equipment/designMetering';
@@ -3402,6 +3403,10 @@ function EngineeringPageInner() {
       backupInterfaceBrand: includePoi && config.backupInterfaceId ? (() => { const b = getBackupInterfaceById(config.backupInterfaceId); return b?.manufacturer ?? undefined; })() : undefined,
       backupInterfaceModel: includePoi && config.backupInterfaceId ? (() => { const b = getBackupInterfaceById(config.backupInterfaceId); return b?.model ?? undefined; })() : undefined,
       batteryCount:   includePoi ? (config.batteryCount || undefined) : undefined,
+      // The recorded combiner / Envoy — the engine counts how many the design
+      // needs (and sizes each one's output circuit) through the same resolver
+      // the drawings and the BOM ask (Ray, 2026-09-26).
+      combinerSelectionId: projectCombinerId,
     };
     return input;
     };
@@ -3511,7 +3516,7 @@ function EngineeringPageInner() {
       return computeMultiSystem([{ ...input, subSystemKey: _fbKey }]);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config, totalPanels, systemPanelCount, compliance.autoDetected, subSystemCounts, fleetDiag, hybridFleetPlan]);
+  }, [config, totalPanels, systemPanelCount, compliance.autoDetected, subSystemCounts, fleetDiag, hybridFleetPlan, projectCombinerId]);
 
   const computedSystem = computedMulti.aggregate;
 
@@ -14326,7 +14331,11 @@ function EngineeringPageInner() {
                         title="The combiner is a project equipment decision, recorded in System Configuration. It is shown here; it is changed there."
                       >
                         <span className="whitespace-nowrap">AC Combiner</span>
-                        <span className={projectCombinerId ? 'font-semibold text-emerald-300' : 'font-semibold text-amber-300'}>
+                        <span className={projectCombinerId ? 'font-semibold text-emerald-300' : 'font-semibold text-amber-300'}
+                          title={pageMetering?.plan.gatewayMultiplicity?.explanation}>
+                          {/* How many the design physically needs (Ray, 2026-09-26:
+                              capacity determines the count) — the SLD draws that many. */}
+                          {pageMetering && planGatewayCount(pageMetering.plan) > 1 ? `${planGatewayCount(pageMetering.plan)} × ` : ''}
                           {(() => {
                             if (!projectCombinerId) return 'not selected';
                             // 🚨 A STANDALONE GATEWAY IS TWO BOXES, and the one the
@@ -15091,6 +15100,8 @@ function EngineeringPageInner() {
                             // gateway (ENVOY-1 below) and has no busbar.
                             const _b = planLandingDevice(pageMetering.plan);
                             row = { ...row0, manufacturer: _b?.brand ?? row0.manufacturer,
+                                    // As many as the design needs — the count the SLD draws.
+                                    qty: planGatewayCount(pageMetering.plan) || row0.qty,
                                     ...(pageMetering.standaloneGateway ? { description: 'PV AC Combiner Panel (AC branches land here)' } : {}),
                                     model: pageMetering.combinerSelectionIsDecided
                                       // A selected id the catalogue does not know is shown AS
@@ -15102,6 +15113,11 @@ function EngineeringPageInner() {
                             row = { ...row0, manufacturer: d?.brand ?? row0.manufacturer,
                                     model: d ? d.model : 'Not selected — see System Configuration' };
                           }
+                        } else if (row0.tag === 'ACP-1' && pageMetering) {
+                          // The shared PV AC combiner panel the gateways land in — named as
+                          // the drawings and the BOM size it (planSharedPanel).
+                          const _p = planSharedPanel(pageMetering.plan);
+                          if (_p) row = { ...row0, manufacturer: _p.brand, model: _p.model, rating: `${_p.busbarA}A busbar` };
                         } else if (/^AC-DISC-/.test(row0.tag) && !subSystemCounts.isHybrid) {
                           const _ocpd = csRun(cs.isMicro ? 'COMBINER_TO_DISCO_RUN' : 'INV_TO_DISCO_RUN')?.ocpdAmps;
                           if (_ocpd) {
@@ -15131,20 +15147,49 @@ function EngineeringPageInner() {
                         // Tagged ENVOY-, not GW-: the engine already tags a battery's
                         // backup gateway / system controller GW-n on this same table.
                         const _sgw = /^COMB-/.test(row0.tag) ? pageMetering?.standaloneGateway : undefined;
-                        if (!_sgw) return _tr;
+                        // More than one gateway: one row per gateway — its branches,
+                        // its current against its capacity, its output breaker and
+                        // whether it reads the site's consumption CTs (the solver's
+                        // rows, worded once; the SLD draws exactly these).
+                        const _mult = /^COMB-/.test(row0.tag) ? pageMetering?.plan.gatewayMultiplicity : undefined;
+                        const _gwRows = _mult
+                          ? gatewayScheduleRows(_mult.instances, pageMetering?.meteringDrawing?.consumption ? 1 : null).map(g => (
+                            <tr key={g.label} className="bg-sky-50">
+                              <td className="border border-slate-200 px-2 py-1.5 font-semibold font-mono">{g.label}</td>
+                              <td className="border border-slate-200 px-2 py-1.5">Branches {g.branches} ({g.devices} micros)</td>
+                              <td className="border border-slate-200 px-2 py-1.5">{row.manufacturer}</td>
+                              <td className="border border-slate-200 px-2 py-1.5">{row.model}</td>
+                              <td className="border border-slate-200 px-2 py-1.5 text-right font-bold">1</td>
+                              <td className="border border-slate-200 px-2 py-1.5 font-bold text-amber-700">{g.continuousA.toFixed(1)}A cont. → {g.outputOcpdA}A breaker · {g.metering}</td>
+                              <td className="border border-slate-200 px-2 py-1.5 text-slate-500 text-xs">NEC 690.8 · 705.12(B)</td>
+                            </tr>
+                          ))
+                          : null;
+                        if (!_sgw && !_gwRows) return _tr;
                         const _gwDev = pageMetering?.plan.gateway;
                         return (
                           <React.Fragment key={row.tag}>
                             {_tr}
+                            {_sgw ? (
                             <tr key="ENVOY-1" className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
                               <td className="border border-slate-200 px-2 py-1.5 font-semibold font-mono">ENVOY-1</td>
                               <td className="border border-slate-200 px-2 py-1.5">Monitoring Gateway (Envoy) — own enclosure</td>
                               <td className="border border-slate-200 px-2 py-1.5">{_gwDev?.brand ?? ''}</td>
                               <td className="border border-slate-200 px-2 py-1.5">{_gwDev?.model ?? _sgw.label}{_sgw.partNumber ? ` (${_sgw.partNumber})` : ''}</td>
-                              <td className="border border-slate-200 px-2 py-1.5 text-right font-bold">1</td>
+                              <td className="border border-slate-200 px-2 py-1.5 text-right font-bold">{planGatewayCount(pageMetering?.plan) || 1}</td>
                               <td className="border border-slate-200 px-2 py-1.5 font-bold text-amber-700">{_sgw.supplyBreakerA}A 2P supply in {row.tag} · {_sgw.supplyConductor}</td>
                               <td className="border border-slate-200 px-2 py-1.5 text-slate-500 text-xs">NEC 690.4 · 240.4(D)</td>
                             </tr>
+                            ) : null}
+                            {_gwRows}
+                            {_mult ? (
+                            <tr key="GATEWAYS-WHY" className="bg-sky-50">
+                              <td colSpan={7} className="border border-slate-200 px-2 py-1.5 text-xs text-slate-600">
+                                {_mult.explanation}
+                                <span className="block mt-1"><strong>Commissioning:</strong> {gatewayCommissioningLines(_mult.instances, pageMetering?.meteringDrawing?.consumption ? 1 : null).join(' ')}</span>
+                              </td>
+                            </tr>
+                            ) : null}
                           </React.Fragment>
                         );
                       })}

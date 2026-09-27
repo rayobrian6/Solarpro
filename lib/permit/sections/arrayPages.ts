@@ -32,6 +32,7 @@ import { GROUNDING_PENDING_LABEL, GROUNDING_AUTHORITY_BLOCKER_CODE } from '../sn
 import { formatPitchDeg, formatPitchRangeDeg } from '@/lib/structural/roofPitch';
 import { projectRapidShutdownAuthority } from '../snapshot/rapidShutdownAuthority';
 import { resolveAccessPathwayIn, resolveHipValleySetbackIn } from '@/lib/permit/utils/fireSetback';
+import { buildIntegratedEquipment } from '../utils/integratedEquipment';
 
 export function pageRoofPlan(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number, ctx?: RenderContext | null): string {
   // ── CAD validation ────────────────────────────────────────────────────────
@@ -579,7 +580,14 @@ export function pageArrayGeometry(input: PermitInput, cad: CADModel, pageNum: nu
       <div>\u2022 ${resolveAccessPathwayIn(null)}" access pathway \u2014 ${_fbArr.verified ? 'per adopted AHJ requirement' : 'modeled; pending AHJ / IFC verification'}</div>
       ${/* 2026-08-29 - asserted module-level RSD independently of the authority. */ ''}
       <div>\u2022 NEC ${escapeH(_pv1Rsd.requirementSection)} ${_pv1Rsd.systemType === 'MODULE-LEVEL' ? 'module-level rapid shutdown' : 'rapid shutdown'}</div>
-      ${_isMicro && totalStrings > 5 ? `<div>\u2022 ${totalStrings} AC branches \u2014 IQ Combiner 6C accepts 5; remaining branches land on AC subpanel, see E-1</div>` : ''}
+      ${(() => {
+        // The plan's own answer — how many gateways the branches land on (Ray,
+        // 2026-09-26: capacity determines the count). This read "IQ Combiner 6C
+        // accepts 5; remaining branches land on AC subpanel" whatever the device.
+        if (!_isMicro) return '';
+        const _m = buildIntegratedEquipment(input, cad).gatewayMultiplicity;
+        return _m ? `<div>\u2022 ${totalStrings} AC branches \u2014 ${_m.count} gateways (${_m.deviceLabel}); see E-1 / PV-4A</div>` : '';
+      })()}
     </div>` :
     isFence(cadSystemType) ? `
     <div class="draw-zone-hdr">FENCE SEGMENTS</div>

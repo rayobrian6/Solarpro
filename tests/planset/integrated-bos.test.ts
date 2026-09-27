@@ -83,17 +83,23 @@ describe('integrated BOS device resolver', () => {
     }
   });
 
-  it('warns when AC branches exceed the resolved combiner PV busbar', () => {
-    // On the fallback device the warning names the 6C; on the paired device it
-    // names the 5C. The warning must describe the device that was RESOLVED, not
-    // a fixed one, or it tells the installer about hardware they do not have.
+  it('past the RESOLVED combiner\'s capacity it is a second combiner of THAT device — never a warning (Ray, 2026-09-26)', () => {
+    // This used to warn "8 AC branches exceed the … PV busbar — route the balance
+    // onto the DER busbar or a subpanel" and still draw and buy ONE box. The
+    // count is now the capacity solver's, for the device that was RESOLVED: the
+    // 6C takes 5 branches (quadplex), the 5C takes 4.
     const fallback = ctxNoPairing({ branchCount: 8 });
     expect(fallback.brains?.model).toBe('IQ Combiner 6C');
-    expect(fallback.branchSlotWarning).toMatch(/exceed the IQ Combiner 6C PV busbar/);
+    expect(fallback.gatewayMultiplicity?.count).toBe(2);
+    expect(fallback.gatewayMultiplicity?.instances.map(i => i.branches.length)).toEqual([5, 3]);
+    expect(fallback.brains?.quantity).toBe(2);
+    expect(fallback.branchSlotWarning).toBeUndefined();
 
     const paired = ctx({ branchCount: 8 });
     expect(paired.brains?.model).toBe('IQ Combiner 5C');
-    expect(paired.branchSlotWarning).toMatch(/exceed the IQ Combiner 5C PV busbar/);
+    expect(paired.gatewayMultiplicity?.count).toBe(2);
+    expect(paired.gatewayMultiplicity?.explanation).toMatch(/^2 × Enphase IQ Combiner 5C: branch breaker positions 8 exceeds the 4/);
+    expect(paired.branchSlotWarning).toBeUndefined();
   });
 
   it('honors an explicit user override (e.g. the older main-lug 4C — no integral disconnect)', () => {

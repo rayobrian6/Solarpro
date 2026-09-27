@@ -14,7 +14,7 @@ import { nearmapConfigured, fetchNearmapStaticAerial, nearmapRoofSnapCenter, OBS
 import { getNearmapAIResultCached } from '@/lib/aerial/nearmapCache';
 import { cropToSubjectBuilding } from '@/lib/aerial/subjectBuildingCrop';
 import { locateEquipment } from '../utils/equipmentLocator';
-import { permitStandaloneGateway } from '../utils/integratedEquipment';
+import { buildIntegratedEquipment, permitSharedGatewayPanel, permitStandaloneGateway } from '../utils/integratedEquipment';
 import { computeModuleAzimuthGrid, snapModuleAzimuth } from '../utils/moduleAzimuthGrid';
 
 // Ray-casting point-in-ring (lat/lng) — used to join a panel to its roof plane
@@ -60,6 +60,12 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
   // same gated helper E-1, PV-4A, SCHED and the snapshot use; absent on every
   // other design, so their legend is unchanged.
   const _pv1Gw = permitStandaloneGateway(input, cad);
+  // More than one IQ Combiner / Envoy (Ray, 2026-09-26): the legend says how
+  // many, and names the shared panel their outputs land in.
+  const _pv1Plan = buildIntegratedEquipment(input, cad);
+  const _pv1N = _pv1Plan.gatewayMultiplicity?.count ?? 1;
+  const _pv1Pre = _pv1N > 1 ? `${_pv1N} × ` : '';
+  const _pv1Panel = permitSharedGatewayPanel(input, cad, _pv1Plan);
   // Legend keys use the SAME tag codes as the wall chips on the drawing —
   // numbered legend rows (1-6) that never appeared on the plan were a
   // coordination P1 an AHJ red-lines.
@@ -68,12 +74,15 @@ export function pageSiteInformation(input: PermitInput, cad: CADModel, pageNum: 
     { tag: 'MSP', label: '(E) MAIN SERVICE PANEL',              desc: `${project.mainPanelAmps || 200}A — ${(project.mainPanelBrand || 'EXISTING').toUpperCase()}` },
     { tag: 'AC',  label: `(N) ${hasAcDisc ? '100A' : '60A'} ${_pv1SupplySide ? 'FUSED' : 'NON-FUSED'} AC DISCONNECT`, desc: _pv1SupplySide ? 'TAP OCPD — NEC 705.11(C), 690.15' : 'WITHIN SIGHT — NEC 690.15' },
     ...(_pv1Gw ? [
-      { tag: 'CB', label: `(N) ${_pv1Gw.landingLabel.toUpperCase()}`, desc: 'AC BRANCHES LAND HERE (2P BREAKERS) — EXTERIOR WALL ADJACENT TO MSP (FIELD VERIFY)' },
-      { tag: 'GW', label: `(N) ${_pv1Gw.label.toUpperCase()}${_pv1Gw.partNumber ? ` (${_pv1Gw.partNumber})` : ''}`,
+      { tag: 'CB', label: `(N) ${_pv1Pre}${_pv1Gw.landingLabel.toUpperCase()}`, desc: `AC BRANCHES LAND HERE (2P BREAKERS)${_pv1N > 1 ? ' — ONE PER GATEWAY' : ''} — EXTERIOR WALL ADJACENT TO MSP (FIELD VERIFY)` },
+      { tag: 'GW', label: `(N) ${_pv1Pre}${_pv1Gw.label.toUpperCase()}${_pv1Gw.partNumber ? ` (${_pv1Gw.partNumber})` : ''}`,
         desc: `OWN ENCLOSURE (NEMA 3R IF OUTDOORS) WITHIN 5 FT PRODUCTION-CT LEAD OF CB — ${_pv1Gw.supplyBreakerA}A 2P SUPPLY IN CB` },
     ] : [
-      { tag: 'CB',  label: `(N) ${invMfr} COMBINER BOX`,          desc: 'EXTERIOR WALL — ADJACENT TO MSP (FIELD VERIFY)' },
+      { tag: 'CB',  label: `(N) ${_pv1Pre}${invMfr} COMBINER BOX`,          desc: `EXTERIOR WALL — ADJACENT TO MSP (FIELD VERIFY)${_pv1N > 1 ? ' — ONE PER GATEWAY' : ''}` },
     ]),
+    ...(_pv1Panel ? [
+      { tag: 'PP', label: `(N) ${_pv1Panel.model.toUpperCase()}`, desc: `SHARED PANEL — THE ${_pv1N} GATEWAY OUTPUTS LAND HERE (FIELD VERIFY LOCATION)` },
+    ] : []),
     ...(hasBatt ? [
       { tag: 'SC',  label: `(N) ${invMfr} SYSTEM CONTROLLER`,   desc: 'ESS / MICROGRID INTERCONNECT DEVICE' },
       { tag: 'BLP', label: '(N) BACKUP LOAD PANEL',             desc: 'CRITICAL LOADS SUB-PANEL' },

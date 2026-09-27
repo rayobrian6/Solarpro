@@ -36,7 +36,7 @@ import type { RackingCapacityDocumentEvidence } from './rackingAssembly';
 import type { FramingCapacityDocumentEvidence, FramingEngineerReviewEvidence } from './framingAuthority';
 import type { EnvironmentalLoadSourceEvidence } from './environmentalAuthority';
 import { buildConductorAuthority } from '../utils/conductorAuthority';
-import { buildIntegratedEquipment, planLandingDevice, permitStandaloneGateway } from '../utils/integratedEquipment';
+import { buildIntegratedEquipment, planLandingDevice, permitSharedGatewayPanel, permitStandaloneGateway } from '../utils/integratedEquipment';
 import { interconnectionRuleOf, permitInterconnectionToken } from '../utils/interconnectionRule';
 import { resolveDesignMetering } from '@/lib/equipment/designMetering';
 import { buildHybridPermitMetering } from '../utils/sldAdapter';
@@ -3186,6 +3186,34 @@ export function buildPermitDesignSnapshot(
             landingModel: bosLanding.model,
             supplyBreakerA: bos.gatewaySupply.breakerA,
             branchBreakerA: bos.branchBreakerA,
+          },
+        };
+      })(),
+      // ── More than one IQ Combiner / Envoy — ONLY on a design that needs it ──
+      // Conditional spread, exactly like gatewayTopology above: absent on every
+      // design one gateway carries (their digests cannot move).
+      ...((): { gatewayMultiplicity?: NonNullable<PermitDesignSnapshot['electrical']['gatewayMultiplicity']> } => {
+        const m = bos.gatewayMultiplicity;
+        if (!m) return {};
+        const panel = permitSharedGatewayPanel(input, cad, bos);
+        const g = m.solution.governing;
+        return {
+          gatewayMultiplicity: {
+            count: m.count,
+            deviceId: m.deviceId,
+            deviceLabel: m.deviceLabel,
+            governing: g.kind === 'limit' ? `limit:${g.dimension}` : g.kind,
+            explanation: m.explanation,
+            instances: m.instances.map(inst => ({
+              index: inst.index,
+              label: inst.label,
+              branches: inst.branches.map(b => b.id),
+              deviceCount: inst.deviceCount,
+              continuousA: inst.continuousCurrentA,
+              outputOcpdA: inst.outputOcpdA,
+            })),
+            sharedPanelModel: panel?.model ?? null,
+            sharedPanelBusbarA: panel?.busbarA ?? null,
           },
         };
       })(),
