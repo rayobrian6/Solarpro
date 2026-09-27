@@ -19,6 +19,8 @@ Last updated: 2026-09-26 (Phase 5).
 | **R15** | `distributor_prices` has **no unique index at all** — proven by executing the shipped `ON CONFLICT` against real PostgreSQL (`42P10`). Repaired without a migration (UPDATE-then-INSERT), so this is optional hardening only. It **will fail if duplicate rows already exist**, so it needs a de-dup pass first (keep the newest `updated_at` per key) | Nothing — atomicity only |
 | **R16** | `pricing_config` is still **one global row for every organisation**, and per-system-type equipment cost has no column. The unauthenticated read is closed and the write is admin-gated, but there is no tenant key: the last save sets the price-per-watt used in every other company's customer-facing proposal. Needs an owning scope column with a per-scope uniqueness constraint | Per-organisation pricing |
 | **P2** | ✅ **CLOSED, both halves** (`557fbaa6` + `802c0b51`). Reopening a saved engineering run used to silently re-equip the design with catalogue defaults. Kept in this list only for a live check — see below | Nothing |
+| **R18** | 🚨 **WHO MAY SEE NEARMAP IMAGERY?** The 3D imagery toggle you asked for is mostly already there — the picker exists and is wired to nothing — but the only browser-reachable tile route is **admin-gated**, so a normal user's Nearmap button silently shows ESRI while still reading "Nearmap HD". Building the 3D layer on that route inherits the gate. One decision: who is allowed to view it, and is it metered per user | The 3D imagery toggle |
+| **R19** | 🚨 **THE IMAGERY HAS NO CAPTURE DATE, AND THE PLAN SET ASSERTS PROVENANCE ANYWAY.** PV-1 prints "Nearmap HD aerial · 7.5 cm/px orthophoto" over an image of unknown vintage — the tile request sends only z/x/y and no survey selector, so two fetches months apart return different acquisitions. The two dates that DO exist belong to the AI product, and binding one of them to the tile image would be **inventing the date**, which you forbade. So it needs either a real date from the tiles API or the claim softened | An honest provenance caption |
 | **R17** | 🚨 **WHAT DOES STORAGE COST THE CUSTOMER?** Adding a battery changes the BOM by **$8,280** and the homeowner's quoted "System Cost" by **$0**. There is no storage term in the pricing model to fix — `pricing_config`, its DB mapper and the admin pricing UI contain no battery field at all, and `equipment-db.msrpUsd` is a manufacturer list price, not what an installer charges. So this is a pricing-model decision, not a bug with a correct answer in the repo. I did not invent one | Quoting any design with storage |
 | **R8** | 🚨 **CORRECTED** — the batch halts at **003**, not 027: `ADD CONSTRAINT IF NOT EXISTS` is not valid PostgreSQL in any version, so `run-pending` is dead after 002 and 027 is never even reached. A whole feature's schema also sits in a directory the runner never scans | Persisting homeowner/micro-stage state; any batch migration run |
 | **R1** | A committed Google API key needs rotating — only you have the account | Nothing in code |
@@ -37,6 +39,69 @@ what is left is what to do about packages approved on the old value. **R8 and R1
 two that matter most operationally.** R8 because a batch migration run cannot
 get past file 027 today, and R1 because rotation is the only remedy for a leak.
 Everything else has a safe default already applied or recorded.
+
+---
+
+## R18 / R19 — 🚨 Nearmap: the toggle is nearly free to build, and two things need your word
+
+**The good news first: there is no second acquisition path to delete, only a read to wire.**
+
+`mapPickerState` appears exactly three times in the 16k-line `SolarEngine3D.tsx` — the import,
+the declaration, and the JSX. **Nothing consumes it.** `components/3d/mapSource/constants.ts`
+already lists `{ id: 'nearmap', label: 'Nearmap', description: 'Nearmap HD (~7.5cm aerial)' }`,
+and `components/3d/mapSource/DESIGN.md` says so outright: *"Switching calls onChange with the new
+MapSource; the actual imagery swap is the integration step handled by SolarEngine3D."* So the UI
+you want exists and the wiring does not. Nearmap imagery today lives only in the 2D canvas and in
+the server-side plan-set stitch.
+
+**And you have already paid for a georeferenced orthophoto per project, which nothing reads
+back.** `app/api/engineering/permit/route.ts` writes the whole permit input to `project_files` as
+`permit_input.json`, and its `aerialData` carries the stitched Nearmap JPEG as a data URI plus
+lat, lng, zoom, imageWidth, imageHeight, `imageSource: 'nearmap'` and the roof polygons in the
+imagery's own frame. `lib/fieldMeasurement/permitAccess.ts` already reads that exact row for
+another purpose. That is a complete, already-acquired, correctly-georeferenced reference image —
+**the cheapest possible source for the 3D layer, and it costs nothing to display again.**
+
+### R18 — who may see it
+
+`app/api/admin/nearmap-tile/[z]/[x]/[y]/route.ts` starts with `requireAdminApi`. For any
+non-admin session it returns 403, the `<img>` fires `onerror`, and `DesignStudio`'s `tryEsri()`
+swaps in ESRI **with no message** — the button stays lit as "Nearmap HD" while the pixels are
+ESRI. A 3D layer built on that route inherits the gate, so a designer would toggle Nearmap and
+get ESRI silently.
+
+Also worth knowing before you decide: that route has **no rate limit** (both
+`app/api/aerial-roof-detect` and `app/api/admin/aerial-roof-lookup` do) and no
+`NEARMAP_AI_CACHE_ONLY` check, so for an admin it is an unmetered, unthrottled passthrough to a
+paid endpoint.
+
+| | Option |
+|---|---|
+| **A** | **Serve the already-paid `permit_input.json` orthophoto** as the 3D reference layer. Costs nothing per view, needs no gate change, and works for any user who can open the project — but only exists once a permit has been generated. |
+| **B** | Open the tile route to any authenticated user, with a rate limit and quota accounting. Live imagery everywhere, and it spends credits on every pan. |
+| **C** | Keep it admin-only and make the degrade visible, so a non-admin is told "Nearmap unavailable — showing ESRI" instead of being shown ESRI labelled Nearmap. |
+
+**A then C is the cheapest honest combination** — reuse what is paid for, and stop the silent
+swap. I have built none of it.
+
+### R19 — the imagery has no date
+
+`NearmapStaticAerial` carries `imageBase64`, width, height, zoom and tile count. **No date, no
+survey id.** The request sends only z/x/y plus the key — Nearmap's date/survey selectors are not
+used — so the endpoint returns "whatever is latest now", and two fetches months apart return
+different acquisitions under identical cache keys. `sitePlan.ts` nonetheless prints
+**"Nearmap HD aerial · 7.5 cm/px orthophoto"** on PV-1.
+
+The two dates that exist (`coverage.latestCaptureDate` and the AI response's `surveyDate`) belong
+to the OTHER product, and `nearmap.ts`'s own comment says the two share only a registration
+FRAME, not a capture date. **Binding the AI date to the tile image would be inventing the imagery
+date, which you forbade.** So: either pass a survey/date selector on the tile request and record
+what comes back, or soften the caption to what is actually known.
+
+| | |
+|---|---|
+| **Blocked** | The 3D imagery toggle (R18) and an honest provenance caption (R19). |
+| **NOT blocked** | The two cost defects are fixed and shipped — a refusal no longer escalates, and a provider toggle no longer re-buys tiles. |
 
 ---
 
