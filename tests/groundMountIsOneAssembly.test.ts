@@ -306,6 +306,78 @@ describe('🚨 DUPLICATE makes a SECOND assembly, not a bigger one', () => {
   });
 });
 
+describe('🚨 THE MOUNT TURNS THE SAME WAY THE AZIMUTH SAYS IT DOES', () => {
+  // 🚨 THIS IS THE ASSERTION THAT WAS MISSING, AND A REAL DEFECT LIVED IN THE GAP.
+  //
+  // `rotateAssembly` advanced `azimuth` CLOCKWISE while rotating the module POSITIONS
+  // counter-clockwise: the formula was the clockwise one with north and east swapped. Twenty-two
+  // tests passed over it, because every one of them asked about rigidity (the shape is
+  // preserved), about the pivot (the anchor held), or about the azimuth field (it reads 210) —
+  // and a backwards rotation satisfies all three.
+  //
+  // It only became visible when the STRUCTURE was measured against the modules in a browser: the
+  // racking solver lays its rails along `azimuth`, so a mount turned the wrong way had its posts
+  // 2.55 m from the nearest module. These assertions state the physical relationship directly,
+  // so the sign cannot flip back silently.
+
+  /** Compass bearing from a to b, degrees clockwise from north. */
+  function bearing(a: PlacedPanel, b: PlacedPanel): number {
+    const cosLat = Math.cos(((a.lat + b.lat) / 2) * Math.PI / 180);
+    const north = (b.lat - a.lat) * MPD;
+    const east = (b.lng - a.lng) * MPD * cosLat;
+    return (Math.atan2(east, north) * 180 / Math.PI + 360) % 360;
+  }
+  const angleGap = (a: number, b: number) => Math.abs(((a - b + 540) % 360) - 180);
+
+  it('a module due north of the anchor swings EAST on a +90° turn, not west', () => {
+    const m = mount('ga-A', 2, 1);              // row 1 sits due north of row 0 at azimuth 180
+    const before = m.find(p => p.id === 'ga-A-p1-0')!;
+    expect(Math.round(bearing(m[0], before)), 'the fixture is not laid out as expected').toBe(0);
+    const turned = rotateAssembly(m, 90);
+    const after = turned.find(p => p.id === 'ga-A-p1-0')!;
+    expect(angleGap(bearing(turned[0], after), 90),
+      `turning +90° sent the back row to bearing ${bearing(turned[0], after).toFixed(1)}° — `
+      + 'it must be 90° (east). 270° means the positions turn the opposite way to the azimuth.')
+      .toBeLessThan(0.5);
+  });
+
+  it('the row behind always sits at the ANTI-AZIMUTH, at every azimuth', () => {
+    // The invariant the racking solver depends on: rows are spaced along −azimuth, so the back
+    // row's bearing from the front row must be azimuth + 180 whatever the mount is pointed at.
+    for (const az of [0, 45, 90, 135, 180, 225, 270, 315]) {
+      const turned = setAssemblyAzimuth(mount('ga-A', 2, 2), az);
+      const front = turned.find(p => p.arrayRow === 0)!;
+      const back = turned.find(p => p.arrayRow === 1 && p.col === front.col)!;
+      expect(back.azimuth, `azimuth was not written for az=${az}`).toBeCloseTo(az, 6);
+      expect(angleGap(bearing(front, back), (az + 180) % 360),
+        `at azimuth ${az}° the row behind sits at bearing ${bearing(front, back).toFixed(1)}°, `
+        + `but the anti-azimuth is ${(az + 180) % 360}°`)
+        .toBeLessThan(0.5);
+    }
+  });
+
+  it('turning it forwards and back returns every module to where it started', () => {
+    const m = mount('ga-A', 2, 3);
+    const there = rotateAssembly(m, 37);
+    const back = rotateAssembly(there, -37);
+    for (const p of m) {
+      const q = back.find(x => x.id === p.id)!;
+      expect(metresBetween(p, q), `${p.id} did not come back`).toBeLessThan(0.001);
+      expect(q.azimuth).toBeCloseTo(p.azimuth!, 6);
+    }
+  });
+
+  it('a frozen pose does not survive the turn', () => {
+    // `frameQuat` is an explicit world orientation the renderer PREFERS over heading/azimuth. A
+    // module that kept one would hold its old pose while the structure turned under it.
+    const m = mount('ga-A', 1, 2).map(p => ({ ...p, frameQuat: { x: 0, y: 0, z: 0, w: 1 } })) as PlacedPanel[];
+    for (const p of rotateAssembly(m, 25)) {
+      expect((p as unknown as Record<string, unknown>).frameQuat,
+        `${p.id} kept its frameQuat, so it will render at the old orientation`).toBeUndefined();
+    }
+  });
+});
+
 describe('🚨 DELETE removes one assembly and nothing else', () => {
   it('the other mount and the roof panels survive', () => {
     const all = [...mount('ga-A', 2, 3), ...mount('ga-B', 2, 2), roofPanel('roof-1')];

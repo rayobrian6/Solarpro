@@ -14,6 +14,7 @@ import React, { useState } from 'react';
 import DetailsDropdown from './DetailsDropdown';
 import SourceTabs from './SourceTabs';
 import SourcePicker from './SourcePicker';
+import ImageryToggle from './ImageryToggle';
 import { setSource, setTab, toggleLayer } from './constants';
 import type { MapLayer, MapPickerState, MapSource, MapTab } from './types';
 
@@ -69,6 +70,10 @@ export default function MapSourcePicker({
           disabled={disabled}
         />
         <SourceTabs tab={state.tab} onChange={handleTabChange} disabled={disabled} />
+        {/* 🚨 BOTH IMAGERY CHOICES, VISIBLE, IN THE 3D WORKSPACE. Ray could not find Nearmap in
+            3D because the only thing that said the word was inside a closed dropdown — see the
+            header of ImageryToggle.tsx. Same state, same onChange as the dropdown below. */}
+        <ImageryToggle source={state.source} onChange={handleSourceChange} disabled={disabled} />
         <SourcePicker
           source={state.source}
           onChange={handleSourceChange}

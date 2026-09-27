@@ -27,6 +27,17 @@ interface AerialReference {
   resolutionCmPerPx: number | null;
   captureDate: string | null;
   captureDateKnown: boolean;
+  /**
+   * WHERE THESE PIXELS CAME FROM — stated, never inferred.
+   *
+   * 'stored'  the orthophoto the permit package saved for this project.
+   * 'session' tiles this browser session already fetched for the 2D canvas.
+   *
+   * Both are imagery that has already been paid for; neither involves a request to Nearmap. The
+   * readout prints which, because "reused" is only an honest claim if it can say reused FROM
+   * WHAT.
+   */
+  origin: 'stored' | 'session';
 }
 import { buildDigitalTwin, enrichDigitalTwinWithDsm, type DigitalTwinData, type RoofSegment } from '@/lib/digitalTwin';
 import { filterToSubjectBuilding, dropDetectedPlanesOverlappingManual } from '@/lib/aerial/subjectBuildingCrop';
@@ -284,7 +295,15 @@ import { DraggablePanel } from './DraggablePanel';
 import {
   assemblyPanels, assemblyFrame, setAssemblyAzimuth, setAssemblyTilt,
   setAssemblyRowPitch, duplicateAssembly, removeAssembly, replaceAssembly,
+  rotateAssembly,
 } from '@/lib/3d/groundMountAssembly';
+
+// 🚨 THE IMAGERY THIS SESSION HAS ALREADY PAID FOR, AND THE PROJECTION TO PLACE IT WITH.
+// `composeCachedTiles` reads the SAME tile cache the 2D canvas fills and issues no request of
+// any kind; `groundResolutionCmPerPx` comes from lib/map/webMercator, which is the one Web
+// Mercator implementation in this codebase — lib/aerial/nearmap.ts (server-only) re-exports it.
+import { composeCachedTiles } from '@/lib/map/tileCache';
+import { groundResolutionCmPerPx } from '@/lib/map/webMercator';
 
 // v65 (camera-tilt): Aurora-parity camera presets — default 3D view at -45° pitch
 // (tilted aerial) instead of -65° (top-down-ish). See lib/3d/cameraPresets.ts.
@@ -3217,6 +3236,46 @@ function SolarEngine3D({
                          tilt: p.tilt, azimuth: p.azimuth })),
         }));
       },
+      /* 🚨 THE STRUCTURE AS IT IS ACTUALLY RENDERED — piles, strongbacks, rails, braces.
+       *
+       * Ray: "Use actual visible rendered entities, not only panel JSON... Record the visible
+       * locations of modules, rails, pylons. Then drag the mount. PASS only if all visible
+       * geometry moves together." Panel JSON cannot answer that, because the modules were always
+       * right; it was the structure that stayed behind. So this reads the position off the
+       * ENTITY IN THE VIEWER and reports the position it is drawing at.
+       *
+       * `contains` is the point: an entity dropped from `panelMapRef` but never removed from the
+       * scene would still be on screen, and an entry here that the viewer no longer holds would
+       * be a member this reports as present while the user sees nothing. Only entities the
+       * viewer is actually holding are returned. */
+      racking: () => {
+        const Cs = (window as any).Cesium;
+        const v = viewerRef.current;
+        const out: Array<{ key: string; name: string; arrayId: string | null;
+                           lat: number; lng: number; height: number }> = [];
+        if (!Cs || !v) return out;
+        const now = Cs.JulianDate.now();
+        panelMapRef.current.forEach((ent: any, key: string) => {
+          const i = key.indexOf('__gnd__');
+          if (i < 0) return;
+          try { if (!v.entities.contains(ent)) return; } catch { return; }
+          let pos: any = null;
+          try { pos = ent.position?.getValue?.(now) ?? ent.position?._value; } catch { return; }
+          if (!pos) return;
+          let carto: any = null;
+          try { carto = Cs.Cartographic.fromCartesian(pos); } catch { return; }
+          if (!carto) return;
+          out.push({
+            key,
+            name: String(ent.name ?? ''),
+            arrayId: i > 0 ? key.slice(0, i) : null,
+            lat: Cs.Math.toDegrees(carto.latitude),
+            lng: Cs.Math.toDegrees(carto.longitude),
+            height: carto.height,
+          });
+        });
+        return out;
+      },
     };
     return () => {
       try { delete (window as any).__solarViewerE2E; } catch {}
@@ -3682,15 +3741,36 @@ function SolarEngine3D({
       return;
     }
 
-    if (!projectId) {
-      setAerialRefStatus({
-        state: 'unavailable',
-        reason: 'A Quick Design has no saved project, so it has no stored aerial to reuse.',
-      });
-      return;
-    }
-
     let cancelled = false;
+
+    /**
+     * 🚨 THE NEARMAP TILES THIS SESSION HAS ALREADY BOUGHT.
+     *
+     * "I can still only access Nearmap from the 2D environment." The 2D canvas fetches Nearmap
+     * Vert tiles through the metered proxy and keeps them in `lib/map/tileCache`. Those pixels
+     * are paid for and in memory; until the cache moved out of DesignStudio the 3D studio simply
+     * could not see them.
+     *
+     * `composeCachedTiles` never fetches — it returns null when nothing usable is cached — so
+     * this is free by construction, which is what keeps "Do not make the visual toggle a billing
+     * event" true. The resolution is COMPUTED from the tiles' own zoom and this latitude (R19);
+     * the capture date is not invented, because a tile carries none.
+     */
+    const fromSessionCache = (): AerialReference | null => {
+      try {
+        const comp = composeCachedTiles('nearmap', { lat, lng });
+        if (!comp) return null;
+        return {
+          source: 'nearmap',
+          imageDataUrl: comp.dataUrl,
+          bounds: comp.bounds,
+          resolutionCmPerPx: groundResolutionCmPerPx(lat, comp.zoom),
+          captureDate: null,
+          captureDateKnown: false,
+          origin: 'session',
+        };
+      } catch { return null; }
+    };
 
     const draw = (ref: AerialReference) => {
       if (cancelled) return;
@@ -3731,14 +3811,29 @@ function SolarEngine3D({
       }
     };
 
+    /** Nothing stored, or nothing to store it against — fall back to the session's own tiles. */
+    const useSessionOr = (reason: string) => {
+      const s = fromSessionCache();
+      if (s) { draw(s); return; }
+      setAerialRefStatus({ state: 'unavailable', reason });
+    };
+
+    if (!projectId) {
+      useSessionOr(
+        'A Quick Design has no saved project, so there is no stored aerial to reuse, and this '
+        + 'session has not loaded any Nearmap tiles yet. Switch to the 2D map and choose '
+        + 'Nearmap HD there once — the tiles it fetches are then reused here for free.');
+      return () => { cancelled = true; };
+    }
+
     // Cached per project — a repeated toggle must not re-request anything.
     const cached = aerialRefCacheRef.current;
     if (cached && cached.projectId === projectId) {
       if (cached.data) draw(cached.data);
-      else setAerialRefStatus({
-        state: 'unavailable',
-        reason: 'This project has no stored aerial that can be georeferenced.',
-      });
+      else useSessionOr(
+        'This project has no stored aerial that can be georeferenced, and this session has not '
+        + 'loaded any Nearmap tiles yet. Switch to the 2D map and choose Nearmap HD there once — '
+        + 'the tiles it fetches are then reused here for free.');
       return () => { cancelled = true; };
     }
 
@@ -3750,15 +3845,14 @@ function SolarEngine3D({
         if (cancelled) return;
         if (!res.ok || !data?.success) {
           aerialRefCacheRef.current = { projectId, data: null };
-          setAerialRefStatus({
-            state: 'unavailable',
-            reason: data?.error || `The aerial reference could not be read (HTTP ${res.status}).`,
-          });
+          useSessionOr(data?.error || `The aerial reference could not be read (HTTP ${res.status}).`);
           return;
         }
         if (!data.available) {
           aerialRefCacheRef.current = { projectId, data: null };
-          setAerialRefStatus({ state: 'unavailable', reason: data.reason || 'No stored aerial.' });
+          useSessionOr(`${data.reason || 'This project has no stored aerial.'} This session has `
+            + 'not loaded any Nearmap tiles either — choose Nearmap HD once on the 2D map and '
+            + 'they are reused here for free.');
           return;
         }
         const ref: AerialReference = {
@@ -3766,20 +3860,20 @@ function SolarEngine3D({
           resolutionCmPerPx: data.resolutionCmPerPx ?? null,
           captureDate: data.captureDate ?? null,
           captureDateKnown: Boolean(data.captureDateKnown),
+          origin: 'stored',
         };
         aerialRefCacheRef.current = { projectId, data: ref };
         draw(ref);
       } catch (e: unknown) {
         if (cancelled) return;
-        setAerialRefStatus({
-          state: 'unavailable',
-          reason: `The aerial reference request failed: ${(e as Error).message}`,
-        });
+        useSessionOr(`The aerial reference request failed: ${(e as Error).message}`);
       }
     })();
 
     return () => { cancelled = true; };
-  }, [mapPickerState.source, projectId, stage]);
+    // `lat`/`lng` are in here because the session-cache composite is grown around the site
+    // centre: moving the site must not leave a reference photo of the previous one on screen.
+  }, [mapPickerState.source, projectId, stage, lat, lng]);
 
   // Drop the reference layer if the component is going away, so a remount starts clean.
   useEffect(() => () => {
@@ -7181,12 +7275,23 @@ function SolarEngine3D({
     const prevMap = new Map<string, PlacedPanel>(prev.map(p => [p.id, p]));
     const nextMap = new Map<string, PlacedPanel>(panelList.map(p => [p.id, p]));
 
+    // 🚨 WHICH GROUND ASSEMBLIES CHANGED IN THIS DIFF.
+    //
+    // Their piles, strongbacks and rails are derived from the panels, so any add, remove or move
+    // makes the structure on screen stale. This is the path a DUPLICATE, a DELETE and every
+    // inspector edit (azimuth, tilt, row pitch) takes — `applyArrayTransform` covers the drag.
+    const touchedGround = new Set<string>();
+    const noteGround = (p?: PlacedPanel) => {
+      if (p && p.systemType === 'ground') touchedGround.add(p.arrayId || GROUND_LEGACY_KEY);
+    };
+
     // Remove panels that no longer exist
     let changed = false;
-    prevMap.forEach((_, id) => {
+    prevMap.forEach((p, id) => {
       if (!nextMap.has(id)) {
         if (panelMapRef.current.has(id)) {
           removePanelEntities(viewer, id); // v47.159: removes frame+glass+grid
+          noteGround(p);
           changed = true;
         }
       }
@@ -7199,6 +7304,7 @@ function SolarEngine3D({
     nextMap.forEach((panel, id) => {
       if (!prevMap.has(id)) {
         addPanelEntity(viewer, C, panel, skipGridIncr);
+        noteGround(panel);
         changed = true;
       }
     });
@@ -7221,6 +7327,8 @@ function SolarEngine3D({
           removePanelEntities(viewer, id);
         }
         addPanelEntity(viewer, C, panel, skipGridIncr);
+        noteGround(panel);
+        noteGround(old);
         changed = true;
       }
     });
@@ -7229,6 +7337,10 @@ function SolarEngine3D({
     if (changed) {
       // Phase 2: rebuild roof rails whenever panel set changes
       try { renderRoofRails(viewer, C, panelList); } catch (e) { handleCesiumError('renderRoofRails incr', e, true); }
+      // 🚨 AND THE GROUND STRUCTURE FOR THE ASSEMBLIES THIS DIFF TOUCHED.
+      try {
+        if (touchedGround.size > 0) syncGroundRacking(viewer, C, panelList, touchedGround);
+      } catch (e) { handleCesiumError('syncGroundRacking incr', e, true); }
       refreshEquipment(viewer, C, panelList); // v63
       publishE2EDiagnostics();
       try { viewer.scene.requestRender(); } catch {}
@@ -9522,7 +9634,10 @@ function SolarEngine3D({
 
       addLog('GROUND', `[GROUND_CLICK_DEBUG] panel placed lat=${panel.lat.toFixed(6)} lng=${panel.lng.toFixed(6)} height=${panel.height.toFixed(2)}`);
       // v48.17 FINAL: structure-before-panels — racking drawn first so posts render under panels
-      addGroundRacking(viewer, C, [panel], baseZ);
+      // A single hand-placed ground panel is its own namespace — it has no `arrayId` (it is not
+      // part of a placed mount), and with no prefix two of them would both key their pylon
+      // `__gnd__pylon_0` and the second would delete the first's.
+      addGroundRacking(viewer, C, [panel], baseZ, `${panel.id}_`);
       addPanelEntity(viewer, C, panel);
       const newPanels = [...panelsRef.current, panel];
       panelsRef.current = newPanels;
@@ -11820,7 +11935,41 @@ function SolarEngine3D({
     });
     return cnt ? C.Cartesian3.divideByScalar(cen, cnt, cen) : null;
   }
+  /** Every module in the selection belongs to a ground mount (and there is at least one). */
+  function selectionIsGround(ids: Set<string>): boolean {
+    let any = false;
+    for (const p of panelsRef.current) {
+      if (!ids.has(p.id)) continue;
+      if (p.systemType !== 'ground') return false;
+      any = true;
+    }
+    return any;
+  }
+
   function arrayNormalECEF(C: any, ids: Set<string>): any | null {
+    // 🚨 A GROUND MOUNT SLIDES ON THE GROUND, NOT ON ITS OWN TILTED FACE.
+    //
+    // This normal is the plane a grab-to-move drag runs in AND the axis a grab-to-rotate turns
+    // about. Taking it from the module face — correct for a roof array, whose plane IS the roof
+    // — means a ground mount dragged 10 m north also climbs 10·tan(20°) ≈ 3.6 m into the air,
+    // and "rotates" by spinning within its tilted plane, which would leave the rows running
+    // diagonally while every module still faced south. A rack cannot be built that way.
+    //
+    // For a ground mount both answers are the ground plane: move horizontally, turn about
+    // vertical — and turning about vertical is exactly a change of azimuth, which is what
+    // `rotateArrayBy` then writes through the assembly authority.
+    //
+    // GEODETIC up, not the geocentric radial the fallback below uses: they differ by up to
+    // ~0.19° and that is a whole separate defect this codebase has already paid for once.
+    if (selectionIsGround(ids)) {
+      const cen = arrayCentroidECEF(C, ids);
+      if (cen) {
+        try {
+          const up = C.Ellipsoid.WGS84.geodeticSurfaceNormal(cen, new C.Cartesian3());
+          if (up && isFinite(up.x)) return up;
+        } catch {}
+      }
+    }
     const ref = panelsRef.current.find(p => ids.has(p.id) && isFinite((p as any).ecefNx));
     if (ref) return C.Cartesian3.normalize(new C.Cartesian3((ref as any).ecefNx, (ref as any).ecefNy, (ref as any).ecefNz), new C.Cartesian3());
     // Fallback: radial-up at the array centroid, so a frameless panel can still rotate.
@@ -11867,6 +12016,18 @@ function SolarEngine3D({
       if (r.u) { next.ecefUx = r.u.x; next.ecefUy = r.u.y; next.ecefUz = r.u.z; }
       return next;
     });
+    commitTransformedPanels(viewer, C, ids, updated, commit);
+  }
+
+  /**
+   * THE TAIL OF EVERY ARRAY TRANSFORM — redraw the modules, the rails, the racking, commit once.
+   *
+   * Extracted so the ground-assembly rotation below can reuse it verbatim instead of growing a
+   * second copy of "what to redraw after the panels changed". Nothing here is new.
+   */
+  function commitTransformedPanels(
+    viewer: any, C: any, ids: Set<string>, updated: PlacedPanel[], commit: boolean,
+  ) {
     const skipGrid = updated.length > 12;
     ids.forEach(id => {
       removePanelEntities(viewer, id);          // removes frame+glass+grid for this panel
@@ -11876,6 +12037,22 @@ function SolarEngine3D({
     panelsRef.current = updated;
     lastRenderedPanelsRef.current = updated;     // pre-sync → [panels] diff is a no-op (no blink)
     try { renderRoofRails(viewer, C, updated); } catch (e) { handleCesiumError('renderRoofRails xform', e, true); }
+    // 🚨 AND THE GROUND MOUNT'S OWN STRUCTURE, WHICH IS WHY RAY'S RAILS STAYED BEHIND.
+    //
+    // This function is the single place both grab-to-move and grab-to-rotate transform an
+    // array, and it re-rendered the ROOF rails only. A ground mount's piles, strongbacks and
+    // rails are derived from the panels and were re-solved nowhere but a full rebuild, so the
+    // modules arrived at the new position and the structure stayed at the old one — exactly
+    // what the live screenshot shows. Re-solving here, on the same list that was just written,
+    // is what makes the mount move as one physical object.
+    //
+    // Scoped to the assemblies actually in the selection: a roof drag must not re-solve a ground
+    // mount on the other side of the site, and re-solving every array on every mouse move would
+    // make a drag quadratic in the number of mounts.
+    try {
+      const touched = groundArraysOf(ids, updated);
+      if (touched.size > 0) syncGroundRacking(viewer, C, updated, touched);
+    } catch (e) { handleCesiumError('syncGroundRacking xform', e, true); }
     if (commit) { onPanelsChange(updated); showRotateHandle(viewer, C); }
     try { viewer.scene.requestRender(); } catch {}
   }
@@ -11905,6 +12082,33 @@ function SolarEngine3D({
   // the plane (face normal stays = N, so tilt/azimuth/energy are unchanged). The result
   // is stored as an explicit frameQuat that addPanelEntity renders verbatim.
   function rotateArrayBy(viewer: any, C: any, ids: Set<string>, rad: number, cen: any, N: any, commit = true) {
+    // ═══ A GROUND MOUNT TURNS ON THE GROUND, AND THAT IS AN AZIMUTH CHANGE ═══
+    //
+    // The in-plane spin below is right for a roof array: the modules keep facing the roof, only
+    // the rectangle's footprint yaws, and `frameQuat` records a pose HPR cannot express. Applied
+    // to a ground mount it produces an object that cannot exist — rows running diagonally while
+    // every module still reports azimuth 180 — and the racking solver, which lays its rails out
+    // along `azimuth`, would then build the structure across the modules instead of under them.
+    //
+    // So a ground assembly is turned by the assembly authority (lib/3d/groundMountAssembly.ts),
+    // which pivots the whole mount on its own anchor and advances every module's azimuth and
+    // heading by the same delta. `N` here is geodetic up for a ground selection (see
+    // `arrayNormalECEF`), so the dragged angle measured about it IS the azimuth delta —
+    // negated, because azimuth runs clockwise from north and a right-hand rotation about up
+    // runs the other way.
+    const groundKeys = groundArraysOf(ids, panelsRef.current);
+    if (groundKeys.size === 1 && selectionIsGround(ids)) {
+      const arrayId = Array.from(groundKeys)[0];
+      if (arrayId !== GROUND_LEGACY_KEY) {
+        const all = panelsRef.current;
+        const members = assemblyPanels(all, arrayId);
+        if (members.length > 0) {
+          const turned = rotateAssembly(members, -rad * 180 / Math.PI);
+          commitTransformedPanels(viewer, C, ids, replaceAssembly(all, arrayId, turned), commit);
+          return;
+        }
+      }
+    }
     const Rq   = C.Quaternion.fromAxisAngle(N, rad);
     const rotM = C.Matrix3.fromQuaternion(Rq);
     applyArrayTransform(viewer, C, ids, (pos, panel) => {
@@ -12134,6 +12338,8 @@ function SolarEngine3D({
     const ids = selectedPanelIdsRef.current;
     if (ids.size === 0 || !viewer) return;
     const count = ids.size;
+    // 🚨 WHAT THE DELETED MODULES BELONGED TO, READ BEFORE THEY ARE GONE.
+    const doomedArrays = groundArraysOf(ids, panelsRef.current);
     ids.forEach(id => removePanelEntities(viewer, id)); // v47.159: removes frame+glass+grid
     const idSet = new Set(ids);
     const newPanels = panelsRef.current.filter(p => !idSet.has(p.id));
@@ -12143,6 +12349,13 @@ function SolarEngine3D({
     // rail run stays under empty roof (rails are separate entities, not removed above).
     const C = (window as any).Cesium;
     if (C) { try { renderRoofRails(viewer, C, newPanels); } catch {} }
+    // 🚨 "DELETE — deletes the complete physical mount. No orphan rails/posts."
+    // `lastRenderedPanelsRef` is pre-synced above, so the [panels] diff is a no-op and the
+    // incremental path will never see this removal. Without this the piles and rails of a
+    // deleted mount stand in an empty field.
+    if (C && doomedArrays.size > 0) {
+      try { syncGroundRacking(viewer, C, newPanels, doomedArrays); } catch {}
+    }
     onPanelsChange(newPanels);
     setPanelCount(newPanels.length);
     selectedPanelIdsRef.current = new Set();
@@ -12266,34 +12479,114 @@ function SolarEngine3D({
    * structure placement drew.
    */
   function rebuildGroundRacking(viewer: any, C: any, panelList: PlacedPanel[]) {
-    if (!showRackingRef.current) return;
-    const ground = panelList.filter(p => p.systemType === 'ground');
-    if (ground.length === 0) return;
+    syncGroundRacking(viewer, C, panelList, null);
+  }
 
-    // One group per physical assembly. A panel with no arrayId predates the id being written;
-    // those are grouped together rather than dropped, which is the same treatment they get in
-    // designSnapshot and groundCAD.
+  /** Panels placed before `arrayId` was stamped. Grouped, never dropped. */
+  const GROUND_LEGACY_KEY = 'ground-legacy';
+
+  /**
+   * Remove the racking entities belonging to ONE assembly.
+   *
+   * Scoped by the key namespace, because `renderGroundRackingOutput` only replaces keys it is
+   * about to re-use: a member the new solve no longer produces — a bay that disappeared when the
+   * row pitch changed, every member of a mount that was just deleted — would otherwise stay on
+   * screen forever with nothing under it.
+   */
+  function removeGroundRackingFor(viewer: any, arrayId: string, knownPrefixes: Set<string>) {
+    const keys: string[] = [];
+    panelMapRef.current.forEach((_ent, key) => {
+      if (!key.includes('__gnd__')) return;
+      if (arrayId === GROUND_LEGACY_KEY) {
+        // Legacy members carry whatever prefix placement minted before `arrayId` existed, so
+        // they cannot be matched by name. Everything that DOES belong to a current assembly is
+        // left alone; what is left over is legacy by elimination.
+        let owned = false;
+        knownPrefixes.forEach(p => { if (key.startsWith(p)) owned = true; });
+        if (!owned) keys.push(key);
+      } else if (key.startsWith(arrayId)) {
+        keys.push(key);
+      }
+    });
+    for (const key of keys) {
+      try {
+        const ent = panelMapRef.current.get(key);
+        if (ent) viewer.entities.remove(ent);
+      } catch {}
+      panelMapRef.current.delete(key);
+    }
+    return keys.length;
+  }
+
+  /**
+   * 🚨 THE STRUCTURE IS PART OF THE MOUNT. REGENERATE IT WHEREVER THE MOUNT CHANGES.
+   *
+   * Ray, live, with a screenshot: "modules moved to the new position / rails stayed behind /
+   * pylons/posts stayed behind". His question was which of four things the rails and pylons are.
+   * The answer is the second: DERIVED GEOMETRY. `buildGroundRacking` computes every pile,
+   * strongback and rail from the panel set — they are Cesium-only entities, nothing persists
+   * them, and no transform is ever applied to them. So they must be re-solved from the
+   * transformed canonical array, and the only question was WHERE that happens.
+   *
+   * It used to happen in exactly one place: `renderAllPanels`' full-rebuild branch. A move or a
+   * rotate goes through `applyArrayTransform`, which re-adds the panel entities and re-renders
+   * the ROOF rails and nothing else — hence modules at B and structure at A.
+   *
+   * `only` names the assemblies to re-solve; `null` means all of them. An id in `only` that no
+   * longer has any panels is a DELETE and is removed without being rebuilt, which is what stops
+   * a deleted mount leaving orphan posts standing in the field.
+   */
+  function syncGroundRacking(
+    viewer: any, C: any, panelList: PlacedPanel[], only?: Set<string> | null,
+  ) {
+    const ground = panelList.filter(p => p.systemType === 'ground');
+
+    // One group per physical assembly. Same grouping `designSnapshot` and `groundCAD` use.
     const byArray = new Map<string, PlacedPanel[]>();
     for (const p of ground) {
-      const key = p.arrayId || 'ground-legacy';
+      const key = p.arrayId || GROUND_LEGACY_KEY;
       const g = byArray.get(key);
       if (g) g.push(p); else byArray.set(key, [p]);
     }
+    const knownPrefixes = new Set<string>();
+    byArray.forEach((_g, k) => { if (k !== GROUND_LEGACY_KEY) knownPrefixes.add(k); });
 
-    for (const [key, group] of byArray) {
+    const targets = only ? new Set(only) : new Set(byArray.keys());
+    if (targets.size === 0) return;
+
+    targets.forEach(key => {
+      const removed = removeGroundRackingFor(viewer, key, knownPrefixes);
+      const group = byArray.get(key);
+      if (!group || group.length === 0) {
+        if (removed > 0) addLog('GROUND', `[SYNC] array ${key}: gone — ${removed} members removed`);
+        return;
+      }
+      if (!showRackingRef.current) return;
       // The grid's inverse — see the note at the call site. Guarded so a group with no usable
       // height is skipped rather than drawing structure at an invented elevation.
       const heights = group.map(p => p.height).filter((h): h is number => typeof h === 'number' && Number.isFinite(h));
       if (heights.length === 0) {
-        addLog('GROUND', `[REBUILD] array ${key}: no panel heights — racking not rebuilt`);
-        continue;
+        addLog('GROUND', `[SYNC] array ${key}: no panel heights — racking not rebuilt`);
+        return;
       }
       const tiltDeg = group[0]?.tilt ?? gTiltRef.current ?? 20;
       const { ph } = panelDims(((group[0] as any).orientation ?? panelOrientationRef.current ?? 'portrait') as PanelOrientation);
       const baseZ = Math.min(...heights) - PLP_MIN_PANEL_CLEARANCE_M - (ph / 2) * Math.sin(tiltDeg * Math.PI / 180);
-      addGroundRacking(viewer, C, group, baseZ);
-      addLog('GROUND', `[REBUILD] array ${key}: ${group.length} panels, baseZ=${baseZ.toFixed(3)} tilt=${tiltDeg}`);
+      addGroundRacking(viewer, C, group, baseZ, key === GROUND_LEGACY_KEY ? `${GROUND_LEGACY_KEY}_` : key);
+      addLog('GROUND', `[SYNC] array ${key}: ${group.length} panels, baseZ=${baseZ.toFixed(3)} tilt=${tiltDeg}`);
+    });
+    try { viewer.scene.requestRender(); } catch {}
+  }
+
+  /** The ground assemblies a set of panel ids belongs to. Empty for a roof-only selection. */
+  function groundArraysOf(ids: Set<string> | string[], panelList: PlacedPanel[]): Set<string> {
+    const want = ids instanceof Set ? ids : new Set(ids);
+    const out = new Set<string>();
+    for (const p of panelList) {
+      if (p.systemType !== 'ground' || !want.has(p.id)) continue;
+      out.add(p.arrayId || GROUND_LEGACY_KEY);
     }
+    return out;
   }
 
   function addGroundRacking(
@@ -12301,6 +12594,15 @@ function SolarEngine3D({
     C: any,
     panels: PlacedPanel[],
     baseZ: number,
+    // 🚨 THE ASSEMBLY'S OWN KEY NAMESPACE, AND IT IS NOT OPTIONAL IN PRACTICE.
+    //
+    // Racking entities are keyed `${keyPrefix}__gnd__pylon_0`, `${keyPrefix}__gnd__sb_0` and so
+    // on. Several of those keys carry only a BAY INDEX, not a panel id. With no prefix, two
+    // ground mounts both produce `__gnd__pylon_0` — and `renderGroundRackingOutput` replaces an
+    // entity whose key it is about to re-use, so building the second mount's structure DELETED
+    // the first mount's pylons. `placeGroundArrayRow` has always passed one
+    // (`groundArrayKeyPrefixRef`, which is also the `arrayId`); the rebuild path passed none.
+    keyPrefix: string,
   ) {
     if (!showRackingRef.current || panels.length === 0) return;
     try {
@@ -12340,6 +12642,7 @@ function SolarEngine3D({
         tiltDeg,
         azimuthDeg:  az,
         orientation: orient,
+        keyPrefix,
       };
 
       // v50.0: Build via Reality Engine
@@ -16790,7 +17093,10 @@ function SolarEngine3D({
                   ? `Captured ${aerialRefStatus.ref.captureDate}`
                   : 'Capture date unavailable'}
               </span>
-              {' · reused, no new imagery was purchased'}
+              {/* "Reused" is only honest if it can say reused FROM WHAT. */}
+              {aerialRefStatus.ref.origin === 'stored'
+                ? ' · reused from this project’s stored aerial, no new imagery was purchased'
+                : ' · reused from the tiles this session already loaded, no new imagery was purchased'}
               <br />
               <span style={{ color: '#7c8aa5' }}>
                 Reference only — your geometry is unchanged.

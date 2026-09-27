@@ -141,17 +141,41 @@ export function rotateAssembly(members: PlacedPanel[], deltaDeg: number): Placed
     // Offset from the pivot, in metres.
     const north = (p.lat - anchor.lat) * MPD;
     const east = (p.lng - anchor.lng) * MPD * cosLat;
-    // Clockwise in the ground plane, so a positive delta turns the assembly the same way a
-    // positive azimuth change points it.
-    const north2 = north * cos + east * sin;
-    const east2 = -north * sin + east * cos;
-    return {
+    // 🚨 CLOCKWISE, THE SAME WAY THE AZIMUTH WRITTEN BELOW TURNS. THIS HAD THE SIGN WRONG.
+    //
+    // It used to read `north2 = north·cos + east·sin; east2 = −north·sin + east·cos`, which is
+    // the clockwise formula with north and east swapped — i.e. COUNTER-clockwise. Take a module
+    // due north of the anchor and turn the mount +90°: the azimuth advanced clockwise to face
+    // west while the module swung EAST-to-WEST the other way, so the rows ended up 2·δ away from
+    // the direction the modules were facing.
+    //
+    // Nothing caught it, because every earlier assertion about rotation was about RIGIDITY (the
+    // shape is preserved), about the PIVOT (the anchor did not move) or about the AZIMUTH FIELD
+    // — all of which a backwards rotation satisfies perfectly. What caught it was measuring the
+    // structure against the modules: the racking solver lays its rails along `azimuth`, so with
+    // the positions turned the other way the posts came out 2.55 m from the nearest module.
+    //
+    // Check: (north = 1, east = 0) at +90° must become (north = 0, east = +1) — north turns to
+    // east, which is what turning a south-facing mount to face west does to the row behind it.
+    const north2 = north * cos - east * sin;
+    const east2 = north * sin + east * cos;
+    const next: PlacedPanel = {
       ...p,
       lat: anchor.lat + north2 / MPD,
       lng: anchor.lng + east2 / (MPD * cosLat),
       azimuth: normalizeDeg((p.azimuth ?? frame.azimuthDeg) + deltaDeg),
       heading: typeof p.heading === 'number' ? p.heading + th : p.heading,
     };
+    // 🚨 AND THE FROZEN POSE GOES WITH IT.
+    //
+    // `frameQuat` is an explicit world orientation the renderer prefers over heading/azimuth —
+    // it exists so an in-plane-rotated ROOF panel can hold a yaw that HeadingPitchRoll cannot
+    // express. A module still carrying one would keep its old pose while the azimuth written
+    // here turned the structure underneath it, which is the same class of defect as the rails
+    // staying behind. Turning a ground mount re-derives the pose from azimuth, so the override
+    // must not survive.
+    delete (next as unknown as Record<string, unknown>).frameQuat;
+    return next;
   });
 }
 

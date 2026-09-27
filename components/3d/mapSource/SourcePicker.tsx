@@ -79,6 +79,11 @@ export default function SourcePicker({
           <div className="py-1">
             {SOURCES.map(s => {
               const isActive = s.id === source;
+              // 🚨 AN OPTION THAT CHANGES NOTHING IS A MASQUERADE WITH BETTER MANNERS.
+              // Bing and Mapbox were selectable and reached no imagery code at all: the viewer
+              // kept rendering Google while the button read "Bing". Offered as unavailable, with
+              // the reason, rather than as a choice.
+              const off = !s.wired;
               return (
                 <button
                   key={s.id}
@@ -86,25 +91,27 @@ export default function SourcePicker({
                   role="menuitemradio"
                   aria-checked={isActive}
                   onClick={() => {
+                    if (off) return;
                     if (s.id !== source) onChange(s.id);
                     onOpenChange(false);
                   }}
-                  disabled={disabled}
-                  title={s.description}
+                  disabled={disabled || off}
+                  title={off ? `${s.label} — ${s.unavailableReason}` : s.description}
                   data-testid={`map-source-option-${s.id}`}
-                  className={`w-full flex items-center gap-2 px-4 py-2 hover:bg-slate-800/60 transition-colors text-left ${
-                    disabled ? 'opacity-50 cursor-not-allowed' : ''
-                  }`}
+                  className={`w-full flex items-center gap-2 px-4 py-2 transition-colors text-left ${
+                    off ? 'opacity-45 cursor-not-allowed' : 'hover:bg-slate-800/60'
+                  } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
                 >
                   <span aria-hidden className={`w-2 h-2 rounded-full flex-shrink-0 ${isActive ? 'bg-emerald-400' : 'bg-transparent'}`} />
                   <SourceIcon kind={s.iconKey} size={14} />
                   <span className="flex-1 text-xs text-slate-200">{s.label}</span>
                   <span
                     className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${
-                      isActive ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-700 text-slate-500'
+                      isActive ? 'bg-emerald-500/20 text-emerald-300'
+                        : off ? 'bg-slate-800 text-slate-500' : 'bg-slate-700 text-slate-500'
                     }`}
                   >
-                    {isActive ? 'ON' : ''}
+                    {isActive ? 'ON' : off ? 'N/A' : ''}
                   </span>
                 </button>
               );

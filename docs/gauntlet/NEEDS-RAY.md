@@ -124,9 +124,36 @@ FRAME, not a capture date. **Binding the AI date to the tile image would be inve
 date, which you forbade.** So: either pass a survey/date selector on the tile request and record
 what comes back, or soften the caption to what is actually known.
 
+### 🚨 UPDATE 2026-09-27 — A **then** C is now built, so R18 has narrowed to one decision
+
+The 3D studio no longer waits on this. It shows Nearmap imagery from two sources that are both
+already paid for, and buys nothing:
+
+1. the project's stored `permit_input.json` orthophoto (option **A**), gated on **project
+   access**, not `requireAdminApi`; and
+2. the Nearmap tiles this browser session already fetched for the 2D canvas — the cache moved out
+   of `DesignStudio.tsx` into `lib/map/tileCache.ts` so both views can read it. The composer
+   issues no request of any kind and returns nothing when nothing is cached.
+
+And option **C** is done in 3D: when neither is available the readout says so, names the reason,
+and adds "The native imagery is still shown — nothing has been substituted for Nearmap."
+
+**One new thing you should know, found while wiring it.** The 2D cache key records what was
+REQUESTED, not what arrived. On a 403 `tryEsri()` runs and `commitTile('esri')` stores the ESRI
+image under the `nearmap/z/x/y` key. The 3D composer now refuses any tile whose `_source` is not
+the provider it claims (proved in `tests/cachedTilesAreReusedNotRebought.test.ts`), so it cannot
+paint ESRI under a Nearmap label. **The 2D canvas still does.** Its badge reads ✓E, which is a
+hint, not a statement, while the button beside it still says "🛰️ Nearmap HD".
+
+| Still yours to decide | |
+|---|---|
+| **R18 (2D)** | Whether the 2D button should say "Nearmap unavailable — showing ESRI" instead of staying lit, and whether `/api/admin/nearmap-tile` gets a rate limit. It has none, unlike the two other Nearmap routes. |
+| **R18 (spend gate)** | Whether ordinary authorised designers may SPEND on new tiles, or only ever see what has already been bought. Nothing built here changes the spending gate. |
+| **R19** | `sitePlan.ts` still prints the fixed **"Nearmap HD aerial · 7.5 cm/px orthophoto"** on PV-1 over imagery of unknown vintage. The 3D readout computes cm/px and says "Capture date unavailable"; the plan set does not. It is customer-facing on a permit, so it is yours. |
+
 | | |
 |---|---|
-| **Blocked** | The 3D imagery toggle (R18) and an honest provenance caption (R19). |
+| **No longer blocked** | The 3D imagery toggle. Built, visible, and browser-proved — see `e2e/nearmap-imagery-toggle-in-3d.spec.ts`. |
 | **NOT blocked** | The two cost defects are fixed and shipped — a refusal no longer escalates, and a provider toggle no longer re-buys tiles. |
 
 ---

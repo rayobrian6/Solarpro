@@ -317,8 +317,11 @@ describe('🚨 a view switch no longer deletes the racking and leaves the module
   });
 
   it('the rebuild groups by assembly and derives its base plane from the grid, not a guess', () => {
-    const body = sliceOf('function rebuildGroundRacking(', 'function addGroundRacking(',
-      'rebuildGroundRacking');
+    // `rebuildGroundRacking` is now a one-line delegate to `syncGroundRacking`, which does the
+    // same job for a NAMED set of assemblies as well as for all of them — that is what lets a
+    // drag re-solve only the mount being dragged. The requirements below are unchanged.
+    const body = sliceOf('function syncGroundRacking(', '\n  /** The ground assemblies',
+      'syncGroundRacking');
     // One racking solve per physical assembly, or two ground mounts get one spanning both.
     expect(body, 'the rebuild does not group by assembly').toMatch(/p\.arrayId/);
     // The base plane is the grid's own inverse, not an invented elevation.
@@ -327,7 +330,7 @@ describe('🚨 a view switch no longer deletes the racking and leaves the module
     expect(body, 'a group with no usable height is not guarded').toMatch(/heights\.length === 0/);
     // And it delegates rather than re-deriving geometry of its own.
     expect(body, 'the rebuild computes its own racking instead of calling the existing path')
-      .toMatch(/addGroundRacking\(viewer, C, group, baseZ\)/);
+      .toMatch(/addGroundRacking\(viewer, C, group, baseZ,/);
   });
 });
 
@@ -365,5 +368,95 @@ describe('🚨 the assembly has an identity, using the field that already existe
       expect(readFileSync(join(ROOT, ...f), 'utf8'), `${what} (${f.join('/')}) no longer reads arrayId`)
         .toMatch(/arrayId/);
     }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 🚨 EVERY PATH THAT CHANGES A GROUND MOUNT RE-SOLVES ITS STRUCTURE.
+//
+// Ray's second live failure, with a screenshot: "modules moved to the new position / rails stayed
+// behind / pylons/posts stayed behind". The racking is DERIVED geometry — `buildGroundRacking`
+// computes every pile, strongback and rail from the panel set — and it was re-solved in exactly
+// one place, `renderAllPanels`' full-rebuild branch. A drag goes through `applyArrayTransform`,
+// which redrew the modules and the ROOF rails and nothing else.
+//
+// These are GUARDS, not proof. The behaviour is proved in a real browser by
+// e2e/ground-mount-structure-moves-with-it.spec.ts, which red-proves with "the modules moved
+// 11.93 m and the structure moved 0.00 m". They exist because that spec takes 80 seconds and
+// these take 4, and each one fails on the source as it was before the fix.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('🚨 the structure follows the mount everywhere the mount can change', () => {
+  it('a move or a rotate re-solves the racking of the assemblies it touched', () => {
+    const body = sliceOf('function commitTransformedPanels(', '\n  // Translate the selected array',
+      'commitTransformedPanels');
+    expect(body, 'the shared transform tail redraws the roof rails but not the ground structure')
+      .toMatch(/syncGroundRacking\(/);
+    // Scoped to the selection: re-solving every mount on every mouse move of a drag would make
+    // the gesture quadratic in the number of mounts on site.
+    expect(body, 'the re-solve is not scoped to the assemblies in the selection')
+      .toMatch(/groundArraysOf\(ids, updated\)/);
+    // And the roof rails are still rebuilt — the fix adds, it does not replace.
+    expect(body).toMatch(/renderRoofRails\(/);
+  });
+
+  it('a duplicate, a delete or an inspector edit re-solves it too', () => {
+    const body = sliceOf('function renderAllPanels(', '\n  // ── Add single panel entity',
+      'renderAllPanels');
+    expect(body, 'the incremental diff never re-solves ground structure')
+      .toMatch(/syncGroundRacking\(viewer, C, panelList, touchedGround\)/);
+    expect(body, 'the diff does not collect which ground assemblies changed')
+      .toMatch(/touchedGround/);
+  });
+
+  it('deleting modules takes their structure with them', () => {
+    const body = sliceOf('function deleteSelectedPanels(', '\n  // Legacy single-delete alias',
+      'deleteSelectedPanels');
+    // It pre-syncs `lastRenderedPanelsRef`, so the [panels] diff is a no-op and the incremental
+    // path above will never see the removal. Without its own call the posts stay standing.
+    expect(body, 'a deleted ground mount leaves its posts and rails in the scene')
+      .toMatch(/syncGroundRacking\(/);
+    expect(body, 'the assemblies are read after the panels are already gone')
+      .toMatch(/groundArraysOf\(ids, panelsRef\.current\)/);
+  });
+
+  it('every racking solve is given its own key namespace', () => {
+    // Several member keys carry only a BAY INDEX — `__gnd__pylon_0`, `__gnd__sb_0`. With no
+    // prefix two mounts collide on them, and `renderGroundRackingOutput` replaces a key it is
+    // about to re-use, so building the second mount deleted the first's pylons.
+    const sig = sliceOf('function addGroundRacking(', 'const style       =', 'addGroundRacking');
+    expect(sig, 'addGroundRacking still accepts a call with no key namespace')
+      .toMatch(/keyPrefix: string,/);
+    const src = readFileSync(join(ROOT, 'components', '3d', 'SolarEngine3D.tsx'), 'utf8');
+    const calls = src.match(/addGroundRacking\(viewer, C, [^)]*\)/g) ?? [];
+    expect(calls.length, 'no addGroundRacking call sites found — this would pass vacuously')
+      .toBeGreaterThan(1);
+    for (const c of calls) {
+      expect(c.split(',').length,
+        `${c} passes no key namespace, so its members can collide with another mount's`)
+        .toBeGreaterThanOrEqual(5);
+    }
+  });
+
+  it('a ground mount is dragged and turned in the GROUND plane, not on its own tilted face', () => {
+    const body = sliceOf('function arrayNormalECEF(', 'function arrayEaveECEF(', 'arrayNormalECEF');
+    // This normal is both the plane a drag runs in and the axis a rotate turns about. Taking it
+    // from the module face sends a ground mount 10·tan(20°) metres into the air when it is
+    // dragged 10 m, and "rotates" it by spinning it inside its own tilted plane.
+    expect(body, 'a ground selection still uses the module face as its drag plane')
+      .toMatch(/selectionIsGround\(ids\)/);
+    // GEODETIC up, not the geocentric radial — they differ by up to ~0.19°.
+    expect(body, 'the ground-mount up axis is the geocentric radial')
+      .toMatch(/geodeticSurfaceNormal/);
+  });
+
+  it('turning a ground mount goes through the assembly authority, not the in-plane spin', () => {
+    const body = sliceOf('function rotateArrayBy(', 'function showRotateHandle(', 'rotateArrayBy');
+    // The in-plane spin keeps `azimuth` fixed and writes a `frameQuat`. On a ground mount that
+    // is an object that cannot exist: rows running diagonally while every module reports 180,
+    // and a racking solver that lays its rails along `azimuth` building across the modules.
+    expect(body, 'a ground mount is still turned by the roof-array in-plane spin')
+      .toMatch(/rotateAssembly\(members,/);
+    expect(body, 'the ground branch is not gated on the selection actually being one assembly')
+      .toMatch(/selectionIsGround\(ids\)/);
   });
 });

@@ -66,6 +66,7 @@ import { RecommendationCard, type RecommendationValue } from '@/components/recom
 import { calculateProductionLocal } from '@/lib/pvwatts';
 import { v4 as uuidv4 } from 'uuid';
 import { tileKey, parseTileKey } from '@/lib/map/tileKey';
+import { TILE_CACHE, TILE_INFLIGHT, evictTileCache } from '@/lib/map/tileCache';
 import SolarEngine3D, { type PlacementMode } from '../3d/SolarEngine3D';
 import { useToast } from '@/components/ui/Toast';
 import { localSaveLayout } from '@/lib/clientStorage';
@@ -207,21 +208,13 @@ const TILE_SIZE = 256;
 // With the provider in the key, tiles from different providers coexist, nothing has to be
 // thrown away to switch, and the redraw simply skips keys that are not the active provider's.
 // `tileKey` / `parseTileKey` live in lib/map/tileKey.ts so they can be tested directly.
-const TILE_CACHE: Map<string, HTMLImageElement> = new Map();
-
-const TILE_INFLIGHT: Set<string> = new Set();  // prevents duplicate in-flight requests
-const TILE_CACHE_MAX = 512;                    // LRU eviction above this count
-
-function evictTileCache() {
-  if (TILE_CACHE.size <= TILE_CACHE_MAX) return;
-  const toDelete = TILE_CACHE.size - TILE_CACHE_MAX;
-  let deleted = 0;
-  for (const key of TILE_CACHE.keys()) {
-    TILE_CACHE.delete(key);
-    TILE_INFLIGHT.delete(key);
-    if (++deleted >= toDelete) break;
-  }
-}
+//
+// 🚨 AND THE CACHE ITSELF NOW LIVES IN lib/map/tileCache.ts, UNCHANGED, BECAUSE THE 3D STUDIO
+// NEEDS TO READ IT. "I can still only access Nearmap from the 2D environment." The Nearmap tiles
+// this canvas fetches are paid for and sitting in memory; the 3D studio could not show them only
+// because this cache was a private const in this file. Nothing about the 2D behaviour changes —
+// this is the same Map, the same inflight set, the same eviction.
+// See lib/map/tileCache.ts for the composer the 3D studio reads it with.
 
 // ─── Utility: lat/lng ↔ world/canvas ─────────────────────────
 function latLngToWorld(lat: number, lng: number, zoom: number) {

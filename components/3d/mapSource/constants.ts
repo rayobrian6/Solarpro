@@ -16,13 +16,32 @@ export interface MapSourceMeta {
   label: string;
   iconKey: 'google' | 'bing' | 'mapbox' | 'nearmap';
   description: string;
+  /**
+   * 🚨 IS THIS PROVIDER ACTUALLY CONNECTED TO ANYTHING IN THE 3D VIEWER?
+   *
+   * The ruling is "Never masquerade one provider as another", and an option that can be selected
+   * while the viewer keeps rendering something else is exactly that — it just does it silently
+   * instead of with a label. Only two of these four reach the engine: `google` is the native
+   * Photorealistic 3D mesh, and `nearmap` draws the project's already-acquired aerial as a
+   * reference surface. Bing and Mapbox have never been implemented here, so they are offered as
+   * unavailable rather than as a choice that quietly changes nothing.
+   */
+  wired: boolean;
+  /** Why it cannot be chosen — printed, not implied. */
+  unavailableReason?: string;
 }
 
 export const SOURCES: ReadonlyArray<MapSourceMeta> = [
-  { id: 'google',  label: 'Google',  iconKey: 'google',  description: 'Google satellite (zoom 21)' },
-  { id: 'bing',    label: 'Bing',    iconKey: 'bing',    description: 'Bing Maps aerial imagery' },
-  { id: 'mapbox',  label: 'Mapbox',  iconKey: 'mapbox',  description: 'Mapbox satellite-streets-v12' },
-  { id: 'nearmap', label: 'Nearmap', iconKey: 'nearmap', description: 'Nearmap HD (~7.5cm aerial)' },
+  { id: 'google',  label: 'Google',  iconKey: 'google',  wired: true,
+    description: 'The viewer’s native 3D imagery (Google Photorealistic mesh)' },
+  { id: 'bing',    label: 'Bing',    iconKey: 'bing',    wired: false,
+    description: 'Bing Maps aerial imagery',
+    unavailableReason: 'Not connected to the 3D viewer — selecting it would change nothing.' },
+  { id: 'mapbox',  label: 'Mapbox',  iconKey: 'mapbox',  wired: false,
+    description: 'Mapbox satellite-streets-v12',
+    unavailableReason: 'Not connected to the 3D viewer — selecting it would change nothing.' },
+  { id: 'nearmap', label: 'Nearmap', iconKey: 'nearmap', wired: true,
+    description: 'This project’s already-acquired Nearmap aerial, as a reference surface' },
 ];
 
 export interface MapLayerMeta {

@@ -1,29 +1,31 @@
 /**
  * e2e/nearmap-imagery-toggle-in-3d.spec.ts
  *
- * 🚨 "I STILL CANNOT ACCESS NEARMAP FROM THE 3D DESIGN STUDIO." Reported live, after the
- * cache/cost repairs had been shipped as if they were the feature. They were infrastructure; the
- * user-facing toggle did not exist, because `mapPickerState` was declared, rendered and read by
- * nothing — components/3d/mapSource/DESIGN.md says so itself: "the actual imagery swap is the
- * integration step handled by SolarEngine3D", and that step had never been done.
+ * ═══ "I AM IN THE 3D ENVIRONMENT RIGHT NOW. THERE IS NO VISIBLE NEARMAP TOGGLE." ═══
  *
- * WHAT IS PROVED HERE, in a real browser with real clicks:
+ * Reported live, the second time, after the reference-imagery renderer had been built and the
+ * `mapPickerState` wire connected. Both of those were real — and he was still right, in the way
+ * that decides whether a feature exists. Measured in this browser, before the fix:
  *
- *   1. The imagery selector exists in the 3D studio and Nearmap is selectable there.
- *   2. Selecting it produces an HONEST answer — either the project's stored aerial is shown with
- *      its real provenance, or the reason it cannot be is stated. Never a Nearmap label over
- *      something else, which is what the 2D canvas does today (403 → `tryEsri()` → the button
- *      still reads "Nearmap HD").
- *   3. Switching Native ↔ Nearmap ↔ Native mutates NO GEOMETRY. "Imagery source is not geometry
- *      authority."
- *   4. Repeated toggles issue NO imagery requests at all. "Do not make the visual toggle a
- *      billing event."
+ *     nearmapMentions: []
  *
- * ON THIS MACHINE the project is a Quick Design with no stored aerial, so (2) resolves to the
- * explicit-unavailability branch — and that is a real assertion, not a skipped one: the
- * requirement is that the product say so rather than substitute. The shown-imagery branch is
- * asserted structurally in the same run (the readout's own test ids) and the georeferencing
- * arithmetic behind it is proved in tests/nearmapImageBounds.test.ts.
+ * — a sweep of every button, menu item and title on the page found the string "Nearmap" ZERO
+ * times while in 3D. The imagery picker was on screen, visible, enabled and clickable, and the
+ * only thing that named the provider was inside a closed dropdown labelled "Google", in a bar
+ * labelled "Details / LiDAR / Street View". Meanwhile the 2D toolbar has a button that says
+ * "🛰️ Nearmap HD" in words, rendered behind `{!show3D ? ... : null}`.
+ *
+ * So the first assertion below is the one that failed live: the control is FINDABLE BY NAME,
+ * without opening anything. The rest is Ray's acceptance list, in order:
+ *
+ *   1. find the imagery selector        4. see the imagery (or an honest reason)
+ *   2. click Nearmap                    5. draw/edit geometry
+ *   3. remain in 3D                     6. switch back to Native   7. geometry unchanged
+ *
+ * ON THIS MACHINE there is no database, so the project has no stored aerial and this session has
+ * loaded no Nearmap tiles — step 4 therefore resolves to the explicit-unavailability branch. That
+ * is a real requirement and not a skip: "If Nearmap is unavailable to the current user/project,
+ * say so explicitly. Never masquerade one provider as another."
  */
 
 import { expect, test, type Page } from '@playwright/test';
@@ -32,7 +34,11 @@ const T = 90_000;
 
 type E2EWin = Window & {
   __solarE2E?: { panels?: unknown[]; seedDesign?: (d: { panels?: unknown[] }) => void };
-  __solarEngineE2E?: { assemblies?: () => Array<{ arrayId: string; modules: Array<{ id: string; lat: number; lng: number; height: number }> }> };
+  __solarViewerE2E?: unknown;
+  __solarEngineE2E?: {
+    assemblies?: () => Array<{ arrayId: string; modules: Array<{ id: string; lat: number; lng: number; height: number }> }>;
+    selection?: () => { groundArrayId: string | null; panelIds: string[] };
+  };
 };
 
 const MPD = 111_320;
@@ -78,86 +84,176 @@ async function boot(page: Page) {
 }
 
 /**
- * Open the source picker and choose a provider.
+ * Choose an imagery source through the VISIBLE segmented control.
  *
- * The trigger is a button whose name is the CURRENT provider ("Source: Google"); the options are
- * `menuitemradio`s inside a "Map source" menu, and their accessible name is the icon's alt text
- * plus the label ("Nearmap Nearmap"). A first version of this helper looked for a BUTTON named
- * exactly "Nearmap" and found nothing while the menu was open on screen — so the role and the
- * loose name match are both deliberate.
+ * 🚨 DELIBERATELY NOT THROUGH THE DROPDOWN. An earlier version of this spec opened the "Source:"
+ * menu and clicked a `menuitemradio` — and it passed, every time, against a product in which a
+ * user could not find Nearmap at all. A spec that opens the menu can never discover that the menu
+ * is the only way in. This clicks what a person clicks.
  */
-async function chooseSource(page: Page, provider: 'Nearmap' | 'Google') {
-  const trigger = page.getByRole('button', { name: /Source:/i });
-  await expect(trigger, 'the 3D imagery source picker is not present').toBeVisible({ timeout: T });
-  await trigger.click();
-  const option = page.getByRole('menuitemradio', { name: new RegExp(provider, 'i') }).first();
-  await expect(option, `${provider} is not offered in the imagery menu`).toBeVisible({ timeout: T });
-  await option.click();
+async function chooseImagery(page: Page, which: 'Nearmap' | 'Native 3D') {
+  const btn = page.getByTestId(which === 'Nearmap' ? 'imagery-nearmap' : 'imagery-native');
+  await expect(btn, `the ${which} imagery control is not visible in the 3D studio`)
+    .toBeVisible({ timeout: T });
+  await btn.click();
   await page.waitForTimeout(1_200);
 }
 
 test.describe('Nearmap is reachable from the 3D Design Studio', () => {
   test.setTimeout(T * 4);
 
-  test('the selector offers Nearmap, and choosing it gives an honest answer', async ({ page }) => {
+  test('🚨 the control is FINDABLE BY NAME in 3D, and choosing it gives an honest answer', async ({ page }) => {
     await boot(page);
 
-    // 1. The selector is there, in 3D.
-    await expect(page.getByRole('button', { name: /Source:/i })).toBeVisible({ timeout: T });
+    // ── 1. FIND IT. No menu opened, no dropdown expanded. ────────────────────
+    // This is the assertion that was false live: the word "Nearmap" appeared nowhere on the page.
+    const visibleNearmapControls = await page.evaluate(() =>
+      Array.from(document.querySelectorAll('button,[role="menuitemradio"],[role="button"]'))
+        .filter(e => {
+          const r = e.getBoundingClientRect();
+          return r.width > 0 && r.height > 0 && /nearmap/i.test(e.textContent ?? '');
+        })
+        .map(e => (e.textContent ?? '').trim()));
+    expect(visibleNearmapControls.length,
+      'nothing on the 3D page names Nearmap without opening a menu — which is exactly what Ray '
+      + 'reported: "There is no visible Nearmap toggle."')
+      .toBeGreaterThan(0);
+    await expect(page.getByTestId('imagery-toggle')).toBeVisible();
+    await expect(page.getByTestId('imagery-native')).toBeVisible();
+    await expect(page.getByTestId('imagery-nearmap')).toBeVisible();
+    // It says which one is on, so the operator can read the state without clicking.
+    await expect(page.getByTestId('imagery-toggle')).toHaveAttribute('data-imagery-source', 'native');
 
-    // 2. Choosing Nearmap produces a definite, honest readout.
-    await chooseSource(page, 'Nearmap');
+    // ── 2. CLICK NEARMAP ────────────────────────────────────────────────────
+    await chooseImagery(page, 'Nearmap');
+    await expect(page.getByTestId('imagery-toggle')).toHaveAttribute('data-imagery-source', 'nearmap');
+
+    // ── 3. STILL IN 3D ──────────────────────────────────────────────────────
+    // The button offering the OTHER view still reads "2D Map", so the studio did not switch, and
+    // the engine hook is still published, so the 3D component did not unmount.
+    await expect(page.getByRole('button', { name: /3D View/ }),
+      'choosing Nearmap left the 3D workspace').toBeVisible();
+    expect(await page.evaluate(() => !!(window as unknown as E2EWin).__solarEngineE2E?.assemblies),
+      'the 3D engine unmounted when Nearmap was chosen').toBe(true);
+
+    // ── 4. A DEFINITE, HONEST READOUT ───────────────────────────────────────
     const status = page.getByTestId('imagery-reference-status');
     await expect(status, 'choosing Nearmap produced no readout at all — the toggle is still inert')
       .toBeVisible({ timeout: T });
-
-    // Either it is shown with its real provenance, or the reason it cannot be is stated. What must
-    // NOT happen is a Nearmap label with no basis — the masquerade the ruling forbids.
     const shown = page.getByTestId('imagery-reference-shown');
     const unavailable = page.getByTestId('imagery-reference-unavailable');
-    // 🚨 WAIT FOR IT TO SETTLE. The readout has a third, legitimate state — "Loading the project's
-    // stored aerial…" — and on a box with no DATABASE_URL the lookup that resolves it is slow.
-    // Sampling immediately caught that intermediate state and reported "it says nothing definite",
-    // which was the spec being impatient rather than the product being vague.
+    // 🚨 WAIT FOR IT TO SETTLE. There is a legitimate LOADING state; sampling it immediately once
+    // reported "it says nothing definite", which was impatience rather than vagueness.
     await expect(async () => {
       expect(await shown.count() + await unavailable.count(),
         'the readout is still loading — it never settled into shown or unavailable')
         .toBeGreaterThan(0);
     }).toPass({ timeout: T });
-    const isShown = await shown.count() > 0;
-    const isUnavailable = await unavailable.count() > 0;
 
-    if (isUnavailable) {
-      // A Quick Design has no project row, so there is no stored aerial to reuse. The requirement
-      // is that the product SAYS so — and says the native imagery is still what is on screen.
+    if (await unavailable.count() > 0) {
+      // No database here, so no stored aerial and no tiles this session — the product must SAY so
+      // and must not substitute another provider's pixels under a Nearmap label.
       await expect(unavailable).toContainText(/unavailable/i);
       await expect(unavailable).toContainText(/nothing has been substituted/i);
     } else {
-      // R19: a date only if it is known, and a resolution only as computed.
       await expect(page.getByTestId('imagery-reference-date')).toBeVisible();
       const dateText = await page.getByTestId('imagery-reference-date').innerText();
       expect(/Captured \S+|Capture date unavailable/.test(dateText),
         `the date readout says "${dateText}" — it must either state a real capture date or say it is unavailable`)
         .toBe(true);
-      // Never a hard-coded brand resolution claim.
       await expect(shown).not.toContainText('7.5 cm/px');
-      await expect(shown).toContainText(/reused, no new imagery was purchased/i);
+      await expect(shown).toContainText(/no new imagery was purchased/i);
+    }
+
+    // A provider that reaches no imagery code must not be offered as a choice.
+    await page.getByRole('button', { name: /Source:/i }).click();
+    await expect(page.getByTestId('map-source-option-bing'),
+      'Bing is selectable although nothing in the viewer renders it').toBeDisabled();
+    await expect(page.getByTestId('map-source-option-mapbox')).toBeDisabled();
+    await expect(page.getByTestId('map-source-option-nearmap')).toBeEnabled();
+  });
+
+  test('🚨 geometry can still be edited with Nearmap on, and survives the switch back', async ({ page }) => {
+    await boot(page);
+    const before = await geometry(page);
+    expect(before.length, 'the seeded geometry is not present, so this proves nothing').toBe(6);
+
+    await chooseImagery(page, 'Nearmap');
+
+    // ── 5. DRAW / EDIT GEOMETRY while Nearmap is the imagery source ──────────
+    // A real click and a real drag on the mount, with the reference layer selected. "Preserve
+    // access to custom polygon/fallback tools" — if the reference surface swallowed the pointer
+    // or the engine stopped accepting edits, this is where it would show.
+    const hit = await page.evaluate(() => {
+      const w = window as unknown as E2EWin;
+      const v = w.__solarViewerE2E as any;
+      const C = (window as any).Cesium;
+      if (!v || !C) return null;
+      const mods = (w.__solarEngineE2E?.assemblies?.() ?? []).flatMap(a => a.modules);
+      if (!mods.length) return null;
+      const lat = mods.reduce((s, m) => s + m.lat, 0) / mods.length;
+      const lng = mods.reduce((s, m) => s + m.lng, 0) / mods.length;
+      const h = mods.reduce((s, m) => s + m.height, 0) / mods.length;
+      v.camera.setView({
+        destination: C.Cartesian3.fromDegrees(lng, lat - 0.00035, h + 45),
+        orientation: { heading: 0, pitch: -C.Math.toRadians(58), roll: 0 },
+      });
+      v.scene.requestRender();
+      const rect = v.canvas.getBoundingClientRect();
+      let best: { x: number; y: number } | null = null;
+      for (const m of mods) {
+        const px = v.scene.cartesianToCanvasCoordinates(C.Cartesian3.fromDegrees(m.lng, m.lat, m.height));
+        if (!px) continue;
+        if (px.x < 20 || px.y < 20 || px.x > rect.width - 20 || px.y > rect.height - 20) continue;
+        if (!best || px.x < best.x - rect.left) best = { x: Math.round(rect.left + px.x), y: Math.round(rect.top + px.y) };
+      }
+      return best;
+    });
+    expect(hit, 'no module could be framed, so the edit step proves nothing').toBeTruthy();
+    await page.mouse.click(hit!.x, hit!.y);
+    await page.waitForTimeout(600);
+    expect((await page.evaluate(() =>
+      (window as unknown as E2EWin).__solarEngineE2E?.selection?.().panelIds.length ?? 0)),
+      'with Nearmap on, clicking a module selected nothing — the reference layer is eating the pointer')
+      .toBe(6);
+
+    await page.mouse.move(hit!.x, hit!.y);
+    await page.mouse.down();
+    for (let i = 1; i <= 8; i++) { await page.mouse.move(hit!.x + i * 9, hit!.y + i * 5); await page.waitForTimeout(40); }
+    await page.mouse.up();
+    await page.waitForTimeout(900);
+
+    const edited = await geometry(page);
+    const cosLat = Math.cos(before[0].lat * Math.PI / 180);
+    const movedM = Math.hypot((edited[0].lat - before[0].lat) * MPD,
+                              (edited[0].lng - before[0].lng) * MPD * cosLat);
+    expect(movedM, 'the mount could not be edited while Nearmap imagery was selected')
+      .toBeGreaterThan(0.1);
+
+    // ── 6-7. SWITCH BACK, AND THE EDIT IS STILL THERE, TO THE MILLIMETRE ─────
+    await chooseImagery(page, 'Native 3D');
+    await expect(page.getByTestId('imagery-toggle')).toHaveAttribute('data-imagery-source', 'native');
+    const after = await geometry(page);
+    expect(after.map(m => m.id)).toEqual(edited.map(m => m.id));
+    for (let i = 0; i < edited.length; i++) {
+      const c = Math.cos(edited[i].lat * Math.PI / 180);
+      const d = Math.hypot((edited[i].lat - after[i].lat) * MPD, (edited[i].lng - after[i].lng) * MPD * c);
+      expect(d, `${edited[i].id} moved ${(d * 1000).toFixed(1)} mm when the imagery source changed back`)
+        .toBeLessThan(0.001);
+      expect(Math.abs(edited[i].height - after[i].height),
+        `${edited[i].id} changed height when the imagery source changed back`).toBeLessThan(0.001);
     }
   });
 
   test('🚨 switching Native ↔ Nearmap ↔ Native mutates NO geometry, and costs nothing', async ({ page }) => {
     // 🚨 COUNT WHAT COSTS MONEY, NOT EVERY PIXEL FETCHED.
     //
-    // A first version of this counted ESRI and Google basemap tiles too, saw 32 across five toggles
-    // and called it spend. It is not: ESRI World Imagery is the FREE native basemap on the globe,
-    // and it re-requests tiles whenever the scene re-renders — which a primitive being added or
-    // removed legitimately causes. Counting it failed the assertion for a reason that has nothing
-    // to do with Nearmap billing.
-    //
-    // What must stay at ZERO is the metered path: the Nearmap tile proxy. And the project's own
-    // aerial-reference route must be hit AT MOST ONCE however many times the source is toggled —
-    // that route acquires nothing, but re-fetching per toggle would still mean the reference was
-    // not being reused.
+    // A first version of this counted ESRI and Google basemap tiles too, saw 32 across five
+    // toggles and called it spend. It is not: ESRI World Imagery is the FREE native basemap and
+    // it re-requests tiles whenever the scene re-renders — which adding or removing a primitive
+    // legitimately causes. What must stay at ZERO is the metered path: the Nearmap tile proxy.
+    // And the project's own aerial-reference route must be hit AT MOST ONCE however many times
+    // the source is toggled.
     const meteredRequests: string[] = [];
     const referenceRequests: string[] = [];
     page.on('request', r => {
@@ -173,14 +269,12 @@ test.describe('Nearmap is reachable from the 3D Design Studio', () => {
     const meteredBaseline = meteredRequests.length;
     const referenceBaseline = referenceRequests.length;
 
-    // Nearmap → Google → Nearmap → Google → Nearmap, the sequence Ray named.
-    for (const step of ['Nearmap', 'Google', 'Nearmap', 'Google', 'Nearmap'] as const) {
-      await chooseSource(page, step);
+    for (const step of ['Nearmap', 'Native 3D', 'Nearmap', 'Native 3D', 'Nearmap'] as const) {
+      await chooseImagery(page, step);
     }
     await page.waitForTimeout(1_500);
 
-    // 🚨 GEOMETRY UNTOUCHED. "It must not alter roofs, sections, walls, panels, ground mounts,
-    // trees, obstructions, electrical equipment, conduit."
+    // 🚨 GEOMETRY UNTOUCHED. "Imagery source is not geometry authority."
     const after = await geometry(page);
     expect(after.map(m => m.id), 'a module disappeared across the imagery toggles')
       .toEqual(before.map(m => m.id));
@@ -195,14 +289,12 @@ test.describe('Nearmap is reachable from the 3D Design Studio', () => {
         `${before[i].id} changed height when the imagery source changed`).toBeLessThan(0.001);
     }
 
-    // 🚨 AND THE TOGGLE BOUGHT NOTHING. The reference layer is the project's already-acquired
-    // aerial, cached per project, so five source changes must not issue imagery requests.
+    // 🚨 AND THE TOGGLE BOUGHT NOTHING.
     const metered = meteredRequests.length - meteredBaseline;
     expect(metered,
       `five imagery toggles issued ${metered} METERED Nearmap tile request(s):\n`
       + meteredRequests.slice(meteredBaseline).join('\n'))
       .toBe(0);
-    // Three Nearmap selections, and the stored reference is fetched at most once — the cache.
     const refetches = referenceRequests.length - referenceBaseline;
     expect(refetches,
       `the aerial reference was requested ${refetches} times across three Nearmap selections — `
