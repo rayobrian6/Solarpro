@@ -9707,29 +9707,62 @@ function SolarEngine3D({
           removedCount++;
         }
         // Re-render existing rows with corrected positions + structural heading/pitch
+        // 🚨 AND WRITE THEM BACK INTO THE ROW STATE, not only into the entity. Re-rendering
+        // an entity at a corrected position while the object behind it keeps the old one is
+        // what made this defect invisible until a remount — see the note on the return
+        // statement below.
         let reRendered = 0;
-        for (const oldP of existingRows) {
+        groundArrayRowsRef.current = groundArrayRowsRef.current.map(row => row.map(oldP => {
           const cp = correctedMap.get(oldP.id);
-          if (cp) {
-            const corrected = { ...oldP, lat: cp.lat, lng: cp.lng, height: cp.height,
-                                heading: structuralHeading, pitch: structuralPitch };
-            addPanelEntity(viewer, C, corrected, skipGridGround);
-            reRendered++;
-          } else {
-            addPanelEntity(viewer, C, oldP, skipGridGround);
-          }
+          return cp
+            ? { ...oldP, lat: cp.lat, lng: cp.lng, height: cp.height,
+                heading: structuralHeading, pitch: structuralPitch }
+            : oldP;
+        }));
+        for (const oldP of groundArrayRowsRef.current.flat()) {
+          if (correctedMap.has(oldP.id)) reRendered++;
+          addPanelEntity(viewer, C, oldP, skipGridGround);
         }
-        addLog('GROUND', `[v6.1.1 SHARED-PLANE] Re-rendered ${reRendered}/${existingRows.length} existing panels with unified positions + heading/pitch (removed ${removedCount} stale entities)`);
+        addLog('GROUND', `[v6.1.1 SHARED-PLANE] Re-rendered ${reRendered}/${existingRows.length} existing panels with unified positions + heading/pitch (removed ${removedCount} stale entities) — and committed those positions to row state`);
       }
     }
     // ═══ END v6.1 SHARED-PLANE FIX ═══
 
     // Track ghost panels for renderAllPanels diff
-    const allGhostSoFar = groundArrayRowsRef.current.flat().concat(panels);
+    const allGhostSoFar = groundArrayRowsRef.current.flat().concat(panelsToRender);
     lastRenderedPanelsRef.current = [...panelsRef.current, ...allGhostSoFar];
 
-    addLog('GROUND', `[v49.2] COMPLETE row${arrayRowIndex}: structure(${membersRendered}) → panels(${panels.length})`);
-    return panels;
+    addLog('GROUND', `[v49.2] COMPLETE row${arrayRowIndex}: structure(${membersRendered}) → panels(${panelsToRender.length})`);
+
+    // 🚨 RETURN WHAT WAS ACTUALLY DRAWN — this line used to `return panels`, the RAW ones.
+    //
+    // That is the whole ground-mount-splits-on-a-view-switch defect, and the view switch was
+    // innocent. `correctedPanels` is the reality engine's deterministic grid — its own comment
+    // calls it "deterministic, drift-free" and says the "Renderer MUST use these instead of raw
+    // planeEngine panel positions" — and it was applied ONLY to the Cesium entities, through the
+    // local `panelsToRender` above. The objects themselves kept their raw pre-grid lat/lng, and
+    // those objects are what all three call sites put into `groundArrayRowsRef.current`, what
+    // `finalizeGroundArray` commits through `onPanelsChange`, and what gets persisted.
+    //
+    // So: on screen the array looked coherent, because the entities were corrected. The
+    // canonical geometry was never corrected. `show3D ? <SolarEngine3D/> : …` in
+    // components/design/DesignStudio.tsx is a CONDITIONAL MOUNT, so switching to 2D unmounts
+    // this component and resets `lastRenderedPanelsRef` to []; switching back takes
+    // `renderAllPanels`' full-rebuild branch (`prev.length === 0 && panelList.length > 0`),
+    // which draws every panel from its stored position with no racking solve and no correction.
+    // The rows then sit at their raw per-row offsets — which is precisely what the grid existed
+    // to replace — so they appear to have separated. Nothing moved on the way out; the stored
+    // geometry had been wrong since it was committed, and the remount only stopped hiding it.
+    //
+    // Returning the corrected panels fixes it at the canonical layer rather than with a render
+    // offset: the committed geometry becomes the deterministic grid, so every later render, view
+    // switch, reload and reopen draws the same thing by construction. And it is safe to persist
+    // because the grid is IDEMPOTENT — `buildPanelGrid` back-projects its origin from the anchor
+    // (lowest arrayRow, then lowest col) and then places every panel, the anchor included, at
+    // origin + its own row/col offset, so re-deriving from already-corrected input returns the
+    // same positions. That anchor-plus-offset model is also the array-transform-plus-row-offset
+    // authority this assembly needed; it already existed, it was just being discarded.
+    return panelsToRender;
   }
 
   // v49.2: finalizeGroundArray — structure already rendered during preview
