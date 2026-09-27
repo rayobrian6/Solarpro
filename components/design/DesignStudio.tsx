@@ -67,7 +67,7 @@ import { calculateProductionLocal } from '@/lib/pvwatts';
 import { v4 as uuidv4 } from 'uuid';
 import { tileKey, parseTileKey } from '@/lib/map/tileKey';
 import { TILE_CACHE, TILE_INFLIGHT, evictTileCache } from '@/lib/map/tileCache';
-import SolarEngine3D, { type PlacementMode } from '../3d/SolarEngine3D';
+import SolarEngine3D, { type PlacementMode, type AerialReferencePayload } from '../3d/SolarEngine3D';
 import { useToast } from '@/components/ui/Toast';
 import { localSaveLayout } from '@/lib/clientStorage';
 import { layoutSignature } from '@/lib/roofPlanesSignature';
@@ -98,6 +98,7 @@ import { formatRise12 } from '@/lib/3d/pitchFormat';
 // server correctly refuses the second one and tells the operator their design "was
 // saved somewhere else" with nothing else open. See lib/design/layoutWriteQueue.ts.
 import { enqueueLayoutWrite } from '@/lib/design/layoutWriteQueue';
+import { restampModuleProjection } from '@/lib/equipment/restampModuleProjection';
 
 interface Props {
   project: Project;
@@ -1098,6 +1099,9 @@ export default function DesignStudio({ project, onSave, onProjectPromoted }: Pro
   // Calculation state
   const [calculating, setCalculating] = useState(false);
   const [production, setProduction] = useState<any>(null);
+  /** The placed modules were laid out at a physical size that is not the selected module's.
+   *  Reported so the operator can re-fit deliberately — nothing is moved for them. */
+  const [layoutFittedForOtherModule, setLayoutFittedForOtherModule] = useState(false);
   const [costEstimate, setCostEstimate] = useState<any>(null);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [feedbackOpen, setFeedbackOpen] = useState(false);
@@ -5053,6 +5057,66 @@ export default function DesignStudio({ project, onSave, onProjectPromoted }: Pro
     return run;
   }, [isRealProject, project.id, project.address, project.name, project.systemType,
       onProjectPromoted, toast]);
+
+  /**
+   * 🚨 EVERY PROJECT REQUEST FOR THE REFERENCE LAYER, IN THE ONE PLACE THAT OWNS THEM.
+   *
+   * `tests/designEntityPersistence.test.ts` states the architecture and enforces it: "Single-writer
+   * architecture: DesignStudio owns the layout row", and the engine must never
+   * `fetch('/api/projects…')`. My first version of the Nearmap layer did exactly that, and the
+   * guard sat red for three commits before I ran it. So the engine renders and this fetches.
+   *
+   * The whole lifecycle is here, in order, and each step has its own reason:
+   *   1. make the design durable — a Quick Design is PROMOTED, not refused, because that is the
+   *      flow Ray works in and imagery bought into an ephemeral object is bought again on every
+   *      toggle;
+   *   2. read what the project already has, which costs nothing;
+   *   3. only if it has nothing, ask the address-gated route to acquire ONE bounded workzone;
+   *   4. read it back.
+   *
+   * It returns the imagery or the REASON there is none, and the engine shows that verbatim.
+   */
+  const loadAerialReference = useCallback(async (): Promise<AerialReferencePayload | null> => {
+    const id = await ensureDurableProject();
+    if (!id) {
+      return {
+        available: false,
+        reason: 'This design could not be saved as a project, so there is nowhere to keep '
+          + 'imagery — buying it would mean buying it again on every switch. Give it an address '
+          + 'and use Save & Calculate, then choose Nearmap again.',
+      };
+    }
+    const read = async () => {
+      const res = await fetch(`/api/projects/${id}/aerial-reference`);
+      const data = await res.json().catch(() => null);
+      return { ok: res.ok, status: res.status, data };
+    };
+    let r = await read();
+    if (r.ok && r.data?.success && !r.data.available) {
+      // Nothing stored: acquire the bounded workzone. The route applies the address gate, buys
+      // one 1440x810 frame centred on the project, stores it, and refuses to buy twice.
+      const acq = await fetch(`/api/projects/${id}/aerial-reference`, { method: 'POST' });
+      const acqData = await acq.json().catch(() => null);
+      if (acqData?.acquired || acqData?.available) r = await read();
+      else if (acqData?.reason) return { available: false, reason: acqData.reason };
+    }
+    if (!r.ok || !r.data?.success) {
+      return { available: false,
+        reason: r.data?.error || `The aerial reference could not be read (HTTP ${r.status}).` };
+    }
+    if (!r.data.available) {
+      return { available: false, reason: r.data.reason || 'This project has no stored aerial.' };
+    }
+    return {
+      available: true,
+      source: r.data.source,
+      imageDataUrl: r.data.imageDataUrl,
+      bounds: r.data.bounds,
+      resolutionCmPerPx: r.data.resolutionCmPerPx ?? null,
+      captureDate: r.data.captureDate ?? null,
+      captureDateKnown: Boolean(r.data.captureDateKnown),
+    };
+  }, [ensureDurableProject]);
   const [engineDeletion, setEngineDeletion] = useState<{
     token: number; scope: string;
     faceIds: string[]; obstructionIds: string[]; panelIds: string[];
@@ -5510,9 +5574,26 @@ export default function DesignStudio({ project, onSave, onProjectPromoted }: Pro
             </div>
           ) : null}
           {panels.length > 0 ? (
-            <div className="flex items-center gap-3 text-xs bg-slate-800/60 rounded-lg px-3 py-1.5">
+            <div className="flex items-center gap-3 text-xs bg-slate-800/60 rounded-lg px-3 py-1.5"
+                 data-testid="system-size-header">
               <span className="text-slate-400">{panels.length} panels</span>
               <span className="text-amber-400 font-bold">{systemSizeKw.toFixed(2)} kW</span>
+            </div>
+          ) : null}
+          {/* 🚨 THE LAYOUT WAS FITTED FOR A DIFFERENT MODULE, AND NOTHING WAS MOVED FOR YOU.
+              Changing the module re-materialises the electrical projection immediately, so every
+              kW figure is right. Its PHYSICAL size is another matter: redrawing the modules at a
+              new size on top of the old positions would produce overlapping hardware, and
+              re-laying them out would destroy hand placement. So it says so. */}
+          {layoutFittedForOtherModule ? (
+            <div
+              data-testid="layout-module-size-stale"
+              title={'The modules on the roof are now the selected product electrically, but they '
+                + 'were laid out at a different physical size. Re-run Fill Roof to re-fit them.'}
+              className="flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg
+                         bg-amber-500/15 text-amber-300 border border-amber-500/30"
+            >
+              ⚠ Layout fitted for a different module size — re-run Fill Roof
             </div>
           ) : null}
           <span className="ml-2 hidden md:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-amber-500/15 text-amber-300 border border-amber-500/30">
@@ -5789,7 +5870,7 @@ export default function DesignStudio({ project, onSave, onProjectPromoted }: Pro
                 (project.client ? [project.client.address, project.client.city, project.client.state].filter(Boolean).join(', ') : '')
               }
               projectId={project.id}
-              onNeedDurableProject={ensureDurableProject}
+              onLoadAerialReference={loadAerialReference}
               placementMode={placementMode3D}
               onPlacementModeChange={setPlacementMode3D}
               showShade={showShade3D}
@@ -7949,6 +8030,27 @@ export default function DesignStudio({ project, onSave, onProjectPromoted }: Pro
                         onClick={() => {
                           clearGridCache();
                           setSelectedPanel(p);
+                          // 🚨 THE MODULES ALREADY ON THE ROOF ARE NOW THIS MODULE.
+                          //
+                          // A `PlacedPanel` carries no `panelId` — only the PROJECTION of one
+                          // (`wattage`, `widthFeet`, `heightFeet`), stamped at placement. Picking
+                          // a new module used to leave all of them projecting the old one, so
+                          // `calculateSystemSize`, which sums `p.wattage`, went on reporting the
+                          // old system while "Panel Wattage" beside it read the new one. Ray:
+                          // 81 modules still showing 35.64 kW after choosing a 580 W module.
+                          //
+                          // Re-materialising the projection is what makes every kW display agree.
+                          // It adds no second calculator — the summation is unchanged.
+                          const stamp = restampModuleProjection(panelsRef2.current ?? panels, p);
+                          if (stamp.restamped > 0) {
+                            setPanels(stamp.panels);
+                            // 🚨 AND THE DERIVED NUMBERS DESCRIBE A DESIGN THAT NO LONGER EXISTS.
+                            // "Do not leave stale green numbers visible while the new design is
+                            // active." Same clearing the property-scope reset already performs.
+                            setProduction(null);
+                            setCostEstimate(null);
+                          }
+                          setLayoutFittedForOtherModule(stamp.layoutFittedForDifferentSize === true);
                           // Immediately persist to the canonical selected_equipment store
                           // (single source of truth both pages read) — don't wait on the
                           // debounced layout auto-save. Engineering picks it up on next load.

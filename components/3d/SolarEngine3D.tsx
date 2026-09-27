@@ -20,6 +20,23 @@ import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { MapSourcePicker, DEFAULT_PICKER_STATE, type MapPickerState } from '@/components/3d/mapSource';
 
 /** What /api/projects/[id]/aerial-reference reports about a project's stored aerial. */
+/**
+ * What the studio hands back for the reference layer. It is the imagery plus the REASON there is
+ * none — a refusal the operator can read is the whole of "never masquerade one provider as
+ * another", and the engine must not have to infer it.
+ */
+export interface AerialReferencePayload {
+  available: boolean;
+  source?: 'nearmap' | 'google' | 'unknown';
+  imageDataUrl?: string;
+  bounds?: { north: number; south: number; east: number; west: number };
+  resolutionCmPerPx?: number | null;
+  captureDate?: string | null;
+  captureDateKnown?: boolean;
+  /** Why there is none. Shown verbatim. */
+  reason?: string;
+}
+
 interface AerialReference {
   source: 'nearmap' | 'google' | 'unknown';
   imageDataUrl: string;
@@ -750,8 +767,8 @@ interface Props {
   lng: number;
   projectAddress?: string;
   /** The project whose already-acquired aerial may be shown as a reference layer. On a Quick
-   *  Design this is an ephemeral `demo-…` id until the design is promoted — see
-   *  `onNeedDurableProject`. */
+   *  Design this is an ephemeral `demo-…` id until the design is promoted by the studio. It is
+   *  read here only to re-run the imagery effect when the project changes. */
   projectId?: string;
   /**
    * 🚨 MAKE THIS DESIGN DURABLE, BECAUSE PAID IMAGERY MUST HAVE SOMEWHERE TO LIVE.
@@ -765,7 +782,7 @@ interface Props {
    * the imagery is first needed, and carries on with whatever id comes back. Resolves to null if
    * the design cannot be made durable, and then nothing is acquired.
    */
-  onNeedDurableProject?: () => Promise<string | null>;
+  onLoadAerialReference?: () => Promise<AerialReferencePayload | null>;
   panels: PlacedPanel[];
   onPanelsChange: (panels: PlacedPanel[]) => void;
   placementMode: PlacementMode;
@@ -1418,7 +1435,7 @@ export function laneASiteKey(lat: number, lng: number): string {
 }
 
 function SolarEngine3D({
-  lat, lng, projectAddress, projectId, onNeedDurableProject,
+  lat, lng, projectAddress, projectId, onLoadAerialReference,
   panels, onPanelsChange, roofPlanes,
   placementMode, onPlacementModeChange,
   systemType, tilt, azimuth, fenceHeight,
@@ -4084,122 +4101,55 @@ function SolarEngine3D({
     };
 
     /**
-     * 🚨 A QUICK DESIGN IS PROMOTED, NOT REFUSED.
+     * 🚨 THE STUDIO OWNS EVERY PROJECT REQUEST. THE ENGINE ASKS IT.
      *
-     * The first version of the cost rule said "a design that cannot keep what it buys may not buy
-     * anything", and disabled Nearmap for a Quick Design. The COST reasoning was right and the
-     * PRODUCT consequence was wrong: "Ray's actual working flow is Quick Design... Ray should not
-     * have to leave Design Studio and manually build a project merely to use Nearmap."
+     * `tests/designEntityPersistence.test.ts` states the architecture and enforces it:
+     * "Single-writer architecture: DesignStudio owns the layout row", and the engine must never
+     * `fetch('/api/projects…')`. The first version of this effect did exactly that, and the guard
+     * had been red for three commits before it was run — a rule this codebase already had, broken
+     * by me and caught by its own test.
      *
-     * So the rule becomes "a design must be durable BEFORE it buys", and the studio makes it
-     * durable through the persistence that already exists — `POST /api/projects`, which geocodes
-     * the address and writes the row. No Nearmap-only store, no second identity.
+     * So the engine renders and the studio fetches. `onLoadAerialReference` is the studio's:
+     * it promotes a Quick Design to a durable project if it has to (Ray: "Ray should not have to
+     * leave Design Studio and manually build a project merely to use Nearmap"), acquires the
+     * bounded workzone once, and returns the imagery. Everything below draws what comes back.
      */
-    const DURABLE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    const startId = projectId;
-    let liveId = startId;
-
     (async () => {
-      if ((!liveId || !DURABLE.test(liveId)) && onNeedDurableProject) {
-        setAerialRefStatus({ state: 'loading' });
-        try {
-          const promoted = await onNeedDurableProject();
-          if (cancelled) return;
-          if (promoted && DURABLE.test(promoted)) liveId = promoted;
-        } catch { /* falls through to the refusal below */ }
+      if (!onLoadAerialReference) {
+        useSessionOr('Reference imagery is not available in this view.');
+        return;
       }
-      if (cancelled) return;
-      // 🚨 NEVER ASK THE PROJECT ROUTE ABOUT AN EPHEMERAL ID. A `demo-…` design has no row, so
-      // `/api/projects/demo-…/aerial-reference` can only 404 — and the reply the user then saw
-      // was the generic "this project has no stored aerial", which is not what happened. What
-      // happened is that the design could not be made durable, and that is what it now says.
-      runWith(liveId && DURABLE.test(liveId) ? liveId : undefined);
-    })();
-
-    return () => { cancelled = true; };
-
-    function runWith(projectId: string | undefined) {
-    if (!projectId) {
-      useSessionOr(
-        'This design could not be saved as a project, so there is nowhere to keep imagery — '
-        + 'buying it would mean buying it again on every switch. Give it an address and use '
-        + 'Save & Calculate, then choose Nearmap again.');
-      return;
-    }
-
-    // Cached per project — a repeated toggle must not re-request anything.
-    const cached = aerialRefCacheRef.current;
-    if (cached && cached.projectId === projectId) {
-      if (cached.data) draw(cached.data);
-      else useSessionOr(
-        'This project has no Nearmap workzone that can be georeferenced, and none could be '
-        + 'acquired for it.');
-      return;
-    }
-
-    setAerialRefStatus({ state: 'loading' });
-    (async () => {
+      setAerialRefStatus({ state: 'loading' });
       try {
-        let res = await fetch(`/api/projects/${projectId}/aerial-reference`);
-        let data = await res.json();
+        const payload = await onLoadAerialReference();
         if (cancelled) return;
-
-        // 🚨 ACQUIRE THE PROJECT'S OWN WORKZONE — ONCE — RATHER THAN SENDING THE USER TO 2D.
-        //
-        // "Starting directly in Design Studio 3D with a valid address must be enough. I must NOT
-        // have to: switch to 2D → choose Nearmap → switch back to 3D."
-        //
-        // So when the project has nothing stored, the imagery layer asks for it itself. The POST
-        // is address-gated on the server by the same `workzoneGate` rule, acquires ONE bounded
-        // 1440x810 frame centred on the project, and stores it — so this runs at most once per
-        // project and every later selection is the free GET above. A project that cannot be
-        // stored to is refused server-side, because acquiring something that cannot be kept means
-        // buying it again on the next toggle.
-        if (res.ok && data?.success && !data.available) {
-          const acq = await fetch(`/api/projects/${projectId}/aerial-reference`, { method: 'POST' });
-          const acqData = await acq.json().catch(() => null);
-          if (cancelled) return;
-          if (acqData?.acquired || acqData?.available) {
-            res = await fetch(`/api/projects/${projectId}/aerial-reference`);
-            data = await res.json();
-            if (cancelled) return;
-          } else if (acqData?.reason) {
-            // The gate's own words — "Select a project address to load Nearmap imagery." — not a
-            // paraphrase invented here.
-            data = { ...data, reason: acqData.reason };
-          }
-        }
-        if (!res.ok || !data?.success) {
-          aerialRefCacheRef.current = { projectId, data: null };
-          useSessionOr(data?.error || `The aerial reference could not be read (HTTP ${res.status}).`);
+        if (payload && payload.available && payload.imageDataUrl && payload.bounds) {
+          draw({
+            source: payload.source ?? 'unknown',
+            imageDataUrl: payload.imageDataUrl,
+            bounds: payload.bounds,
+            resolutionCmPerPx: payload.resolutionCmPerPx ?? null,
+            captureDate: payload.captureDate ?? null,
+            captureDateKnown: Boolean(payload.captureDateKnown),
+            origin: 'stored',
+          });
           return;
         }
-        if (!data.available) {
-          aerialRefCacheRef.current = { projectId, data: null };
-          useSessionOr(`${data.reason || 'This project has no stored aerial.'}`);
-          return;
-        }
-        const ref: AerialReference = {
-          source: data.source, imageDataUrl: data.imageDataUrl, bounds: data.bounds,
-          resolutionCmPerPx: data.resolutionCmPerPx ?? null,
-          captureDate: data.captureDate ?? null,
-          captureDateKnown: Boolean(data.captureDateKnown),
-          origin: 'stored',
-        };
-        aerialRefCacheRef.current = { projectId, data: ref };
-        draw(ref);
+        useSessionOr(payload?.reason
+          || 'No Nearmap workzone could be loaded or acquired for this design.');
       } catch (e: unknown) {
         if (cancelled) return;
         useSessionOr(`The aerial reference request failed: ${(e as Error).message}`);
       }
     })();
-    }
+
+    return () => { cancelled = true; };
     // `lat`/`lng` are in here because the session-cache composite is grown around the site
     // centre: moving the site must not leave a reference photo of the previous one on screen.
     // `groundDatumM` is in here because the photo is DRAWN AT that elevation: the lookup resolves
     // after boot and again after a geocode, and a photo anchored before it lands sits at the
     // ellipsoid while every pick resolves at the real ground. Watched that happen in the browser.
-  }, [mapPickerState.source, projectId, stage, lat, lng, groundDatumM, onNeedDurableProject]);
+  }, [mapPickerState.source, projectId, stage, lat, lng, groundDatumM, onLoadAerialReference]);
 
   // Drop the reference layer if the component is going away, so a remount starts clean.
   useEffect(() => () => {
