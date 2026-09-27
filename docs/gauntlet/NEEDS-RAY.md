@@ -19,8 +19,8 @@ Last updated: 2026-09-26 (Phase 5).
 | **R15** | `distributor_prices` has **no unique index at all** — proven by executing the shipped `ON CONFLICT` against real PostgreSQL (`42P10`). Repaired without a migration (UPDATE-then-INSERT), so this is optional hardening only. It **will fail if duplicate rows already exist**, so it needs a de-dup pass first (keep the newest `updated_at` per key) | Nothing — atomicity only |
 | **R16** | `pricing_config` is still **one global row for every organisation**, and per-system-type equipment cost has no column. The unauthenticated read is closed and the write is admin-gated, but there is no tenant key: the last save sets the price-per-watt used in every other company's customer-facing proposal. Needs an owning scope column with a per-scope uniqueness constraint | Per-organisation pricing |
 | **P2** | ✅ **CLOSED, both halves** (`557fbaa6` + `802c0b51`). Reopening a saved engineering run used to silently re-equip the design with catalogue defaults. Kept in this list only for a live check — see below | Nothing |
-| **R18** | 🚨 **WHO MAY SEE NEARMAP IMAGERY?** The 3D imagery toggle you asked for is mostly already there — the picker exists and is wired to nothing — but the only browser-reachable tile route is **admin-gated**, so a normal user's Nearmap button silently shows ESRI while still reading "Nearmap HD". Building the 3D layer on that route inherits the gate. One decision: who is allowed to view it, and is it metered per user | The 3D imagery toggle |
-| **R19** | 🚨 **THE IMAGERY HAS NO CAPTURE DATE, AND THE PLAN SET ASSERTS PROVENANCE ANYWAY.** PV-1 prints "Nearmap HD aerial · 7.5 cm/px orthophoto" over an image of unknown vintage — the tile request sends only z/x/y and no survey selector, so two fetches months apart return different acquisitions. The two dates that DO exist belong to the AI product, and binding one of them to the tile image would be **inventing the date**, which you forbade. So it needs either a real date from the tiles API or the claim softened | An honest provenance caption |
+| **R18** | ✅ **THE 3D TOGGLE IS SHIPPED** (`4a3e9821`) without needing this decision — it serves the project's ALREADY-PAID aerial, gated on project access rather than `is admin`, so it costs nothing and no entitlement change was required. What is still open is the **2D canvas**, which does masquerade: a non-admin's tile request 403s, `tryEsri()` swaps in ESRI, and the button still reads "Nearmap HD". Plus that route has no rate limit | The 2D Nearmap button telling the truth |
+| **R19** | ⚠️ **HALF DONE.** The 3D readout is now truthful (`4a3e9821`): it prints "Capture date unavailable" unless the record carries a real date, and a COMPUTED cm/px instead of a brand claim. **The PLAN SET still prints the fixed string** "Nearmap HD aerial · 7.5 cm/px orthophoto" on PV-1 over an image of unknown vintage. I did not change that — it is a customer-facing caption on a permit document and you judge those by looking at them. One word from you and it goes | An honest PV-1 caption |
 | **R17** | 🚨 **WHAT DOES STORAGE COST THE CUSTOMER?** Adding a battery changes the BOM by **$8,280** and the homeowner's quoted "System Cost" by **$0**. There is no storage term in the pricing model to fix — `pricing_config`, its DB mapper and the admin pricing UI contain no battery field at all, and `equipment-db.msrpUsd` is a manufacturer list price, not what an installer charges. So this is a pricing-model decision, not a bug with a correct answer in the repo. I did not invent one | Quoting any design with storage |
 | **R8** | 🚨 **CORRECTED** — the batch halts at **003**, not 027: `ADD CONSTRAINT IF NOT EXISTS` is not valid PostgreSQL in any version, so `run-pending` is dead after 002 and 027 is never even reached. A whole feature's schema also sits in a directory the runner never scans | Persisting homeowner/micro-stage state; any batch migration run |
 | **R1** | A committed Google API key needs rotating — only you have the account | Nothing in code |
@@ -42,7 +42,33 @@ Everything else has a safe default already applied or recorded.
 
 ---
 
-## R18 / R19 — 🚨 Nearmap: the toggle is nearly free to build, and two things need your word
+## R18 / R19 — ✅ The 3D toggle is SHIPPED; two narrower things are left
+
+**Live acceptance reopened this and it is now built** (`4a3e9821`). What changed since this entry
+was written: the toggle did not need the entitlement decision at all, because it does not fetch
+imagery. It serves the orthophoto the project has **already paid for** — stored by the permit route
+in `project_files` as `permit_input.json`, georeferenced from its own centre/zoom/pixel-size —
+through a new route gated on **project access**, not `is admin`. Zero credits, zero tile requests,
+and a browser test proves five source toggles issue no metered request at all.
+
+So both original questions narrowed:
+
+- **R18 is now only about the 2D canvas.** It still does the thing you forbade: a non-admin's tile
+  request 403s, `img.onerror` fires, `tryEsri()` substitutes ESRI, and the button keeps reading
+  "Nearmap HD". The 3D readout says explicitly when Nearmap is unavailable and that nothing was
+  substituted; the 2D one lies by omission. That route also has **no rate limit**, unlike its two
+  siblings. Your call on whether to open it to authorised designers with a limit, or keep it
+  admin-only and make the degrade visible.
+- **R19 is now only about PV-1.** The 3D readout is truthful. The plan set still prints the fixed
+  string "Nearmap HD aerial · 7.5 cm/px orthophoto" over an image whose vintage is unknown, and
+  whose true resolution varies with latitude — a test asserts that the same zoom is finer further
+  from the equator, so the fixed figure cannot be right everywhere. `groundResolutionCmPerPx` can
+  now compute the real number. I did not touch the caption because it is customer-facing on a permit
+  document.
+
+The original analysis follows, since it is still the evidence for both.
+
+### The original entry
 
 **The good news first: there is no second acquisition path to delete, only a read to wire.**
 
