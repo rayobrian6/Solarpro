@@ -18,7 +18,8 @@ Last updated: 2026-09-26 (Phase 5).
 | **R14** | Should the auto-sizer **recommend #3 AWG**? It is now resolvable (real Table 8 resistance, real voltage drop) so a designer who states it gets a true answer — but inserting it between #4 and #2 in `AWG_ORDER` changes what the engine recommends on designs that work today, and #3 is a real NEC size that is rarely stocked. A BOM ruling, not a correctness fix. One-line change either way | Nothing |
 | **R15** | `distributor_prices` has **no unique index at all** — proven by executing the shipped `ON CONFLICT` against real PostgreSQL (`42P10`). Repaired without a migration (UPDATE-then-INSERT), so this is optional hardening only. It **will fail if duplicate rows already exist**, so it needs a de-dup pass first (keep the newest `updated_at` per key) | Nothing — atomicity only |
 | **R16** | `pricing_config` is still **one global row for every organisation**, and per-system-type equipment cost has no column. The unauthenticated read is closed and the write is admin-gated, but there is no tenant key: the last save sets the price-per-watt used in every other company's customer-facing proposal. Needs an owning scope column with a per-scope uniqueness constraint | Per-organisation pricing |
-| **P2** | 🚨 **NOT A DECISION — A HANDOFF INTO A FILE ANOTHER SESSION OWNS.** Reopening a saved engineering run **silently re-equips the design**. The persistence half is fixed (see below), so no run saved from now on can be substituted — but `app/engineering/page.tsx` still substitutes for every run already in the database, and that file is peer-dirty | Faithful restore of runs saved before today |
+| **P2** | ✅ **CLOSED, both halves** (`557fbaa6` + `802c0b51`). Reopening a saved engineering run used to silently re-equip the design with catalogue defaults. Kept in this list only for a live check — see below | Nothing |
+| **R17** | 🚨 **WHAT DOES STORAGE COST THE CUSTOMER?** Adding a battery changes the BOM by **$8,280** and the homeowner's quoted "System Cost" by **$0**. There is no storage term in the pricing model to fix — `pricing_config`, its DB mapper and the admin pricing UI contain no battery field at all, and `equipment-db.msrpUsd` is a manufacturer list price, not what an installer charges. So this is a pricing-model decision, not a bug with a correct answer in the repo. I did not invent one | Quoting any design with storage |
 | **R8** | 🚨 **CORRECTED** — the batch halts at **003**, not 027: `ADD CONSTRAINT IF NOT EXISTS` is not valid PostgreSQL in any version, so `run-pending` is dead after 002 and 027 is never even reached. A whole feature's schema also sits in a directory the runner never scans | Persisting homeowner/micro-stage state; any batch migration run |
 | **R1** | A committed Google API key needs rotating — only you have the account | Nothing in code |
 | **R2** | How approximate should an UNCLAIMED lead's map pin be? Currently house-level | The marketplace pin only |
@@ -39,9 +40,83 @@ Everything else has a safe default already applied or recorded.
 
 ---
 
-## P2 — 🚨 Reopening a saved engineering run silently re-equips the design
+## R17 — 🚨 The homeowner's price does not change when you add a battery
 
-**Not a decision. A two-file defect whose second file belongs to another session right now.**
+**One decision, and it is genuinely yours: what does storage cost the customer?**
+
+I checked whether the repo already answers it, per the standing rule that something the repo,
+spec or schema decides is not a product decision. **It does not.**
+
+- `grep -rn "batteryPrice|batteryCost|pricePerKwh|batteryAdder|storagePrice|storageCost|batteryMsrp" lib app`
+  returns **zero hits**.
+- `lib/companyPricing.ts`, `lib/db/pricing.ts` and `app/admin/pricing/page.tsx` contain **no**
+  occurrence of "batter" or "storage" — there is no storage field in the pricing config, its
+  database mapper, or the admin UI that edits it.
+- `equipment-db`'s `msrpUsd` is published for all 30 batteries and is read by exactly one
+  consumer, `lib/engineering/generatorData.ts:86`, never for a battery and never for a price.
+  It is a manufacturer list price, not what an installer charges.
+
+So there is no correct answer to recover, and I did not invent one.
+
+### What happens today
+
+`lib/pricingEngine.ts:261` — `calculateItemizedPrice(panels, layoutSystemType, cfg)`. The only
+equipment input to the customer's price is **an array of panels**. Its one caller,
+`app/api/production/route.ts:136`, persists the result as `costEstimate.cashPrice`, and all
+three homeowner-facing entry points read it straight back (`pdf/route.ts:233`,
+`proposals/view/[id]/page.tsx:428`, `send-email/route.ts:98`) into `storedCashPrice`, which
+`buildCanonicalProposal.ts:639` makes `systemCost` and `renderProposalHTML.ts:463` prints as the
+headline **"System Cost"**.
+
+Design 20 × 440 W plus one Tesla Powerwall 3: the BOM rises by **$8,280**
+(`lib/bom/distributorPricing.ts:498`) — or by $4,200 via the flat category fallback for the
+other 27 batteries — and the System Cost is **$29,280 either way**. The installer sells and
+installs the battery for free.
+
+**Verification widened it.** The battery is missing from the proposal *entirely*, not just from
+its price: `renderProposalHTML.ts`'s equipment pages emit Solar Panel and Inverter rows only,
+and there is no battery row to emit. A skeptic also killed the original claim that the document
+contradicts itself by advertising storage incentives — those rows are keyed on the **utility**,
+not the design, so a PV-only job on the same utility prints them too.
+
+### The options, so this is a yes/no rather than an essay
+
+| | Basis | What it needs |
+|---|---|---|
+| **A** | **$/kWh of usable capacity**, a new `pricing_config` column beside `price_per_panel`, edited in the admin pricing UI | one number from you, one column, one input |
+| **B** | **Cost-plus** — take the BOM's battery line and apply the existing margin | no new number, but it exposes hardware cost to the customer-facing price in a way the per-panel model deliberately does not |
+| **C** | **Per-unit sell price per battery model**, a column on the equipment catalogue | 30 numbers |
+
+**A is the smallest change that matches the existing model** (the price is already per-panel
+plus a fixed cost, so per-kWh-plus-fixed is the same shape). I have not built any of them.
+
+### What I did NOT do, deliberately
+
+I did not make the proposal refuse to render, and I did not add a disclosure line to the
+customer document. Both would change what a homeowner sees on the page they sign, and you judge
+those by looking at them. Say which option you want and I will build it with the numbers you
+give me.
+
+| | |
+|---|---|
+| **Blocked** | A correct quote for any design with storage. |
+| **NOT blocked** | Everything else. PV-only quotes are unaffected. |
+
+---
+
+## P2 — ✅ CLOSED. Reopening a saved engineering run silently re-equipped the design
+
+**Both halves are now fixed** (`557fbaa6` write side, `802c0b51` read side). It is kept here
+because it is worth a live check on your side, and because the second half only became possible
+when the session that owns `app/engineering/page.tsx` confirmed its line ranges and cleared it.
+
+**Live check:** open a project, save engineering outputs, then reopen that saved run from Client
+Files. It should restore the panel and inverter you designed with. An OLD run — saved before
+today — should now show an amber *"Partially restored … the PANEL and INVERTER were NOT"*
+banner instead of the green *"restored"* one, keep your current equipment, and **not**
+auto-recalculate.
+
+**What it used to do, for the record.**
 
 `migrations/009_engineering_runs.sql` exists for one stated reason — *"so files can be
 traced back to the exact system configuration that generated them"* — and defines the
@@ -91,23 +166,28 @@ stored — it is a conclusion of the real topology read against manufacturer cap
 `config_snapshot.inverters` is what preserves that, so NULL is written explicitly to stop
 the column default filling it in.
 
-**NOT fixed** — `app/engineering/page.tsx`, which the peer session is mid-edit in:
+**Also fixed, in `802c0b51`** — the read side in `app/engineering/page.tsx`. It now resolves
+the identity from the run, then the snapshot's topology, then the stored per-string `panelId`,
+then a recorded wattage — each something the design actually stated — and **never** the head of
+a catalogue list. When either piece is still unknown the equipment is WITHHELD, everything else
+still restores, the banner says *"Partially restored"* and names the panel and inverter, and the
+auto-recalculation does **not** fire (it would otherwise produce a fresh SLD, BOM and permit
+input from a design the restore could not vouch for, 400 ms after telling you to check it). A
+multi-inverter design is rebuilt from `configSnapshot.inverters` instead of collapsing to one,
+and only if every entry survives.
 
-| Line | What it does | What it should do |
-|---|---|---|
-| ~2425 | `inverterId = invType === 'micro' ? MICROINVERTERS[0].id : STRING_INVERTERS[0].id` | read `equipmentIdentity.complete`; refuse and banner instead of substituting |
-| ~2442 | `panelId = sysType === 'fence' ? 'panel-fence-ps1' : 'qcells-peak-duo-400'` | same |
-| ~2520 | `patches.inverters = [_buildInvCfg({…})]` — one inverter | rebuild **all** inverters from `configSnapshot.inverters` |
+One thing deliberately left alone: `MICROINVERTERS[0]` at ~1497 is the **new-project seed** path,
+where a project with no stored inverter is offered the head of the catalogue and you change it.
+That is a legitimate default. The first version of the test banned the pattern file-wide and went
+red there — a false positive, now scoped to the restore block only.
 
-Until that lands, **every run already in the database** still restores by substitution —
-the persistence fix only protects runs saved from now on. Coverage that will catch the page
-side when it is touched: `tests/engineeringRunRemembersItsEquipment.postgres.test.ts`
-(13 cases, real PostgreSQL).
+Coverage: `tests/engineeringRunRemembersItsEquipment.postgres.test.ts`, **19 cases** on real
+PostgreSQL, red-proved 8 then 5 against the original bytes.
 
 | | |
 |---|---|
-| **Blocked** | Faithful restore of pre-existing runs. |
-| **NOT blocked** | New saves, and every other engineering path. |
+| **Blocked** | Nothing. |
+| **NOT blocked** | Everything. |
 
 ---
 
