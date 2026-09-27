@@ -7391,6 +7391,15 @@ function EngineeringPageInner() {
           // FIX: Pass acOCPD so BOM disconnect uses correct 60A rating (not the 40A API default fallback)
           acOCPD:           csAcOcpdBom,
           backfeedAmps:     csAcOcpdBom,
+          // 🚨 PV ONLY — and stating it is what lets the BOM evaluate NEC 705.12(B).
+          // `csAcOcpdBom` is the INVERTER→DISCONNECT run's OCPD (or acSizing, or the AC-kW
+          // formula): PV alone in all three branches. It is deliberately NOT
+          // `cs.backfeedBreakerAmps`, which the SLD payload sends and which carries
+          // PV + storage. The BOM's 120% allowance had no battery term, so on a battery job
+          // it certified an allowance the battery branch had already spent; it now subtracts
+          // that branch OCPD from the equipment authority, and refuses to certify when the
+          // split is unstated rather than guessing which figure it was handed.
+          pvOnlyBackfeedA:  csAcOcpdBom,
           mainPanelAmps:    config.mainPanelAmps,
           acDisconnect:     config.acDisconnect,
           // DC Disconnect: never for microinverter systems

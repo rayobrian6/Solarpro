@@ -31,13 +31,15 @@ import {
 import { resolveDesignMetering, type SldMeteringDrawing } from './equipment/designMetering';
 import { combinerCompatibilityFor } from '@/lib/equipment/combinerCompatibility';
 import { getMountingSystemById } from './mounting-hardware-db';
-import { nextStandardOcpd, prevStandardOcpd, nextEnclosure } from './electrical/stdSizes';
+import { nextStandardOcpd, nextEnclosure } from './electrical/stdSizes';
 // Grounding: ONE authority each. `getEGCSize` is the full 11-rung NEC 250.122
 // table (this file previously carried a 3-rung inline ternary that went FLAT at
 // #6 AWG above 100 A); `resolveGec` is NEC Table 250.66 keyed on the
 // service-entrance conductor, with the 250.66(A) rod-only cap.
 import { getEGCSize } from './manufacturer-specs';
 import { resolveGec } from './nec/table250_66';
+import { resolveLoadSideBackfeedBreaker } from './nec/loadSideBackfeed';
+import { resolveBatteryBranch } from './equipment-db';
 import { resolveAcDisconnect } from './electrical/acDisconnect';
 import { resolveTrunkCablePlan } from './equipment/trunkCable';
 import { resolveSuggestedTools } from './equipment/suggestedTools';
@@ -84,6 +86,21 @@ export interface BOMGenerationInputV4 {
   rackingId?: string;
   batteryId?: string;
   panelId?: string;
+  /**
+   * 🚨 THE PV BREAKER CURRENT, PV ALONE — and the field exists because `backfeedAmps` does
+   * not mean the same thing to every caller. `lib/permit/utils/bomForPermit.ts` passes
+   * `_auth.acFeeder.ocpdAmps` (PV only); `app/engineering/page.tsx`'s hybrid path passes
+   * `cs.backfeedBreakerAmps`, which `lib/computed-system.ts` sets from `totalBackfeedA` —
+   * PV **plus** storage. NEC 705.12(B)'s allowance is a SUM over every device other than
+   * the main, so the battery branch spends the same allowance the PV breaker draws on, and
+   * subtracting it from an allowance while sizing against a figure that already includes it
+   * would double-count.
+   *
+   * Supplying this field ASSERTS the split, and only then will the 120% rule be evaluated
+   * for the BOM. Omit it on a battery job and the BOM sizes the breaker but refuses to
+   * certify it — see `lib/nec/loadSideBackfeed.ts`.
+   */
+  pvOnlyBackfeedA?: number;
 
   // System sizing
   moduleCount: number;
@@ -1859,55 +1876,69 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     // NEC 705.12(B) — backfed breaker required in main load center. Enforce 120% rule.
     const busRating    = input.panelBusRating ?? input.mainPanelAmps ?? 200;
     const mainAmps     = input.mainPanelAmps ?? 200;
-    const maxPVBreaker = Math.floor(busRating * 1.2 - mainAmps);
+    // 🚨 THE 120% ALLOWANCE HAD NO BATTERY TERM. This was
+    //     const maxPVBreaker = Math.floor(busRating * 1.2 - mainAmps);
+    // in this block and in its twin below, with no term for any other source on the
+    // busbar — while `batteryId` and `batteryCount` sat on this very input, used only for
+    // a line quantity. NEC 705.12(B)'s allowance is a SUM over every device other than the
+    // main, so a battery branch spends the allowance the PV breaker draws on.
+    // `lib/computed-system.ts` — the permit's engine — counts it, so the same package
+    // carried a stamped busbar verdict INCLUDING the battery beside a BOM compliance note
+    // asserting an allowance the battery had already spent, and purchased a breaker sized
+    // for PV alone. A 200 A bus with a 200 A main has 40 A; a 2 × IQ Battery 10C branch is
+    // an 80 A OCPD, which takes all of it.
+    //
+    // The contribution comes from the equipment authority — `resolveBatteryBranch`, the
+    // manufacturer's step function over the unit count — not from a device count and not
+    // from a second table here. An unresolved battery yields no contribution and the
+    // resolver then says the rule was not evaluated rather than certifying the design.
+    const _batBranch = input.batteryId
+      ? resolveBatteryBranch(input.batteryId, input.batteryCount ?? 1)
+      : null;
+    const _otherBackfeedA = _batBranch?.resolved ? (_batBranch.busbarContributionA ?? 0) : 0;
+    const _otherBasis = _batBranch
+      ? (_batBranch.resolved
+          ? `battery branch OCPD, ${input.batteryCount ?? 1} × ${input.batteryId}`
+          : `battery ${input.batteryId} UNRESOLVED — contribution missing`)
+      : null;
     // If backfeedAmps not provided (0 or missing), derive from system kW:
     // NEC 705.12(B): continuous AC output current × 1.25 → next standard breaker
-    const derivedBackfeedAmps = (input.backfeedAmps ?? 0) > 0
-      ? input.backfeedAmps
-      : ((input.acOutputKw ?? input.systemKw) * 1000 / (input.acVoltage ?? 240)) * 1.25;
+    const derivedBackfeedAmps = (input.pvOnlyBackfeedA ?? 0) > 0
+      ? input.pvOnlyBackfeedA!
+      : (input.backfeedAmps ?? 0) > 0
+        ? input.backfeedAmps
+        : ((input.acOutputKw ?? input.systemKw) * 1000 / (input.acVoltage ?? 240)) * 1.25;
     const requestedBreaker = nextStandardBreaker(derivedBackfeedAmps);
-    // 🚨 The cap used to be `Math.min(requestedBreaker, maxPVBreaker)` — raw
-    // arithmetic, not a rating. `maxPVBreaker` is `floor(busRating × 1.2 − mainAmps)`,
-    // which lands on a real NEC 240.6(A) size only by coincidence. A 320 A service
-    // with a 200 A main — a common commercial-residential meter-main — gave 184,
-    // and the BOM emitted the line '184A Backfeed Breaker' with Square D part
-    // number 'QO184'. No such device exists, so the installer buys the nearest
-    // one: rounding UP to 200 puts 200 + 200 = 400 A on a 384 A allowance and
-    // violates the 705.12(B)(3)(2) rule this BOM just certified; rounding DOWN
-    // silently changes the breaker the drawing calls out.
-    //
-    // `prevStandardOcpd` takes the largest REAL rating at or below the allowance,
-    // so the emitted part is always orderable and never above the 120% limit.
-    // `maxPVBreaker` stays unrounded in the warning and the compliance note, so
-    // the sheet still states the true allowance.
-    const ladderCappedMax = prevStandardOcpd(maxPVBreaker);
-    const backfeedAmps = Math.min(requestedBreaker, ladderCappedMax);
-    if (requestedBreaker > maxPVBreaker) {
-      // When even the smallest standard rating (15 A) exceeds the allowance there
-      // is no compliant load-side breaker at all. `prevStandardOcpd` floors at 15,
-      // so say that plainly rather than letting the cap read as a fix.
-      const noCompliantSize = backfeedAmps > maxPVBreaker;
-      warnings.push(
-        `NEC 705.12(B) VIOLATION: Requested ${requestedBreaker}A backfeed exceeds 120% max (${maxPVBreaker}A) ` +
-        `for ${busRating}A bus / ${mainAmps}A main. ` +
-        (noCompliantSize
-          ? `NO standard NEC 240.6(A) rating fits a ${maxPVBreaker}A allowance — the smallest is 15A. `
-            + `This design cannot be interconnected load-side; use SUPPLY_SIDE_TAP (NEC 705.11) or upgrade the service.`
-          : `BOM capped to ${backfeedAmps}A (largest standard rating at or below the allowance) — `
-            + `use SUPPLY_SIDE_TAP (NEC 705.11) to use full ${requestedBreaker}A.`)
-      );
-    }
+    // A kW-derived figure is PV by construction (it comes from the inverter AC output), and
+    // an explicit pvOnlyBackfeedA asserts the split. Only an ambiguous `backfeedAmps` on a
+    // battery job leaves it unestablished.
+    const _pvFigureEstablished =
+      (input.pvOnlyBackfeedA ?? 0) > 0 || !((input.backfeedAmps ?? 0) > 0);
+    const _bf = resolveLoadSideBackfeedBreaker({
+      busRatingA: busRating,
+      mainBreakerA: mainAmps,
+      requestedBreakerA: requestedBreaker,
+      pvFigureEstablished: _pvFigureEstablished,
+      otherSourceBackfeedA: _otherBackfeedA,
+      otherSourceBasis: _otherBasis,
+    });
+    const backfeedAmps = _bf.breakerA;
+    // The allowance left to PV, unrounded, for the printed derivation. The allowance BEFORE
+    // other sources stays on `_bf.busAllowanceA` for anything that needs the gross figure.
+    const pvAllowance = _bf.pvAllowanceA;
+    if (_bf.warning) warnings.push(_bf.warning);
     items.push(addItem('ac', 'breaker', 'Square D', `${backfeedAmps}A Backfeed Breaker`,
       `QO${backfeedAmps}`,
-      `${backfeedAmps}A 2-pole backfeed breaker — NEC 705.12(B) load-side (bus: ${busRating}A, max: ${maxPVBreaker}A)`,
+      `${backfeedAmps}A 2-pole backfeed breaker — NEC 705.12(B) load-side (bus: ${busRating}A, ${_bf.evaluated ? `PV max: ${pvAllowance}A` : 'PV max: NOT EVALUATED'})`,
       1, 'ea', 'NEC 705.12(B)', 'perSystem', '1', true));
     log.push({ stageId: 'ac', category: 'breaker', item: `${backfeedAmps}A Backfeed Breaker`,
       quantity: 1, derivedFrom: 'backfeedAmps',
-      formula: 'min(nextStandardBreaker(backfeedAmps), prevStandardOcpd(floor(busRating×1.2−mainPanelAmps)))',
+      formula: 'min(nextStandardBreaker(pvOnlyBackfeedA), prevStandardOcpd(maxLoadSideBackfeedA(bus,main) − otherSourceBackfeedA))',
       necReference: 'NEC 705.12(B)' });
-    complianceNotes.push(
-      `NEC 705.12(B): Backfeed breaker ${backfeedAmps}A — 120% rule: (${busRating}A × 1.2) − ${mainAmps}A = ${maxPVBreaker}A max`
-    );
+    // The note states the resolver's own derivation, so it cannot drift from the number the
+    // breaker was sized against — and when the rule was not evaluated it says that instead
+    // of printing a 120% conclusion nobody reached.
+    complianceNotes.push(`Backfeed breaker ${backfeedAmps}A — ${_bf.basis}`);
   } else if (isSupplySideTap) {
     // NEC 705.11 — supply-side tap, no backfed breaker in load center.
     // The tap itself needs PHYSICAL connectors (was a compliance note only —
@@ -3224,49 +3255,65 @@ function generateBOMV4PerSubSystem(
   if (isLoadSide) {
     const busRating = input.panelBusRating ?? input.mainPanelAmps ?? 200;
     const mainAmps = input.mainPanelAmps ?? 200;
-    const maxPVBreaker = Math.floor(busRating * 1.2 - mainAmps);
-    const derivedBackfeedAmps = (input.backfeedAmps ?? 0) > 0
-      ? input.backfeedAmps
-      : ((input.acOutputKw ?? input.systemKw) * 1000 / (input.acVoltage ?? 240)) * 1.25;
-    const requestedBreaker = nextStandardBreaker(derivedBackfeedAmps);
-    // 🚨 The cap used to be `Math.min(requestedBreaker, maxPVBreaker)` — raw
-    // arithmetic, not a rating. `maxPVBreaker` is `floor(busRating × 1.2 − mainAmps)`,
-    // which lands on a real NEC 240.6(A) size only by coincidence. A 320 A service
-    // with a 200 A main — a common commercial-residential meter-main — gave 184,
-    // and the BOM emitted the line '184A Backfeed Breaker' with Square D part
-    // number 'QO184'. No such device exists, so the installer buys the nearest
-    // one: rounding UP to 200 puts 200 + 200 = 400 A on a 384 A allowance and
-    // violates the 705.12(B)(3)(2) rule this BOM just certified; rounding DOWN
-    // silently changes the breaker the drawing calls out.
+    // 🚨 THE 120% ALLOWANCE HAD NO BATTERY TERM. This was
+    //     const maxPVBreaker = Math.floor(busRating * 1.2 - mainAmps);
+    // in this block and in its twin below, with no term for any other source on the
+    // busbar — while `batteryId` and `batteryCount` sat on this very input, used only for
+    // a line quantity. NEC 705.12(B)'s allowance is a SUM over every device other than the
+    // main, so a battery branch spends the allowance the PV breaker draws on.
+    // `lib/computed-system.ts` — the permit's engine — counts it, so the same package
+    // carried a stamped busbar verdict INCLUDING the battery beside a BOM compliance note
+    // asserting an allowance the battery had already spent, and purchased a breaker sized
+    // for PV alone. A 200 A bus with a 200 A main has 40 A; a 2 × IQ Battery 10C branch is
+    // an 80 A OCPD, which takes all of it.
     //
-    // `prevStandardOcpd` takes the largest REAL rating at or below the allowance,
-    // so the emitted part is always orderable and never above the 120% limit.
-    // `maxPVBreaker` stays unrounded in the warning and the compliance note, so
-    // the sheet still states the true allowance.
-    const ladderCappedMax = prevStandardOcpd(maxPVBreaker);
-    const backfeedAmps = Math.min(requestedBreaker, ladderCappedMax);
-    if (requestedBreaker > maxPVBreaker) {
-      // When even the smallest standard rating (15 A) exceeds the allowance there
-      // is no compliant load-side breaker at all. `prevStandardOcpd` floors at 15,
-      // so say that plainly rather than letting the cap read as a fix.
-      const noCompliantSize = backfeedAmps > maxPVBreaker;
-      warnings.push(
-        `NEC 705.12(B) VIOLATION: Requested ${requestedBreaker}A backfeed exceeds 120% max (${maxPVBreaker}A) ` +
-        `for ${busRating}A bus / ${mainAmps}A main. ` +
-        (noCompliantSize
-          ? `NO standard NEC 240.6(A) rating fits a ${maxPVBreaker}A allowance — the smallest is 15A. `
-            + `This design cannot be interconnected load-side; use SUPPLY_SIDE_TAP (NEC 705.11) or upgrade the service.`
-          : `BOM capped to ${backfeedAmps}A (largest standard rating at or below the allowance) — `
-            + `use SUPPLY_SIDE_TAP (NEC 705.11) to use full ${requestedBreaker}A.`)
-      );
-    }
+    // The contribution comes from the equipment authority — `resolveBatteryBranch`, the
+    // manufacturer's step function over the unit count — not from a device count and not
+    // from a second table here. An unresolved battery yields no contribution and the
+    // resolver then says the rule was not evaluated rather than certifying the design.
+    const _batBranch = input.batteryId
+      ? resolveBatteryBranch(input.batteryId, input.batteryCount ?? 1)
+      : null;
+    const _otherBackfeedA = _batBranch?.resolved ? (_batBranch.busbarContributionA ?? 0) : 0;
+    const _otherBasis = _batBranch
+      ? (_batBranch.resolved
+          ? `battery branch OCPD, ${input.batteryCount ?? 1} × ${input.batteryId}`
+          : `battery ${input.batteryId} UNRESOLVED — contribution missing`)
+      : null;
+    // If backfeedAmps not provided (0 or missing), derive from system kW:
+    // NEC 705.12(B): continuous AC output current × 1.25 → next standard breaker
+    const derivedBackfeedAmps = (input.pvOnlyBackfeedA ?? 0) > 0
+      ? input.pvOnlyBackfeedA!
+      : (input.backfeedAmps ?? 0) > 0
+        ? input.backfeedAmps
+        : ((input.acOutputKw ?? input.systemKw) * 1000 / (input.acVoltage ?? 240)) * 1.25;
+    const requestedBreaker = nextStandardBreaker(derivedBackfeedAmps);
+    // A kW-derived figure is PV by construction (it comes from the inverter AC output), and
+    // an explicit pvOnlyBackfeedA asserts the split. Only an ambiguous `backfeedAmps` on a
+    // battery job leaves it unestablished.
+    const _pvFigureEstablished =
+      (input.pvOnlyBackfeedA ?? 0) > 0 || !((input.backfeedAmps ?? 0) > 0);
+    const _bf = resolveLoadSideBackfeedBreaker({
+      busRatingA: busRating,
+      mainBreakerA: mainAmps,
+      requestedBreakerA: requestedBreaker,
+      pvFigureEstablished: _pvFigureEstablished,
+      otherSourceBackfeedA: _otherBackfeedA,
+      otherSourceBasis: _otherBasis,
+    });
+    const backfeedAmps = _bf.breakerA;
+    // The allowance left to PV, unrounded, for the printed derivation. The allowance BEFORE
+    // other sources stays on `_bf.busAllowanceA` for anything that needs the gross figure.
+    const pvAllowance = _bf.pvAllowanceA;
+    if (_bf.warning) warnings.push(_bf.warning);
     push(undefined, addItem('ac', 'breaker', 'Square D', `${backfeedAmps}A Backfeed Breaker`,
       `QO${backfeedAmps}`,
-      `${backfeedAmps}A 2-pole backfeed breaker — NEC 705.12(B) load-side (bus: ${busRating}A, max: ${maxPVBreaker}A)`,
+      `${backfeedAmps}A 2-pole backfeed breaker — NEC 705.12(B) load-side (bus: ${busRating}A, ${_bf.evaluated ? `PV max: ${pvAllowance}A` : 'PV max: NOT EVALUATED'})`,
       1, 'ea', 'NEC 705.12(B)', 'perSystem (aggregate of all sub-systems)', '1', true));
-    complianceNotes.push(
-      `NEC 705.12(B): Backfeed breaker ${backfeedAmps}A — 120% rule: (${busRating}A × 1.2) − ${mainAmps}A = ${maxPVBreaker}A max`
-    );
+    // The note states the resolver's own derivation, so it cannot drift from the number the
+    // breaker was sized against — and when the rule was not evaluated it says that instead
+    // of printing a 120% conclusion nobody reached.
+    complianceNotes.push(`Backfeed breaker ${backfeedAmps}A — ${_bf.basis}`);
   } else if (isSupplySideTap) {
     push(undefined, addItem('ac', 'connector', 'NSI Polaris',
       'Insulated Multi-Tap Connector (350 kcmil–#6)', 'IPLD350-3',

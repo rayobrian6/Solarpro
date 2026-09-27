@@ -355,6 +355,11 @@ export async function POST(req: NextRequest) {
     // under-protected by a breaker the drawing never named.
     const acOCPD       = nextStandardOcpd(acOutputAmps * 1.25);
     const backfeedAmps = acOCPD;
+    // This figure is PV BY CONSTRUCTION — `acOutputAmps` is the inverter AC output and this
+    // route models no storage. Saying so lets the BOM evaluate NEC 705.12(B), which it now
+    // refuses to do when it cannot tell whether a `backfeedAmps` already includes a battery
+    // branch (`lib/nec/loadSideBackfeed.ts`).
+    const pvOnlyBackfeedA = acOCPD;
 
     // ── Step 4: Cost estimate ─────────────────────────────────────────────────
     const costLow  = Math.round(systemWatts * COST_LOW);
@@ -394,6 +399,7 @@ export async function POST(req: NextRequest) {
         railSections:          Math.ceil(panelCount / 4),
         mainPanelAmps:         DEFAULTS.mainPanelAmps,
         backfeedAmps,
+        pvOnlyBackfeedA,
         acOCPD,
         dcOCPD:                20,
         requiresACDisconnect:  true,
@@ -441,6 +447,7 @@ export async function POST(req: NextRequest) {
         acOCPD,
         mainPanelAmps:           DEFAULTS.mainPanelAmps,
         backfeedAmps,
+        pvOnlyBackfeedA,
         utilityName:             utilityName || 'Local Utility',
         interconnection:         'LOAD_SIDE',
         rapidShutdownIntegrated: true,

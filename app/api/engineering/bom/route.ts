@@ -367,6 +367,15 @@ export async function POST(req: NextRequest) {
       spliceAtRows:       body.spliceAtRows === true,
       mainPanelAmps:      Number(body.mainPanelAmps)      || 200,
       backfeedAmps:       Number(body.backfeedAmps)       || 0,   // FIX: was 40A hardcoded default — now 0 forces correct calculation
+      // 🚨 THE PV-ONLY FIGURE, AND ONLY WHEN THE CALLER STATES IT. `backfeedAmps` is
+      // ambiguous across this route's callers — the engineering page's hybrid path sends
+      // `cs.backfeedBreakerAmps`, which INCLUDES the battery branch, while its single-system
+      // path sends a PV-only AC OCPD. NEC 705.12(B)'s allowance is a sum over every device
+      // other than the main, so the BOM cannot subtract the battery from the allowance while
+      // sizing against a figure that may already include it. Forwarded rather than guessed:
+      // absent, the BOM sizes the breaker and declines to certify it
+      // (`lib/nec/loadSideBackfeed.ts`).
+      pvOnlyBackfeedA:    Number(body.pvOnlyBackfeedA) > 0 ? Number(body.pvOnlyBackfeedA) : undefined,
       acOCPD:             Number(body.acOCPD)             || 0,   // FIX: was 40A hardcoded default — frontend now sends correct value
       dcOCPD:             Number(body.dcOCPD)             || 20,
       jurisdiction:       body.jurisdiction,

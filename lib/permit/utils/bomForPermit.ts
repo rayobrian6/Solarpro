@@ -794,6 +794,15 @@ export function generateBOMForPermit(
         runs:                buildComputedRunsForPermit(input, cad) ?? undefined,
         mainPanelAmps:       mainPanelA,
         backfeedAmps,
+        // 🚨 PV ONLY, AND SAYING SO IS WHAT LETS THE BOM EVALUATE 705.12(B).
+        // `backfeedAmps` above is `_auth.acFeeder.ocpdAmps` — the conductor authority's AC
+        // FEEDER OCPD, which carries PV alone (the field that carries PV+storage is
+        // `project.backfeedBreakerA` / `cs.backfeedBreakerAmps`, three different places, and
+        // that ambiguity is the reason this second field exists). The BOM's 120% allowance
+        // had no battery term at all, so on every battery job it certified an allowance the
+        // battery branch had already spent; it now subtracts the branch OCPD from the
+        // equipment authority, and refuses to certify when the PV split is unstated.
+        pvOnlyBackfeedA:     backfeedAmps,
         acOCPD:              backfeedAmps,
         // Stage D — system AC disconnect / supply-side tap OCPD single-sourced
         // to the conductor authority's POI block (Σ per-sub backfeed OCPDs →
