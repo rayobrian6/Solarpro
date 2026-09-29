@@ -15,6 +15,7 @@
 
 import React, { useState, useRef, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { safeRelativeRedirect } from '@/lib/safeRedirect';
 import {
   Sun, Shield, Key, ArrowRight, AlertTriangle,
   RefreshCw, Loader2, HelpCircle,
@@ -69,9 +70,10 @@ function MFAChallengeForm() {
         return;
       }
 
-      // MFA verification successful — redirect to intended page
-      const redirect = searchParams.get('redirect') || '/dashboard';
-      window.location.href = redirect;
+      // MFA verification successful — redirect to intended page. Same-site
+      // paths only (lib/safeRedirect.ts): this used to follow ?redirect= to
+      // any URL, including another origin or `javascript:`.
+      window.location.href = safeRelativeRedirect(searchParams.get('redirect'));
     } catch {
       setError('Network error. Please check your connection and try again.');
     } finally {
@@ -111,8 +113,7 @@ function MFAChallengeForm() {
         // Redirect to settings security tab to re-enroll
         window.location.href = '/settings?tab=security';
       } else {
-        const redirect = searchParams.get('redirect') || '/dashboard';
-        window.location.href = redirect;
+        window.location.href = safeRelativeRedirect(searchParams.get('redirect'));
       }
     } catch {
       setError('Network error. Please check your connection and try again.');

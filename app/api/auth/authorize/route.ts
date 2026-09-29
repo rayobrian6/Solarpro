@@ -16,7 +16,7 @@
 //        - Redirects (302) to:
 //            <redirect_uri>?token=<jwt>&state=<state>
 //
-//   3. If there is NO session, redirects to /auth/login?next=<this-url>
+//   3. If there is NO session, redirects to /auth/login?redirect=<this-url>
 //      so the user logs in first and then gets redirected back here.
 //
 // JWT claims (the EXACT contract for B and C to trust):
@@ -49,6 +49,7 @@ import { randomUUID } from 'crypto';
 import { getUserFromRequest } from '@/lib/auth';
 import { getDbReady } from '@/lib/db-neon';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
+import { parseAllowedRedirectPrefixes, isRedirectAllowed } from '@/lib/ssoRedirectAllowlist';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -57,48 +58,16 @@ export const maxDuration = 30;
 const SSO_TOKEN_TTL_SECONDS = 10 * 60; // 10 minutes
 
 // ---------------------------------------------------------------------------
-// getAllowedRedirectPrefixes
-//
-// Reads AUTHORIZE_ALLOWED_REDIRECTS (comma-separated) and returns a trimmed
-// list. Falls back to a safe default that allows ALL known mobile app schemes:
-//
-//   sitesurvey://          — production custom scheme (site survey app)
-//   exp://                 — Expo Go development client (any host)
-//   com.underthesun://     — production bundle-id scheme (if used)
-//
-// To override: set AUTHORIZE_ALLOWED_REDIRECTS=sitesurvey://,exp://
-// in Vercel → Project → Settings → Environment Variables.
+// Redirect allowlist — lib/ssoRedirectAllowlist.ts is the rule (default
+// `sitesurvey://` only; bare `exp://` and Expo's shared u.expo.dev host are
+// refused even when AUTHORIZE_ALLOWED_REDIRECTS lists them).
 // ---------------------------------------------------------------------------
-const DEFAULT_ALLOWED_PREFIXES = [
-  'sitesurvey://',
-  'exp://',
-  'com.underthesun.',
-];
-
 function getAllowedRedirectPrefixes(): string[] {
-  const raw = (process.env.AUTHORIZE_ALLOWED_REDIRECTS ?? '').trim();
-  if (!raw) {
-    // No override set — use the built-in defaults for all known mobile schemes
-    return DEFAULT_ALLOWED_PREFIXES;
+  const { allowed, ignored } = parseAllowedRedirectPrefixes(process.env.AUTHORIZE_ALLOWED_REDIRECTS);
+  if (ignored.length > 0) {
+    console.warn('[authorize] AUTHORIZE_ALLOWED_REDIRECTS entries ignored (admit attacker-controlled Expo hosts):', ignored.join(', '));
   }
-  return raw
-    .split(',')
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-}
-
-// ---------------------------------------------------------------------------
-// isRedirectAllowed
-//
-// Returns true when redirect_uri begins with at least one allowed prefix.
-// Exact prefix match - do NOT do substring match (that would allow
-// https://evil.com/sitesurvey:// to sneak through).
-// ---------------------------------------------------------------------------
-function isRedirectAllowed(redirectUri: string, allowed: string[]): boolean {
-  for (const prefix of allowed) {
-    if (redirectUri.startsWith(prefix)) return true;
-  }
-  return false;
+  return allowed;
 }
 
 // ---------------------------------------------------------------------------
@@ -157,9 +126,8 @@ export async function GET(req: NextRequest) {
   <p style="margin-top:20px;padding:12px 16px;background:#1e293b;border:1px solid #f59e0b33;border-radius:8px;text-align:left;">
     <strong style="color:#fbbf24;">⚠ To fix (Vercel):</strong><br/>
     Go to <strong>Vercel → Project → Settings → Environment Variables</strong><br/>
-    Set <code>AUTHORIZE_ALLOWED_REDIRECTS</code> to:<br/>
-    <code style="color:#4ade80;">sitesurvey://,exp://,com.underthesun.</code><br/>
-    <span style="color:#64748b;font-size:11px;">(All three schemes are required. Setting this var overrides the built-in defaults entirely.)</span>
+    The production app uses <code style="color:#4ade80;">sitesurvey://</code>, which is allowed by default.<br/>
+    <span style="color:#64748b;font-size:11px;">A specific development host can be admitted by listing its exact URL prefix in <code>AUTHORIZE_ALLOWED_REDIRECTS</code>. Expo Go's shared hosts are refused: they would let anyone's Expo project receive users' sign-in tokens — use a development build with the <code>sitesurvey://</code> scheme instead.</span>
   </p>
   <p style="margin-top:16px;font-size:12px;color:#64748b;">
     Contact <a href="mailto:support@solarpro.solutions">support@solarpro.solutions</a> if the issue persists.
@@ -174,7 +142,7 @@ export async function GET(req: NextRequest) {
       {
         error: 'redirect_uri is not in the allowlist',
         allowedPrefixes,
-        fix: 'Set AUTHORIZE_ALLOWED_REDIRECTS=sitesurvey://,exp://,com.underthesun. in Vercel → Project → Settings → Environment Variables',
+        fix: 'The production app scheme (sitesurvey://) is allowed by default. A specific development host can be admitted by listing its exact URL prefix in AUTHORIZE_ALLOWED_REDIRECTS; Expo Go shared hosts are refused — use a development build with the sitesurvey:// scheme.',
       },
       { status: 400 },
     );
@@ -183,11 +151,13 @@ export async function GET(req: NextRequest) {
   // -- Check session --------------------------------------------------------
   const user = getUserFromRequest(req);
   if (!user) {
-    // Not logged in - bounce to the SolarPro login page with ?next=<this-url>
-    // so that after login the user returns here and completes the authorize.
+    // Not logged in - bounce to the SolarPro login page so that after login
+    // the user returns here and completes the authorize. The login page reads
+    // `redirect` (lib/safeRedirect.ts) — this used to send `next`, which it
+    // ignores, so SSO never resumed and the user landed on /dashboard.
     const nextUrl = `${req.nextUrl.pathname}${req.nextUrl.search}`;
     const loginUrl = new URL('/auth/login', req.nextUrl.origin);
-    loginUrl.searchParams.set('next', nextUrl);
+    loginUrl.searchParams.set('redirect', nextUrl);
     return NextResponse.redirect(loginUrl, { status: 302 });
   }
 

@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useRef, Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
+import { safeRelativeRedirect } from '@/lib/safeRedirect';
 import { Sun, Eye, EyeOff, ArrowRight, Mail, Lock, CheckCircle, RefreshCw, Shield } from 'lucide-react';
 
 // ── How many times the UI will auto-retry a DB_STARTING 503 ──────────────────
@@ -23,16 +24,10 @@ function LoginForm() {
   const countdownTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastFormRef      = useRef(form);
 
-  // SECURITY: open redirect fix — only allow relative paths starting with '/'
-  // Reject absolute URLs (http://, https://, //) and protocol-relative URLs
-  // to prevent attackers from using ?redirect=https://evil.com
-  const rawRedirect = searchParams.get('redirect') || '';
-  const redirect = (
-    rawRedirect.startsWith('/') &&
-    !rawRedirect.startsWith('//') &&
-    !rawRedirect.toLowerCase().startsWith('/\\') &&
-    !/^\/[a-z]+:/i.test(rawRedirect)
-  ) ? rawRedirect : '/dashboard';
+  // SECURITY: same-site paths only — lib/safeRedirect.ts is the one rule for
+  // every post-auth redirect (it resolves with the browser's URL parser, so
+  // `/\t/evil.com` and `/\\evil.com` are refused as well as absolute URLs).
+  const redirect = safeRelativeRedirect(searchParams.get('redirect'));
 
   // Keep lastFormRef in sync so the retry closure sees the current values
   useEffect(() => { lastFormRef.current = form; }, [form]);
