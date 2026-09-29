@@ -234,6 +234,16 @@ declare global {
 
 const E2E_ENABLED = process.env.NEXT_PUBLIC_E2E === '1';
 
+/**
+ * Does this id name a project row? A Quick Design session's id is
+ * `demo-<timestamp>` (app/design/page.tsx): nothing exists for it on the server,
+ * and every project route refuses a non-UUID id with a 400.
+ */
+const DURABLE_PROJECT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function isDurableProjectId(id: string): boolean {
+  return DURABLE_PROJECT_ID.test(id);
+}
+
 const TILE_SIZE = 256;
 
 // ─── Module-level tile cache (survives re-renders, cleared on location change) ─
@@ -1230,6 +1240,13 @@ export default function DesignStudio({ project, onSave, onProjectPromoted }: Pro
   // The beforeunload beacon had the same hole. 'failed' keeps saves disabled
   // too: if we couldn't READ the layout we must not risk WRITING over it.
   const restoreStateRef = useRef<'pending' | 'done' | 'failed'>('pending');
+  // A Quick Design promoted to a real project (ensureDurableProject) keeps the
+  // design in memory: the restore effect for the new id must NOT hydrate from
+  // the new, empty row. `adoptedInMemoryIdRef` names that id; the second ref
+  // makes the one save that writes the design under it fire once, even when
+  // StrictMode runs the restore effect twice.
+  const adoptedInMemoryIdRef = useRef<string | null>(null);
+  const adoptionSavedIdRef = useRef<string | null>(null);
   // Rendered mirror of restoreStateRef === 'done', for props. A ref cannot be a
   // prop (no re-render), and SolarEngine3D's Lane A gate needs this signal:
   // detection lands in React state immediately while the fence above only
@@ -1510,7 +1527,7 @@ export default function DesignStudio({ project, onSave, onProjectPromoted }: Pro
     //
     // The local save above genuinely worked and still does, so say that instead
     // of firing a request we know will be refused.
-    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(project.id)) {
+    if (!isDurableProjectId(project.id)) {
       setSaveStatus('saved');
       setLastSavedAt(new Date());
       setTimeout(() => setSaveStatus(s => (s === 'saved' ? 'idle' : s)), 3000);
@@ -1552,6 +1569,18 @@ export default function DesignStudio({ project, onSave, onProjectPromoted }: Pro
             // which is refused rather than allowed to overwrite blindly — the
             // safe direction for an unreadable answer.
           }
+        } else if (sent.status !== 409) {
+          // 🚨 A SAVE THAT FAILED AFTER CLAIMING THE ROW STILL MOVED ITS VERSION.
+          // The server says so (`currentVersion`, lib/db/projects.ts
+          // layoutCurrentVersionOf). Adopted here, inside the same queued turn
+          // for the same reason as above — otherwise this tab's next save is
+          // refused as "saved somewhere else" by this failed attempt, for ever.
+          // A refusal (409) is not adopted: nothing was written and the token
+          // the tab holds is the one the refusal was judged against.
+          try {
+            const failed = await sent.clone().json() as { currentVersion?: unknown };
+            if (typeof failed?.currentVersion === 'string') site.noteSavedVersion(failed.currentVersion);
+          } catch { /* no version to adopt */ }
         }
         return sent;
       });
@@ -1721,6 +1750,8 @@ export default function DesignStudio({ project, onSave, onProjectPromoted }: Pro
       // came back with 4 — twice, once before the autosave was gated and once after,
       // because the beacon is a second writer on the same path.
       if (restoreInFlightRef.current) return;
+      // A Quick Design has no row; the route would answer 400 to a beacon.
+      if (!isDurableProjectId(project.id)) return;
       const panelList = panelsRef2.current;
       const designElectrical = designElectricalRef.current ?? undefined;
       // v66: must match saveLayoutToDB's signature exactly, or closing the tab
@@ -1800,8 +1831,49 @@ export default function DesignStudio({ project, onSave, onProjectPromoted }: Pro
       // (app/design/page.tsx) — so React reuses the instance and project A's
       // 'done' stayed open across project B's in-flight restore. A save firing
       // in that window writes A's state onto B. Synchronous, before the fetch.
+      // 🚨 A PROMOTED QUICK DESIGN KEEPS WHAT IS ON SCREEN — checked BEFORE the
+      // fence is re-armed, because nothing is about to replace the design.
+      // `ensureDurableProject` just created this project FROM the design in
+      // memory, so its row is empty by construction — hydrating from it applied
+      // an empty bundle and wiped every panel, face, obstruction and
+      // measurement the user had drawn. The design in memory IS the design, and
+      // it was hydrated when the Quick Design opened, so the fence stays open:
+      // keep it, and write it under the new id now (no version token — the row
+      // does not exist yet, so the first save creates it). Sticky per id, so
+      // the StrictMode re-run of this effect cannot slip past it into the
+      // empty read, and the save fires once.
+      if (adoptedInMemoryIdRef.current === project.id) {
+        restoreStateRef.current = 'done';
+        if (adoptionSavedIdRef.current !== project.id) {
+          adoptionSavedIdRef.current = project.id;
+          site.noteSavedVersion(null);
+          lastSavedPanelsRef.current = '';
+          saveLayoutToDBRef.current?.(panelsRef2.current);
+        }
+        return;
+      }
+
       restoreStateRef.current = 'pending';
       setRoofRestoreResolved(false);
+
+      // 🚨 A QUICK DESIGN HAS NOTHING STORED — AND THAT IS NOT A FAILURE.
+      // Its id is `demo-<timestamp>`; the layout route answers 400 to any
+      // non-UUID id, and that 400 used to land in the "read did not succeed"
+      // branch below: saving DISABLED and "Could not load the saved design" on
+      // every Quick Design, so the local-save branch in saveLayoutToDB (written
+      // for exactly this session) was unreachable. Hydrate from "nothing
+      // stored" instead — the same call a real project makes, so the session
+      // gets a resolved property and the fence opens after a hydration, as it
+      // must (tests/laneAAcquisitionOrdering.test.tsx).
+      if (!isDurableProjectId(project.id)) {
+        site.hydrateFromStored(null, siteKeyFromCoords(
+          mapCenterRef.current?.lat, mapCenterRef.current?.lng, project.id,
+        ));
+        restoreStateRef.current = 'done';
+        setRoofRestoreResolved(true);
+        return;
+      }
+
       try {
         const res = await fetch(`/api/projects/${project.id}/layout`);
         const data = await res.json();
@@ -5011,8 +5083,7 @@ export default function DesignStudio({ project, onSave, onProjectPromoted }: Pro
    * before it reads the body, and the versions routes do the same — so offering
    * History there is offering a button that can only produce an error.
    */
-  const isRealProject =
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(project.id);
+  const isRealProject = isDurableProjectId(project.id);
 
   /**
    * 🚨 GIVE THIS DESIGN A DURABLE IDENTITY, ONCE, BEFORE ANY PAID IMAGERY IS BOUGHT.
@@ -5065,6 +5136,10 @@ export default function DesignStudio({ project, onSave, onProjectPromoted }: Pro
         const created = data?.data ?? data?.project ?? null;
         if (!res.ok || !data?.success || !created?.id) { promotionFailedRef.current = true; return null; }
         toast.info('Design saved', 'Saved as a project so its Nearmap imagery is kept and reused.');
+        // Marked BEFORE the parent swaps the id in: the restore effect that runs
+        // for the new id must keep the in-memory design, not read the new
+        // (empty) row over it.
+        adoptedInMemoryIdRef.current = created.id as string;
         onProjectPromoted?.(created as Project);
         return created.id as string;
       } catch {

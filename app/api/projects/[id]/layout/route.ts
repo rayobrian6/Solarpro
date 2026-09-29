@@ -5,7 +5,7 @@ export const maxDuration = 30;
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
-import { getProjectById, getLayoutByProject, upsertLayout, saveProjectVersion, handleRouteDbError, getDbReady, isValidUUID, upsertSelectedEquipment } from '@/lib/db-neon';
+import { getProjectById, getLayoutByProject, upsertLayout, saveProjectVersion, handleRouteDbError, getDbReady, isValidUUID, upsertSelectedEquipment, layoutCurrentVersionOf } from '@/lib/db-neon';
 import { syncProjectPipeline } from '@/lib/engineering/syncPipeline';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 import { getPanelById } from '@/lib/equipment-db';
@@ -343,7 +343,14 @@ export async function POST(req: NextRequest, context: RouteContext) {
     // HERE is what let LAYOUT_COORDS_MISMATCH fall through to 503 while its two
     // siblings were handled, and left the other three routes that call
     // `upsertLayout` with no handling at all.
-    return handleRouteDbError('[POST /api/pr', error);
+    const res = handleRouteDbError('[POST /api/pr', error);
+    // A save that failed AFTER claiming the row reports the version it left, so
+    // the studio adopts it instead of being refused as stale by its own failed
+    // attempt on every later save (lib/db/projects.ts layoutCurrentVersionOf).
+    const currentVersion = layoutCurrentVersionOf(error);
+    if (!currentVersion) return res;
+    const body = await res.json().catch(() => ({}));
+    return NextResponse.json({ ...body, currentVersion }, { status: res.status, headers: res.headers });
   }
 }
 

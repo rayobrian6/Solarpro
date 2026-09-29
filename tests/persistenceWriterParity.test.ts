@@ -184,10 +184,12 @@ describe('the restore seed stays in parity with the writers', () => {
     // NB: slice from the hydrate call, not from a `restoreStateRef` string —
     // that phrase also appears in a comment ABOVE the seed, which would
     // truncate the window and make this assertion pass vacuously.
-    const restore = SRC.slice(
-      SRC.indexOf('const hydrated = site.hydrateFromStored'),
-      SRC.indexOf('setRoofRestoreResolved(true);'),
-    );
+    // The END is the fence opening AFTER that hydrate — the Quick Design
+    // branch opens the fence earlier in the file (after its own hydrate), and
+    // taking the first match anywhere would make the window empty.
+    const from = SRC.indexOf('const hydrated = site.hydrateFromStored');
+    const restore = SRC.slice(from, SRC.indexOf('setRoofRestoreResolved(true);', from));
+    expect(restore.length, 'the restore window is empty — the slice anchors moved').toBeGreaterThan(200);
     expect(restore).toMatch(/lastSavedPanelsRef\.current = hydrated\.needsAdoptionSave \? ''/);
     expect(restore).toMatch(/archivesSignature\(site\.storedArchives\(/);
   });

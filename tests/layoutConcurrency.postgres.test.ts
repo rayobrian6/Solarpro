@@ -969,3 +969,85 @@ describe('🚨 the millisecond truncation is load-bearing, and PGlite hides that
     expect((await row('panels'))?.panels).toHaveLength(5);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 🚨 ONE WHEEL NOTCH MUST NOT STOP THE DESIGN SAVING
+//
+// The 2D map zooms 0.75 per wheel notch; `map_zoom` is INTEGER. `19.75::integer`
+// is refused by Postgres, and the refusal landed AFTER the version claim — so
+// the tab kept a token the claim had already made stale and every later save
+// was refused as "saved somewhere else" until a reload. Two fixes, both proved
+// here against the real schema: the zoom is stored to the nearest level, and any
+// failure after the claim hands back the version it left.
+// ─────────────────────────────────────────────────────────────────────────────
+const { normalizeMapZoom, layoutCurrentVersionOf } = await import('@/lib/db/projects');
+
+describe('🚨 a 2D wheel zoom does not stop the design saving', () => {
+  it('normalizeMapZoom stores the nearest whole level and treats junk as absent', () => {
+    expect(normalizeMapZoom(19.75)).toBe(20);
+    expect(normalizeMapZoom(19.25)).toBe(19);
+    expect(normalizeMapZoom(18)).toBe(18);
+    expect(normalizeMapZoom(Number.NaN)).toBeNull();
+    expect(normalizeMapZoom('20' as unknown)).toBeNull();
+    expect(normalizeMapZoom(undefined)).toBeNull();
+  });
+
+  it('design → zoom → save → reload: a 19.75 zoom saves, the next save still lands, the design reads back whole', async () => {
+    await seedProject();
+    await upsertLayout(save(TWELVE));                           // the design
+    const token = await whatTheTabRead();
+
+    const zoomed = await upsertLayout(save(TWELVE, { expectedUpdatedAt: token, mapZoom: 19.75 }));  // one wheel notch
+    expect((await row('map_zoom')).map_zoom).toBe(20);
+
+    // The tab adopts the version its save produced, and keeps saving.
+    const next = await upsertLayout(save(TWELVE.slice(0, 10), { expectedUpdatedAt: zoomed.updatedAt, mapZoom: 20.5 }));
+    expect(next.panels).toHaveLength(10);
+
+    // Reload: what the studio reads back.
+    const back = await getLayoutByProject(PROJECT, USER_ID);
+    expect(back!.panels).toHaveLength(10);
+    expect(back!.roofPlanes).toHaveLength(SIX_PLANES.length);
+    expect(back!.mapZoom).toBe(21);
+  });
+
+  it('a first-ever save carrying a fractional zoom creates the row (INSERT path)', async () => {
+    await seedProject();
+    await expect(upsertLayout(save(TWELVE, { mapZoom: 17.25 }))).resolves.toBeTruthy();
+    expect((await row('map_zoom')).map_zoom).toBe(17);
+  });
+
+  it('🚨 a save that fails AFTER its claim reports the version it left — and only that unwedges the tab', async () => {
+    await seedProject();
+    await upsertLayout(save(TWELVE));
+    const token = await whatTheTabRead();
+
+    // Any failure after the claim: a value the main UPDATE cannot cast.
+    let failure: unknown;
+    try {
+      await upsertLayout(save(TWELVE, { expectedUpdatedAt: token, groundTilt: 'not-a-number' }));
+    } catch (e) { failure = e; }
+    expect(failure, 'the malformed save should fail').toBeTruthy();
+    const current = layoutCurrentVersionOf(failure);
+    expect(current, 'the failure must carry the version the claim left').toBeTruthy();
+    expect(current).not.toBe(token);
+
+    // The token the tab held is now stale — this is the wedge.
+    await expect(upsertLayout(save(TWELVE, { expectedUpdatedAt: token })))
+      .rejects.toThrow(/LAYOUT_STALE_WRITE/);
+
+    // The reported version is the way out, and the next save carries the whole design.
+    await upsertLayout(save(TWELVE.slice(0, 8), { expectedUpdatedAt: current }));
+    expect((await row('total_panels')).total_panels).toBe(8);
+  });
+
+  it('a refusal BEFORE the claim carries no version (nothing moved, nothing to adopt)', async () => {
+    await seedProject();
+    await upsertLayout(save(TWELVE));
+    const stale = new Date(Date.parse(await whatTheTabRead()) - 60_000).toISOString();
+    let refusal: unknown;
+    try { await upsertLayout(save(TWELVE, { expectedUpdatedAt: stale })); } catch (e) { refusal = e; }
+    expect(String((refusal as Error)?.message)).toMatch(/LAYOUT_STALE_WRITE/);
+    expect(layoutCurrentVersionOf(refusal)).toBeNull();
+  });
+});

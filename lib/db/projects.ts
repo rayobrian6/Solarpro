@@ -1246,6 +1246,54 @@ async function claimLayoutForWrite(
 }
 
 /**
+ * `map_zoom` is an INTEGER column; the 2D map zooms in fractional steps
+ * (DesignStudio's ZOOM_STEP is 0.75 per wheel notch). Bound as `19.75::integer`
+ * Postgres refuses the value ("invalid input syntax for type integer") — and
+ * because that refusal came AFTER the version claim, one wheel notch left the
+ * tab holding a stale token and every later save was refused as "saved
+ * somewhere else". The zoom is a view hint, so it is stored to the nearest
+ * whole level; anything that is not a finite number is treated as absent.
+ */
+export function normalizeMapZoom(zoom: unknown): number | null {
+  if (typeof zoom !== 'number' || !Number.isFinite(zoom)) return null;
+  return Math.min(30, Math.max(0, Math.round(zoom)));
+}
+
+const LAYOUT_CURRENT_VERSION = 'layoutCurrentVersion';
+
+/**
+ * The version a failed, version-claimed save left on the row, when known.
+ *
+ * 🚨 A SAVE THAT FAILS AFTER ITS CLAIM MUST HAND THE ROW'S VERSION BACK. The
+ * claim (and any statement after it that did land) has already moved
+ * `updated_at`, so the client's token is stale the moment the failure is
+ * reported — and a client that keeps it is refused as LAYOUT_STALE_WRITE on
+ * every later save, for ever, by its own failed attempt. No other
+ * token-bearing writer can have written in between (their claims fail against
+ * the version this save advanced), so the current version is this save's to
+ * hand back and the client's next save — which carries the whole design —
+ * repairs whatever the failure left half-written.
+ */
+export function layoutCurrentVersionOf(err: unknown): string | null {
+  const v = (err as Record<string, unknown> | null | undefined)?.[LAYOUT_CURRENT_VERSION];
+  return typeof v === 'string' && v ? v : null;
+}
+
+async function attachCurrentVersion(sql: any, data: UpsertLayoutData, claimed: string, err: unknown): Promise<unknown> {
+  let current: string | null = null;
+  try {
+    const rows = await sql`
+      SELECT updated_at FROM layouts
+      WHERE project_id = ${data.projectId} AND user_id = ${data.userId} LIMIT 1
+    `;
+    current = normalizeVersion(rows[0]?.updated_at);
+  } catch { /* fall back to the claimed version */ }
+  const target = (err && typeof err === 'object') ? err as Record<string, unknown> : new Error(String(err)) as unknown as Record<string, unknown>;
+  target[LAYOUT_CURRENT_VERSION] = current ?? claimed;
+  return target;
+}
+
+/**
  * Tell the caller the version the row ACTUALLY ended up with.
  *
  * 🚨 THE RETURNED `updatedAt` WAS A MID-SAVE VALUE, AND IT WOULD HAVE WEDGED
@@ -1588,90 +1636,97 @@ export async function upsertLayout(data: UpsertLayoutData): Promise<Layout> {
     // 🚨 THE DELETION RECORD GOES DOWN BEFORE THE STATEMENT THAT REMOVES THE
     // GEOMETRY IT EXPLAINS — and after the guard above, which reads the stored
     // `activeSiteKey` out of this very column. See `persistDeletionLedgerFirst`.
-    await persistDeletionLedgerFirst(sql, data, version);
-    //
-    // 🚨 AND THE WRITES FROM HERE ON ARE DELIBERATELY UNCONDITIONAL.
-    //
-    // The obvious next move — pin the main write to what the ledger returned —
-    // is WRONG, and quietly so. The ledger has already been written by then, so
-    // a refusal at the main write would leave the row holding TOMBSTONES FOR
-    // FACES THAT ARE STILL THERE. `admitAfterHydrate` filters the active bundle
-    // against that ledger on the next load, so those faces would vanish from
-    // the user's screen — a refusal causing exactly the data loss the refusal
-    // exists to prevent, and a subtler one, because nothing reports it.
-    //
-    // The claim is the mechanism and it has already done its job: no other
-    // writer holding a version token can be in flight, because their claim
-    // would have failed against the version this one advanced. What remains is
-    // an opt-out writer (the admin repair tools, /api/engineering/preliminary,
-    // the version-restore route) landing in the microseconds between the two
-    // statements — and against those, this save winning is exactly today's
-    // behaviour, with the ledger and the geometry still in step.
-    // UPDATE existing layout
-    // 🚨 roof_planes AND map_center USE COALESCE: `undefined` MEANS KEEP STORED,
-    // exactly as it does for obstructions, measurements and site_archives.
-    //
-    // They used to be written unconditionally, so `undefined` meant SET NULL —
-    // a roof-destroying default. Any caller that does not happen to send
-    // roofPlanes wiped the geometry, and `/api/engineering/preliminary`
-    // (reached from the bill-upload modal) sends neither it nor mapCenter. So
-    // uploading a bill deleted the roof of a designed project. After migration
-    // 123 it was worse: the active roof was destroyed while site_archives kept
-    // naming it, leaving that design neither active nor archived — the one
-    // thing the ownership model forbids.
-    //
-    // Nulling map_center also disables the legacy multi-site repair in
-    // rowToLayout, which falls back to it to decide which property a row is at.
-    //
-    // A DELIBERATE CLEAR STILL WORKS. The studio sends `[]`, which is not
-    // undefined, so COALESCE keeps the empty array. Only absence is ignored.
-    const rows = await sql`
-      UPDATE layouts SET
-        system_type         = ${data.systemType || 'roof'},
-        panels              = COALESCE(${panelsJson}::jsonb, panels),
-        roof_planes         = COALESCE(${roofPlanesJson}::jsonb, roof_planes),
-        -- ABSENCE KEEPS. These seven were the uneven half of a doctrine the two
-        -- lines around them already follow. See the note above upsertLayout.
-        --
-        -- fence_line was written unconditionally, and fenceLineJson is null
-        -- whenever data.fenceLine is absent -- so ANY save that did not carry a
-        -- fence SET THE STORED FENCE TO NULL. Unconditional, destructive, and
-        -- reachable from a read-only production CALCULATION
-        -- (app/api/production/route.ts), which sends no fence at all.
-        --
-        -- The four scalars were worse than silent: the 20 / 180 / 1.5 / 0.6
-        -- fallbacks replaced a value the user had set with a FABRICATED default
-        -- whenever a caller omitted it. Absence became a confident wrong answer.
-        --
-        -- An explicit empty array still clears a fence: [] is truthy, so it
-        -- serialises to '[]' and writes. Only genuine absence keeps.
-        ground_tilt         = COALESCE(${data.groundTilt ?? null}::double precision, ground_tilt),
-        ground_azimuth      = COALESCE(${data.groundAzimuth ?? null}::double precision, ground_azimuth),
-        row_spacing         = COALESCE(${data.rowSpacing ?? null}::double precision, row_spacing),
-        ground_height       = COALESCE(${data.groundHeight ?? null}::double precision, ground_height),
-        fence_azimuth       = COALESCE(${data.fenceAzimuth ?? null}::double precision, fence_azimuth),
-        fence_height        = COALESCE(${data.fenceHeight ?? null}::double precision, fence_height),
-        fence_line          = COALESCE(${fenceLineJson}::jsonb, fence_line),
-        -- The same rule, applied to the last four that did not follow it.
-        -- A '?? false' turned an omitted flag into a deliberate "no"; '?? 0'
-        -- turned an omitted count into "this design has no panels"; and
-        -- map_zoom was written unconditionally, so any save that did not carry
-        -- it NULLED the stored zoom. total_panels and system_size_kw are
-        -- DERIVED from panels, so if the panels are kept these must be too —
-        -- otherwise a save that omits everything leaves 3 panels beside a
-        -- stored count of 0.
-        bifacial_optimized  = COALESCE(${data.bifacialOptimized ?? null}::boolean, bifacial_optimized),
-        total_panels        = COALESCE(${data.totalPanels ?? null}::integer, total_panels),
-        system_size_kw      = COALESCE(${data.systemSizeKw === undefined && nameplateKw == null ? null : sizeKw}::double precision, system_size_kw),
-        map_center          = COALESCE(${mapCenterJson}::jsonb, map_center),
-        map_zoom            = COALESCE(${data.mapZoom ?? null}::integer, map_zoom),
-        updated_at          = NOW()
-      WHERE project_id = ${data.projectId}
-        AND user_id = ${data.userId}
-      RETURNING *
-    `;
-    return await withCurrentVersion(sql, data,
-      await applyDesignElectrical(sql, data, rowToLayout(rows[0])));
+    try {
+      await persistDeletionLedgerFirst(sql, data, version);
+      //
+      // 🚨 AND THE WRITES FROM HERE ON ARE DELIBERATELY UNCONDITIONAL.
+      //
+      // The obvious next move — pin the main write to what the ledger returned —
+      // is WRONG, and quietly so. The ledger has already been written by then, so
+      // a refusal at the main write would leave the row holding TOMBSTONES FOR
+      // FACES THAT ARE STILL THERE. `admitAfterHydrate` filters the active bundle
+      // against that ledger on the next load, so those faces would vanish from
+      // the user's screen — a refusal causing exactly the data loss the refusal
+      // exists to prevent, and a subtler one, because nothing reports it.
+      //
+      // The claim is the mechanism and it has already done its job: no other
+      // writer holding a version token can be in flight, because their claim
+      // would have failed against the version this one advanced. What remains is
+      // an opt-out writer (the admin repair tools, /api/engineering/preliminary,
+      // the version-restore route) landing in the microseconds between the two
+      // statements — and against those, this save winning is exactly today's
+      // behaviour, with the ledger and the geometry still in step.
+      // UPDATE existing layout
+      // 🚨 roof_planes AND map_center USE COALESCE: `undefined` MEANS KEEP STORED,
+      // exactly as it does for obstructions, measurements and site_archives.
+      //
+      // They used to be written unconditionally, so `undefined` meant SET NULL —
+      // a roof-destroying default. Any caller that does not happen to send
+      // roofPlanes wiped the geometry, and `/api/engineering/preliminary`
+      // (reached from the bill-upload modal) sends neither it nor mapCenter. So
+      // uploading a bill deleted the roof of a designed project. After migration
+      // 123 it was worse: the active roof was destroyed while site_archives kept
+      // naming it, leaving that design neither active nor archived — the one
+      // thing the ownership model forbids.
+      //
+      // Nulling map_center also disables the legacy multi-site repair in
+      // rowToLayout, which falls back to it to decide which property a row is at.
+      //
+      // A DELIBERATE CLEAR STILL WORKS. The studio sends `[]`, which is not
+      // undefined, so COALESCE keeps the empty array. Only absence is ignored.
+      const rows = await sql`
+        UPDATE layouts SET
+          system_type         = ${data.systemType || 'roof'},
+          panels              = COALESCE(${panelsJson}::jsonb, panels),
+          roof_planes         = COALESCE(${roofPlanesJson}::jsonb, roof_planes),
+          -- ABSENCE KEEPS. These seven were the uneven half of a doctrine the two
+          -- lines around them already follow. See the note above upsertLayout.
+          --
+          -- fence_line was written unconditionally, and fenceLineJson is null
+          -- whenever data.fenceLine is absent -- so ANY save that did not carry a
+          -- fence SET THE STORED FENCE TO NULL. Unconditional, destructive, and
+          -- reachable from a read-only production CALCULATION
+          -- (app/api/production/route.ts), which sends no fence at all.
+          --
+          -- The four scalars were worse than silent: the 20 / 180 / 1.5 / 0.6
+          -- fallbacks replaced a value the user had set with a FABRICATED default
+          -- whenever a caller omitted it. Absence became a confident wrong answer.
+          --
+          -- An explicit empty array still clears a fence: [] is truthy, so it
+          -- serialises to '[]' and writes. Only genuine absence keeps.
+          ground_tilt         = COALESCE(${data.groundTilt ?? null}::double precision, ground_tilt),
+          ground_azimuth      = COALESCE(${data.groundAzimuth ?? null}::double precision, ground_azimuth),
+          row_spacing         = COALESCE(${data.rowSpacing ?? null}::double precision, row_spacing),
+          ground_height       = COALESCE(${data.groundHeight ?? null}::double precision, ground_height),
+          fence_azimuth       = COALESCE(${data.fenceAzimuth ?? null}::double precision, fence_azimuth),
+          fence_height        = COALESCE(${data.fenceHeight ?? null}::double precision, fence_height),
+          fence_line          = COALESCE(${fenceLineJson}::jsonb, fence_line),
+          -- The same rule, applied to the last four that did not follow it.
+          -- A '?? false' turned an omitted flag into a deliberate "no"; '?? 0'
+          -- turned an omitted count into "this design has no panels"; and
+          -- map_zoom was written unconditionally, so any save that did not carry
+          -- it NULLED the stored zoom. total_panels and system_size_kw are
+          -- DERIVED from panels, so if the panels are kept these must be too —
+          -- otherwise a save that omits everything leaves 3 panels beside a
+          -- stored count of 0.
+          bifacial_optimized  = COALESCE(${data.bifacialOptimized ?? null}::boolean, bifacial_optimized),
+          total_panels        = COALESCE(${data.totalPanels ?? null}::integer, total_panels),
+          system_size_kw      = COALESCE(${data.systemSizeKw === undefined && nameplateKw == null ? null : sizeKw}::double precision, system_size_kw),
+          map_center          = COALESCE(${mapCenterJson}::jsonb, map_center),
+          map_zoom            = COALESCE(${normalizeMapZoom(data.mapZoom)}::integer, map_zoom),
+          updated_at          = NOW()
+        WHERE project_id = ${data.projectId}
+          AND user_id = ${data.userId}
+        RETURNING *
+      `;
+      return await withCurrentVersion(sql, data,
+        await applyDesignElectrical(sql, data, rowToLayout(rows[0])));
+    } catch (err) {
+      // See `layoutCurrentVersionOf`: a failure after the claim reports the
+      // version it left, so the client is not wedged by its own attempt.
+      if (version !== null) throw await attachCurrentVersion(sql, data, version, err);
+      throw err;
+    }
   } else {
     // INSERT new layout.
     //
@@ -1704,7 +1759,7 @@ export async function upsertLayout(data: UpsertLayoutData): Promise<Layout> {
         ${data.totalPanels ?? 0},
         ${sizeKw},
         ${mapCenterJson}::jsonb,
-        ${data.mapZoom ?? null}
+        ${normalizeMapZoom(data.mapZoom)}::integer
       )
       RETURNING *
     `;

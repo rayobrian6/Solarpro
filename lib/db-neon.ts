@@ -71,6 +71,8 @@ export {
   bulkSoftDeleteProjects,
   getLayoutByProject,
   upsertLayout,
+  layoutCurrentVersionOf,
+  normalizeMapZoom,
 } from './db/projects';
 
 export type { UpsertLayoutData } from './db/projects';

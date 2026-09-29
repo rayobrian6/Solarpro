@@ -968,3 +968,33 @@ describe('🚨 unplaced panels must not replace a placed design', () => {
       .toBe('LAYOUT_COORDS_UNPLACED');
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+describe('🚨 the layout route: a wheel zoom saves, and a failed save hands back its version', () => {
+  async function currentToken() {
+    return new Date((await get())!.updatedAt as string).toISOString();
+  }
+
+  it('an autosave carrying a fractional zoom (one 0.75 wheel notch) is 200, not a DB error', async () => {
+    expect((await post(autosaveBody({ panels: [panel('p1')], roofPlanes: [], mapCenter: MELVIN, activeSiteKey: KEY_A }))).status).toBe(200);
+    const token = await currentToken();
+    const res = await post({ ...autosaveBody({ panels: [panel('p1'), panel('p2')], roofPlanes: [], mapCenter: MELVIN, activeSiteKey: KEY_A }),
+      mapZoom: 19.75, expectedUpdatedAt: token });
+    expect(res.status).toBe(200);
+    expect((await get())?.mapZoom).toBe(20);
+  });
+
+  it('🚨 a save that fails after its claim answers with currentVersion, and a save with it succeeds', async () => {
+    expect((await post(autosaveBody({ panels: [panel('p1')], roofPlanes: [], mapCenter: MELVIN, activeSiteKey: KEY_A }))).status).toBe(200);
+    const token = await currentToken();
+    const failed = await post({ ...autosaveBody({ panels: [panel('p1')], roofPlanes: [], mapCenter: MELVIN, activeSiteKey: KEY_A }),
+      groundTilt: 'not-a-number', expectedUpdatedAt: token });
+    expect(failed.status).toBeGreaterThanOrEqual(500);
+    expect(typeof failed.json.currentVersion).toBe('string');
+
+    const again = await post({ ...autosaveBody({ panels: [panel('p1'), panel('p2')], roofPlanes: [], mapCenter: MELVIN, activeSiteKey: KEY_A }),
+      expectedUpdatedAt: failed.json.currentVersion });
+    expect(again.status, JSON.stringify(again.json).slice(0, 300)).toBe(200);
+    expect((await get())?.panels).toHaveLength(2);
+  });
+});
