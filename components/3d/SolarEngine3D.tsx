@@ -4546,7 +4546,7 @@ function SolarEngine3D({
     };
 
     /** Nothing stored, or nothing to store it against — fall back to the session's own tiles. */
-    const useSessionOr = (reason: string) => {
+    const fallBackToSessionOr = (reason: string) => {
       const s = fromSessionCache();
       if (s) { draw(s); return; }
       // 🚨 NO PHOTO MEANS NO FLAT MODE. Hiding the mesh with nothing to put in its place would
@@ -4571,7 +4571,7 @@ function SolarEngine3D({
      */
     (async () => {
       if (!onLoadAerialReference) {
-        useSessionOr('Reference imagery is not available in this view.');
+        fallBackToSessionOr('Reference imagery is not available in this view.');
         return;
       }
       setAerialRefStatus({ state: 'loading' });
@@ -4605,12 +4605,12 @@ function SolarEngine3D({
           });
           return;
         }
-        useSessionOr(payload?.reason
+        fallBackToSessionOr(payload?.reason
           || 'No Nearmap workzone could be loaded or acquired for this design.');
       } catch (e: unknown) {
         if (cancelled) return;
         setExpandingImagery(false);
-        useSessionOr(`The aerial reference request failed: ${(e as Error).message}`);
+        fallBackToSessionOr(`The aerial reference request failed: ${(e as Error).message}`);
       }
     })();
 
