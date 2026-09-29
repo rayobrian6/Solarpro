@@ -28,6 +28,9 @@ import { sizeSystemFromBrand } from '@/lib/system/sizingEngine';
 import { coldVocFactor } from '@/lib/permit/utils/panelSpecs';
 import { SOLAR_PANELS, MICROINVERTERS } from '@/lib/equipment-db';
 import { BRAND_PROFILES } from '@/lib/system/brandProfiles';
+import { getDesignTemps } from '@/lib/permit/utils/designTemps';
+import fs from 'fs';
+import path from 'path';
 
 /** A micro brand — the topology this gate checks on Voc vs max DC input voltage. */
 const microBrand = () =>
@@ -183,5 +186,89 @@ describe('🚨 the panel-compatibility gate reads the site temperature', () => {
     expect(withMax.length,
       'no microinverter carries a max DC input voltage — the gate has nothing to check',
     ).toBeGreaterThan(0);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 🚨 THE CALLERS MUST HAND OVER THE TEMPERATURE, OR ×1.25 DECIDES FOR THEM.
+//
+// The no-temperature fallback is deliberately conservative (×1.25). That is right
+// for a site nobody knows — and wrong as a verdict on a site the page DOES know.
+// The engineering page's main sizing recommendation and its per-sub-system
+// recommendations called sizeSystemFromBrand with no designTempMin, so on those
+// two paths the gate always ran at ×1.25 and AUTO-SWAPPED modules that are safe at
+// the site's real design low (EverVolt 410, 49.0 V, on a 60 V micro), and the
+// engine sized their strings at its −10 °C default.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('🚨 every sizing caller hands the gate the site temperature', () => {
+  const evervolt = SOLAR_PANELS.find(p => p.id === 'pan-evervolt-410')!;
+  const nationalLow = getDesignTemps(null, null, null).ashraeExtremeLowC;
+  const size = (designTempMin?: number) => sizeSystemFromBrand({
+    systemType: 'roof',
+    panelCount: 20,
+    panelWattage: evervolt.watts,
+    panelVoc: evervolt.voc,
+    panelTempCoeffVoc: evervolt.tempCoeffVoc,
+    panelId: evervolt.id,
+    selectedBrand: 'enphase',
+    ...(designTempMin === undefined ? {} : { designTempMin }),
+  });
+
+  it('PRECONDITION: the module is safe at a real site and over the cap at ×1.25', () => {
+    expect(evervolt, 'pan-evervolt-410 left the catalogue').toBeTruthy();
+    expect(evervolt.voc * coldVocFactor(evervolt.tempCoeffVoc, nationalLow)).toBeLessThan(60);
+    expect(evervolt.voc * 1.25).toBeGreaterThan(60);
+  });
+
+  it('at the site design low, the engine keeps the module the designer chose', () => {
+    const r = size(nationalLow);
+    expect(r.panelCompatibility, 'the engine produced no compatibility verdict').toBeTruthy();
+    expect(r.panelCompatibility!.autoSwitched,
+      `a module that is safe at ${nationalLow} °C was auto-swapped: ${r.panelCompatibility!.reason}`,
+    ).toBe(false);
+    expect(r.panelCompatibility!.effectivePanelId).toBe(evervolt.id);
+  });
+
+  it('with no temperature, the conservative fallback swaps it — so a caller that omits it is wrong', () => {
+    const r = size(undefined);
+    expect(r.panelCompatibility?.autoSwitched).toBe(true);
+  });
+
+  it('🚨 every sizeSystemFromBrand call on the engineering page passes designTempMin', () => {
+    const src = fs.readFileSync(path.resolve(__dirname, '..', 'app', 'engineering', 'page.tsx'), 'utf8');
+    // Strip comments so a mention in prose is neither counted as a call nor as
+    // a passed field.
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, c => c.replace(/[^\n]/g, ' ')).replace(/(^|[^:])\/\/.*$/gm, '$1');
+
+    /** The balanced {...} starting at `open`. */
+    const objectAt = (open: number): string => {
+      let depth = 0;
+      for (let i = open; i < code.length; i++) {
+        if (code[i] === '{') depth++;
+        else if (code[i] === '}' && --depth === 0) return code.slice(open, i + 1);
+      }
+      throw new Error('unbalanced object literal');
+    };
+
+    const calls = [...code.matchAll(/sizeSystemFromBrand\(\s*([{\w])/g)];
+    expect(calls.length, 'no sizing calls found — the scan is stale').toBeGreaterThanOrEqual(10);
+    const missing: string[] = [];
+    for (const m of calls) {
+      const at = m.index! + m[0].length - 1;
+      let arg: string;
+      if (code[at] === '{') {
+        arg = objectAt(at);
+      } else {
+        // An identifier: read the object literal it was declared with.
+        const name = /^\w+/.exec(code.slice(at))![0];
+        const decl = [...code.slice(0, at).matchAll(new RegExp(`\\b(?:const|let)\\s+${name}\\b[^=]*=\\s*\\{`, 'g'))].pop();
+        if (!decl) { missing.push(`${name} (declaration not found)`); continue; }
+        arg = objectAt(decl.index! + decl[0].length - 1);
+      }
+      if (!/\bdesignTempMin\s*:/.test(arg)) {
+        missing.push(`line ${code.slice(0, m.index!).split('\n').length}`);
+      }
+    }
+    expect(missing, `sizing calls with no site temperature: ${missing.join(', ')}`).toEqual([]);
   });
 });

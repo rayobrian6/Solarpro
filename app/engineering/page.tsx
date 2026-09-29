@@ -3683,6 +3683,13 @@ function EngineeringPageInner() {
   // CURRENT panel count. The UI then diffs current vs recommended and
   // offers a single-click "Apply" button. Nothing here mutates state.
   // ──────────────────────────────────────────────────────────────────
+  // 🚨 THE SITE'S COLD BASIS, as a NUMBER. These two recommendations passed no
+  // temperature at all, so the engine sized their strings at its −10 °C default
+  // and the panel gate fell to its no-temperature ×1.25 — which auto-swapped
+  // modules that are safe at the site's real design low (EverVolt 410 on a 60 V
+  // micro: 61.3 V at ×1.25, 55.1 V at −25 °C). A number, not the compliance
+  // object, so the memos recompute only when the temperature actually changes.
+  const sizingDesignTempMinC = resolveDesignTempMinC(compliance.autoDetected, config.state);
   const sizingRecommendation = useMemo<SystemSizingResult | null>(() => {
     const primary = config.inverters[0];
     if (systemPanelCount <= 0) return null;
@@ -3762,6 +3769,7 @@ function EngineeringPageInner() {
         // is skipped and the engine produces over-voltage string layouts.
         panelIsc:          panelData?.isc,
         panelTempCoeffVoc: panelData?.tempCoeffVoc,
+        designTempMin:     sizingDesignTempMinC,
         // v47.423 — pass the panel id so the Panel Compatibility Gate
         // runs. Enables brand-agnostic auto-swap when the loaded panel
         // is incompatible with the selected brand's per-MPPT current cap.
@@ -3813,6 +3821,7 @@ function EngineeringPageInner() {
     config.selectedBrand,
     batteryEnabled,
     config.batteryKwh,
+    sizingDesignTempMinC,
     // NOTE: deliberately NOT depending on config.batteryCount. A battery UNITS
     // edit must never recompute the recommendation, because that re-fires the
     // auto-apply / runtime-guard chain and rebuilds the STRING layout — adding
@@ -5467,6 +5476,7 @@ function EngineeringPageInner() {
           ...(panelId ? { panelId } : {}),
           selectedBrand: brand,
           ...(curInvId ? { selectedInverterId: curInvId } : {}),
+          designTempMin: sizingDesignTempMinC,
           batteryEnabled: false,
         } as any);
       } catch { rec = null; }
@@ -5493,7 +5503,7 @@ function EngineeringPageInner() {
     }
     return out;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [subSystemCounts, config.inverters, config.systemType, (config as any).subSystems]);
+  }, [subSystemCounts, config.inverters, config.systemType, (config as any).subSystems, sizingDesignTempMinC]);
 
   const renderSubSystemHeader = (key: SubSystemKey) => {
     const entry = (((config as any).subSystems ?? {})[key] ?? {}) as Record<string, any>;

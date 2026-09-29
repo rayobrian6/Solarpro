@@ -14,6 +14,7 @@ import {
 import { SOLAR_PANELS } from '../equipment-db';
 import { BRAND_PROFILES, getBrandProfile } from './brandProfiles';
 import type { BrandProfile } from './brandProfiles';
+import { getDesignTemps } from '../permit/utils/designTemps';
 
 // ─── Fixture helpers ───────────────────────────────────────────────────────
 
@@ -318,7 +319,7 @@ describe('v47.431 — getBrandMinMicroMaxDcVoltage()', () => {
 });
 
 describe('v47.431 — micro Voc gate classification', () => {
-  it('SunPower Maxeon 3 (Voc 75.6 V) on Enphase IQ8 is INCOMPATIBLE (75.6 × 1.12 = 84.7 V > 60 V)', () => {
+  it('SunPower Maxeon 3 (Voc 75.6 V) on Enphase IQ8 is INCOMPATIBLE (75.6 × 1.25 = 94.5 V > 60 V)', () => {
     const r = evaluatePanelBrandCompatibility(maxeon3(), enphase());
     expect(r.status).toBe('incompatible');
     expect(r.brand.effectiveMaxDcInputVoltage).toBe(60);
@@ -336,14 +337,22 @@ describe('v47.431 — micro Voc gate classification', () => {
       for (const s of r.suggestions) {
         expect(s.id).not.toBe('sp-maxeon3-400');
         const p = SOLAR_PANELS.find(x => x.id === s.id)!;
-        expect(p.voc * 1.12).toBeLessThanOrEqual(60);
+        // No site temperature → the conservative ×1.25 (NEC Table 690.7(A)),
+        // the same fallback as lib/permit/utils/panelSpecs.ts coldVocFactor.
+        expect(p.voc * 1.25).toBeLessThanOrEqual(60);
       }
     }
   });
 
-  it('classifies a near-cap panel as MARGINAL (forged Voc 52 V → 58.2 V cold, 3% headroom)', () => {
+  it('classifies a near-cap panel as MARGINAL (forged Voc 52 V → 58.3 V at −20 °C, 2.8% headroom)', () => {
+    // This case was written against the old ×1.12 no-temperature fallback
+    // (52 × 1.12 = 58.2 V). Since a5e3cb32 the fallback is the conservative
+    // ×1.25 (65 V — plainly incompatible), so the marginal band is exercised
+    // at a real site temperature instead: β −0.27 %/°C at −20 °C gives
+    // 1 + 0.0027 × 45 = 1.1215 → 58.3 V against the 60 V cap.
     const forged = { ...qcells400(), id: 'forged-high-voc', voc: 52.0 };
-    const r = evaluatePanelBrandCompatibility(forged, enphase());
+    expect(forged.tempCoeffVoc, 'precondition: the forged module carries β').toBeCloseTo(-0.27, 2);
+    const r = evaluatePanelBrandCompatibility(forged, enphase(), { designTempMinC: -20 });
     expect(r.status).toBe('marginal');
     expect(r.headroomPct).toBeGreaterThan(0);
     expect(r.headroomPct).toBeLessThan(5);
@@ -442,12 +451,28 @@ describe('v47.423 — brand-agnostic sweep', () => {
           'compatible', 'marginal', 'incompatible', 'unknown',
         ]).toContain(r.status);
         // Micro topology brands must never be 'unknown'. All three
-        // representative panels have standard Voc (≤ 49 V → cold ≤ 54.9 V),
-        // safely under every micro brand's 60 V max DC input, so they must
-        // classify 'compatible' (v47.431: high-Voc panels like Maxeon 3
-        // would instead be 'incompatible' — covered in the micro Voc suite).
+        // representative panels have standard Voc (≤ 49 V), safely under
+        // every micro brand's 60 V max DC input AT A REAL SITE DESIGN LOW —
+        // the national default the permit engine uses when the state does not
+        // resolve (EverVolt 410: 49.0 × (1 + 0.0025 × 50) = 55.1 V) — so they
+        // must classify 'compatible' there (v47.431: high-Voc panels like
+        // Maxeon 3 would instead be 'incompatible' — see the micro Voc suite).
+        //
+        // With NO temperature the gate applies the conservative ×1.25 (since
+        // a5e3cb32; this case was written against the old ×1.12), and a 49 V
+        // module is then 61.3 V — over 60 V. That is the gate being
+        // conservative about an unknown site, not a verdict on the module,
+        // which is why every sizing caller must hand it the site temperature.
         if (brand.topology === 'micro') {
-          expect(r.status).toBe('compatible');
+          const atSite = evaluatePanelBrandCompatibility(panel, brand, {
+            designTempMinC: getDesignTemps(null, null, null).ashraeExtremeLowC,
+          });
+          expect(atSite.status).toBe('compatible');
+          if (r.status === 'incompatible') {
+            expect(panel.voc * 1.25, 'no-temperature verdict must come from the ×1.25 fallback')
+              .toBeGreaterThan(r.brand.effectiveMaxDcInputVoltage!);
+          }
+          expect(r.status).not.toBe('unknown');
         }
         // incompatible results MUST produce either suggestions or an explanatory reason
         if (r.status === 'incompatible') {
