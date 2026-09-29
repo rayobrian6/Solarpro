@@ -1,16 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { timingSafeEqual } from 'crypto';
 import { getDbReady } from '@/lib/db-neon';
 import { sendProposalSignedEmail } from '@/lib/email';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
-
-/** Constant-time string comparison to prevent timing attacks on share tokens. */
-function safeStrEqual(a: string, b: string): boolean {
-  const bufA = Buffer.from(a, 'utf8');
-  const bufB = Buffer.from(b, 'utf8');
-  if (bufA.length !== bufB.length) return false;
-  return timingSafeEqual(bufA, bufB);
-}
+import { checkShareToken } from '@/lib/proposalAccess';
+import { isIssued } from '@/lib/proposal/signatureAuthority';
 
 export const dynamic     = 'force-dynamic';
 export const runtime     = 'nodejs';
@@ -120,7 +113,7 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
   // ── Fetch proposal ────────────────────────────────────────────────────
   const rows = await sql`
     SELECT p.id, p.status, p.project_id, p.data_json, p.signed_at,
-           p.share_token
+           p.share_token, p.share_expires_at
     FROM proposals p
     WHERE p.id = ${id}
     LIMIT 1
@@ -150,14 +143,18 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
   // link a homeowner could have arrived from and no token they could present.
   // Refusing is the correct answer, not a gap: signing is reachable only via
   // a share link, and a share link always carries a token.
-  const shareToken = proposal.share_token as string | null;
+  //
+  // The token is judged by the same rule as the read path
+  // (lib/proposalAccess.ts checkShareToken): constant-time, never-shared is a
+  // refusal, and an EXPIRED link is a refusal — which this route used to skip,
+  // so a link the read path already refused could still execute a contract.
   const providedToken = (body.token ?? null) || (req.nextUrl?.searchParams?.get('token') ?? null);
-  if (!shareToken || !providedToken || !safeStrEqual(shareToken, providedToken)) {
+  if (!checkShareToken(proposal as Record<string, unknown>, providedToken).ok) {
     return NextResponse.json({ success: false, error: 'Invalid access token' }, { status: 403 });
   }
 
   // ── Idempotency check ─────────────────────────────────────────────────
-  if (proposal.signed_at || proposal.status === 'accepted') {
+  if (isIssued(proposal as Record<string, unknown>)) {
     return NextResponse.json(
       { success: false, error: 'Proposal has already been signed.' },
       { status: 409 },
@@ -181,8 +178,14 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
   });
 
   // ── Write to DB ───────────────────────────────────────────────────────
+  // 🚨 CONDITIONAL ON THE ROW STILL BEING UNSIGNED. The idempotency check above
+  // reads, then this writes; without the guard in the WHERE clause two signers
+  // who both passed the read would both "win" and the second would overwrite
+  // the first signer's name, IP and timestamp. RETURNING tells us whether this
+  // request is the one that executed the contract.
+  let affected: unknown[];
   try {
-    await sql`
+    affected = await sql`
       UPDATE proposals
       SET status       = 'accepted',
           data_json    = ${updatedData}::jsonb,
@@ -192,16 +195,21 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
           signer_ip    = ${signerIp},
           updated_at   = NOW()
       WHERE id = ${id}
+        AND signed_at IS NULL
+        AND (status IS NULL OR status NOT IN ('accepted', 'signed'))
+      RETURNING id
     `;
   } catch {
     // Fallback: dedicated columns may not exist yet (pre-migration)
     try {
-      await sql`
+      affected = await sql`
         UPDATE proposals
         SET status     = 'accepted',
             data_json  = ${updatedData}::jsonb,
             updated_at = NOW()
         WHERE id = ${id}
+          AND (status IS NULL OR status NOT IN ('accepted', 'signed'))
+        RETURNING id
       `;
     } catch (fallbackErr) {
       console.error('[sign/route] DB write failed:', fallbackErr);
@@ -210,6 +218,13 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
         { status: 500 },
       );
     }
+  }
+  if (!Array.isArray(affected) || affected.length === 0) {
+    // Another signer got there between our read and our write.
+    return NextResponse.json(
+      { success: false, error: 'Proposal has already been signed.' },
+      { status: 409 },
+    );
   }
 
   // ── Try to insert into proposal_signatures table (if exists) ──────────

@@ -7,18 +7,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDbReady, isValidUUID, handleRouteDbError } from '@/lib/db-neon';
 import { getUserFromRequest } from '@/lib/auth';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
+import { isIssued, isSignatureOnlyStatus, SIGNATURE_ONLY_MESSAGE } from '@/lib/proposal/signatureAuthority';
 
 // ── Issued-artifact rule ─────────────────────────────────────────────────────
 // Mirrors app/api/proposals/[id]/route.ts. A signed proposal is an executed
 // contract; `status` is checked alongside `signed_at` so a database predating
 // migration 020 is still covered.
-const TERMINAL_STATUSES = new Set(['accepted', 'signed']);
-
-function isIssued(row: Record<string, unknown> | null | undefined): boolean {
-  if (!row) return false;
-  if (row.signed_at) return true;
-  return typeof row.status === 'string' && TERMINAL_STATUSES.has(row.status);
-}
+// isIssued: see lib/proposal/signatureAuthority.ts (one definition for every route).
 
 // POST /api/proposals/bulk
 // Body: { action: 'delete' | 'archive' | 'status' | 'clear_test', ids?: string[], status?: string }
@@ -186,7 +181,13 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === 'status') {
-      const allowedStatuses = ['draft', 'sent', 'viewed', 'signed', 'accepted', 'rejected', 'archived'];
+      // 'signed' / 'accepted' are not settable here: only the homeowner's
+      // e-signature (POST /api/proposals/[id]/sign) produces an executed
+      // contract. See lib/proposal/signatureAuthority.ts.
+      if (isSignatureOnlyStatus(status)) {
+        return NextResponse.json({ success: false, error: SIGNATURE_ONLY_MESSAGE }, { status: 400 });
+      }
+      const allowedStatuses = ['draft', 'sent', 'viewed', 'rejected', 'archived'];
       if (!status || !allowedStatuses.includes(status)) {
         return NextResponse.json({ success: false, error: 'Invalid status value' }, { status: 400 });
       }

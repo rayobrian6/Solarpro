@@ -7,8 +7,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDbReady, isValidUUID, handleRouteDbError } from '@/lib/db-neon';
 import { getUserFromRequest } from '@/lib/auth';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
-import { sendProposalViewedEmail, sendProposalSignedEmail } from '@/lib/email';
-import { authorizeProposalRead, type ProposalSqlExecutor } from '@/lib/proposalAccess';
+import { sendProposalViewedEmail } from '@/lib/email';
+import { authorizeProposalRead, checkShareToken, type ProposalSqlExecutor } from '@/lib/proposalAccess';
+import { isIssued, isSignatureOnlyStatus, checkNonSignatureWrite, SIGNATURE_ONLY_MESSAGE } from '@/lib/proposal/signatureAuthority';
 
 type RouteContext = { params: Promise<{id: string}> };
 
@@ -22,13 +23,8 @@ type RouteContext = { params: Promise<{id: string}> };
 // app/api/cron/proposal-expiry/route.ts already uses. `status` is checked too
 // so a database that predates migration 020 (which added signed_at) is still
 // protected, and so the guard holds if only one of the two was written.
-const TERMINAL_STATUSES = new Set(['accepted', 'signed']);
-
-function isIssued(row: Record<string, unknown> | null | undefined): boolean {
-  if (!row) return false;
-  if (row.signed_at) return true;
-  return typeof row.status === 'string' && TERMINAL_STATUSES.has(row.status);
-}
+// `isIssued` lives in lib/proposal/signatureAuthority.ts with the rule that
+// only POST .../sign may PRODUCE that state.
 
 const ISSUED_MESSAGE = 'Proposal has already been signed.';
 
@@ -176,9 +172,25 @@ export async function PUT(req: NextRequest, context: RouteContext) {
     if (body.preparedBy && typeof body.preparedBy === 'string' && body.preparedBy.length > 200) return NextResponse.json({ success: false, error: 'preparedBy too long (max 200).' }, { status: 400 });
     if (body.status     && typeof body.status     === 'string' && body.status.length     > 50)  return NextResponse.json({ success: false, error: 'status too long (max 50).'      }, { status: 400 });
 
+    // Only POST .../sign may make a proposal signed — not the seller's own PUT.
+    const signatureGate = checkNonSignatureWrite(body);
+    if (!signatureGate.ok) {
+      return NextResponse.json({ success: false, error: signatureGate.error }, { status: signatureGate.status! });
+    }
+
     const existing = await sql`SELECT * FROM proposals WHERE id = ${id} LIMIT 1`;
     if (existing.length === 0) {
       return NextResponse.json({ success: false, error: 'Proposal not found' }, { status: 404 });
+    }
+
+    // Same issued-artifact freeze as the PATCH merge below: PUT is the other
+    // generic merge and it had no guard at all, so an executed contract's
+    // status could be walked back through it.
+    if (isIssued(existing[0] as Record<string, unknown>) && body.status !== undefined) {
+      return NextResponse.json(
+        { success: false, error: `${ISSUED_MESSAGE} Its signature and status are frozen.` },
+        { status: 409 },
+      );
     }
 
     const currentData = (existing[0].data_json as Record<string, unknown>) || {};
@@ -226,169 +238,51 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
     if (body.preparedBy && typeof body.preparedBy === 'string' && body.preparedBy.length > 200) return NextResponse.json({ success: false, error: 'preparedBy too long (max 200).' }, { status: 400 });
     if (body.status     && typeof body.status     === 'string' && body.status.length     > 50)  return NextResponse.json({ success: false, error: 'status too long (max 50).'      }, { status: 400 });
 
-    // Public token-based status update (homeowner view page) — no auth required.
-    // Allowed via this path: 'viewed', 'accepted', and digital signature submission.
-    // Full edits still require ownership.
+    // Public token-based update (homeowner view page) — no auth required.
+    //
+    // 🚨 THE SHARE LINK IS NOT A SIGNATURE. This path used to accept
+    // { status: 'accepted' } from anyone holding the link, which made the
+    // proposal read as an executed contract with no signer, no
+    // proposal_signatures row and no pipeline move — and the real e-signature
+    // then answered 409 "already signed", so the homeowner could not sign.
+    // It also carried a second, unaudited signing branch ({ signature, ... }).
+    // POST /api/proposals/[id]/sign is now the only way to sign (see
+    // lib/proposal/signatureAuthority.ts); the only status a link holder may
+    // write here is the 'viewed' ping the view page sends on load.
     const tokenParam = req.nextUrl.searchParams.get('token');
-    const PUBLIC_STATUSES = new Set(['viewed', 'accepted']);
-    const isPublicStatusUpdate = !user && tokenParam && typeof body.status === 'string' && PUBLIC_STATUSES.has(body.status);
-    const isSignatureSubmission = !user && tokenParam && body.signature !== undefined;
+    const PUBLIC_STATUSES = new Set(['viewed']);
 
-    if (isPublicStatusUpdate || isSignatureSubmission) {
+    if (!user && tokenParam && body.signature !== undefined) {
+      return NextResponse.json(
+        { success: false, error: 'Signing has moved to POST /api/proposals/[id]/sign.' },
+        { status: 410 },
+      );
+    }
+    if (tokenParam && isSignatureOnlyStatus(body.status)) {
+      return NextResponse.json({ success: false, error: SIGNATURE_ONLY_MESSAGE }, { status: 403 });
+    }
+
+    const isPublicStatusUpdate = !user && tokenParam && typeof body.status === 'string' && PUBLIC_STATUSES.has(body.status);
+
+    if (isPublicStatusUpdate) {
       // The terminal state is read alongside the token so the guards below
       // judge the same row the token was verified against. The narrower query
       // is the fallback for a database that predates migration 020: `status`
       // alone is still enough to refuse an executed proposal.
       const rows = await sql`
-        SELECT id, share_token, status, signed_at FROM proposals WHERE id = ${id} LIMIT 1
+        SELECT id, share_token, share_expires_at, status, signed_at FROM proposals WHERE id = ${id} LIMIT 1
       `.catch(() => sql`
         SELECT id, share_token, status FROM proposals WHERE id = ${id} LIMIT 1
       `);
       if (!rows.length) return NextResponse.json({ success: false, error: 'Proposal not found' }, { status: 404 });
       const target = rows[0] as Record<string, unknown>;
-      // SECURITY: Use timingSafeEqual to prevent timing attacks on token comparison
-      const { timingSafeEqual } = await import('crypto');
-      const expected = Buffer.from(target.share_token as string, 'utf8');
-      const actual   = Buffer.from(tokenParam, 'utf8');
-      const tokenValid = expected.length === actual.length && timingSafeEqual(expected, actual);
-      if (!tokenValid) {
+      // Same token rule as the read path and /sign — constant-time compare,
+      // never-shared refusal, and expiry (which this path used to skip).
+      if (!checkShareToken(target, tokenParam).ok) {
         return NextResponse.json({ success: false, error: 'Invalid token' }, { status: 403 });
       }
 
-      if (isSignatureSubmission) {
-        // ── Idempotency ───────────────────────────────────────────────────
-        // Without this, anyone holding the share link could re-sign an executed
-        // proposal under a different name: the write below replaces the whole
-        // `signature` key and re-stamps signed_at, so the record of who
-        // actually signed, and when, was destroyed rather than duplicated.
-        // Matches the 409 the dedicated /sign endpoint already returns — that
-        // is now the endpoint the homeowner UI calls, and this branch remains
-        // only so the same rule covers a direct caller.
-        if (isIssued(target)) {
-          return NextResponse.json({ success: false, error: ISSUED_MESSAGE }, { status: 409 });
-        }
-
-        // Digital signature submission
-        // Validate fields
-        const sigData    = body.signature as string;           // base64 data-URL of drawn signature
-        const signerName = (body.signerName  as string) || ''; // typed full name
-        const signerEmail= (body.signerEmail as string) || ''; // optional email
-
-        if (!signerName || signerName.length < 2) {
-          return NextResponse.json({ success: false, error: 'Full name is required to sign.' }, { status: 400 });
-        }
-        if (signerName.length > 200) {
-          return NextResponse.json({ success: false, error: 'Name too long (max 200 chars).' }, { status: 400 });
-        }
-        if (signerEmail && signerEmail.length > 200) {
-          return NextResponse.json({ success: false, error: 'Email too long (max 200 chars).' }, { status: 400 });
-        }
-        // Signature data-URL sanity check (must be a data: URL, limit 512KB)
-        if (sigData && (!sigData.startsWith('data:image/') || sigData.length > 512 * 1024)) {
-          return NextResponse.json({ success: false, error: 'Invalid signature data.' }, { status: 400 });
-        }
-
-        // Get client IP
-        const signerIp = getClientIp(req);
-
-        // Store signature in data_json (in case signed_at/signer_name columns don't exist yet)
-        const existingRow = await sql`SELECT data_json FROM proposals WHERE id = ${id} LIMIT 1`;
-        const existingData = (existingRow[0]?.data_json as Record<string, unknown>) || {};
-        const updatedData = JSON.stringify({
-          ...existingData,
-          signature: {
-            signedAt:    new Date().toISOString(),
-            signerName,
-            signerEmail,
-            signerIp,
-            imageData:   sigData || null,
-          },
-        });
-
-        // Try to update dedicated columns (if migration 020 has been applied)
-        try {
-          await sql`
-            UPDATE proposals
-            SET status      = 'accepted',
-                data_json   = ${updatedData}::jsonb,
-                signed_at   = NOW(),
-                signer_name  = ${signerName},
-                signer_email = ${signerEmail || null},
-                signer_ip    = ${signerIp || null},
-                updated_at  = NOW()
-            WHERE id = ${id}
-          `;
-        } catch {
-          // Fallback: columns may not exist yet — store in data_json only
-          await sql`
-            UPDATE proposals
-            SET status     = 'accepted',
-                data_json  = ${updatedData}::jsonb,
-                updated_at = NOW()
-            WHERE id = ${id}
-          `;
-        }
-
-        // Fire "proposal signed" email to installer — fire-and-forget.
-        try {
-          const installerRows = await sql`
-            SELECT u.email, u.name AS installer_name
-            FROM proposals p
-            JOIN projects proj ON proj.id = p.project_id
-            JOIN users u ON u.id = proj.user_id
-            WHERE p.id = ${id}
-            LIMIT 1
-          `;
-          if (installerRows.length > 0) {
-            const installer = installerRows[0];
-            const pData = existingData as Record<string, unknown>;
-            const clientName = (pData.clientName as string) || 'Your client';
-            const proposalTitle = (pData.title as string) || 'Solar Proposal';
-            sendProposalSignedEmail({
-              installerEmail: installer.email as string,
-              installerName:  installer.installer_name as string,
-              clientName,
-              signerName,
-              signerEmail:    signerEmail || '',
-              proposalTitle,
-              proposalId:     id,
-              signedAt:       new Date().toISOString(),
-            }).catch((e: unknown) => console.warn('[proposal signed email] failed:', (e as Error)?.message));
-          }
-        } catch (emailErr: unknown) {
-          console.warn('[proposal signed email] lookup failed:', (emailErr as Error)?.message);
-        }
-
-        // Auto-advance homeowner stage to 'installation' on signature.
-        // Only advances if still at 'proposal' — never downgrades.
-        try {
-          const projIdRows = await sql`SELECT project_id FROM proposals WHERE id = ${id} LIMIT 1`;
-          const projectId = projIdRows[0]?.project_id as string | undefined;
-          if (projectId) {
-            await sql`
-              UPDATE projects
-              SET homeowner_stage = 'installation', updated_at = NOW()
-              WHERE id = ${projectId}
-                AND homeowner_stage = 'proposal'
-            `;
-            try {
-              await sql`
-                INSERT INTO project_micro_stages (project_id, micro_stage)
-                VALUES (${projectId}, 'contract_signed')
-                ON CONFLICT (project_id, micro_stage) DO UPDATE SET created_at = NOW()
-              `;
-            } catch {
-              // non-fatal
-            }
-          }
-        } catch {
-          // homeowner_stage column may not exist — non-fatal
-        }
-
-        return NextResponse.json({ success: true, signed: true });
-      }
-
-      // Simple status update (viewed / accepted without signature)
+      // Simple status update ('viewed' only)
       //
       // The homeowner view fires { status: 'viewed' } on EVERY page load, so a
       // returning signer used to walk their own executed contract back from
@@ -498,6 +392,12 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
       `;
 
       return NextResponse.json({ success: true, data: refreshedRows[0], refreshed: true });
+    }
+
+    // Only POST .../sign may make a proposal signed — not the seller's own PATCH.
+    const signatureGate = checkNonSignatureWrite(body);
+    if (!signatureGate.ok) {
+      return NextResponse.json({ success: false, error: signatureGate.error }, { status: signatureGate.status! });
     }
 
     const existing = await sql`SELECT * FROM proposals WHERE id = ${id} LIMIT 1`;

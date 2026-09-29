@@ -194,25 +194,31 @@ beforeEach(() => {
 
 // ── 1. Double-signing ───────────────────────────────────────────────────────
 
-describe('a signature cannot be overwritten', () => {
+describe('a signature cannot be written or overwritten through PATCH', () => {
+  // The PATCH signing branch is RETIRED: POST .../sign is the only signature
+  // path (lib/proposal/signatureAuthority.ts). What this block pinned — an
+  // executed contract's signer is never replaced — now holds because PATCH
+  // writes no signature at all, first-time or second. First-time signing is
+  // covered by tests/proposals-sign.test.ts and
+  // tests/proposalSignatureIsTheOnlyWayToSign.test.ts.
   const secondSignature = {
     signature:   'data:image/png;base64,MALLORY',
     signerName:  'Mallory Attacker',
     signerEmail: 'mallory@example.test',
   };
 
-  it('refuses a second signature on an executed proposal with 409', async () => {
+  it('answers 410 Gone for a signature on an executed proposal', async () => {
     wire(signedRow());
     const res = await PATCH(patchReq(secondSignature, `?token=${GOOD_TOKEN}`), ctx);
-    expect(res.status).toBe(409);
+    expect(res.status).toBe(410);
   });
 
-  it('says the proposal has already been signed', async () => {
+  it('points the caller at the e-signature endpoint', async () => {
     wire(signedRow());
     const res  = await PATCH(patchReq(secondSignature, `?token=${GOOD_TOKEN}`), ctx);
     const body = await res.json();
     expect(body.success).toBe(false);
-    expect(String(body.error)).toMatch(/already been signed/i);
+    expect(String(body.error)).toMatch(/\/sign/);
   });
 
   it('issues no write at all — the first signer is not discarded', async () => {
@@ -221,25 +227,23 @@ describe('a signature cannot be overwritten', () => {
     expect(proposalWrites(sql)).toHaveLength(0);
   });
 
-  it('refuses on signed_at alone, even if status was moved off accepted', async () => {
+  it('issues no write on signed_at alone, even if status was moved off accepted', async () => {
     const sql = wire(signedRow({ status: 'viewed' }));
-    const res = await PATCH(patchReq(secondSignature, `?token=${GOOD_TOKEN}`), ctx);
-    expect(res.status).toBe(409);
+    await PATCH(patchReq(secondSignature, `?token=${GOOD_TOKEN}`), ctx);
     expect(proposalWrites(sql)).toHaveLength(0);
   });
 
-  it('refuses on status=accepted alone, before migration 020 columns exist', async () => {
+  it('issues no write on status=accepted alone, before migration 020 columns exist', async () => {
     const sql = wire(signedRow({ signed_at: undefined }));
-    const res = await PATCH(patchReq(secondSignature, `?token=${GOOD_TOKEN}`), ctx);
-    expect(res.status).toBe(409);
+    await PATCH(patchReq(secondSignature, `?token=${GOOD_TOKEN}`), ctx);
     expect(proposalWrites(sql)).toHaveLength(0);
   });
 
-  it('still lets a first-time signer through', async () => {
+  it('does not sign an UNSIGNED proposal either — /sign is the only path', async () => {
     const sql = wire(unsignedRow());
     const res = await PATCH(patchReq(secondSignature, `?token=${GOOD_TOKEN}`), ctx);
-    expect(res.status).toBe(200);
-    expect(proposalWrites(sql).length).toBeGreaterThan(0);
+    expect(res.status).toBe(410);
+    expect(proposalWrites(sql)).toHaveLength(0);
   });
 });
 
@@ -384,9 +388,11 @@ describe('the owning installer cannot edit the signature or status either', () =
   });
 
   it('refuses an authenticated PATCH that rewrites data_json.signature', async () => {
+    // 403, not 409: a signature is never installer-writable, signed or not
+    // (lib/proposal/signatureAuthority.ts checkNonSignatureWrite runs first).
     const sql = wire(signedRow());
     const res = await PATCH(patchReq({ signature: { signerName: 'Someone Else' } }), ctx);
-    expect(res.status).toBe(409);
+    expect(res.status).toBe(403);
     expect(proposalWrites(sql)).toHaveLength(0);
   });
 

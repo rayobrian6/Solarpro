@@ -206,7 +206,10 @@ function StatusDropdown({ onSelect, onClose }: { onSelect: (s: ProposalStatus) =
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [onClose]);
-  const statuses: ProposalStatus[] = ['draft', 'sent', 'viewed', 'signed', 'accepted', 'rejected', 'archived'];
+  // 'signed' / 'accepted' are not offered: only the homeowner's e-signature
+  // makes a proposal signed (lib/proposal/signatureAuthority.ts), and the API
+  // refuses them from every other writer.
+  const statuses: ProposalStatus[] = ['draft', 'sent', 'viewed', 'rejected', 'archived'];
   return (
     <div ref={ref} className="absolute left-0 top-8 z-30 w-44 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl overflow-hidden">
       {statuses.map(s => {

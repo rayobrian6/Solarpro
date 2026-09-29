@@ -124,11 +124,28 @@ export async function authorizeProposalRead(opts: {
   }
 
   // ── 2. Share-token path ──────────────────────────────────────────────────
-  const shareToken = row.share_token as string | null | undefined;
-  if (!token)                           return deny('no_token');
-  if (!shareToken)                      return deny('proposal_never_shared');
-  if (!safeStrEqual(shareToken, token)) return deny('token_mismatch');
-  if (isShareLinkExpired(row.share_expires_at, now)) return deny('token_expired');
+  const tokenCheck = checkShareToken(row, token, now);
+  return tokenCheck.ok ? grant('share-token') : deny(tokenCheck.reason ?? 'token_invalid');
+}
 
-  return grant('share-token');
+/**
+ * Is `token` a live share token for `row`? The token half of
+ * authorizeProposalRead, exported so every unauthenticated proposal endpoint
+ * (the homeowner PATCH, the /sign workflow) judges a link by the same rule —
+ * including expiry, which the /sign route used to skip.
+ *
+ * `row` must carry `share_token` and `share_expires_at`; a row selected
+ * without `share_expires_at` is treated as never expiring, so select it.
+ */
+export function checkShareToken(
+  row:   Record<string, unknown>,
+  token: string | null | undefined,
+  now:   number = Date.now(),
+): { ok: boolean; reason: string | null } {
+  const shareToken = row.share_token as string | null | undefined;
+  if (!token)                           return { ok: false, reason: 'no_token' };
+  if (!shareToken)                      return { ok: false, reason: 'proposal_never_shared' };
+  if (!safeStrEqual(shareToken, token)) return { ok: false, reason: 'token_mismatch' };
+  if (isShareLinkExpired(row.share_expires_at, now)) return { ok: false, reason: 'token_expired' };
+  return { ok: true, reason: null };
 }

@@ -331,8 +331,9 @@ describe('🚨 EVERY micro-stage writer, not just the one with a test', () => {
 // The portal renders it as "You signed — you're locked in!". A customer disputing
 // a contract must never be shown the vendor's own system asserting they signed
 // one, dated, because an installer clicked a stage dropdown. So the census is
-// explicit: the only things that may write it are the two proposal signature
-// paths — each of which sets `proposals.signed_at` in the same operation — and
+// explicit: the only things that may write it are the proposal signature path
+// (POST .../sign — the PATCH branch that used to be the second one is retired),
+// which sets `proposals.signed_at` in the same operation — and
 // the ops pipeline stage whose own name is `contract_signed`.
 
 describe('🚨 nothing invents a signature', () => {
@@ -363,8 +364,10 @@ describe('🚨 nothing invents a signature', () => {
 
   it('only the signature paths and the identically-named pipeline stage write it', () => {
     expect(WRITERS).toEqual([
-      // Raw INSERT, in the same block that sets signed_at.
-      'app/api/proposals/[id]/route.ts',
+      // Raw INSERT, in the same block that sets signed_at. The PATCH signing
+      // branch in app/api/proposals/[id]/route.ts was retired (410) — the
+      // e-signature workflow is now the ONLY proposal signature path — so the
+      // census is one writer SHORTER, never longer.
       'app/api/proposals/[id]/sign/route.ts',
       // The map entry keyed by the identically-named pipeline stage.
       'lib/operations/pipelineMicroStage.ts',
@@ -372,7 +375,7 @@ describe('🚨 nothing invents a signature', () => {
   });
 
   it('each signature path records the signature itself, not just the milestone', () => {
-    for (const f of ['app/api/proposals/[id]/route.ts', 'app/api/proposals/[id]/sign/route.ts']) {
+    for (const f of ['app/api/proposals/[id]/sign/route.ts']) {
       const src = stripComments(readFileSync(join(ROOT, f), 'utf8'));
       expect(src, `${f} writes the milestone without recording a signature`)
         .toMatch(/signed_at\s*=\s*NOW\(\)|signed_at\)/);

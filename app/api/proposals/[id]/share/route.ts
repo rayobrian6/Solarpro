@@ -9,18 +9,13 @@ import { getUserFromRequest } from '@/lib/auth';
 import { v4 as uuidv4 } from 'uuid';
 import { getBaseUrl } from '@/lib/env';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
+import { isIssued } from '@/lib/proposal/signatureAuthority';
 
 // ── Issued-artifact rule ─────────────────────────────────────────────────────
 // Mirrors app/api/proposals/[id]/route.ts. A signed proposal is an executed
 // contract; `status` is checked alongside `signed_at` so a database predating
 // migration 020 is still covered.
-const TERMINAL_STATUSES = new Set(['accepted', 'signed']);
-
-function isIssued(row: Record<string, unknown> | null | undefined): boolean {
-  if (!row) return false;
-  if (row.signed_at) return true;
-  return typeof row.status === 'string' && TERMINAL_STATUSES.has(row.status);
-}
+// isIssued: see lib/proposal/signatureAuthority.ts (one definition for every route).
 
 // POST /api/proposals/[id]/share — generate a shareable token for a proposal
 export async function POST(
