@@ -1,9 +1,9 @@
 # Render / Vercel deployment mapping — why a `dev` push reaches production
 
 Status: **investigation only — no deployment setting has been changed.**
-Branch: `fix/audit-remediation` (from `origin/dev` @ `9f4ee8b4`).
+Branch: `claude/keen-sagan-i2fl6m` (on `origin/dev` @ `ce4e208d`).
 
-File:line references are to `origin/dev` @ `9f4ee8b4` (this branch adds
+File:line references are to `origin/dev` @ `9f4ee8b4`, unchanged at `ce4e208d` (this branch adds
 `VISION_SERVICE_TOKEN` entries to both `render.yaml` files, which shifts
 `render.yaml`'s worker block down; no `branch:` value is changed).
 
