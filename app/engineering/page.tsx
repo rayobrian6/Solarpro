@@ -27,6 +27,7 @@ import { applyPanelToEngineeringConfig } from '@/lib/system/selectedEquipment';
 import AppShell from '@/components/ui/AppShell';
 import PlanGate from '@/components/ui/PlanGate';
 import CombinerSelector from '@/components/engineering/CombinerSelector';
+import { ServiceTopologyBuilder } from '@/components/engineering/ServiceTopologyBuilder';
 import { useSubscription } from '@/hooks/useSubscription';
 import {
   Zap, Download, Printer, Plus, Trash2, Settings,
@@ -294,7 +295,7 @@ function parseCityFromAddress(address: string): string | null {
 type InverterType = 'string' | 'micro' | 'optimizer' | 'hybrid' | 'ecoflow';
 type RoofType = 'shingle' | 'tile' | 'metal_standing_seam' | 'metal_corrugated' | 'flat_tpo' | 'flat_epdm' | 'flat_gravel';
 type SystemType = 'roof' | 'ground' | 'fence';
-type TabId = 'config' | 'compliance' | 'electrical' | 'diagram' | 'schedule' | 'structural' | 'mounting' | 'permit' | 'bom' | 'files';
+type TabId = 'config' | 'service' | 'compliance' | 'electrical' | 'diagram' | 'schedule' | 'structural' | 'mounting' | 'permit' | 'bom' | 'files';
 
 // Wave 1 (docs/ARCHITECTURE-per-subsystem-equipment.md §1.3): the ProjectConfig
 // family is REUNIFIED — canonical declarations live in lib/engineering-helpers.ts;
@@ -9118,6 +9119,7 @@ function EngineeringPageInner() {
 
   const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
     { id: 'config',     label: 'System Config',      icon: <Settings size={14} /> },
+    { id: 'service',    label: 'Service Topology',     icon: <Zap size={14} /> },
     { id: 'compliance', label: 'Compliance',          icon: <ClipboardCheck size={14} /> },
     { id: 'electrical', label: 'Electrical Sizing',   icon: <Activity size={14} /> },
     { id: 'diagram',    label: 'Single-Line Diagram', icon: <Zap size={14} /> },
@@ -12438,6 +12440,23 @@ function EngineeringPageInner() {
           })()) : null}
 
           {/* ── COMPLIANCE TAB ── */}
+          {/* ══════════════════════════════════════════════════════════════
+               SERVICE TOPOLOGY — the canonical service graph, built and inspected here.
+
+               Ray: "The visible Engineering workflow must expose the canonical topology rather
+               than requiring fixtures or direct JSON... Do not retain a competing editable
+               'Main Panel Amps' scalar as another authority."
+
+               The page mounts ONE component. Every graph operation is a pure function in
+               lib/electrical/topologyAuthoring.ts — a screen that builds graph objects inline is
+               a second model of the graph.
+             ══════════════════════════════════════════════════════════════ */}
+          {activeTab === 'service' ? (
+            <div data-testid="engineering-service-tab">
+              <ServiceTopologyBuilder projectId={currentProjectId ?? null} />
+            </div>
+          ) : null}
+
           {activeTab === 'compliance' ? ((() => {
             const _ov   = compliance.overallStatus;
             const _el   = compliance.electrical?.status;

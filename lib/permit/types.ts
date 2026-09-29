@@ -199,6 +199,19 @@ export interface PermitInput {
      *  ConsumptionCtLocation). Absent / '' ⇒ the interconnection default. */
     consumptionCtLocation?: string | null;
     panelBusRating?: number;
+    /**
+     * 🚨 THE CANONICAL SERVICE GRAPH — the same object Engineering, the SLD, the BOM and pricing
+     * consume.
+     *
+     * Present ⇒ the service is a GRAPH: an aggregate rating, its branches, its panels, its backup
+     * domains and its four disconnect roles. The equipment schedule reads THIS, so a 400 A service
+     * with two 200 A MSPs and two gateways cannot collapse to one main panel on the way to a sheet.
+     *
+     * `mainPanelAmps` above stays for the legacy single-service path and for every consumer that
+     * has not migrated. When a topology is present it is a DERIVED COMPATIBILITY PROJECTION of the
+     * primary panel — never a second authority. See docs/SERVICE-TOPOLOGY-SCALAR-AUDIT.md.
+     */
+    serviceTopology?: import('@/lib/electrical/serviceTopology').ServiceTopology | null;
     // User-selected brand-integrated BOS device(s) — combiner/gateway/"brains"
     // (ids from lib/equipment/integratedBos). When set, overrides the auto-config
     // (the design-studio picker will write this). Read by buildIntegratedEquipment.

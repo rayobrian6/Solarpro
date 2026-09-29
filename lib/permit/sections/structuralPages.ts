@@ -14,6 +14,10 @@ import { MIN_ATTACHMENT_SF } from '@/lib/structural/attachmentCapacity';
 import { analyzeFenceWind } from '@/lib/structural/fenceWindEngine';
 import { resolveModuleIdentity } from '@/lib/equipment/moduleIdentity';
 import {
+  serviceTopologyScheduleRows, serviceTopologyProcurement,
+  serviceTopologyReleaseReadiness,
+} from '../utils/serviceTopologySchedule';
+import {
   projectStructuralFromInput, fmt, fmtStr, findCheck, checkResultLabel,
   checkThresholdLabel, projectFastenerAssembly, FASTENER_NON_ORDERABLE_LABEL,
   projectStructuralConclusion, projectCapacityCitation,
@@ -1498,6 +1502,81 @@ export function roofStructuralHasContinuation(systemType: unknown): boolean {
 // Standalone helper — uses deriveStructuralBOM() to get real quantities
 // for fence/ground system-specific hardware tables. Replaces TBD placeholders.
 // Roof returns empty string (no additional hardware table needed).
+/**
+ * 🚨 THE SERVICE TOPOLOGY, ON THE SCHEDULE — ONE ROW PER PHYSICAL INSTANCE.
+ *
+ * Ray: the permit "must not collapse back to `1 main panel`, `1 gateway`, or `4 Powerwalls`", and
+ * "MSP #1 and MSP #2 must remain separately identifiable. Do not aggregate away topology merely
+ * because two devices have the same model/rating."
+ *
+ * So the first table below is instances — two gateway rows, two MSP rows, two ESS rows, two
+ * expansion rows, each tagged and each naming its domain — and the second is the procurement
+ * summary, which still lists the tags it covers.
+ *
+ * 🚨 AND A CELL THAT CANNOT BE FILLED SAYS WHAT WOULD FILL IT. "NOT EVALUATED —
+ * AVAILABLE FAULT CURRENT REQUIRED" goes where the number would have gone. That is DATA a stamping
+ * engineer needs, and it is deliberately NOT a release banner: Ray's 2026-09-18 ruling took every
+ * release gate, gate counter and "DESIGN COMPLETE" stamp off the outbound planset, and he had to
+ * say it three times. `releaseReady` travels in the permit RESULT, for our own screens, and never
+ * onto this sheet.
+ */
+function renderServiceTopologySchedule(input: PermitInput): string {
+  const topology = input.project?.serviceTopology ?? null;
+  if (!topology) return '';
+  const rows = serviceTopologyScheduleRows(topology);
+  if (rows.length === 0) return '';
+  const procurement = serviceTopologyProcurement(topology);
+  const readiness = serviceTopologyReleaseReadiness(topology);
+  const esc = (s: string) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  const TYPE_LABEL: Record<string, string> = {
+    'service': 'Service',
+    'service-branch': 'Service branch',
+    'panelboard': 'Panelboard',
+    'backup-gateway': 'Backup gateway',
+    'ess-ac-source': 'ESS (AC source)',
+    'battery-expansion': 'Battery expansion (DC)',
+    'disconnect': 'Disconnect',
+  };
+  return `
+      <div class="section-title">Service Topology &amp; Backup Domains — physical instances</div>
+      <table class="equip-table">
+        <thead><tr><th>Tag</th><th>Device type</th><th>Domain</th><th>Manufacturer</th><th>Model</th><th>Rating</th><th>OCPD</th><th>Notes</th></tr></thead>
+        <tbody>
+          ${rows.map(r => `
+          <tr>
+            <td class="fw7">${esc(r.tag)}</td>
+            <td>${esc(TYPE_LABEL[r.deviceType] ?? r.deviceType)}</td>
+            <td>${esc(r.domain) || '—'}</td>
+            <td>${esc(r.manufacturer) || '—'}</td>
+            <td>${esc(r.model) || '—'}</td>
+            <td class="tr">${esc(r.rating)}</td>
+            <td class="tr">${esc(r.ocpd)}</td>
+            <td style="font-size:7.5px">${esc(r.notes)}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+      ${procurement.length === 0 ? '' : `
+      <div class="section-title">Service Topology — procurement quantities</div>
+      <table class="equip-table">
+        <thead><tr><th>Manufacturer</th><th>Model</th><th>Qty</th><th>Covers</th></tr></thead>
+        <tbody>
+          ${procurement.map(l => `
+          <tr>
+            <td>${esc(l.manufacturer) || '—'}</td>
+            <td>${esc(l.model)}</td>
+            <td class="tr fw7">${l.quantity}</td>
+            <td style="font-size:7.5px">${esc(l.instanceTags.join(', '))}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>`}
+      ${readiness.requirements.length === 0 ? '' : `
+      <div style="padding:2px 6px;margin-top:2px;font-size:var(--f-sm);line-height:1.25;border:1px solid #000;background:#fff;">
+        <strong>ENGINEERING INPUT REQUIRED:</strong>
+        ${readiness.requirements.map(esc).join(' · ')}
+      </div>`}
+`;
+}
+
 function renderHardwareSchedule(input: PermitInput, cad: CADModel): string {
   const { system } = input;
   const totalPanels = cad.totalPanels || system.totalPanels || 0;
@@ -2676,6 +2755,9 @@ export function pageEquipmentSchedule(input: PermitInput, cad: CADModel, pageNum
 
       <!-- System-Specific Hardware Schedule -->
          ${renderHardwareSchedule(input, cad)}
+
+      <!-- Service topology: instances, then procurement -->
+         ${renderServiceTopologySchedule(input)}
 
       <div style="padding:2px 6px;margin-top:2px;font-size:var(--f-sm);line-height:1.25;border:2px solid #000;background:#fff;">
         <strong>PAGE CONCLUSION — EQUIPMENT SCHEDULE:</strong>

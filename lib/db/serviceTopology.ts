@@ -21,13 +21,33 @@
 // `batteryCount` — ONE number for the site. Two domains, each with a Powerwall and an Expansion, is
 // not a number.
 //
-// ═══ NO MIGRATION GATE ═══
+// ═══ 🚨 TEMPORARY FORWARD-COMPATIBLE BOOTSTRAP — NOT THE PERMANENT SCHEMA AUTHORITY ═══
 //
-// `ADD COLUMN IF NOT EXISTS`, the same self-heal `upsertSelectedEquipment` uses for its own column,
-// so a write works before any formal migration is run. Ray runs migrations himself through
+// `ADD COLUMN IF NOT EXISTS` is the same self-heal `upsertSelectedEquipment` uses for its own
+// column, so a write works before any formal migration is run. Ray runs migrations himself through
 // Admin → System Tools and a `.sql` file is not a migration until it clears five registrations
-// (`migration-four-gates`); blocking the feature on that would be blocking it on an operations
-// task. The column is additive and nothing else reads it.
+// (`migration-four-gates`); the batch runner is additionally halted at 027
+// (`migration-runner-halted-at-027`). Blocking this feature on that would be blocking it on an
+// operations task.
+//
+// Ray's ruling, verbatim: "Do not rip this out during this slice. But explicitly classify it as
+// TEMPORARY FORWARD-COMPATIBLE BOOTSTRAP rather than making application runtime DDL the permanent
+// source of schema truth."
+//
+// So it is classified. What is required to retire it, recorded here beside the code it governs:
+//
+//   1. A forward migration creating `projects.service_topology JSONB`, registered through all five
+//      gates, applied after the 027 blockage is cleared.
+//   2. A reconciliation step that proves the migration and this bootstrap produce the SAME column
+//      (type, nullability, default) — a bootstrap that drifts from its migration is worse than
+//      either alone.
+//   3. This `ensureColumn` call demoted to an assertion (column exists ⇒ proceed; absent ⇒ refuse
+//      loudly) rather than a DDL statement.
+//
+// Historical applied migrations are NOT rewritten. Behaviour under test in
+// tests/topologyAuthoredThenAgreesEverywhere.postgres.test.ts: repeated initialisation is
+// idempotent, concurrent instances neither corrupt the schema nor lose a write, and an inability to
+// alter the schema FAILS rather than silently losing the topology.
 //
 // ═══ THE READ CHECKS, IT DOES NOT CAST ═══
 //

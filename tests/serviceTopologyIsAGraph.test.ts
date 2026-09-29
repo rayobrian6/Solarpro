@@ -459,8 +459,21 @@ describe('🚨 the graph is generic — Tesla is the proving case, not the model
     const code = src.split('\n').filter(l => !l.trim().startsWith('//') && !l.trim().startsWith('*')).join('\n');
     // A rating typed into an adapter is a second equipment authority.
     expect(code, 'a continuous rating was typed into the Tesla adapter').not.toMatch(/\b200\b/);
-    expect(code).toContain('getBackupInterfaceById');
-    expect(code).toContain('getBatteryById');
+    // It DELEGATES the catalogue reads rather than holding its own copy — two copies of the same
+    // lookups is how a UI-built domain and a fixture-built one begin to differ.
+    expect(code).toContain('buildDomainFromCatalogue');
+
+    const generic = readFileSync(
+      join(__dirname, '..', 'lib', 'electrical', 'topologyAuthoring.ts'), 'utf8');
+    expect(generic).toContain('getBackupInterfaceById');
+    expect(generic).toContain('getBatteryById');
+    // And the generic builder names no manufacturer either.
+    const genericCode = generic.split('\n')
+      .filter(l => !l.trim().startsWith('//') && !l.trim().startsWith('*')).join('\n');
+    for (const forbidden of ['Powerwall', 'tesla-', 'ComEd']) {
+      expect(genericCode, `the generic authoring module hard-codes '${forbidden}'`)
+        .not.toContain(forbidden);
+    }
   });
 
   it('a 600 A service with three domains evaluates the same way', () => {
