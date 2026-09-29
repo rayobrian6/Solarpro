@@ -35,7 +35,7 @@ import {
   type MatchQuality,
   DEFAULT_FEATURE_MATCH_PARAMS,
 } from './types';
-import { withVisionServiceAuth } from '@/lib/visionServiceAuth';
+import { withVisionServiceAuth } from '@/lib/renderServiceAuth';
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 

@@ -21,7 +21,7 @@
  * REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY
  */
 
-import { withVisionServiceAuth } from '@/lib/visionServiceAuth';
+import { withVisionServiceAuth } from '@/lib/renderServiceAuth';
 // ---------------------------------------------------------------------------
 // Configuration
 // ---------------------------------------------------------------------------

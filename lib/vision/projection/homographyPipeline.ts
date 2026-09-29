@@ -50,7 +50,7 @@ import type { FeatureMatchResult } from './types';
 
 import type { ExifData, ExifCameraParams } from '../exif/exifExtractor';
 import { computeFieldOfView, getDefaultSmartphoneFov } from '../exif/exifExtractor';
-import { withVisionServiceAuth } from '@/lib/visionServiceAuth';
+import { withVisionServiceAuth } from '@/lib/renderServiceAuth';
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 

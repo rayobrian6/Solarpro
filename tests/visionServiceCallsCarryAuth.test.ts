@@ -7,14 +7,14 @@
  * except /health without `Authorization: Bearer <VISION_SERVICE_TOKEN>`
  * (sam2-service/service_auth.py, tests/python/test_vision_service_auth.py).
  * This is the other half: the website's clients must send it, through the one
- * helper (lib/visionServiceAuth.ts), on every non-health call — including ones
+ * helper (lib/renderServiceAuth.ts), on every non-health call — including ones
  * added later, which the census at the bottom catches.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { withVisionServiceAuth } from '@/lib/visionServiceAuth';
+import { withVisionServiceAuth } from '@/lib/renderServiceAuth';
 
 const TOKEN = 'test-vision-token-0123456789abcdef';
 const ROOT = join(__dirname, '..');

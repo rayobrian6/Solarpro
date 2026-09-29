@@ -40,7 +40,7 @@ import {
   classifyUnclassifiedPhotosWithVision,
   type VisionClassificationBatchResult,
 } from './openaiVisionClassifier';
-import { withVisionServiceAuth } from '@/lib/visionServiceAuth';
+import { withVisionServiceAuth } from '@/lib/renderServiceAuth';
 
 export type JobStatus = 'pending' | 'running' | 'completed' | 'failed';
 export type FinalizationStatus = 'pending' | 'running' | 'complete' | 'failed' | 'skipped';

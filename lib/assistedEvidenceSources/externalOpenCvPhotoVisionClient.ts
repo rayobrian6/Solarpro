@@ -5,7 +5,7 @@ import type {
   OpenSourcePhotoVisionRunResult,
 } from './openSourcePhotoVisionWorker';
 import type { SiteSurvey, SiteSurveyFile } from '@/lib/db/surveys';
-import { withVisionServiceAuth } from '@/lib/visionServiceAuth';
+import { withVisionServiceAuth } from '@/lib/renderServiceAuth';
 
 export const EXTERNAL_OPENCV_PHOTO_VISION_TOOL_NAME = 'external-opencv-photo-vision-worker';
 export const EXTERNAL_OPENCV_PHOTO_VISION_TOOL_VERSION = '0.1.0';

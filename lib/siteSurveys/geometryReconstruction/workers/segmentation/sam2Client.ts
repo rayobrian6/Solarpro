@@ -19,7 +19,7 @@
  */
 
 import type { NormalizedPoint } from '../../types';
-import { withVisionServiceAuth } from '@/lib/visionServiceAuth';
+import { withVisionServiceAuth } from '@/lib/renderServiceAuth';
 
 // ---------------------------------------------------------------------------
 // Configuration
