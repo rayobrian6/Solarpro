@@ -183,11 +183,17 @@ describe('POST /api/webhooks/survey-complete — v47.435 response contract', () 
   });
 
   it("records delivery status as verified or failed (no new status values pre-pipeline)", () => {
-    // The DB INSERT uses verified|failed BEFORE the pipeline runs.
-    // The pipeline itself updates the status to 'ingested' or 'failed' post-INSERT.
-    expect(ROUTE_SRC).toMatch(
-      /deliveryStatus:\s*'verified'\s*\|\s*'failed'\s*=\s*sigResult\.valid\s*&&\s*envelope\s*\?\s*'verified'\s*:\s*'failed'/,
-    );
+    // Before the pipeline runs, a delivery row is written only as 'verified'
+    // (a signed, valid delivery claiming the event — by INSERT, or by taking
+    // over a failed/abandoned row) or 'failed' (a delivery that cannot be
+    // processed). The pipeline itself moves it to 'ingested' or 'failed'.
+    const prePipeline = ROUTE_SRC.slice(0, ROUTE_SRC.indexOf('await runIngestPipeline('));
+    const written = [
+      ...[...prePipeline.matchAll(/SET\s+status\s*=\s*'(\w+)'/g)].map(m => m[1]),
+      ...[...prePipeline.matchAll(/\$\{rawBody\},\s*'(\w+)'/g)].map(m => m[1]),
+    ];
+    expect(written.length, 'no pre-pipeline status write found — the scan is stale').toBeGreaterThan(0);
+    expect(new Set(written)).toEqual(new Set(['verified', 'failed']));
   });
 
   it('pipeline is wired: runIngestPipeline is called in the route', () => {

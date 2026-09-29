@@ -70,6 +70,18 @@ export async function POST(
     signature_valid: boolean;
   };
 
+  // 🚨 AN UNSIGNED BODY IS NOT A SURVEY. The webhook route logs every delivery
+  // it receives — including ones that failed the HMAC check, whose raw_body
+  // (owner claims, project ids, photo URLs) was written by whoever sent it.
+  // Replaying one would ingest that body with an admin's authority. Only a
+  // delivery whose signature verified may be replayed.
+  if (delivery.signature_valid !== true) {
+    return NextResponse.json(
+      { success: false, error: 'This delivery failed signature verification — its body is untrusted and cannot be replayed.' },
+      { status: 422 },
+    );
+  }
+
   // ── Parse envelope from raw_body ───────────────────────────────────────────
   let parsed: unknown;
   try {

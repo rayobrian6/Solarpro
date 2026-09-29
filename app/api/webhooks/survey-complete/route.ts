@@ -118,73 +118,145 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // ── Idempotency check (only meaningful when we have a verified event_id) ─
-  // Prefer event_id from envelope; fall back to X-Survey-Event-Id header if present.
+  // ── Idempotency: ONE event, claimed only by a delivery that can be processed ─
+  //
+  // 🚨 A FAILED ATTEMPT MUST NOT CONSUME THE EVENT. The duplicate lookup used to
+  // match ANY row with this event_id — including a delivery that failed the
+  // HMAC check (wrong secret, clock skew) or the envelope validation. The
+  // correctly signed retry then got 200 "duplicate", the app backend marked the
+  // event delivered, and the survey was never ingested. Nothing on either side
+  // could recover it short of the admin replay route.
+  //
+  // The rule now:
+  //   · an UNSIGNED delivery is logged (signature_valid = false) and never
+  //     claims the event — migration 014's unique index excludes those rows too;
+  //   · a signed delivery whose ENVELOPE is invalid is logged and never claims
+  //     it either;
+  //   · a signed, valid delivery claims it. The event is a DUPLICATE only when a
+  //     signed delivery for it has been ingested/replayed, or is being processed
+  //     right now. A signed delivery that FAILED (validation or ingest), or one
+  //     abandoned mid-flight, is taken over by the retry — the SAME row, by an
+  //     atomic compare-and-set, because migration 014 allows one signature-valid
+  //     row per event.
   const effectiveEventId = envelope?.event_id ?? eventIdHeader ?? null;
 
-  if (sigResult.valid && envelope && effectiveEventId) {
-    try {
-      const existing = await sql`
-        SELECT id, status FROM webhook_deliveries
-         WHERE source = 'survey' AND event_id = ${effectiveEventId}
-         LIMIT 1
-      `;
-      if (existing.length > 0) {
-        // Duplicate delivery — record nothing new, return 200 no-op.
-        // Survey backend will mark this delivered and stop retrying.
-        return NextResponse.json(
-          {
-            // Partner-contract fields (v47.435)
-            ok: true,
-            duplicate: true,
-            event_id: effectiveEventId,
-            // Extended fields for internal ops
-            success: true,
-            data: {
-              duplicate: true,
-              existingDeliveryId: existing[0].id,
-              existingStatus: existing[0].status,
-            },
-            producerVersion: BUILD_VERSION,
-          },
-          { status: 200 },
-        );
-      }
-    } catch (err) {
-      return handleRouteDbError('[POST /api/webhooks/survey-complete:idempotency]', err);
-    }
-  }
+  const duplicateResponse = (existing: { id: string; status: string }) =>
+    NextResponse.json(
+      {
+        // Partner-contract fields (v47.435)
+        ok: true,
+        duplicate: true,
+        event_id: effectiveEventId,
+        // Extended fields for internal ops
+        success: true,
+        data: {
+          duplicate: true,
+          existingDeliveryId: existing.id,
+          existingStatus: existing.status,
+        },
+        producerVersion: BUILD_VERSION,
+      },
+      { status: 200 },
+    );
 
-  // ── Record delivery (valid or invalid — ops needs to see both) ────────
-  const deliveryStatus: 'verified' | 'failed' = sigResult.valid && envelope ? 'verified' : 'failed';
   const deliveryError: string | null = !sigResult.valid
     ? `HMAC verification failed: ${sigResult.reason ?? 'unknown'}`
     : envelopeError;
-
   // For the log row we need SOMETHING as event_id even when unverified, so
   // downstream queries on webhook_deliveries don't fail. We use the header
-  // if present, else a synthetic marker. The (source, event_id) unique-ish
-  // pattern is NOT enforced as a DB UNIQUE to allow logging repeated failures.
+  // if present, else a synthetic marker.
   const logEventId = effectiveEventId ?? `unverified-${Date.now()}`;
   const logEventType = envelope?.event ?? 'survey.completed'; // best guess; we know only survey.completed is valid in v1
 
   let deliveryId: string;
-  try {
-    const rows = await sql`
-      INSERT INTO webhook_deliveries (
-        source, event_type, event_id,
-        signature_header, timestamp_header, signature_valid,
-        raw_body, status, error_message, processed_at
-      ) VALUES (
-        'survey', ${logEventType}, ${logEventId},
-        ${signatureHeader}, ${timestampHeader}, ${sigResult.valid},
-        ${rawBody}, ${deliveryStatus}, ${deliveryError}, now()
-      )
-      RETURNING id
-    `;
-    deliveryId = rows[0].id;
-  } catch (err) {
-    return handleRouteDbError('[POST /api/webhooks/survey-complete:log]', err);
+
+  if (sigResult.valid && envelope && effectiveEventId) {
+    try {
+      const existing = await sql`
+        SELECT id, status, processed_at, received_at FROM webhook_deliveries
+         WHERE source = 'survey' AND event_id = ${effectiveEventId}
+           AND signature_valid = true
+         ORDER BY received_at DESC
+         LIMIT 1
+      `;
+      if (existing.length > 0) {
+        const row = existing[0] as { id: string; status: string; processed_at: unknown; received_at: unknown };
+        if (!isReclaimableDelivery(row)) return duplicateResponse(row);
+        // Take the failed / abandoned row over. Conditional on the state that
+        // was read, so of two concurrent retries exactly one proceeds.
+        const claimed = await sql`
+          UPDATE webhook_deliveries
+             SET status           = 'verified',
+                 event_type       = ${logEventType},
+                 signature_header = ${signatureHeader},
+                 timestamp_header = ${timestampHeader},
+                 raw_body         = ${rawBody},
+                 error_message    = NULL,
+                 processed_at     = now()
+           WHERE id = ${row.id}
+             AND status = ${row.status}
+             -- Millisecond precision: the driver hands timestamptz back as a JS
+             -- Date (ms), the column holds µs. Same idiom as the layout claim.
+             AND date_trunc('milliseconds', processed_at)
+                 IS NOT DISTINCT FROM date_trunc('milliseconds', ${isoOrNull(row.processed_at)}::timestamptz)
+           RETURNING id
+        `;
+        if (claimed.length === 0) return duplicateResponse(row);
+        deliveryId = claimed[0].id;
+      } else {
+        try {
+          const rows = await sql`
+            INSERT INTO webhook_deliveries (
+              source, event_type, event_id,
+              signature_header, timestamp_header, signature_valid,
+              raw_body, status, error_message, processed_at
+            ) VALUES (
+              'survey', ${logEventType}, ${effectiveEventId},
+              ${signatureHeader}, ${timestampHeader}, true,
+              ${rawBody}, 'verified', NULL, now()
+            )
+            RETURNING id
+          `;
+          deliveryId = rows[0].id;
+        } catch (err) {
+          // Migration 014: another signed delivery of this event was recorded
+          // between our read and our write — it owns the event.
+          if (isUniqueViolation(err)) {
+            return duplicateResponse({ id: 'concurrent', status: 'verified' });
+          }
+          throw err;
+        }
+      }
+    } catch (err) {
+      return handleRouteDbError('[POST /api/webhooks/survey-complete:claim]', err);
+    }
+  } else {
+    // ── Record a delivery that cannot be processed (ops needs to see it) ───
+    // It claims nothing. A SIGNED one (bad envelope) is signature_valid = true,
+    // so it can only be logged while no signed row holds the event; a
+    // collision is reported in the log, not turned into a 5xx retry loop.
+    try {
+      const rows = await sql`
+        INSERT INTO webhook_deliveries (
+          source, event_type, event_id,
+          signature_header, timestamp_header, signature_valid,
+          raw_body, status, error_message, processed_at
+        ) VALUES (
+          'survey', ${logEventType}, ${logEventId},
+          ${signatureHeader}, ${timestampHeader}, ${sigResult.valid},
+          ${rawBody}, 'failed', ${deliveryError}, now()
+        )
+        RETURNING id
+      `;
+      deliveryId = rows[0].id;
+    } catch (err) {
+      if (!isUniqueViolation(err)) {
+        return handleRouteDbError('[POST /api/webhooks/survey-complete:log]', err);
+      }
+      console.warn('[webhook:survey-complete] rejected delivery not logged — a signed delivery already holds event',
+        logEventId, '—', deliveryError);
+      deliveryId = 'not-logged';
+    }
   }
 
   // ── Terminal responses ─────────────────────────────────────────────────
@@ -333,4 +405,34 @@ export async function POST(req: NextRequest) {
     },
     { status: 202 },
   );
+}
+
+/**
+ * May a signed retry take this signature-valid delivery row over?
+ *   · 'failed'   — validation or ingest failed: yes, reprocess (ingest is
+ *                  idempotent: attach is update-only, file inserts are
+ *                  ON CONFLICT DO NOTHING);
+ *   · 'verified' — being processed: only once it is older than the in-flight
+ *                  window (this route's maxDuration is 30 s), i.e. abandoned;
+ *   · anything else ('ingested', 'replayed', 'duplicate', unknown) — no: the
+ *     event was delivered, and a retry is a true duplicate.
+ */
+const IN_FLIGHT_WINDOW_MS = 5 * 60 * 1000;
+function isReclaimableDelivery(row: { status: string; processed_at: unknown; received_at: unknown }): boolean {
+  if (row.status === 'failed') return true;
+  if (row.status !== 'verified') return false;
+  const at = row.processed_at ?? row.received_at;
+  const ms = at instanceof Date ? at.getTime() : Date.parse(String(at ?? ''));
+  return Number.isFinite(ms) && Date.now() - ms > IN_FLIGHT_WINDOW_MS;
+}
+
+function isoOrNull(v: unknown): string | null {
+  if (v === null || v === undefined || v === '') return null;
+  const d = v instanceof Date ? v : new Date(String(v));
+  return Number.isFinite(d.getTime()) ? d.toISOString() : null;
+}
+
+function isUniqueViolation(err: unknown): boolean {
+  const e = err as { code?: unknown; message?: unknown } | null;
+  return e?.code === '23505' || /duplicate key value violates unique constraint/i.test(String(e?.message ?? ''));
 }
