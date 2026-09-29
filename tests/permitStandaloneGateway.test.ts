@@ -368,6 +368,10 @@ describe('a string job with a leftover standalone pick', () => {
 describe("golden-path's E-1 key set", () => {
   const golden = JSON.parse(fs.readFileSync(
     path.resolve(__dirname, '../test-fixtures/golden/golden.json'), 'utf-8'));
+  // 2026-09-29 — `serviceTopology` was added to this list deliberately. The adapter now passes the
+  // project's service graph to the renderer, which draws the service side from it; the key set
+  // guard did its job and caught the addition, and this is the record that it was intended rather
+  // than silently absorbed.
   const goldenKeys: string[] = golden['sld-input-roof'].topLevelKeys;
 
   it('is unchanged for the roof fixture (the exact call golden-path makes)', () => {

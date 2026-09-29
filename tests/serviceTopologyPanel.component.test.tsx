@@ -52,9 +52,11 @@ describe('🚨 the service panel shows the service, not a main-panel number', ()
       // Its own status badge — domain A's answer is not domain B's.
       expect(within(d).getAllByText(/PASS|FAIL|NOT EVALUATED/).length).toBeGreaterThan(0);
     }
-    // And the two domains name different panels.
-    expect(within(screen.getByTestId('domain-domain-a')).getByText(/msp-1/)).toBeTruthy();
-    expect(within(screen.getByTestId('domain-domain-b')).getByText(/msp-2/)).toBeTruthy();
+    // And the two domains name different panels — by the LABEL on the enclosure, not by the
+    // internal id. "backs msp-1" is a key an electrician should never have to read.
+    expect(screen.getByTestId('domain-domain-a').textContent).toContain('MSP #1');
+    expect(screen.getByTestId('domain-domain-b').textContent).toContain('MSP #2');
+    expect(screen.getByTestId('domain-domain-a').textContent).not.toMatch(/\bmsp-1\b/);
   });
 
   it('🚨 an Expansion is shown as DC with no AC output and no breaker', () => {

@@ -200,6 +200,7 @@
       "revision",
       "scale",
       "selectedCombinerId",
+      "serviceTopology",
       "systemType",
       "topologyType",
       "totalModules",

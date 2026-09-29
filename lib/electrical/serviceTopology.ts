@@ -119,6 +119,19 @@ export interface ServiceBranch {
   ocpdAmps: number | null;
   /** Calculated demand ON THIS BRANCH. null ⇒ the branch load check is NOT_EVALUATED. */
   calculatedDemandA: number | null;
+  /**
+   * The panelboards this branch physically feeds.
+   *
+   * 🚨 THIS IS THE FEED, NOT THE BACKUP. `BackupDomain.backedUpPanelIds` says which panels sit
+   * BEHIND a gateway; this says which panels the branch conductors land in at all. They are the
+   * same list on a fully backed-up branch and they differ on a partially backed-up one.
+   *
+   * Optional, and absent on graphs written before it existed: a consumer that needs the link falls
+   * back to the domain's panels, which is what it did when this field did not exist. It was added
+   * because the SLD had to GUESS the panel for a branch with no backup domain, and a drawing that
+   * guesses which panel a 200 A feeder lands in is a drawing an inspector cannot trust.
+   */
+  panelIds?: string[];
 }
 
 export interface GatewayInstance {
@@ -161,6 +174,14 @@ export type StorageRole = 'inverter-unit' | 'energy-expansion';
 export interface StorageUnit {
   id: string;
   productId: string;
+  /**
+   * The catalogue's own name for it, resolved when the unit was built.
+   *
+   * 🚨 A PRODUCT ID IS NOT A MODEL NAME. A drawing that prints `tesla-powerwall-3` in an equipment
+   * box is printing an internal key at an inspector. Optional because graphs written before it
+   * existed do not carry it; consumers fall back to the id, which is what they printed then.
+   */
+  label?: string;
   role: StorageRole;
   /** Continuous AC output. MUST be null or 0 for an 'energy-expansion'. */
   continuousOutputA: number | null;

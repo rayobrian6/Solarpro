@@ -112,6 +112,12 @@ function parseBranch(v: unknown): ServiceBranch | null {
     ratedAmps: rated,
     ocpdAmps: numOrNull(v.ocpdAmps),
     calculatedDemandA: numOrNull(v.calculatedDemandA),
+    // Absent on graphs written before the explicit feed link existed. Undefined, not [] — an empty
+    // list would read as "this branch feeds nothing", which is a different claim from "nobody
+    // recorded it", and the consumers fall back to the domain's panels only for the second.
+    ...(Array.isArray(v.panelIds)
+      ? { panelIds: v.panelIds.filter((x): x is string => typeof x === 'string') }
+      : {}),
   };
 }
 
@@ -150,6 +156,9 @@ function parseStorage(v: unknown): StorageUnit | null {
   return {
     id: str(v.id),
     productId: str(v.productId),
+    // The catalogue name recorded when it was built, not re-resolved: a sheet reprinted years
+    // later names the product the operator actually chose.
+    ...(typeof v.label === 'string' && v.label ? { label: v.label } : {}),
     role,
     continuousOutputA: numOrNull(v.continuousOutputA),
     ocpdA: numOrNull(v.ocpdA),

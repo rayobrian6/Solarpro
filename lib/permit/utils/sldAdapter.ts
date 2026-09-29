@@ -336,6 +336,11 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
     homerunEgcGauge:         (_snapHomerun.present ? (_snapHomerun.egcGauge ?? undefined) : undefined)
                                ?? _snapBranchEgc ?? undefined,
     acOCPD,
+    // 🚨 THE SERVICE GRAPH REACHES THE DRAWING. With one present the renderer draws the service
+    // side FROM it and `mainPanelAmps` below is only the derived compatibility projection the
+    // scalar audit describes — it is passed on because surfaces that have not migrated still read
+    // it, not because the sheet decides anything with it.
+    serviceTopology:         project.serviceTopology ?? null,
     mainPanelAmps:           mainAmps,
     // W2: busbar base + the ENGINE's 120% verdict projected from the snapshot
     // when this adapter runs inside permit generation — the renderer prints,

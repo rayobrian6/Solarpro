@@ -117,6 +117,20 @@ export async function POST(req: NextRequest) {
         const _id = effectiveCombinerId(body.selectedCombinerId, _stored, 'sld/POST');
         if (_id) body.selectedCombinerId = _id; else delete body.selectedCombinerId;
       } else effectiveCombinerId(body.selectedCombinerId, _stored, 'sld/POST');
+
+      // 🚨 THE SERVICE GRAPH IS READ FROM THE STORE, NOT POSTED BY THE PAGE.
+      //
+      // Same reason as the combiner above: the permit route reads the store itself, so the Diagram
+      // tab has to as well, or "Generate SLD" and the plan set draw two different services on one
+      // project. A read that fails leaves it absent, which draws the legacy single-service tail —
+      // the honest outcome, because a half-read graph is worse than no graph.
+      try {
+        const { readServiceTopology } = await import('@/lib/db/serviceTopology');
+        const _stored2 = await readServiceTopology(String(body.projectId), _auth.user.id);
+        if (_stored2) body.serviceTopology = _stored2.topology;
+      } catch (e) {
+        console.warn('[sld/POST] service topology unreadable; drawing the legacy service tail', e);
+      }
     }
 
     // ── Wave 5A — hybrid multi-lane path (primary at N>1) ────────────────────
@@ -189,6 +203,9 @@ export async function POST(req: NextRequest) {
           acWireGauge:             String(body.acWireGauge ?? body.wireGauge ?? '#6 AWG'),
           acConduitType:           String(body.acConduitType ?? body.conduitType ?? 'EMT'),
           acOCPD:                  Number(body.acOCPD) || _sumLaneBackfeed,
+          // The project's service graph, read from the store above. The multi-source sheet does
+          // not draw it; it states on the sheet that it is not drawing it (see the renderer).
+          serviceTopology:         body.serviceTopology ?? null,
           mainPanelAmps:           Number(body.mainPanelAmps) || 200,
           panelBusRating:          Number(body.panelBusRating ?? body.mainPanelAmps) || 200,
           // §1.7 CONTRACT: client passes the AGGREGATE total (per-inverter
@@ -867,6 +884,9 @@ export async function POST(req: NextRequest) {
       backfeedAmps:            resolvedBackfeedAmps,
       // ──────────────────────────────────────────────────────────────────
 
+      // 🚨 THE SERVICE GRAPH. Present ⇒ the renderer draws the service side from it and the two
+      // scalars below are only the derived compatibility projection for surfaces still reading them.
+      serviceTopology:         body.serviceTopology ?? null,
       mainPanelAmps:           Number(body.mainPanelAmps)          || 200,
       panelBusRating:          Number(body.panelBusRating ?? body.mainPanelAmps) || 200,  // C1: busbar rating for the 120% rule
       utilityName:             String(body.utilityName ?? body.utilityCompany ?? body.utility ?? 'Local Utility'),

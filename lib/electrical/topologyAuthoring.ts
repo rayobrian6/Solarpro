@@ -188,6 +188,7 @@ export function buildDomainFromCatalogue(intent: DomainIntent): DomainBuild {
     storage.push({
       id: `${intent.id}-ess-${i + 1}`,
       productId,
+      label: `${p.manufacturer} ${p.model}`,
       role,
       continuousOutputA: p.maxContinuousOutputA ?? null,
       ocpdA: p.backfeedBreakerA ?? null,
@@ -211,6 +212,7 @@ export function buildDomainFromCatalogue(intent: DomainIntent): DomainBuild {
     storage.push({
       id: `${intent.id}-exp-${i + 1}`,
       productId,
+      ...(p ? { label: `${p.manufacturer} ${p.model}` } : {}),
       role: 'energy-expansion',
       // Zero, not null: an expansion's AC contribution is KNOWN, and it is none.
       continuousOutputA: 0,
@@ -269,6 +271,113 @@ export function addBackupDomain(
     domain,
     unresolved: build.unresolved,
   };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// EDITING WHAT IS ALREADY THERE.
+//
+// Ray: "Click MSP #1 and edit: bus rating, main breaker. Click Backup Domain 1 and edit: Gateway,
+// Powerwall, Expansion, point of connection." So the visual builder needs to CHANGE nodes, not only
+// append them — and every change is a pure function here for the same reason every addition is.
+//
+// 🚨 RE-EQUIPPING A DOMAIN GOES BACK THROUGH `buildDomainFromCatalogue`. Editing must not be a
+// second way to resolve a device: a domain re-equipped from a dropdown and a domain created by the
+// wizard have to be the same object, or the two paths begin to differ in exactly the numbers
+// nobody re-checks.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Patch the service itself. Fields left out are untouched. */
+export function updateService(
+  t: ServiceTopology,
+  patch: Partial<ServiceTopology['service']> & { calculatedServiceDemandA?: number | null },
+): ServiceTopology {
+  const { calculatedServiceDemandA, ...service } = patch;
+  return {
+    ...t,
+    service: { ...t.service, ...service },
+    calculatedServiceDemandA: calculatedServiceDemandA === undefined
+      ? t.calculatedServiceDemandA : calculatedServiceDemandA,
+  };
+}
+
+export function updateBranch(
+  t: ServiceTopology, branchId: string, patch: Partial<Omit<ServiceBranch, 'id'>>,
+): ServiceTopology {
+  return { ...t, branches: t.branches.map(b => (b.id === branchId ? { ...b, ...patch } : b)) };
+}
+
+export function updatePanel(
+  t: ServiceTopology, panelId: string, patch: Partial<Omit<PanelBoard, 'id'>>,
+): ServiceTopology {
+  return { ...t, panels: t.panels.map(p => (p.id === panelId ? { ...p, ...patch } : p)) };
+}
+
+export function updateDomain(
+  t: ServiceTopology,
+  domainId: string,
+  patch: Partial<Pick<BackupDomain, 'label' | 'branchId' | 'backedUpPanelIds' | 'storageConnection'
+    | 'generationOutputA' | 'backedUpDemandA'>>,
+): ServiceTopology {
+  return { ...t, domains: t.domains.map(d => (d.id === domainId ? { ...d, ...patch } : d)) };
+}
+
+/**
+ * Replace a domain's equipment.
+ *
+ * The domain's OLD storage units are dropped from `topology.storage` and the rebuilt ones take
+ * their place — an edit that left the old units behind would leave the BOM counting batteries that
+ * are no longer in any domain.
+ */
+export function setDomainEquipment(
+  t: ServiceTopology,
+  domainId: string,
+  opts: { gatewayProductId?: string; storageProductIds: string[]; expansionProductIds?: string[] },
+): { topology: ServiceTopology; unresolved: string[] } {
+  const domain = t.domains.find(d => d.id === domainId);
+  if (!domain) return { topology: t, unresolved: [`No domain '${domainId}' to re-equip.`] };
+
+  const build = buildDomainFromCatalogue({
+    id: domain.id,
+    label: domain.label,
+    gatewayProductId: opts.gatewayProductId ?? domain.gateway.productId,
+    mainBreakerA: domain.gateway.mainBreakerA,
+    sccrA: domain.gateway.sccrA,
+    storageProductIds: opts.storageProductIds,
+    expansionProductIds: opts.expansionProductIds,
+  });
+  const dropped = new Set(domain.storageUnitIds);
+  return {
+    topology: {
+      ...t,
+      storage: [...t.storage.filter(u => !dropped.has(u.id)), ...build.storage],
+      domains: t.domains.map(d => (d.id === domainId
+        ? { ...d, gateway: build.gateway, storageUnitIds: build.storage.map(u => u.id) }
+        : d)),
+    },
+    unresolved: build.unresolved,
+  };
+}
+
+/** Remove a domain and the storage that belonged to it. Its branch and panels stay. */
+export function removeBackupDomain(t: ServiceTopology, domainId: string): ServiceTopology {
+  const domain = t.domains.find(d => d.id === domainId);
+  if (!domain) return t;
+  const dropped = new Set(domain.storageUnitIds);
+  return {
+    ...t,
+    domains: t.domains.filter(d => d.id !== domainId),
+    storage: t.storage.filter(u => !dropped.has(u.id)),
+  };
+}
+
+export function updateProtectiveDevice(
+  t: ServiceTopology, deviceId: string, patch: Partial<Omit<ProtectiveDevice, 'id'>>,
+): ServiceTopology {
+  return { ...t, devices: t.devices.map(d => (d.id === deviceId ? { ...d, ...patch } : d)) };
+}
+
+export function removeProtectiveDevice(t: ServiceTopology, deviceId: string): ServiceTopology {
+  return { ...t, devices: t.devices.filter(d => d.id !== deviceId) };
 }
 
 /** Record the interconnection facts the jurisdiction and the project constrain. */

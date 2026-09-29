@@ -224,7 +224,12 @@ export function buildServiceTopologyGraph(
 
     if (!domain) {
       // A branch with no backup domain still gets drawn — partial backup is a real arrangement.
-      const panel = topology.panels.find(p => !p.backedUp);
+      //
+      // 🚨 THE FEED IS READ, NOT GUESSED, WHERE IT WAS RECORDED. `branch.panelIds` is the explicit
+      // link; without it this fell back to "the first panel nobody backs up", which on a two-branch
+      // job could land the wrong 200 A feeder in the wrong enclosure on the sheet.
+      const named = (branch.panelIds ?? []).map(id => panelById.get(id)).filter(Boolean);
+      const panel = named[0] ?? topology.panels.find(p => !p.backedUp);
       const target = panel ? add({
         id: panel.id, type: 'MAIN_SERVICE_PANEL', label: panel.label,
         ratedCurrent: amps(panel.busbarRatingA), ocpdRating: amps(panel.mainBreakerA),

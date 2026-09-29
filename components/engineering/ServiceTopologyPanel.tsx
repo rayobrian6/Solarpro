@@ -228,9 +228,12 @@ export function ServiceTopologyPanel({ topology, onChange }: ServiceTopologyPane
                   <StatusBadge size="sm" status={foldConclusions(checks)} />
                 </div>
                 <div className="mt-1 text-xs text-slate-300">
+                  {/* Names, not internal keys — this is read by an installer, not a debugger. */}
                   {d.gateway.label} ({A(d.gateway.continuousRatingA)})
-                  {' → '}{d.backedUpPanelIds.join(', ')}
-                  {' · fed by '}{d.branchId}
+                  {' → '}{d.backedUpPanelIds
+                    .map(id => topology.panels.find(p => p.id === id)?.label ?? id).join(', ')}
+                  {' · fed by '}
+                  {topology.branches.find(b => b.id === d.branchId)?.label ?? d.branchId}
                 </div>
                 <div className="mt-1 text-xs text-slate-400">
                   {units.map(u => (
