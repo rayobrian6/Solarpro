@@ -99,6 +99,9 @@ describe('🚨 signing a proposal moves the installer\'s pipeline', () => {
     const { sql, statements } = recordingSql((t) =>
       /FROM proposals/i.test(t)
         ? [{ id: PID, project_id: PROJECT, status: 'sent', data_json: {}, share_token: 'tok' }]
+        // The signing write is conditional on the row still being unsigned and
+        // answers RETURNING id; an unsigned row is affected.
+        : /^\s*UPDATE proposals/i.test(t) ? [{ id: PID }]
         : []);
     (getDbReady as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(sql);
 

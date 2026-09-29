@@ -293,9 +293,15 @@ describe('the archive branch uses the predicate that was already there', () => {
       .toMatch(/isIssued\(/);
   });
 
-  it('and isIssued is still defined once, at the top of the file', () => {
-    expect((ROUTE.match(/function isIssued\(/g) ?? [])).toHaveLength(1);
-    expect(ROUTE).toMatch(/TERMINAL_STATUSES/);
+  it('and isIssued is still defined once — in the shared signature authority', () => {
+    // It used to be copied into three routes; lib/proposal/signatureAuthority.ts
+    // now holds the one definition, and this route imports it rather than
+    // keeping a copy that could drift.
+    expect((ROUTE.match(/function isIssued\(/g) ?? [])).toHaveLength(0);
+    expect(ROUTE).toMatch(/import \{[^}]*\bisIssued\b[^}]*\} from '@\/lib\/proposal\/signatureAuthority'/);
+    const AUTHORITY = readFileSync(join(__dirname, '..', 'lib', 'proposal', 'signatureAuthority.ts'), 'utf8');
+    expect((AUTHORITY.match(/function isIssued\(/g) ?? [])).toHaveLength(1);
+    expect(AUTHORITY).toMatch(/SIGNED_STATUSES/);
   });
 
   it('the guard reads the row before writing it', () => {
