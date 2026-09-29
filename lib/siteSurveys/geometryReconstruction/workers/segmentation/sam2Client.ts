@@ -19,6 +19,7 @@
  */
 
 import type { NormalizedPoint } from '../../types';
+import { withVisionServiceAuth } from '@/lib/visionServiceAuth';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -388,11 +389,11 @@ export function warmupSAM2Service(): void {
   url.searchParams.set('max_masks', '1');             // Minimize processing
 
   // Fire-and-forget: we don't await this, and we handle 502 gracefully
-  fetch(url.toString(), {
+  fetch(url.toString(), withVisionServiceAuth({
     method: 'POST',
     body: formData,
     signal: AbortSignal.timeout(120_000), // Allow up to 2min for cold start
-  })
+  }))
     .then((response) => {
       const elapsedMs = Date.now() - t0;
       if (response.ok) {
@@ -469,7 +470,7 @@ async function fetchWithRetry(
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      const response = await fetch(url, init);
+      const response = await fetch(url, withVisionServiceAuth(init));
 
       // If response is OK or a client error (4xx), return immediately
       // Only retry on 502 (Bad Gateway) and 503 (Service Unavailable)

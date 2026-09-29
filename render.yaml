@@ -47,6 +47,15 @@ services:
         value: "true"
       - key: DATABASE_URL
         sync: false
+      # Bearer every caller must present (app/service_auth.py). Same value on
+      # both Vercel projects and every vision service. Set BEFORE deploying the
+      # build that enforces it, or every request answers 401.
+      - key: VISION_SERVICE_TOKEN
+        sync: false
+      # Optional host allowlist for fetched image URLs (app/url_guard.py);
+      # private/internal addresses are refused regardless.
+      - key: FETCH_ALLOWED_HOSTS
+        sync: false
 
   # ── Geometry Reconstruction Worker ───────────────────────────────────────
   # P1 — Execution Architecture: Render Background Worker
@@ -69,6 +78,9 @@ services:
         sync: false
       - key: SAM2_SERVICE_URL
         value: "https://sam2-segmentation.onrender.com"
+      # The worker calls SAM2/MiDaS, which require this bearer.
+      - key: VISION_SERVICE_TOKEN
+        sync: false
       - key: GEOMETRY_RECONSTRUCTION_WORKER
         value: "true"
       - key: GEOMETRY_PIPELINE_TIMEOUT_MS

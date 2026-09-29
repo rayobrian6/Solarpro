@@ -35,6 +35,7 @@ import {
   type MatchQuality,
   DEFAULT_FEATURE_MATCH_PARAMS,
 } from './types';
+import { withVisionServiceAuth } from '@/lib/visionServiceAuth';
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -96,12 +97,12 @@ async function callWorkerFeatureMatch(
   const timeoutId = setTimeout(() => controller.abort(), WORKER_TIMEOUT_MS);
 
   try {
-    const response = await fetch(`${workerUrl}/vision/match-features`, {
+    const response = await fetch(`${workerUrl}/vision/match-features`, withVisionServiceAuth({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(request),
       signal: controller.signal,
-    });
+    }));
 
     if (!response.ok) {
       return {

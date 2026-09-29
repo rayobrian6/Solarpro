@@ -75,6 +75,7 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 WORKDIR /app
 COPY main.py /app/main.py
 COPY classifier_logic.py /app/classifier_logic.py
+COPY service_auth.py /app/service_auth.py
 COPY onnx_sam2_amg.py /app/onnx_sam2_amg.py
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh

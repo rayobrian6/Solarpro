@@ -40,6 +40,7 @@ import {
   classifyUnclassifiedPhotosWithVision,
   type VisionClassificationBatchResult,
 } from './openaiVisionClassifier';
+import { withVisionServiceAuth } from '@/lib/visionServiceAuth';
 
 export type JobStatus = 'pending' | 'running' | 'completed' | 'failed';
 export type FinalizationStatus = 'pending' | 'running' | 'complete' | 'failed' | 'skipped';
@@ -167,12 +168,12 @@ export async function createAndSubmitJob(
 
       console.log(`[asyncJobManager] Job ${jobId}: submitting ${photoFiles.length} files to Render in one POST`);
 
-      const submitRes = await fetch(`${workerUrl}/v1/photo-vision/jobs`, {
+      const submitRes = await fetch(`${workerUrl}/v1/photo-vision/jobs`, withVisionServiceAuth({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(jobPayload),
         signal: AbortSignal.timeout(30_000), // 30s to submit (should be instant 202)
-      });
+      }));
 
       if (submitRes.status === 202) {
         const submitJson = await submitRes.json() as Record<string, unknown>;
@@ -356,10 +357,10 @@ export async function cancelJob(jobId: string): Promise<boolean> {
     try {
       const workerUrl = getExternalOpenCvWorkerUrl();
       if (workerUrl) {
-        await fetch(`${workerUrl}/v1/photo-vision/jobs/${renderJobId}`, {
+        await fetch(`${workerUrl}/v1/photo-vision/jobs/${renderJobId}`, withVisionServiceAuth({
           method: 'DELETE',
           signal: AbortSignal.timeout(5_000),
-        });
+        }));
       }
     } catch {
       // Ignore Render cancel errors

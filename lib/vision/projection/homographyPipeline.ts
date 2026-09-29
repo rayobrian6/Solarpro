@@ -50,6 +50,7 @@ import type { FeatureMatchResult } from './types';
 
 import type { ExifData, ExifCameraParams } from '../exif/exifExtractor';
 import { computeFieldOfView, getDefaultSmartphoneFov } from '../exif/exifExtractor';
+import { withVisionServiceAuth } from '@/lib/visionServiceAuth';
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -121,12 +122,12 @@ async function callWorkerEstimateHomography(
   const timeoutId = setTimeout(() => controller.abort(), WORKER_TIMEOUT_MS);
 
   try {
-    const response = await fetch(`${workerUrl}/vision/estimate-homography`, {
+    const response = await fetch(`${workerUrl}/vision/estimate-homography`, withVisionServiceAuth({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(request),
       signal: controller.signal,
-    });
+    }));
 
     if (!response.ok) {
       return {

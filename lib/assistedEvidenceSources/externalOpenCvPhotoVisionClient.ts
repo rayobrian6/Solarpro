@@ -5,6 +5,7 @@ import type {
   OpenSourcePhotoVisionRunResult,
 } from './openSourcePhotoVisionWorker';
 import type { SiteSurvey, SiteSurveyFile } from '@/lib/db/surveys';
+import { withVisionServiceAuth } from '@/lib/visionServiceAuth';
 
 export const EXTERNAL_OPENCV_PHOTO_VISION_TOOL_NAME = 'external-opencv-photo-vision-worker';
 export const EXTERNAL_OPENCV_PHOTO_VISION_TOOL_VERSION = '0.1.0';
@@ -171,7 +172,7 @@ async function fetchJson(url: string, init: RequestInit & { timeoutMs: number })
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), init.timeoutMs);
   try {
-    const res = await fetch(url, { ...init, signal: controller.signal });
+    const res = await fetch(url, withVisionServiceAuth({ ...init, signal: controller.signal }));
     if (!res.ok) throw new Error(`external worker ${res.status}`);
     return await res.json();
   } finally {

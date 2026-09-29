@@ -21,6 +21,7 @@
  * REVIEW-ONLY / NON-AUTHORITATIVE / NOT CAD GEOMETRY
  */
 
+import { withVisionServiceAuth } from '@/lib/visionServiceAuth';
 // ---------------------------------------------------------------------------
 // Configuration
 // ---------------------------------------------------------------------------
@@ -174,7 +175,7 @@ async function fetchWithRetry(
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      const response = await fetch(url, init);
+      const response = await fetch(url, withVisionServiceAuth(init));
 
       if (response.ok || (response.status >= 400 && response.status < 500)) {
         return response;

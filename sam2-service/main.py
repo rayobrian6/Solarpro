@@ -193,6 +193,7 @@ SEMANTIC_CLASSIFIER_MIN_AGREEMENT = float(os.environ.get("SAM2_SEMANTIC_CLASSIFI
 # ADE20K -> SolarPro class mapping and the pure majority-vote override logic live
 # in classifier_logic.py (no torch/cv2 deps) so they can be unit-tested.
 from classifier_logic import model_override_class_for_mask  # noqa: E402
+from service_auth import ServiceAuthMiddleware, log_auth_configuration  # noqa: E402
 
 # ---------------------------------------------------------------------------\
 # MiDaS / DPT Depth Estimation Configuration
@@ -1695,12 +1696,22 @@ app = FastAPI(
     version="2.2.0",
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# 🚨 AUTHENTICATED, NOT OPEN. This used to be CORS "*" with no auth on
+# /segment, /segment-prompted and /depth. The only callers are SolarPro
+# server-side (Vercel routes + the geometry worker), which need no CORS at
+# all, so browser origins are allowed only if CORS_ALLOW_ORIGINS names them,
+# and every non-health request needs the VISION_SERVICE_TOKEN bearer
+# (service_auth.py).
+_cors_origins = [o.strip() for o in os.environ.get("CORS_ALLOW_ORIGINS", "").split(",") if o.strip()]
+if _cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_cors_origins,
+        allow_methods=["GET", "POST"],
+        allow_headers=["Authorization", "Content-Type"],
+    )
+app.add_middleware(ServiceAuthMiddleware)
+log_auth_configuration()
 
 
 @app.on_event("startup")

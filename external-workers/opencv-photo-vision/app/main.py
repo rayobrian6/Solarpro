@@ -38,6 +38,8 @@ import psycopg2
 import psycopg2.extras
 from app.ocr_detection import TesseractOcrService
 from app.yolo_detection import YoloDetectionService
+from app.service_auth import ServiceAuthMiddleware, log_auth_configuration
+from app.url_guard import guarded_client
 from fastapi import FastAPI, HTTPException
 from PIL import Image
 from pydantic import BaseModel, Field
@@ -64,6 +66,14 @@ yolo_service = YoloDetectionService()
 ocr_service = TesseractOcrService()
 
 app = FastAPI(title="SolarPro External OpenCV Photo Vision Worker", version=TOOL_VERSION)
+# 🚨 AUTHENTICATED, NOT OPEN. Every endpoint but /health used to answer anyone:
+# job submission (which fetches caller-supplied URLs and writes results into
+# the website database keyed by a caller-supplied job id), feature matching
+# and homography. The only caller is SolarPro server-side code, which sends the
+# VISION_SERVICE_TOKEN bearer (app/service_auth.py). Outbound image fetches go
+# through app/url_guard.py.
+app.add_middleware(ServiceAuthMiddleware)
+log_auth_configuration()
 
 # ---------------------------------------------------------------------------
 # Neon PostgreSQL connection
@@ -459,7 +469,7 @@ async def cancel_job(render_job_id: str) -> dict[str, Any]:
 def _fetch_single_image(file_job: FileJob) -> tuple[FileJob, bytes | None, str | None]:
     """Fetch a single image. Returns (file_job, content, error)."""
     try:
-        with httpx.Client(timeout=FETCH_TIMEOUT_SECONDS, follow_redirects=True) as client:
+        with guarded_client(FETCH_TIMEOUT_SECONDS) as client:
             response = client.get(file_job.fileUrl)
             response.raise_for_status()
             content = response.content
@@ -1395,7 +1405,7 @@ def analyze_file(job: VisionJob, file_job: FileJob, created_at: str) -> dict[str
     """Fetch and analyze a file (legacy wrapper)."""
     try:
         started = time.time()
-        with httpx.Client(timeout=FETCH_TIMEOUT_SECONDS, follow_redirects=True) as client:
+        with guarded_client(FETCH_TIMEOUT_SECONDS) as client:
             response = client.get(file_job.fileUrl)
             response.raise_for_status()
             content = response.content
@@ -1469,7 +1479,7 @@ class HomographyEstimateRequest(BaseModel):
 
 def _fetch_image_as_cv2(url: str) -> np.ndarray:
     """Fetch an image URL and decode it as a BGR numpy array using httpx."""
-    with httpx.Client(timeout=FETCH_TIMEOUT_SECONDS, follow_redirects=True) as client:
+    with guarded_client(FETCH_TIMEOUT_SECONDS) as client:
         response = client.get(url)
         response.raise_for_status()
         content = response.content

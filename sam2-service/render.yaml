@@ -9,6 +9,10 @@ services:
     region: oregon
     healthCheckPath: /health
     envVars:
+      # Bearer every caller must present (service_auth.py). Set BEFORE deploying
+      # the build that enforces it, or every request answers 401.
+      - key: VISION_SERVICE_TOKEN
+        sync: false
       - key: SAM2_HF_MODEL_ID
         value: facebook/sam2.1-hiera-tiny
       - key: SAM2_MIN_MASK_AREA_FRACTION
