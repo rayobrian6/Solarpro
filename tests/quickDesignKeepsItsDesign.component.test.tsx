@@ -177,6 +177,13 @@ describe('🚨 promoting a Quick Design keeps the design', () => {
     // the design is still on screen …
     expect(engine.props.panels, 'promotion wiped the in-memory design').toHaveLength(DESIGN.length);
 
+    // … the new project row is pinned to the property the design is on (the
+    // server geocodes the address and ignores posted coordinates) …
+    const pin = calls.find(c => c.method === 'PATCH' && c.url.endsWith(`/api/projects/${NEW_ID}`));
+    expect(pin, 'the promoted project was not pinned to the design\'s property').toBeTruthy();
+    expect(pin!.body?.lat).toBeCloseTo(SITE.lat, 4);
+    expect(pin!.body?.lng).toBeCloseTo(SITE.lng, 4);
+
     // … and is written under the new id, as a first save (no version token).
     await flush();
     const saved = layoutPosts(NEW_ID);

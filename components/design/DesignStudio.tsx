@@ -72,7 +72,7 @@ import { useToast } from '@/components/ui/Toast';
 import { localSaveLayout } from '@/lib/clientStorage';
 import { layoutSignature } from '@/lib/roofPlanesSignature';
 import { siteKeyFromCoords, isSameSite, coordKeyOf, isPlaceholderCoords, PLACEHOLDER_LAT, PLACEHOLDER_LNG } from '@/lib/siteIdentity';
-import { archivesSignature, sitesAreSameProperty } from '@/lib/design/siteDesignModel';
+import { archivesSignature, sitesAreSameProperty, coordsOfSiteKey } from '@/lib/design/siteDesignModel';
 import { planAerialAdoption } from '@/lib/design/aerialAdoption';
 import { nativeAcquisitionPermitted, dispositionLabel, customModelGoverns } from '@/lib/design/nativeGeometryDisposition';
 import { useSiteDesign } from './useSiteDesign';
@@ -2674,6 +2674,13 @@ export default function DesignStudio({ project, onSave, onProjectPromoted }: Pro
   // always geocode it to get precise parcel coords, even if stored coords look valid.
   // This fixes the "flew to wrong city downtown" bug after bill parse + project creation.
   useEffect(() => {
+    // 🚨 A PROMOTED QUICK DESIGN IS ALREADY WHERE THE USER IS DESIGNING. Its new
+    // row was pinned to that property's coordinates (ensureDurableProject);
+    // re-geocoding its address here would move the map — and PUT the geocode
+    // over the pin — for a design that has not moved. Its solar data and roof
+    // segments are still this property's, so they are kept too.
+    if (adoptedInMemoryIdRef.current === project.id) return;
+
     setSolarApiData(null); setRoofSegments([]); setSolarDataAddress(null); setSolarDataCityOnly(false);
 
     const projectAddr = project.address?.trim();
@@ -5136,11 +5143,30 @@ export default function DesignStudio({ project, onSave, onProjectPromoted }: Pro
         const created = data?.data ?? data?.project ?? null;
         if (!res.ok || !data?.success || !created?.id) { promotionFailedRef.current = true; return null; }
         toast.info('Design saved', 'Saved as a project so its Nearmap imagery is kept and reused.');
+        // 🚨 THE PROJECT IS WHERE THE DESIGN IS. POST /api/projects geocodes the
+        // address server-side and ignores posted coordinates, so the new row
+        // could sit anywhere the geocoder said (kilometres off, or nowhere when
+        // it fails) — and on the next open the studio derives the property from
+        // those coordinates and no longer recognises the design as this one's.
+        // Pin the row to the property the design belongs to.
+        let promoted = created as Project;
+        const at = coordsOfSiteKey(site.activeSiteKey)
+          ?? (hasValidCoords(mapCenterRef.current?.lat, mapCenterRef.current?.lng) ? mapCenterRef.current : null);
+        if (at) {
+          try {
+            const pin = await fetch(`/api/projects/${created.id}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ lat: at.lat, lng: at.lng }),
+            });
+            if (pin.ok) promoted = { ...promoted, lat: at.lat, lng: at.lng };
+          } catch { /* the design still saves; the next open re-derives its site */ }
+        }
         // Marked BEFORE the parent swaps the id in: the restore effect that runs
         // for the new id must keep the in-memory design, not read the new
         // (empty) row over it.
         adoptedInMemoryIdRef.current = created.id as string;
-        onProjectPromoted?.(created as Project);
+        onProjectPromoted?.(promoted);
         return created.id as string;
       } catch {
         promotionFailedRef.current = true;
@@ -5152,7 +5178,7 @@ export default function DesignStudio({ project, onSave, onProjectPromoted }: Pro
     promotingRef.current = run;
     return run;
   }, [isRealProject, project.id, project.address, project.name, project.systemType,
-      onProjectPromoted, toast]);
+      onProjectPromoted, toast, site.activeSiteKey]);
 
   /**
    * 🚨 EVERY PROJECT REQUEST FOR THE REFERENCE LAYER, IN THE ONE PLACE THAT OWNS THEM.
