@@ -1,0 +1,145 @@
+name: CI (dev)
+
+# The master workflow (ci.yml) runs only on push/PR to master, so nothing
+# checked `dev` — the integration branch that auto-deploys solarpro-dev AND
+# (per render.yaml) the Render workers production uses. On 2026-09-29 dev held
+# 15 failing tests and 3 lint errors that no workflow had reported.
+#
+# This workflow does not replace or weaken ci.yml; it adds the same gates to
+# dev, ordered cheapest-first so a red push is reported in minutes:
+#   typecheck · lint · secret guard · critical suites · Python service auth
+#   → then the FULL vitest suite, one worker (machine-safe; see
+#     playwright.config.ts for the same rule on the browser suite).
+
+on:
+  push:
+    branches: [dev]
+  pull_request:
+    branches: [dev]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-dev-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Stub values — the same ones ci.yml uses; no real secret is needed.
+  DATABASE_URL: postgresql://test:test@localhost:5432/test
+  JWT_SECRET: ci-test-secret-do-not-use-in-production
+  OPENAI_API_KEY: sk-test-placeholder
+  GOOGLE_MAPS_API_KEY: test-placeholder
+  RESEND_API_KEY: re_test_placeholder
+  NEXT_PUBLIC_BASE_URL: https://localhost:3000
+  NEXT_TELEMETRY_DISABLED: '1'
+
+jobs:
+  typecheck:
+    name: TypeScript (tsc --noEmit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20', cache: 'npm' }
+      - run: npm ci
+      - run: npx tsc --noEmit --skipLibCheck
+
+  lint:
+    name: ESLint (next lint)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20', cache: 'npm' }
+      - run: npm ci
+      - run: npm run lint
+
+  secret-guard:
+    name: Committed-secret guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20', cache: 'npm' }
+      - run: npm ci
+      - run: npm run test:secrets
+
+  critical:
+    name: Critical suites (auth / tenancy / signature / save / delivery)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20', cache: 'npm' }
+      - run: npm ci
+      # The boundaries a regression must never cross silently. Fast, and run
+      # before the full suite so a security or data-loss regression is
+      # reported on its own line.
+      - run: >
+          npx vitest run --reporter=verbose
+          tests/proposalSignatureIsTheOnlyWayToSign.test.ts
+          tests/proposalIssuedArtifactImmutability.test.ts
+          tests/proposals-sign.test.ts
+          tests/proposal-read-authorization.test.ts
+          tests/adminCannotActOnEqualOrHigherRole.test.ts
+          tests/permitAndDrawingsAreTenantScoped.test.ts
+          tests/visionServiceCallsCarryAuth.test.ts
+          tests/authRedirectsStayOnSite.test.ts
+          tests/mfaRedirectStaysOnSite.test.tsx
+          tests/priority-sso-authorize.test.ts
+          tests/layoutConcurrency.postgres.test.ts
+          tests/siteDesignRoute.postgres.test.ts
+          tests/quickDesignKeepsItsDesign.component.test.tsx
+          tests/surveyWebhookDeliverySemantics.postgres.test.ts
+          tests/middleware-public-path-bypass.test.ts
+          tests/security/issued-package-read-immutability.test.ts
+
+  python-services:
+    name: Render vision services — auth + fetch guard (pytest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - run: >
+          pip install
+          "fastapi==0.115.6" "httpx==0.28.1" "pydantic==2.10.4" "python-multipart==0.0.20"
+          opencv-python-headless numpy pillow psycopg2-binary pytest
+      - run: python -m pytest tests/python -q -p no:cacheprovider
+
+  full:
+    name: Full vitest (one worker)
+    needs: [typecheck, lint, secret-guard, critical, python-services]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20', cache: 'npm' }
+      - run: npm ci
+      - run: npx vitest run --reporter=dot --maxWorkers=1
+
+  ci-dev-complete:
+    name: CI (dev) complete
+    runs-on: ubuntu-latest
+    needs: [typecheck, lint, secret-guard, critical, python-services, full]
+    if: always()
+    steps:
+      - name: Report
+        run: |
+          echo "typecheck:       ${{ needs.typecheck.result }}"
+          echo "lint:            ${{ needs.lint.result }}"
+          echo "secret-guard:    ${{ needs.secret-guard.result }}"
+          echo "critical:        ${{ needs.critical.result }}"
+          echo "python-services: ${{ needs.python-services.result }}"
+          echo "full:            ${{ needs.full.result }}"
+          for r in "${{ needs.typecheck.result }}" "${{ needs.lint.result }}" \
+                   "${{ needs.secret-guard.result }}" "${{ needs.critical.result }}" \
+                   "${{ needs.python-services.result }}" "${{ needs.full.result }}"; do
+            [ "$r" = "success" ] || { echo "STATUS: FAILED"; exit 1; }
+          done
+          echo "STATUS: PASSED"
