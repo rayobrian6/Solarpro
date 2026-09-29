@@ -133,13 +133,40 @@ export function validateBatteryPlausibility(b: BatterySystem): string[] {
   if (b.usableCapacityKwh < 1 || b.usableCapacityKwh > 100) {
     violations.push(`${b.id}: usableCapacityKwh=${b.usableCapacityKwh} outside [1,100] range`);
   }
-  if (b.continuousPowerKw < 0.5 || b.continuousPowerKw > 30) {
-    violations.push(`${b.id}: continuousPowerKw=${b.continuousPowerKw} outside [0.5,30] range`);
-  }
-  if (b.peakPowerKw < b.continuousPowerKw) {
-    violations.push(
-      `${b.id}: peakPowerKw=${b.peakPowerKw} < continuousPowerKw=${b.continuousPowerKw} (peak must be ≥ continuous)`,
-    );
+  // 🚨 AN ENERGY EXPANSION HAS NO POWER, AND THAT IS THE POINT.
+  //
+  // A DC expansion pack (Tesla's Powerwall 3 Expansion is the first) connects to a HOST unit
+  // through the manufacturer's harness. It has no inverter, so its continuous and peak power are
+  // ZERO — deliberately, so that every consumer that sums these fields gets the right answer
+  // without knowing the field exists. Holding it to a 0.5-30 kW range would be holding it to being
+  // something it is not. Its ENERGY is still checked above, which is the property it actually has.
+  if (b.storageRole !== 'energy-expansion') {
+    if (b.continuousPowerKw < 0.5 || b.continuousPowerKw > 30) {
+      violations.push(`${b.id}: continuousPowerKw=${b.continuousPowerKw} outside [0.5,30] range`);
+    }
+    if (b.peakPowerKw < b.continuousPowerKw) {
+      violations.push(
+        `${b.id}: peakPowerKw=${b.peakPowerKw} < continuousPowerKw=${b.continuousPowerKw} (peak must be ≥ continuous)`,
+      );
+    }
+  } else {
+    // And the converse is enforced: an expansion that claims power is a defect, not a variant.
+    if (b.continuousPowerKw !== 0 || b.peakPowerKw !== 0) {
+      violations.push(
+        `${b.id}: storageRole='energy-expansion' but declares continuousPowerKw=${b.continuousPowerKw} / `
+        + `peakPowerKw=${b.peakPowerKw}. An expansion is a DC extension of its host and contributes `
+        + 'no AC power of its own.',
+      );
+    }
+    if ((b.maxContinuousOutputA ?? 0) !== 0 || (b.backfeedBreakerA ?? 0) !== 0) {
+      violations.push(
+        `${b.id}: storageRole='energy-expansion' but declares an AC output current or a backfeed `
+        + 'breaker. It receives no breaker of its own.',
+      );
+    }
+    if (!b.expansionHostId) {
+      violations.push(`${b.id}: storageRole='energy-expansion' names no expansionHostId.`);
+    }
   }
   if (b.voltageNominalV < 40 || b.voltageNominalV > 500) {
     violations.push(`${b.id}: voltageNominalV=${b.voltageNominalV} outside [40,500] range`);

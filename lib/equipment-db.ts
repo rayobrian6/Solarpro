@@ -2649,6 +2649,24 @@ export interface BatterySystem {
   roundTripEfficiencyPct: number;
   chemistry: 'LFP' | 'NMC' | 'NCA';
   voltageNominalV: number;
+  /**
+   * 🚨 DOES THIS PRODUCT INVERT, OR ONLY STORE?
+   *
+   * Absent ⇒ `'inverter-unit'`, which is every row that existed before this field: a battery with
+   * its own AC output that backfeeds a panel.
+   *
+   * `'energy-expansion'` is a DC battery extension that connects to a HOST unit through the
+   * manufacturer's expansion harness — a Powerwall 3 Expansion is the first. It adds usable energy
+   * and **no AC current at all**: no inverter contribution, no backfeed breaker, no gateway
+   * breaker of its own. Ray, on the 400 A Tesla job: "Never calculate service/busbar contribution
+   * from Expansion-unit energy capacity."
+   *
+   * The AC fields on such a row are therefore ZERO rather than absent, so a consumer that sums them
+   * without knowing about this field still gets the right answer.
+   */
+  storageRole?: 'inverter-unit' | 'energy-expansion';
+  /** For an 'energy-expansion': the catalogue id of the unit it extends. */
+  expansionHostId?: string;
   // AC interconnection (ac_coupled)
   acOutputVoltageV?: number;
   maxContinuousOutputA?: number;
@@ -2730,6 +2748,51 @@ export const BATTERIES: BatterySystem[] = [
     compatibleWith: ['tesla-backup-gateway-2', 'tesla-wall-connector-gen3'],
     active: true,
     datasheetUrl: 'https://energylibrary.tesla.com/docs/Public/EnergyStorage/Powerwall/3/Datasheet/en-us/Powerwall-3-Datasheet.pdf',
+  },
+  {
+    // ── Powerwall 3 Expansion ────────────────────────────────────────────────
+    //
+    // 🚨 EVERY AC FIELD HERE IS ZERO ON PURPOSE, NOT MISSING.
+    //
+    // An Expansion is a DC battery pack that connects to a host Powerwall 3 through Tesla's
+    // Expansion Harness. It has no inverter, no AC output, no backfeed breaker and no breaker in
+    // the Gateway. A consumer that sums `backfeedBreakerA` or `maxContinuousOutputA` across a
+    // fleet — which is what `resolveBatteryBranch` and the 120% busbar check do — must get zero
+    // from this row even if it has never heard of `storageRole`. Absent fields would have been
+    // read as "unknown" by some consumers and as "use the default" by others.
+    //
+    // WHAT IS NOT CLAIMED HERE: an SCCR, a peak power figure and a standalone datasheet URL. The
+    // Expansion is documented inside the Powerwall 3 literature rather than as its own datasheet,
+    // and `lib/electrical/adapters/tesla.ts` raises MANUFACTURER DOCUMENT REQUIRED rather than
+    // letting an unstated number become a passing check.
+    id: 'tesla-powerwall-3-expansion',
+    manufacturer: 'Tesla', model: 'Powerwall 3 Expansion',
+    category: 'battery', subcategory: 'dc_coupled',
+    storageRole: 'energy-expansion',
+    expansionHostId: 'tesla-powerwall-3',
+    usableCapacityKwh: 13.5, peakPowerKw: 0, continuousPowerKw: 0,
+    roundTripEfficiencyPct: 97.5, chemistry: 'LFP', voltageNominalV: 50,
+    acOutputVoltageV: 0, maxContinuousOutputA: 0,
+    backfeedBreakerA: 0, minDedicatedBreakerA: 0,
+    weightLbs: 253, outdoorRated: true, ipRating: 'IP67',
+    gridFormingCapable: false, backupCapable: true, wholeHomeBackup: false,
+    requiresGateway: false,
+    warrantyYears: 10, cycleGuarantee: 'Unlimited cycles', capacityRetentionPct: 70,
+    msrpUsd: 0,
+    necRefs: [
+      'NEC 706 — Energy Storage Systems',
+      'Adds no NEC 705.12(B) busbar contribution: it is a DC extension of its host unit and has no '
+      + 'AC output of its own.',
+    ],
+    ulListing: 'UL 9540 / UL 9540A', certifications: ['UL 9540', 'UL 9540A'],
+    ecosystemBrand: 'tesla',
+    ecosystemFamily: 'powerwall',
+    compatibleWith: ['tesla-powerwall-3'],
+    active: true,
+    // The Expansion is documented inside the Powerwall 3 literature rather than as a standalone
+    // datasheet, so this cites the Energy Library Powerwall 3 documentation root — the place the
+    // document actually is — instead of a PDF path that has not been confirmed to cover it.
+    datasheetUrl: 'https://energylibrary.tesla.com/docs/Public/EnergyStorage/Powerwall/3/',
   },
   {
     id: 'enphase-iq-battery-5p',
@@ -3795,6 +3858,45 @@ export const BACKUP_INTERFACES: BackupInterface[] = [
     active: true,
     // v47.400 datasheet: HTML specs page (no standalone PDF published)
     datasheetUrl: 'https://energylibrary.tesla.com/docs/Public/EnergyStorage/Powerwall/2/InstallManual/BackupGateway/2/en-us/GUID-C93D57B7-CA13-4E04-9449-1EAB073A485B.html',
+  },
+  {
+    // ── Backup Gateway 3 ─────────────────────────────────────────────────────
+    //
+    // 🚨 THE 200 A NUMBER IS THE WHOLE REASON A 400 A SERVICE NEEDS TWO OF THESE. A Gateway is a
+    // 200 A continuous device, so `400 A service → one Gateway → everything` is not a topology
+    // SolarPro may produce. `lib/electrical/serviceTopology.ts` FAILS that arrangement by name.
+    //
+    // WHAT THIS ROW DOES NOT STATE, DELIBERATELY:
+    //   · an SCCR — the supported rating depends on WHICH main breaker is fitted, so it belongs to
+    //     the instance in the design, not to the product. `GatewayInstance.sccrA` carries it and an
+    //     absent one reports NOT_EVALUATED rather than passing the fault-current chain.
+    //   · a single main-breaker size as the only option. The field holds one number and the
+    //     product accepts a range of service-rated mains up to this value; the size actually
+    //     fitted is an instance property.
+    id: 'tesla-backup-gateway-3',
+    manufacturer: 'Tesla', model: 'Backup Gateway 3',
+    category: 'backup_interface', subcategory: 'gateway_controller',
+    maxBackupOutputKw: 48, maxContinuousOutputA: 200,
+    serviceEntranceRated: true, mainBreakerA: 200,
+    gridFormingCapable: true, islandingCapable: true,
+    loadSheddingCapable: false,
+    generatorCompatible: false,
+    outdoorRated: true, weightLbs: 20, warrantyYears: 10, msrpUsd: 1200,
+    necRefs: [
+      'NEC 705.12(B) — load-side interconnection',
+      'NEC 706 — Energy Storage Systems',
+      'NEC 230.82 — service entrance rated',
+      'NEC 110.9 / 110.24 — interrupting rating depends on the main breaker fitted; it is an '
+      + 'instance property, not a product constant.',
+    ],
+    ulListing: 'UL 1741 / UL 1741-SA',
+    compatibleBatteries: ['tesla-powerwall-3'],
+    ecosystemBrand: 'tesla',
+    ecosystemFamily: 'backup-gateway',
+    compatibleWith: ['tesla-powerwall-3', 'tesla-powerwall-3-expansion'],
+    active: true,
+    isNew: true,
+    datasheetUrl: 'https://energylibrary.tesla.com/docs/Public/EnergyStorage/Powerwall/3/',
   },
   {
     id: 'generac-pwrmanager',
