@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDbReady , handleRouteDbError } from '@/lib/db-neon';
 import { signToken } from '@/lib/auth';
 import { requireAdminApi } from '@/lib/adminAuth';
+import { canActOnAccount } from '@/lib/adminRoleHierarchy';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 export const dynamic = 'force-dynamic';
@@ -74,6 +75,19 @@ export async function POST(req: NextRequest) {
 
     if (new Date(row.expires_at) < new Date()) {
       return NextResponse.json({ success: false, error: 'Token expired' }, { status: 401 });
+    }
+
+    // 🚨 THE BOUNDARY IS RE-CHECKED AT CONSUMPTION. The token is a bearer
+    // secret minted for ONE admin: any other admin presenting it is refused.
+    // And the target's role is read now, not at mint time — a target promoted
+    // in the 5-minute window (or a token minted before this rule existed) must
+    // not become a session on an account the minter no longer outranks.
+    if (row.admin_id !== adminCheck.id) {
+      return NextResponse.json({ success: false, error: 'This impersonation token was issued to another admin.' }, { status: 403 });
+    }
+    const boundary = canActOnAccount(adminCheck, { id: row.uid as string, role: row.role });
+    if (!boundary.ok) {
+      return NextResponse.json({ success: false, error: boundary.error }, { status: boundary.status! });
     }
 
     // Mark token as used atomically — prevents race-condition double-use

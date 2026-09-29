@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAdminApi } from '@/lib/adminAuth';
 import { getDbReady, handleRouteDbError, isValidUUID } from '@/lib/db-neon';
 import { logAdminAction } from '@/lib/adminActivityLog';
+import { canActOnAccount } from '@/lib/adminRoleHierarchy';
 import crypto from 'crypto';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
@@ -81,6 +82,17 @@ export async function PATCH(req: NextRequest) {
     // Fetch target user info for logging
     const targetRows = await sql`SELECT id, name, email, company, role FROM users WHERE id = ${id} LIMIT 1`;
     const targetUser = targetRows[0] ?? null;
+
+    // 🚨 THE TARGET MUST BE BENEATH THE ACTOR. requireAdminApi only proved the
+    // caller is an admin; every action below mutates (or, for 'impersonate',
+    // assumes) the target account. Without this a plain admin could reset the
+    // owner's password and was handed the temporary password in the response.
+    // Strict rank: never a peer, never higher, never yourself — see
+    // lib/adminRoleHierarchy.ts.
+    const boundary = canActOnAccount(admin, targetUser as { id: string; role?: unknown } | null);
+    if (!boundary.ok) {
+      return NextResponse.json({ success: false, error: boundary.error }, { status: boundary.status! });
+    }
 
     if (action === 'grant_free_pass') {
       await sql`UPDATE users SET is_free_pass = true, plan = 'contractor', subscription_status = 'free_pass',
@@ -241,8 +253,13 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Cannot delete your own account via this endpoint.' }, { status: 400 });
     }
 
-    const targetRows = await sql`SELECT email, company FROM users WHERE id = ${id} LIMIT 1`;
+    const targetRows = await sql`SELECT id, email, company, role FROM users WHERE id = ${id} LIMIT 1`;
     if (!targetRows[0]) return NextResponse.json({ success: false, error: 'User not found.' }, { status: 404 });
+    // A super_admin may not delete another super_admin (lib/adminRoleHierarchy.ts).
+    const boundary = canActOnAccount(admin, targetRows[0] as { id: string; role?: unknown });
+    if (!boundary.ok) {
+      return NextResponse.json({ success: false, error: boundary.error }, { status: boundary.status! });
+    }
     await sql`DELETE FROM users WHERE id = ${id}`;
     await logAdminAction({ adminId: admin.id, action: 'delete_user', targetUserId: id, targetCompany: targetRows[0]?.company, metadata: { targetEmail: targetRows[0]?.email } });
     return NextResponse.json({ success: true });

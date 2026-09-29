@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest, getDbReady } from '@/lib/auth';
 import { handleRouteDbError } from '@/lib/db-neon';
 import { requireAdminApi } from '@/lib/adminAuth';
+import { canActOnAccount } from '@/lib/adminRoleHierarchy';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 export const dynamic = 'force-dynamic';
@@ -51,6 +52,23 @@ export async function POST(req: NextRequest) {
     const safePlan = typeof plan === 'string' && VALID_PLANS.has(plan) ? plan : 'contractor';
 
     const sql = await getDbReady();
+
+    // 🚨 THE ACCOUNT BEHIND THE EMAIL MUST BE BENEATH THE ACTOR. grant, revoke
+    // and delete all write to (or remove) whatever account owns this email —
+    // and 'delete' let any admin delete the owner unless OWNER_EMAIL happened
+    // to name that exact address. Same strict-rank rule as /api/admin/users
+    // (lib/adminRoleHierarchy.ts). An email with no account is not a target:
+    // grant creates a plain user, revoke/delete are no-ops.
+    if (action === 'grant' || action === 'revoke' || action === 'delete') {
+      const targetRows = await sql`SELECT id, role FROM users WHERE email = ${String(email).toLowerCase()} LIMIT 1`;
+      const target = (targetRows[0] ?? null) as { id: string; role?: unknown } | null;
+      if (target) {
+        const boundary = canActOnAccount(adminUser, target);
+        if (!boundary.ok) {
+          return NextResponse.json({ success: false, error: boundary.error }, { status: boundary.status! });
+        }
+      }
+    }
 
     if (action === 'grant') {
       // Check if user exists

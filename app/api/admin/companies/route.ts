@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAdminApi } from '@/lib/adminAuth';
 import { getDbReady, handleRouteDbError, isValidUUID } from '@/lib/db-neon';
 import { logAdminAction } from '@/lib/adminActivityLog';
+import { canActOnAccount, rolesOutrankedBy } from '@/lib/adminRoleHierarchy';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 export const maxDuration = 30;
@@ -93,6 +94,14 @@ export async function PATCH(req: NextRequest) {
     if (typeof action  === 'string' && action.length  > 50)  return NextResponse.json({ success: false, error: 'action too long (max 50).'  }, { status: 400 });
     if (body.note      && typeof body.note === 'string' && body.note.length > 500) return NextResponse.json({ success: false, error: 'note too long (max 500).' }, { status: 400 });
 
+    // 🚨 COMPANY-WIDE WRITES TOUCH ONLY ACCOUNTS THE ACTOR OUTRANKS. `company`
+    // is a free-text column, so "every user in Acme" included Acme's owner —
+    // and the platform owner too, if their row carries the same company. Each
+    // bulk UPDATE below is scoped to the roles beneath the actor (NULL role =
+    // 'user'), the same strict-rank rule as /api/admin/users
+    // (lib/adminRoleHierarchy.ts).
+    const scope = rolesOutrankedBy(admin.role);
+
     switch (action) {
 
       case 'grant_free_pass': {
@@ -103,6 +112,7 @@ export async function PATCH(req: NextRequest) {
               free_pass_note = ${body.note || 'Company free pass granted by admin'},
               updated_at = NOW()
           WHERE company = ${company}
+            AND COALESCE(role, 'user') = ANY(${scope}::text[])
         `;
         await logAdminAction({ adminId: admin.id, action: 'company_grant_free_pass', targetCompany: company, metadata: { note: body.note } });
         return NextResponse.json({ success: true, message: `Free pass granted to all users in ${company}` });
@@ -113,6 +123,7 @@ export async function PATCH(req: NextRequest) {
           UPDATE users
           SET is_free_pass = false, subscription_status = 'trialing', updated_at = NOW()
           WHERE company = ${company}
+            AND COALESCE(role, 'user') = ANY(${scope}::text[])
         `;
         await logAdminAction({ adminId: admin.id, action: 'company_revoke_free_pass', targetCompany: company, metadata: {} });
         return NextResponse.json({ success: true, message: `Free pass revoked for all users in ${company}` });
@@ -122,7 +133,8 @@ export async function PATCH(req: NextRequest) {
         const plan = body.plan;
         if (!['starter', 'professional', 'contractor', 'enterprise'].includes(plan))
           return NextResponse.json({ success: false, error: 'Invalid plan' }, { status: 400 });
-        await sql`UPDATE users SET plan = ${plan}, updated_at = NOW() WHERE company = ${company}`;
+        await sql`UPDATE users SET plan = ${plan}, updated_at = NOW()
+                  WHERE company = ${company} AND COALESCE(role, 'user') = ANY(${scope}::text[])`;
         await logAdminAction({ adminId: admin.id, action: 'company_change_plan', targetCompany: company, metadata: { newPlan: plan } });
         return NextResponse.json({ success: true, message: `Plan changed to ${plan} for all users in ${company}` });
       }
@@ -130,13 +142,16 @@ export async function PATCH(req: NextRequest) {
       case 'disable_company': {
         if (admin.role !== 'super_admin')
           return NextResponse.json({ success: false, error: 'Only super_admin can disable companies' }, { status: 403 });
-        await sql`UPDATE users SET subscription_status = 'suspended', updated_at = NOW() WHERE company = ${company}`;
+        await sql`UPDATE users SET subscription_status = 'suspended', updated_at = NOW()
+                  WHERE company = ${company} AND COALESCE(role, 'user') = ANY(${scope}::text[])`;
         await logAdminAction({ adminId: admin.id, action: 'company_disabled', targetCompany: company, metadata: {} });
         return NextResponse.json({ success: true, message: `All users in ${company} have been suspended` });
       }
 
       case 'enable_company': {
-        await sql`UPDATE users SET subscription_status = 'trialing', updated_at = NOW() WHERE company = ${company} AND subscription_status = 'suspended'`;
+        await sql`UPDATE users SET subscription_status = 'trialing', updated_at = NOW()
+                  WHERE company = ${company} AND subscription_status = 'suspended'
+                    AND COALESCE(role, 'user') = ANY(${scope}::text[])`;
         await logAdminAction({ adminId: admin.id, action: 'company_enabled', targetCompany: company, metadata: {} });
         return NextResponse.json({ success: true, message: `All suspended users in ${company} have been re-enabled` });
       }
@@ -149,6 +164,11 @@ export async function PATCH(req: NextRequest) {
           return NextResponse.json({ success: false, error: 'Invalid userId format.' }, { status: 400 });
         if (admin.role !== 'super_admin')
           return NextResponse.json({ success: false, error: 'Only super_admin can promote to admin' }, { status: 403 });
+        // "Promote to admin" on a super_admin is a demotion of a peer.
+        const promoteRows = await sql`SELECT id, role FROM users WHERE id = ${userId} AND company = ${company} LIMIT 1`;
+        const promoteBoundary = canActOnAccount(admin, (promoteRows[0] ?? null) as { id: string; role?: unknown } | null);
+        if (!promoteBoundary.ok)
+          return NextResponse.json({ success: false, error: promoteBoundary.error }, { status: promoteBoundary.status! });
         await sql`UPDATE users SET role = 'admin', updated_at = NOW() WHERE id = ${userId} AND company = ${company}`;
         await logAdminAction({ adminId: admin.id, action: 'company_add_admin', targetUserId: userId, targetCompany: company, metadata: {} });
         return NextResponse.json({ success: true, message: `User promoted to admin in ${company}` });
@@ -168,6 +188,15 @@ export async function PATCH(req: NextRequest) {
         const ownerRows = await sql`SELECT 1 FROM users WHERE id = ${newOwnerId} AND company = ${company} LIMIT 1`;
         if (ownerRows.length === 0)
           return NextResponse.json({ success: false, error: 'New owner not found in this company' }, { status: 404 });
+        // The transfer demotes every super_admin in the company. That is a
+        // write on each of them, so it is allowed only when the actor is the
+        // only super_admin it would demote (handing over their own ownership);
+        // it can never be used to demote a peer super_admin.
+        const peerOwners = await sql`
+          SELECT id FROM users WHERE company = ${company} AND role = 'super_admin' AND id <> ${admin.id} LIMIT 1
+        `;
+        if (peerOwners.length > 0)
+          return NextResponse.json({ success: false, error: 'Transfer would demote another super_admin — not permitted from the admin console.' }, { status: 403 });
         // Demote all current super_admins in company to admin, then promote new owner
         await sql`UPDATE users SET role = 'admin', updated_at = NOW() WHERE company = ${company} AND role = 'super_admin'`;
         await sql`UPDATE users SET role = 'super_admin', updated_at = NOW() WHERE id = ${newOwnerId} AND company = ${company}`;
