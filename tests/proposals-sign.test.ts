@@ -410,19 +410,39 @@ describe('POST /api/proposals/[id]/sign', () => {
       expect(() => new Date(body.signedAt)).not.toThrow();
     });
 
-    it('calls getDbReady exactly once per request', async () => {
-      const sqlMock = makeSqlMock(
-        () => Promise.resolve([makeProposal()]),
-        () => Promise.resolve([{ id: 'prop-123' }]), // UPDATE proposals … RETURNING id (the row was still unsigned)
-        () => Promise.resolve([]),
-        () => Promise.resolve([]),
-        () => Promise.resolve([]),
-        () => Promise.resolve([]),
-      );
-      vi.mocked(getDbReady).mockResolvedValue(sqlMock);
+    it('opens one executor for its own statements and hands the stage to the stage writer', async () => {
+      // This asserted "getDbReady exactly once per request". Since 3cddb98d the
+      // route advances the pipeline stage through applyStageChange — the ONE stage
+      // writer (project_status, contract_signed_at, activity row, generated
+      // tasks) — which acquires its own executor, as does generateTasksForStage.
+      // That is 3 acquisitions, and it is correct: getDbReady hands back a
+      // stateless Neon HTTP executor, so there is no connection or transaction
+      // for them to share. Pinning the raw count to 3 would bless whatever the
+      // stage writer happens to do; what the old case protected is that the
+      // ROUTE does not re-acquire per statement. So the stage writer is isolated
+      // and the route's own count is still one — and the hand-off itself is
+      // asserted, which the old count never did.
+      const applyStageChange = vi.fn().mockResolvedValue(undefined);
+      vi.doMock('@/lib/operations/stageChange', () => ({ applyStageChange }));
+      try {
+        const sqlMock = makeSqlMock(
+          () => Promise.resolve([makeProposal()]),
+          () => Promise.resolve([{ id: 'prop-123' }]), // UPDATE proposals … RETURNING id (the row was still unsigned)
+        );
+        vi.mocked(getDbReady).mockResolvedValue(sqlMock);
 
-      await POST(makeRequest(validBody) as never, routeParams);
-      expect(getDbReady).toHaveBeenCalledTimes(1);
+        const res = await POST(makeRequest(validBody) as never, routeParams);
+        expect(res.status).toBe(200);
+        expect(getDbReady).toHaveBeenCalledTimes(1);
+        expect(applyStageChange).toHaveBeenCalledTimes(1);
+        expect(applyStageChange).toHaveBeenCalledWith(expect.objectContaining({
+          projectId: 'proj-456',
+          toStage:   'contract_signed',
+          source:    'proposal_signature',
+        }));
+      } finally {
+        vi.doUnmock('@/lib/operations/stageChange');
+      }
     });
 
     it('response Content-Type is application/json', async () => {

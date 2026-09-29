@@ -4,6 +4,12 @@
  * tests/mapSources.test.tsx
  *
  * Unit tests for the map-source picker (Aurora parity).
+ *
+ * The toolbar's imagery choice is ImageryToggle (`Native 3D | Nearmap`), not the
+ * SourcePicker dropdown: 2e58cb94 unmounted the dropdown because the bar offered
+ * the same choice twice, and its extra entries — Bing and Mapbox — are
+ * `wired: false` and reach no imagery code in the viewer. SourcePicker is kept
+ * for the LiDAR / Street View work and is still tested directly below.
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
@@ -146,11 +152,14 @@ function ControlledPicker(props: { initial?: MapPickerState; disabled?: boolean 
 }
 
 describe('MapSourcePicker — rendering', () => {
-  it('renders the three control triggers with Aurora-style labels', () => {
+  it('renders the three controls: Details, the tabs, and ONE imagery control', () => {
     render(<ControlledPicker />);
     expect(screen.getByTestId('map-source-details')).toBeInTheDocument();
     expect(screen.getByTestId('map-source-tabs')).toBeInTheDocument();
-    expect(screen.getByTestId('map-source-picker')).toBeInTheDocument();
+    expect(screen.getByTestId('imagery-toggle')).toBeInTheDocument();
+    // The provider dropdown is deliberately not mounted — the imagery choice is
+    // offered once (2e58cb94).
+    expect(screen.queryByTestId('map-source-picker')).toBeNull();
     expect(screen.getByTestId('map-source-tab-streetView')).toHaveTextContent('Street View');
     expect(screen.getByTestId('map-source-tab-lidar')).toHaveTextContent('LiDAR');
   });
@@ -161,9 +170,12 @@ describe('MapSourcePicker — rendering', () => {
     expect(screen.getByTestId('map-source-tab-lidar')).toHaveAttribute('aria-selected', 'false');
   });
 
-  it('shows the current source label inside the picker button', () => {
+  it('shows the current source on the imagery control', () => {
     render(<ControlledPicker />);
-    expect(screen.getByTestId('map-source-picker-label').textContent).toBe('Google');
+    // `google` is the viewer's native imagery (the Photorealistic mesh).
+    expect(screen.getByTestId('imagery-toggle')).toHaveAttribute('data-imagery-source', 'native');
+    render(<ControlledPicker initial={{ ...DEFAULT_PICKER_STATE, source: 'nearmap' }} />);
+    expect(screen.getAllByTestId('imagery-toggle')[1]).toHaveAttribute('data-imagery-source', 'nearmap');
   });
 
   it('shows the active layer count in the Details button', () => {
@@ -228,37 +240,40 @@ describe('MapSourcePicker — Details dropdown', () => {
   });
 });
 
-describe('MapSourcePicker — Source picker', () => {
-  it('opens the source menu and shows all four providers', () => {
+describe('MapSourcePicker — imagery control', () => {
+  it('offers exactly the sources the viewer can render, and nothing it cannot', () => {
     render(<ControlledPicker />);
-    fireEvent.click(screen.getByTestId('map-source-picker').querySelector('button')!);
-    const menu = screen.getByTestId('map-source-picker-menu');
-    expect(menu).toBeInTheDocument();
-    for (const s of SOURCES) {
-      expect(within(menu).getByTestId(`map-source-option-${s.id}`)).toBeInTheDocument();
+    const toggle = screen.getByTestId('imagery-toggle');
+    // Every wired source is offered; no unwired one (Bing, Mapbox) is.
+    expect(SOURCES.filter(s => s.wired).map(s => s.id)).toEqual(['google', 'nearmap']);
+    expect(within(toggle).getByTestId('imagery-native')).toHaveTextContent('Native 3D');
+    expect(within(toggle).getByTestId('imagery-nearmap')).toHaveTextContent('Nearmap');
+    expect(within(toggle).getAllByRole('button')).toHaveLength(2);
+    for (const s of SOURCES.filter(x => !x.wired)) {
+      expect(screen.queryByText(s.label), `${s.label} is offered but reaches no imagery code`).toBeNull();
     }
   });
 
-  it('the active source (Google) is marked aria-checked', () => {
+  it('the active source (Native 3D) is marked aria-pressed', () => {
     render(<ControlledPicker />);
-    fireEvent.click(screen.getByTestId('map-source-picker').querySelector('button')!);
-    expect(screen.getByTestId('map-source-option-google')).toHaveAttribute('aria-checked', 'true');
-    expect(screen.getByTestId('map-source-option-bing')).toHaveAttribute('aria-checked', 'false');
+    expect(screen.getByTestId('imagery-native')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('imagery-nearmap')).toHaveAttribute('aria-pressed', 'false');
   });
 
-  it('selecting Bing updates the picker label and closes the menu', () => {
+  it('choosing Nearmap switches the source, and Native 3D switches it back', () => {
     render(<ControlledPicker />);
-    fireEvent.click(screen.getByTestId('map-source-picker').querySelector('button')!);
-    fireEvent.click(screen.getByTestId('map-source-option-bing'));
-    expect(screen.getByTestId('map-source-picker-label').textContent).toBe('Bing');
-    expect(screen.queryByTestId('map-source-picker-menu')).toBeNull();
+    fireEvent.click(screen.getByTestId('imagery-nearmap'));
+    expect(screen.getByTestId('map-source-picker-root')).toHaveAttribute('data-source', 'nearmap');
+    expect(screen.getByTestId('imagery-nearmap')).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByTestId('imagery-native'));
+    expect(screen.getByTestId('map-source-picker-root')).toHaveAttribute('data-source', 'google');
   });
 
-  it('selecting the already-active source still closes the menu', () => {
-    render(<ControlledPicker />);
-    fireEvent.click(screen.getByTestId('map-source-picker').querySelector('button')!);
-    fireEvent.click(screen.getByTestId('map-source-option-google'));
-    expect(screen.queryByTestId('map-source-picker-menu')).toBeNull();
+  it('choosing the already-active source is a no-op', () => {
+    const onChange = vi.fn();
+    render(<MapSourcePicker state={DEFAULT_PICKER_STATE} onChange={onChange} />);
+    fireEvent.click(screen.getByTestId('imagery-native'));
+    expect(onChange).not.toHaveBeenCalled();
   });
 });
 
@@ -278,19 +293,21 @@ describe('MapSourcePicker — popover behavior', () => {
         <button data-testid="outside-button">outside</button>
       </div>
     );
-    fireEvent.click(screen.getByTestId('map-source-picker').querySelector('button')!);
-    expect(screen.getByTestId('map-source-picker-menu')).toBeInTheDocument();
-    fireEvent.mouseDown(screen.getByTestId('outside-button'));
-    expect(screen.queryByTestId('map-source-picker-menu')).toBeNull();
-  });
-
-  it('opening the Source menu closes the Details menu', () => {
-    render(<ControlledPicker />);
     fireEvent.click(screen.getByTestId('map-source-details').querySelector('button')!);
     expect(screen.getByTestId('map-source-details-menu')).toBeInTheDocument();
-    fireEvent.click(screen.getByTestId('map-source-picker').querySelector('button')!);
+    fireEvent.mouseDown(screen.getByTestId('outside-button'));
     expect(screen.queryByTestId('map-source-details-menu')).toBeNull();
-    expect(screen.getByTestId('map-source-picker-menu')).toBeInTheDocument();
+  });
+
+  it('switching imagery keeps the chosen layers and tab', () => {
+    render(<ControlledPicker initial={{
+      source: 'google', tab: 'lidar', layers: new Set(['imagery', 'parcels']),
+    }} />);
+    fireEvent.click(screen.getByTestId('imagery-nearmap'));
+    const root = screen.getByTestId('map-source-picker-root');
+    expect(root).toHaveAttribute('data-source', 'nearmap');
+    expect(root).toHaveAttribute('data-tab', 'lidar');
+    expect(root).toHaveAttribute('data-layer-count', '2');
   });
 });
 
@@ -309,22 +326,25 @@ describe('MapSourcePicker — disabled prop', () => {
     expect(screen.getByTestId('map-source-tab-streetView')).toBeDisabled();
   });
 
-  it('disables the source picker trigger', () => {
+  it('disables both imagery choices', () => {
     render(<ControlledPicker disabled />);
-    const trigger = screen.getByTestId('map-source-picker').querySelector('button')!;
-    expect(trigger).toBeDisabled();
-    fireEvent.click(trigger);
-    expect(screen.queryByTestId('map-source-picker-menu')).toBeNull();
+    expect(screen.getByTestId('imagery-native')).toBeDisabled();
+    expect(screen.getByTestId('imagery-nearmap')).toBeDisabled();
+    fireEvent.click(screen.getByTestId('imagery-nearmap'));
+    expect(screen.getByTestId('map-source-picker-root')).toHaveAttribute('data-source', 'google');
   });
 });
 
 describe('MapSourcePicker — Aurora parity', () => {
-  it('exposes Aurora\'s exact label set when the picker is open', () => {
+  it('shows Nearmap in words without opening anything', () => {
+    // Ray: "There is no visible Nearmap toggle" — the word lived inside a closed
+    // dropdown. Both imagery choices, the tabs and the Details trigger are all
+    // visible with no menu open.
     render(<ControlledPicker />);
-    fireEvent.click(screen.getByTestId('map-source-picker').querySelector('button')!);
-    for (const s of SOURCES) {
-      expect(screen.getAllByText(s.label).length).toBeGreaterThan(0);
-    }
+    expect(screen.queryByTestId('map-source-details-menu')).toBeNull();
+    expect(screen.getByTestId('imagery-nearmap')).toHaveTextContent('Nearmap');
+    expect(screen.getByTestId('imagery-nearmap')).toBeVisible();
+    expect(screen.getByText('Native 3D')).toBeInTheDocument();
     expect(screen.getByText('LiDAR')).toBeInTheDocument();
     expect(screen.getByText('Street View')).toBeInTheDocument();
   });
