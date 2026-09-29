@@ -54,6 +54,96 @@
  * generalises it rather than inventing it.
  */
 
+// ═══════════════════════════════════════════════════════════════════════════
+// 🚨 THE SAME RULE, ONE LEVEL DOWN: A SINGLE CHECK MUST BE ABLE TO SAY "I DID NOT RUN".
+//
+// Everything above is about ENGINES. Ray, on the 400 A Tesla service:
+//
+//   "You found that the current rules engine can only express `error | warning | info | pass`.
+//    Do not fake NOT_EVALUATED as a warning string sprinkled into outputs. Strengthen the existing
+//    assessment model so engineering conclusions distinguish PASS / FAIL / NOT_EVALUATED-
+//    INPUT_REQUIRED, while severity remains a separate presentation concern if necessary."
+//
+// So a CONCLUSION is what the engineering says, and a SEVERITY is how a screen paints it. They are
+// different things and the codebase had only the second. `RuleSeverity` has no member for "the
+// available fault current was never established", so that fact could only travel as a warning —
+// and a warning is something that was evaluated.
+//
+// These three types are the shared vocabulary. `lib/electrical/serviceTopology.ts` produces them,
+// `lib/rules-engine.ts` carries them alongside its severities, and the UI, the SLD notes and the
+// permit read them. One vocabulary, not one per consumer.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * What the engineering concluded about one check.
+ *
+ * 🚨 `NOT_EVALUATED` IS NOT A SOFT FAIL AND NOT A SOFT PASS. It means the check could not run
+ * because a governing input or authority is absent, and it always travels with the NAME of what is
+ * missing (`requires`). "Unknown may not become PASS."
+ */
+export type EngineeringConclusion = 'PASS' | 'FAIL' | 'NOT_EVALUATED';
+
+export interface EngineeringCheck {
+  id: string;
+  /** 'site', or a scoped key like `domain:<id>` / `branch:<id>`, so a panel can group them. */
+  scope: string;
+  title: string;
+  conclusion: EngineeringConclusion;
+  detail: string;
+  /**
+   * The inputs or authorities this check needs. Present ⇔ NOT_EVALUATED, and never empty then:
+   * an indeterminate result that cannot say what would resolve it is a dead end.
+   */
+  requires?: string[];
+  citation?: string;
+}
+
+/**
+ * Fold many checks into one conclusion.
+ *
+ * 🚨 A KNOWN FAILURE OUTRANKS AN UNKNOWN — the same precedence `resolveOverallStatus` uses above,
+ * for the same reason: you do not get to soften a proven failure by also failing to evaluate
+ * something else. And an empty set is NOT a pass; nothing was checked.
+ */
+export function foldConclusions(checks: readonly EngineeringCheck[]): EngineeringConclusion {
+  if (!checks || checks.length === 0) return 'NOT_EVALUATED';
+  if (checks.some(c => c.conclusion === 'FAIL')) return 'FAIL';
+  if (checks.some(c => c.conclusion === 'NOT_EVALUATED')) return 'NOT_EVALUATED';
+  return 'PASS';
+}
+
+/**
+ * How a conclusion is PAINTED. Presentation only — never read this to decide engineering.
+ *
+ * NOT_EVALUATED maps to 'warning' because that is the loudest thing the existing severity scale
+ * can say, and it must not be quieter than a warning. That mapping is exactly why the conclusion
+ * has to exist separately: 'warning' cannot be un-read as "we checked and it was nearly fine".
+ */
+export function conclusionSeverity(c: EngineeringConclusion): 'error' | 'warning' | 'pass' {
+  return c === 'FAIL' ? 'error' : c === 'NOT_EVALUATED' ? 'warning' : 'pass';
+}
+
+/** Every distinct missing input across a set of checks, for a one-line "what is needed" summary. */
+export function requiredInputs(checks: readonly EngineeringCheck[]): string[] {
+  const out = new Set<string>();
+  for (const c of checks ?? []) {
+    if (c.conclusion !== 'NOT_EVALUATED') continue;
+    for (const r of c.requires ?? []) out.add(r);
+  }
+  return [...out].sort();
+}
+
+/**
+ * The line a UI, an SLD note or a permit prints for an indeterminate result.
+ *
+ * One phrasing, in one place, so the drawing and the report cannot word it differently.
+ */
+export function notEvaluatedLabel(checks: readonly EngineeringCheck[]): string | null {
+  const needs = requiredInputs(checks);
+  if (needs.length === 0) return null;
+  return `NOT EVALUATED — ${needs.join(', ')} REQUIRED`;
+}
+
 /** Why an engine produced no verdict. */
 export type NotEvaluatedReason =
   /** The caller supplied no input for this engine. */

@@ -50,6 +50,10 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { maxLoadSideBackfeedA } from '@/lib/nec/rule705_12';
+import {
+  foldConclusions,
+  type EngineeringConclusion, type EngineeringCheck,
+} from '@/lib/engineering/engineeringStatus';
 
 // ── The service ─────────────────────────────────────────────────────────────
 
@@ -282,19 +286,16 @@ export interface ManufacturerDocumentState {
 
 // ── Verdicts ────────────────────────────────────────────────────────────────
 
-export type Verdict = 'PASS' | 'FAIL' | 'NOT_EVALUATED';
-
-export interface TopologyCheck {
-  id: string;
-  /** 'site', or `branch:<id>` / `domain:<id>` — so a proof panel can group them. */
-  scope: string;
-  title: string;
-  verdict: Verdict;
-  detail: string;
-  /** Named inputs the check needs. Present only when NOT_EVALUATED. */
-  requires?: string[];
-  citation?: string;
-}
+/**
+ * 🚨 ONE ASSESSMENT VOCABULARY FOR THE WHOLE PRODUCT, NOT ONE PER MODULE.
+ *
+ * These were declared here first. They now live in `lib/engineering/engineeringStatus.ts` — the
+ * file that already held the "PASS must not mean nothing objected" rule at engine level — and this
+ * module re-exports them under its own names so the SLD, the permit, the BOM and the engineering
+ * UI all read the same three words. A second enum spelled the same way is a second authority.
+ */
+export type Verdict = EngineeringConclusion;
+export type TopologyCheck = EngineeringCheck;
 
 export interface TopologyEvaluation {
   checks: TopologyCheck[];
@@ -320,12 +321,12 @@ export interface StorageSummary {
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 const pass = (id: string, scope: string, title: string, detail: string, citation?: string): TopologyCheck =>
-  ({ id, scope, title, verdict: 'PASS', detail, citation });
+  ({ id, scope, title, conclusion: 'PASS', detail, citation });
 const fail = (id: string, scope: string, title: string, detail: string, citation?: string): TopologyCheck =>
-  ({ id, scope, title, verdict: 'FAIL', detail, citation });
+  ({ id, scope, title, conclusion: 'FAIL', detail, citation });
 const unknown = (
   id: string, scope: string, title: string, detail: string, requires: string[], citation?: string,
-): TopologyCheck => ({ id, scope, title, verdict: 'NOT_EVALUATED', detail, requires, citation });
+): TopologyCheck => ({ id, scope, title, conclusion: 'NOT_EVALUATED', detail, requires, citation });
 
 const num = (v: number | null | undefined): v is number => typeof v === 'number' && Number.isFinite(v);
 
@@ -733,9 +734,9 @@ export function evaluateServiceTopology(topology: ServiceTopology): TopologyEval
     }
   }
 
-  const overall: Verdict = checks.some(c => c.verdict === 'FAIL') ? 'FAIL'
-    : checks.some(c => c.verdict === 'NOT_EVALUATED') ? 'NOT_EVALUATED'
-    : 'PASS';
+  // Folded by the shared authority, which applies the same "a known failure outranks an unknown"
+  // precedence the engine-level aggregator uses.
+  const overall: Verdict = foldConclusions(checks);
 
   return { checks, bonding, storageSummary, overall };
 }

@@ -1,0 +1,160 @@
+// ═══════════════════════════════════════════════════════════════════════════
+// THE BOM LINES FOR A SERVICE TOPOLOGY'S PHYSICAL EQUIPMENT.
+//
+// Ray: "BOM must consume physical instances from the topology... Do not derive count from a global
+// battery quantity scalar." And, on pricing: "Prove: `ServiceTopology equipment instances` =
+// `BOM quantities` = `pricing quantities`."
+//
+// So the quantity on every line below is `instances.filter(...).length`. There is no count
+// parameter to this function, and no catalogue default. If the graph has two gateways the BOM has
+// two gateways, and the only way to change that is to change the graph.
+//
+// 🚨 AN EXPANSION BUYS HARDWARE AND SELLS NO CURRENT. It gets its own line AND its harness line —
+// it is a real thing somebody has to order — while `contributesAcSource` keeps it out of every
+// source count. The two facts live in different fields precisely so neither can be inferred from
+// the other.
+//
+// WHAT THIS DOES NOT DO: it does not replace `lib/bom-engine-v4.ts`. That engine builds the racking,
+// conductors, conduit, labels and the rest from the array and the runs. This supplies the
+// SERVICE-TOPOLOGY equipment — the instances the old model had no way to enumerate — and
+// `reconcileQuantities` is how the two are held to the same numbers.
+// ═══════════════════════════════════════════════════════════════════════════
+
+import type { BOMLineItemV4 } from '@/lib/bom-types-v4';
+import type { ServiceTopology } from '@/lib/electrical/serviceTopology';
+import {
+  equipmentInstancesFromTopology, type EquipmentInstance,
+} from '@/lib/electrical/topologyEquipment';
+import { getBatteryById, getBackupInterfaceById } from '@/lib/equipment-db';
+import { resolveUnitCost } from '@/lib/bom/distributorPricing';
+
+/** A catalogue-resolved name for a product id, or the id itself when unresolved. */
+function nameOf(productId: string): { manufacturer: string; model: string } {
+  const b = getBatteryById(productId);
+  if (b) return { manufacturer: b.manufacturer, model: b.model };
+  const g = getBackupInterfaceById(productId);
+  if (g) return { manufacturer: g.manufacturer, model: g.model };
+  return { manufacturer: '', model: productId };
+}
+
+function line(
+  id: string, category: string, productId: string, quantity: number,
+  description: string, derivedFrom: string, notes?: string,
+): BOMLineItemV4 {
+  const { manufacturer, model } = nameOf(productId);
+  return {
+    id, stageId: 'ac', stageLabel: 'AC / Service',
+    category, manufacturer, model,
+    partNumber: productId,
+    description,
+    quantity,
+    unit: 'ea',
+    derivedFrom,
+    required: true,
+    notes,
+  };
+}
+
+export interface TopologyBomResult {
+  items: BOMLineItemV4[];
+  /** The instances the lines were built from, so a consumer can audit the count. */
+  instances: EquipmentInstance[];
+  /** Product id → quantity. This is what pricing multiplies. */
+  quantities: Record<string, number>;
+}
+
+/**
+ * Build the service-topology equipment BOM.
+ *
+ * Every line's quantity is a count of instances in the graph. Nothing is defaulted, nothing is
+ * scaled by a site-level number.
+ */
+export function bomFromServiceTopology(t: ServiceTopology): TopologyBomResult {
+  const instances = equipmentInstancesFromTopology(t);
+  const items: BOMLineItemV4[] = [];
+  const quantities: Record<string, number> = {};
+
+  const byProduct = new Map<string, EquipmentInstance[]>();
+  for (const i of instances) {
+    if (!i.productId) continue;          // described, not selected — not orderable, not a line
+    const list = byProduct.get(i.productId) ?? [];
+    list.push(i);
+    byProduct.set(i.productId, list);
+  }
+
+  for (const [productId, list] of byProduct) {
+    const kind = list[0].kind;
+    quantities[productId] = list.length;
+    const where = list.map(i => i.domainId ?? '—').join(', ');
+
+    if (kind === 'gateway') {
+      items.push(line(
+        `topology-gateway-${productId}`, 'Backup Gateway', productId, list.length,
+        `Backup gateway / controller — one per backup domain (${where})`,
+        'service topology: one gateway per backup domain',
+      ));
+      continue;
+    }
+    if (kind === 'storage-inverter') {
+      items.push(line(
+        `topology-ess-${productId}`, 'Energy Storage', productId, list.length,
+        `Energy storage unit with integrated inverter (${where})`,
+        'service topology: inverter-bearing storage instances',
+      ));
+      continue;
+    }
+    if (kind === 'storage-expansion') {
+      items.push(line(
+        `topology-ess-expansion-${productId}`, 'Energy Storage', productId, list.length,
+        `DC battery expansion — energy only, no AC output and no OCPD of its own (${where})`,
+        'service topology: energy-expansion storage instances',
+        'Contributes usable energy. Contributes NO inverter, NO AC ESS breaker and NO source '
+        + 'current to any busbar calculation.',
+      ));
+      // 🚨 AND THE HARNESS IT CANNOT BE INSTALLED WITHOUT. One per expansion, because that is how
+      // many are needed — an expansion that arrives without its harness is not installable, and a
+      // BOM that omits it is the reason a crew makes a second trip.
+      items.push({
+        ...line(
+          `topology-ess-expansion-harness-${productId}`, 'Energy Storage',
+          `${productId}-harness`, list.length,
+          'Expansion harness / accessory kit — one per DC expansion unit',
+          'service topology: one harness per energy-expansion instance',
+        ),
+        // The harness is an accessory of a product, not a catalogue product in its own right.
+        manufacturer: nameOf(productId).manufacturer,
+        model: `${nameOf(productId).model} expansion harness`,
+      });
+      continue;
+    }
+  }
+
+  // Price from the same lines, so "BOM quantity" and "priced quantity" are one number.
+  for (const item of items) {
+    const unitCost = resolveUnitCost(item.partNumber, item.category);
+    if (Number.isFinite(unitCost) && unitCost > 0) {
+      item.unitCost = unitCost;
+      item.totalCost = Number((unitCost * item.quantity).toFixed(2));
+    }
+  }
+
+  return { items, instances, quantities };
+}
+
+/**
+ * What pricing multiplies, keyed by product.
+ *
+ * 🚨 DERIVED FROM THE SAME LINES, NOT FROM A SECOND LOOKUP. Ray: "No independent `batteryQty` or
+ * `gatewayQty` fallback is allowed to silently disagree." The only way for pricing to disagree
+ * with the BOM here is for the BOM to disagree with itself.
+ */
+export function pricedQuantitiesFromBom(result: TopologyBomResult): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const item of result.items) {
+    // Accessories carry a derived part number; they are priced, but they are not a catalogue
+    // product whose count the topology states, so they do not enter the reconciliation.
+    if (item.partNumber.endsWith('-harness')) continue;
+    out[item.partNumber] = (out[item.partNumber] ?? 0) + item.quantity;
+  }
+  return out;
+}

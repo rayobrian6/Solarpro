@@ -154,14 +154,14 @@ describe('🚨 power and energy are different things', () => {
     const r = evaluateServiceTopology(topology);
     expect(r.storageSummary.totalContinuousOutputA,
       'a bad expansion row leaked into the AC total').toBeCloseTo(96, 6);
-    expect(check(r.checks, 'storage.expansion-contributes-no-ac')!.verdict).toBe('FAIL');
+    expect(check(r.checks, 'storage.expansion-contributes-no-ac')!.conclusion).toBe('FAIL');
   });
 
   it('an Expansion with no host is a FAIL, not attached to whatever was first', () => {
     const { topology } = buildTesla400ATwoGateway();
     topology.storage.find(u => u.role === 'energy-expansion')!.attachedToUnitId = null;
     const r = evaluateServiceTopology(topology);
-    expect(check(r.checks, 'storage.expansion-has-a-host')!.verdict).toBe('FAIL');
+    expect(check(r.checks, 'storage.expansion-has-a-host')!.conclusion).toBe('FAIL');
   });
 });
 
@@ -170,7 +170,7 @@ describe('🚨 the defect this whole model exists to refuse', () => {
     const { topology } = buildTesla400ATwoGateway({ collapseToSingleGateway: true });
     const r = evaluateServiceTopology(topology);
     const c = check(r.checks, 'domain.gateway-passthrough')!;
-    expect(c.verdict, 'a 400 A branch through a 200 A gateway passed').toBe('FAIL');
+    expect(c.conclusion, 'a 400 A branch through a 200 A gateway passed').toBe('FAIL');
     expect(c.detail).toMatch(/200 A continuous/);
     expect(r.overall).toBe('FAIL');
   });
@@ -178,16 +178,16 @@ describe('🚨 the defect this whole model exists to refuse', () => {
   it('and the 400 A branch overloads the 200 A panel behind it too', () => {
     const { topology } = buildTesla400ATwoGateway({ collapseToSingleGateway: true });
     const r = evaluateServiceTopology(topology);
-    expect(check(r.checks, 'domain.panel-rating')!.verdict).toBe('FAIL');
+    expect(check(r.checks, 'domain.panel-rating')!.conclusion).toBe('FAIL');
   });
 
   it('🚨 a 400 A service does NOT make two 200 A branches automatically valid', () => {
     // Each branch carries its own load calculation, and an aggregate one does not stand in for it.
     const { topology } = buildTesla400ATwoGateway({ calculatedServiceDemandA: 310 });
     const r = evaluateServiceTopology(topology);
-    expect(check(r.checks, 'service.demand')!.verdict).toBe('PASS');
-    expect(check(r.checks, 'branch.demand', 'branch:branch-a')!.verdict).toBe('NOT_EVALUATED');
-    expect(check(r.checks, 'branch.demand', 'branch:branch-b')!.verdict).toBe('NOT_EVALUATED');
+    expect(check(r.checks, 'service.demand')!.conclusion).toBe('PASS');
+    expect(check(r.checks, 'branch.demand', 'branch:branch-a')!.conclusion).toBe('NOT_EVALUATED');
+    expect(check(r.checks, 'branch.demand', 'branch:branch-b')!.conclusion).toBe('NOT_EVALUATED');
   });
 
   it('an over-subscribed branch FAILS on its own calculation', () => {
@@ -195,14 +195,14 @@ describe('🚨 the defect this whole model exists to refuse', () => {
       calculatedServiceDemandA: 310, branchDemandA: [240, 150],
     });
     const r = evaluateServiceTopology(topology);
-    expect(check(r.checks, 'branch.demand', 'branch:branch-a')!.verdict).toBe('FAIL');
-    expect(check(r.checks, 'branch.demand', 'branch:branch-b')!.verdict).toBe('PASS');
+    expect(check(r.checks, 'branch.demand', 'branch:branch-a')!.conclusion).toBe('FAIL');
+    expect(check(r.checks, 'branch.demand', 'branch:branch-b')!.conclusion).toBe('PASS');
   });
 
   it('branches that sum past the service FAIL', () => {
     const { topology } = buildTesla400ATwoGateway();
     topology.branches.forEach(b => { b.ratedAmps = 300; });
-    expect(check(evaluateServiceTopology(topology).checks, 'service.branch-sum')!.verdict).toBe('FAIL');
+    expect(check(evaluateServiceTopology(topology).checks, 'service.branch-sum')!.conclusion).toBe('FAIL');
   });
 });
 
@@ -213,7 +213,7 @@ describe('🚨 UNKNOWN MAY NOT BECOME PASS', () => {
     expect(r.overall, 'an unmeasured job produced a passing engineering report').not.toBe('PASS');
     for (const id of ['service.demand', 'sccr.chain', 'branch.demand']) {
       const c = r.checks.find(x => x.id === id)!;
-      expect(c.verdict, `${id} passed with nothing established`).toBe('NOT_EVALUATED');
+      expect(c.conclusion, `${id} passed with nothing established`).toBe('NOT_EVALUATED');
       expect(c.requires!.length, `${id} does not say what it needs`).toBeGreaterThan(0);
     }
   });
@@ -221,7 +221,7 @@ describe('🚨 UNKNOWN MAY NOT BECOME PASS', () => {
   it('🚨 no available fault current means NO device has been shown adequate', () => {
     const { topology } = buildTesla400ATwoGateway({ gatewaySccrA: 65_000 });
     const c = check(evaluateServiceTopology(topology).checks, 'sccr.chain')!;
-    expect(c.verdict).toBe('NOT_EVALUATED');
+    expect(c.conclusion).toBe('NOT_EVALUATED');
     expect(c.requires).toContain('service.availableFaultCurrentA');
   });
 
@@ -229,7 +229,7 @@ describe('🚨 UNKNOWN MAY NOT BECOME PASS', () => {
     const topology = fullySpecified();
     topology.service.availableFaultCurrentA = 25_000;
     const c = check(evaluateServiceTopology(topology).checks, 'sccr.chain')!;
-    expect(c.verdict).toBe('FAIL');
+    expect(c.conclusion).toBe('FAIL');
     expect(c.detail).toMatch(/below the 25000 A available/);
   });
 
@@ -237,7 +237,7 @@ describe('🚨 UNKNOWN MAY NOT BECOME PASS', () => {
     const topology = fullySpecified();
     topology.domains[0].gateway.sccrA = null;
     const c = check(evaluateServiceTopology(topology).checks, 'sccr.chain')!;
-    expect(c.verdict).toBe('NOT_EVALUATED');
+    expect(c.conclusion).toBe('NOT_EVALUATED');
     // And it says the thing a breaker amperage alone does not settle.
     expect(c.detail).toMatch(/main breaker selected/);
   });
@@ -248,7 +248,7 @@ describe('🚨 UNKNOWN MAY NOT BECOME PASS', () => {
     for (const p of topology.panels) { p.busbarRatingA = 225; p.mainBreakerA = 150; }
     const r = evaluateServiceTopology(topology);
     // Everything except the one thing Tesla has not given us.
-    const notPass = r.checks.filter(c => c.verdict !== 'PASS');
+    const notPass = r.checks.filter(c => c.conclusion !== 'PASS');
     expect(notPass.map(c => c.id)).toEqual(['metering.multi-gateway']);
   });
 
@@ -261,7 +261,7 @@ describe('🚨 UNKNOWN MAY NOT BECOME PASS', () => {
     const perPanel = evaluateServiceTopology(topology).checks
       .filter(c => c.id === 'domain.busbar-705-12');
     expect(perPanel).toHaveLength(2);
-    expect(perPanel.every(c => c.verdict === 'FAIL')).toBe(true);
+    expect(perPanel.every(c => c.conclusion === 'FAIL')).toBe(true);
     expect(perPanel[0].detail).toMatch(/40\.0 A allowed/);
   });
 
@@ -269,7 +269,7 @@ describe('🚨 UNKNOWN MAY NOT BECOME PASS', () => {
     const topology = fullySpecified();
     for (const d of topology.domains) d.storageConnection = 'gateway-panelboard';
     const c = evaluateServiceTopology(topology).checks.find(x => x.id === 'domain.busbar-705-12')!;
-    expect(c.verdict).toBe('NOT_EVALUATED');
+    expect(c.conclusion).toBe('NOT_EVALUATED');
     expect(c.detail).toMatch(/not the governing limit/);
     expect(c.requires![0]).toMatch(/^manufacturer-limit:/);
   });
@@ -277,7 +277,7 @@ describe('🚨 UNKNOWN MAY NOT BECOME PASS', () => {
   it('unresolved is unresolved — the default state of a job nobody has decided', () => {
     const { topology } = buildTesla400ATwoGateway();
     const c = evaluateServiceTopology(topology).checks.find(x => x.id === 'domain.busbar-705-12')!;
-    expect(c.verdict).toBe('NOT_EVALUATED');
+    expect(c.conclusion).toBe('NOT_EVALUATED');
     expect(c.requires).toContain('domain.storageConnection');
   });
 });
@@ -292,7 +292,7 @@ describe('🚨 bonding is derived from where the service disconnect is', () => {
       'domain-a-gateway', 'domain-b-gateway', 'msp-1', 'msp-2',
     ]));
     expect(b.basis).toMatch(/bonding screw removed/i);
-    expect(check(evaluateServiceTopology(topology).checks, 'bonding.location')!.verdict).toBe('PASS');
+    expect(check(evaluateServiceTopology(topology).checks, 'bonding.location')!.conclusion).toBe('PASS');
   });
 
   it('🚨 the grouped arrangement bonds EACH service disconnect, and nothing below', () => {
@@ -315,7 +315,7 @@ describe('🚨 bonding is derived from where the service disconnect is', () => {
     topology.devices = topology.devices.filter(d => !d.roles.includes('service-disconnect'));
     const r = evaluateServiceTopology(topology);
     const c = check(r.checks, 'bonding.location')!;
-    expect(c.verdict).toBe('NOT_EVALUATED');
+    expect(c.conclusion).toBe('NOT_EVALUATED');
     expect(c.detail).toMatch(/undetermined/);
   });
 });
@@ -329,7 +329,7 @@ describe('🚨 four disconnect roles, not one disconnectAmps field', () => {
       ratedAmps: 400, sccrA: null, lockableOpen: true, visibleOpen: true,
     }];
     const c = check(evaluateServiceTopology(topology).checks, 'device.role-combination')!;
-    expect(c.verdict).toBe('FAIL');
+    expect(c.conclusion).toBe('FAIL');
   });
 
   it('and PASSES when an authority names why one device may do both', () => {
@@ -349,7 +349,7 @@ describe('🚨 ComEd, and the interconnection Ray is not allowed to use', () => 
   it('a meter-collar interconnection on this project FAILS', () => {
     const { topology } = buildTesla400ATwoGateway({ selectMeterCollar: true });
     const c = check(evaluateServiceTopology(topology).checks, 'interconnection.meter-collar')!;
-    expect(c.verdict).toBe('FAIL');
+    expect(c.conclusion).toBe('FAIL');
     expect(c.detail).toMatch(/Gateway-based, non-meter-collar topology is required/);
   });
 
@@ -362,14 +362,14 @@ describe('🚨 ComEd, and the interconnection Ray is not allowed to use', () => 
   it('the external DER isolation device is required, present, lockable and visible-open', () => {
     const c = check(evaluateServiceTopology(fullySpecified()).checks,
       'interconnection.der-isolation')!;
-    expect(c.verdict).toBe('PASS');
+    expect(c.conclusion).toBe('PASS');
   });
 
   it('🚨 removing it FAILS — the requirement is not satisfied by the service disconnect', () => {
     const topology = fullySpecified();
     topology.devices = topology.devices.filter(d => !d.roles.includes('der-isolation-disconnect'));
     const c = check(evaluateServiceTopology(topology).checks, 'interconnection.der-isolation')!;
-    expect(c.verdict).toBe('FAIL');
+    expect(c.conclusion).toBe('FAIL');
     expect(c.detail).toMatch(/no device in this topology carries that role/);
   });
 
@@ -377,7 +377,7 @@ describe('🚨 ComEd, and the interconnection Ray is not allowed to use', () => 
     const topology = fullySpecified();
     topology.devices.find(d => d.roles.includes('der-isolation-disconnect'))!.sccrA = 5_000;
     const c = check(evaluateServiceTopology(topology).checks, 'interconnection.der-isolation')!;
-    expect(c.verdict).toBe('FAIL');
+    expect(c.conclusion).toBe('FAIL');
     expect(c.detail).toMatch(/below the 10000 A available/);
   });
 
@@ -385,7 +385,7 @@ describe('🚨 ComEd, and the interconnection Ray is not allowed to use', () => 
     const { topology } = buildTesla400ATwoGateway();
     topology.interconnection.externalDerIsolationRequired = null;
     const c = check(evaluateServiceTopology(topology).checks, 'interconnection.der-isolation')!;
-    expect(c.verdict).toBe('NOT_EVALUATED');
+    expect(c.conclusion).toBe('NOT_EVALUATED');
   });
 });
 
@@ -393,7 +393,7 @@ describe('🚨 MANUFACTURER DOCUMENT REQUIRED — what Tesla has not told us', (
   it('a multi-gateway site names the missing application note and refuses to guess', () => {
     const r = evaluateServiceTopology(fullySpecified());
     const c = check(r.checks, 'metering.multi-gateway')!;
-    expect(c.verdict, 'SolarPro decided multi-gateway metering on its own').toBe('NOT_EVALUATED');
+    expect(c.conclusion, 'SolarPro decided multi-gateway metering on its own').toBe('NOT_EVALUATED');
     expect(c.title).toMatch(/MANUFACTURER DOCUMENT REQUIRED/);
     expect(c.detail).toMatch(/Multiple Backup Gateways on a Single Site/);
     expect(c.detail).toMatch(/master/);
@@ -437,7 +437,7 @@ describe('🚨 the 120% busbar allowance is evaluated PER DOMAIN', () => {
     for (const p of topology.panels) { p.busbarRatingA = 225; p.mainBreakerA = 150; }
     const perPanel = evaluateServiceTopology(topology).checks
       .filter(c => c.id === 'domain.busbar-705-12');
-    expect(perPanel.every(c => c.verdict === 'PASS')).toBe(true);
+    expect(perPanel.every(c => c.conclusion === 'PASS')).toBe(true);
   });
 });
 
@@ -470,7 +470,7 @@ describe('🚨 the graph is generic — Tesla is the proving case, not the model
       id: 'branch-c', label: 'Branch C', ratedAmps: 200, ocpdAmps: 200, calculatedDemandA: 120,
     });
     const r = evaluateServiceTopology(topology);
-    expect(check(r.checks, 'service.branch-sum')!.verdict).toBe('PASS');
-    expect(check(r.checks, 'branch.demand', 'branch:branch-c')!.verdict).toBe('PASS');
+    expect(check(r.checks, 'service.branch-sum')!.conclusion).toBe('PASS');
+    expect(check(r.checks, 'branch.demand', 'branch:branch-c')!.conclusion).toBe('PASS');
   });
 });

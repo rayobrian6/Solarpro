@@ -462,6 +462,30 @@ export type SLDNodeType =
   | 'UTILITY_GRID'
   | 'BATTERY'
   | 'GATEWAY'
+  // ── SERVICE TOPOLOGY (added for the 400 A / multi-gateway service graph) ──
+  //
+  // 🚨 THE DIAGRAM HAD NO WORDS FOR A SERVICE. Before these, the union could say
+  // MAIN_SERVICE_PANEL and UTILITY_GRID and nothing in between: no service disconnect, no utility
+  // isolation device, no place where a 400 A service splits into two 200 A paths, and no way to
+  // show a battery that stores energy without inverting. A drawing cannot be asked to represent a
+  // topology it has no nouns for, which is why the first version of this job could only have been
+  // drawn as a special case.
+  //
+  // They are generic on purpose — `SERVICE_DISTRIBUTION`, not `Tesla split`. `lib/sld/
+  // serviceTopologyGraph.ts` renders the canonical `ServiceTopology` into them.
+  | 'UTILITY_METER'
+  | 'SERVICE_DISCONNECT'
+  | 'DER_ISOLATION_DISCONNECT'
+  | 'SERVICE_DISTRIBUTION'
+  | 'SUBPANEL'
+  /** A storage unit that INVERTS — it is an AC source on the diagram. */
+  | 'ESS_AC_SOURCE'
+  /** A DC battery extension of a host unit. Never an AC source, never its own breaker. */
+  | 'DC_BATTERY_EXPANSION'
+  /** Where the neutral is bonded to ground. One per service enclosure, and no more. */
+  | 'NEUTRAL_GROUND_BOND'
+  /** Current transformers / metering point. Its arrangement may be manufacturer-governed. */
+  | 'CT_METERING'
   | 'RUN_SEGMENT';   // ← the mandatory connector node
 
 export type RunSegmentId =
@@ -528,6 +552,24 @@ export interface SLDNode {
   runSegment?: RunSegment;
   // Layout hints
   layoutOrder: number;             // 0 = top (PV), higher = lower on diagram
+  /**
+   * Which backup domain this node belongs to, when it is inside one.
+   *
+   * 🚨 A DOMAIN IS A BOUNDARY, NOT A DEVICE. It has no terminals and carries no current, so it is
+   * not a node with edges — it is a grouping the drawing draws a boundary around. Putting it in
+   * the union would have created a phantom piece of equipment that a BOM or a permit schedule
+   * could pick up.
+   */
+  domainId?: string;
+  /**
+   * A field this node cannot state because a governing authority is missing.
+   *
+   * Rendered as the callout, verbatim, instead of a number. Ray: "SLD fields that depend on that
+   * document must remain explicitly unresolved... Render MANUFACTURER DOCUMENT REQUIRED rather
+   * than inventing a topology. The SLD may be structurally complete while specific
+   * manufacturer-governed callouts remain NOT_EVALUATED."
+   */
+  unresolvedCallouts?: Array<{ field: string; label: string; requires: string[] }>;
 }
 
 export interface SLDEdge {

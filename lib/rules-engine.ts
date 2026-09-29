@@ -6,13 +6,34 @@
 import { ElectricalCalcInput, runElectricalCalc, ElectricalCalcResult } from './electrical-calc';
 import { StructuralInput, runStructuralCalc, StructuralCalcResult } from './structural-calc';
 import { resolveStructural, StructuralAutoResolutionResult } from './structural-resolver';
+import {
+  foldConclusions, type EngineeringConclusion, type EngineeringCheck,
+} from './engineering/engineeringStatus';
 
 export type RuleSeverity = 'error' | 'warning' | 'info' | 'pass';
 
 export interface RuleResult {
   ruleId: string;
   category: 'electrical' | 'structural' | 'equipment' | 'bom';
+  /**
+   * How this result is PAINTED. Presentation.
+   *
+   * 🚨 NOT THE ENGINEERING ANSWER — see `conclusion` below. This scale has no member for "the
+   * governing input was never established", so a check that could not run could only ever travel
+   * as a warning, and a warning reads as something that WAS evaluated.
+   */
   severity: RuleSeverity;
+  /**
+   * What the engineering concluded: PASS, FAIL or NOT_EVALUATED.
+   *
+   * Optional so every existing rule keeps compiling unchanged; absent means "this rule predates
+   * the conclusion vocabulary and its severity is all it has". A rule that CAN be indeterminate
+   * must set this, and set `requires` with it — `lib/engineering/engineeringStatus.ts` holds the
+   * one definition, shared with the service-topology checks.
+   */
+  conclusion?: EngineeringConclusion;
+  /** Named inputs or authorities this rule needs. Present ⇔ `conclusion === 'NOT_EVALUATED'`. */
+  requires?: string[];
   title: string;
   message: string;
   value?: string | number;
@@ -57,6 +78,18 @@ export interface RulesEngineResult {
   structuralResult: StructuralCalcResult;
   rules: RuleResult[];
   overallStatus: 'PASS' | 'WARNING' | 'FAIL';
+  /**
+   * The engineering answer, separate from the presentation one above.
+   *
+   * 🚨 `overallStatus` CANNOT EXPRESS "INCOMPLETE": its PASS is the value a variable holds when
+   * nothing objected, so a rule that never ran and a rule that ran and was satisfied are the same
+   * answer. This folds the rules' own conclusions with "a known failure outranks an unknown", and
+   * an empty rule set is NOT_EVALUATED rather than PASS. Additive: `overallStatus` is byte-for-byte
+   * what it always was, for every consumer that already reads it.
+   */
+  overallConclusion: EngineeringConclusion;
+  /** How many rules could not be evaluated, and what they need. */
+  indeterminate: Array<{ ruleId: string; requires: string[] }>;
   errorCount: number;
   warningCount: number;
   autoFixCount: number;
@@ -323,8 +356,19 @@ export function runRulesEngine(input: RulesEngineInput): RulesEngineResult {
   const autoFixCount = rules.filter(r => r.autoFixed).length;
   const overrideCount = input.overrides.length;
   const overallStatus: 'PASS'|'WARNING'|'FAIL' = errorCount>0?'FAIL':warningCount>0?'WARNING':'PASS';
+  // A rule with no conclusion of its own is folded on its severity: an error is a FAIL, and
+  // anything else is a PASS. It is NOT silently promoted to NOT_EVALUATED — these rules DID run.
+  const asChecks: EngineeringCheck[] = rules.map(r => ({
+    id: r.ruleId, scope: r.category, title: r.title,
+    conclusion: r.conclusion ?? (r.severity === 'error' ? 'FAIL' : 'PASS'),
+    detail: r.message, requires: r.requires,
+  }));
+  const overallConclusion = foldConclusions(asChecks);
+  const indeterminate = rules
+    .filter(r => r.conclusion === 'NOT_EVALUATED')
+    .map(r => ({ ruleId: r.ruleId, requires: r.requires ?? [] }));
 
-  return { electricalResult, structuralResult:resolvedStructural, rules, overallStatus, errorCount, warningCount, autoFixCount, overrideCount, dependencyChain:[...new Set(dependencyChain)], structuralAutoResolutions };
+  return { electricalResult, structuralResult:resolvedStructural, rules, overallStatus, overallConclusion, indeterminate, errorCount, warningCount, autoFixCount, overrideCount, dependencyChain:[...new Set(dependencyChain)], structuralAutoResolutions };
 }
 
 export function getRulesForField(field: string): string[] {
