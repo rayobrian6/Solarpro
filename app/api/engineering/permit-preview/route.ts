@@ -34,6 +34,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest }         from '@/lib/auth';
+import { authorizeProjectAccess }     from '@/lib/projectAccess';
 import { getDbReady, isValidUUID }    from '@/lib/db-neon';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
@@ -117,13 +118,12 @@ export async function GET(req: NextRequest) {
       });
     }
     const projectRow = projectRows[0];
-    if (projectRow.user_id !== user.id) {
-      const roleRows = await sql`SELECT role FROM users WHERE id = ${user.id}`;
-      if (roleRows[0]?.role !== 'super_admin' && roleRows[0]?.role !== 'admin') {
-        return new NextResponse(errorPage('Forbidden.'), {
-          status: 403, headers: { 'Content-Type': 'text/html' },
-        });
-      }
+    // Same rule as the permit GET/POST (lib/projectAccess.ts).
+    const access = await authorizeProjectAccess({ sql: sql as never, projectId, user });
+    if (!access.ok) {
+      return new NextResponse(errorPage(access.status === 404 ? 'Project not found.' : 'Forbidden.'), {
+        status: access.status!, headers: { 'Content-Type': 'text/html' },
+      });
     }
 
     // ── Load saved permit HTML from project_files ─────────────────────────────

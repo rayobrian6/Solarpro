@@ -54,6 +54,7 @@ import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 import { parseRunId } from '@/lib/computed-multi-system';
 import { combinerBasisIsDecided } from '@/lib/combinerSelection/service';
 import { readStoredCombinerSelection, effectiveCombinerId, isReadableProjectId } from '@/lib/combinerSelection/storedRead';
+import { gateProjectAccess } from '@/lib/projectAccess';
 
 // ── Wave 3.7 → Wave 5A: LEGACY FALLBACK ARMOR ────────────────────────────────
 // Since Wave 5A the primary hybrid path is `body.sources` (validated by
@@ -112,7 +113,17 @@ export async function POST(req: NextRequest) {
     // be read leaves the posted value: only the permit, the sealed package, refuses.
     if (isReadableProjectId(body?.projectId)) {
       const { getDbReady } = await import('@/lib/db-neon');
-      const _stored = await readStoredCombinerSelection(getDbReady, body.projectId);
+      // TENANT BOUNDARY first: the stored selection belongs to the project's
+      // owner (lib/projectAccess.ts — owner or platform admin). A check that
+      // cannot run skips the stored read; the posted value stands, as it does
+      // for an unreadable store.
+      const _gate = await gateProjectAccess(getDbReady, body.projectId, _auth.user);
+      if (_gate.kind === 'denied') {
+        return NextResponse.json({ success: false, error: _gate.error }, { status: _gate.status });
+      }
+      const _stored = _gate.kind === 'unavailable'
+        ? { kind: 'unreadable' as const, error: _gate.error }
+        : await readStoredCombinerSelection(getDbReady, body.projectId);
       if (_stored.kind === 'stored') {
         const _id = effectiveCombinerId(body.selectedCombinerId, _stored, 'sld/POST');
         if (_id) body.selectedCombinerId = _id; else delete body.selectedCombinerId;

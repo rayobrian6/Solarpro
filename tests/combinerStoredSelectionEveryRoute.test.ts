@@ -36,6 +36,11 @@ const db = vi.hoisted(() => ({
 vi.mock('@/lib/db-neon', async () => {
   const { DbConfigError: Cfg } = await import('@/lib/db-ready');
   const sql = async (strings: TemplateStringsArray, ...values: unknown[]) => {
+    // The tenant check (lib/projectAccess.ts) runs before the store read: the
+    // session user owns the project whenever a row exists.
+    if (/^\s*SELECT id, user_id FROM projects WHERE id =/i.test(strings.join('?'))) {
+      return db.mode === 'no-row' ? [] : [{ id: values[0], user_id: 'test-user' }];
+    }
     if (!strings.join('?').includes('FROM projects')) return [];
     db.reads.push(values[0]);
     if (db.mode === 'throw') throw new Error('connection reset');

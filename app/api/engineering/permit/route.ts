@@ -86,7 +86,8 @@ import { normalizeToPermitInverters, designToPermitInverters } from '@/lib/syste
 import { getMicroinverterById } from '@/lib/equipment-db';
 // The project's RECORDED combiner — the one server reader every artefact route
 // uses, derived with the combiner-selection endpoint's own helpers.
-import { readStoredCombinerSelection, effectiveCombinerId, postedCombinerId } from '@/lib/combinerSelection/storedRead';
+import { readStoredCombinerSelection, effectiveCombinerId, postedCombinerId, isReadableProjectId } from '@/lib/combinerSelection/storedRead';
+import { gateProjectAccess, authorizeProjectAccess } from '@/lib/projectAccess';
 
 // Site Survey pipeline imports — survey data enriches the permit plan set
 import { fromPhysicalData, type ProjectPhysicalDataRow } from '@/lib/siteSurvey/fromPhysicalData';
@@ -262,7 +263,11 @@ export async function GET(req: NextRequest) {
     // reconciliation into this GET.
     const sql = readOnlySql(await getDbReady(), 'permit/GET');
 
-    // Ownership check
+    // Ownership check — the same rule POST uses (lib/projectAccess.ts).
+    const access = await authorizeProjectAccess({ sql: sql as never, projectId, user });
+    if (!access.ok) {
+      return NextResponse.json({ success: false, error: access.error }, { status: access.status! });
+    }
     const projectRows = await sql`
       SELECT id, user_id, name FROM projects WHERE id = ${projectId} AND deleted_at IS NULL
     `;
@@ -270,12 +275,6 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Project not found' }, { status: 404 });
     }
     const projectRow = projectRows[0];
-    if (projectRow.user_id !== user.id) {
-      const roleRows = await sql`SELECT role FROM users WHERE id = ${user.id}`;
-      if (roleRows[0]?.role !== 'super_admin' && roleRows[0]?.role !== 'admin') {
-        return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
-      }
-    }
 
     // Load saved permit HTML + the input snapshot (for self-healing regeneration)
     const fileRows = await sql`
@@ -447,6 +446,30 @@ export async function POST(req: NextRequest) {
     }
 
     const projectId = body.projectId || project.projectId;
+
+    // ── TENANT BOUNDARY — BEFORE ANY READ BY PROJECT ID ────────────────────
+    // Every enrichment below reads by `projectId`: the stored combiner, the
+    // project name, engineering_config, design_electrical, the canonical roof
+    // model — and the package is written back against it. This handler used to
+    // authenticate the caller and never ask whether the project was theirs, so
+    // any signed-in user holding another tenant's project UUID got that
+    // tenant's permit package. Same rule as this route's GET and the preview
+    // (lib/projectAccess.ts): the owner, or a platform admin. The permit is
+    // the sealed artefact, so a check that cannot run refuses.
+    if (isReadableProjectId(projectId)) {
+      const gate = await gateProjectAccess(getDbReady, projectId, user);
+      if (gate.kind === 'denied') {
+        return NextResponse.json({ success: false, error: gate.error }, { status: gate.status });
+      }
+      if (gate.kind === 'unavailable') {
+        console.error('[permit/POST] PROJECT_ACCESS_UNVERIFIABLE — refusing to generate:', gate.error, { projectId });
+        return NextResponse.json({
+          success: false,
+          error: 'Project access could not be verified, so no permit package was generated. Try again in a moment.',
+          code: 'PROJECT_ACCESS_UNVERIFIABLE',
+        }, { status: 503 });
+      }
+    }
 
     // ── THE RECORDED COMBINER IS READ HERE, NOT TAKEN FROM THE BODY ────────────
     // `project.selectedCombinerId` outranks every other combiner source in

@@ -30,6 +30,7 @@ import { sizingResultToBomItems, shouldStripMicroItems } from '@/lib/system/sizi
 import { applyDistributorPricing, type DistributorPriceOverride } from '@/lib/bom/distributorPricing';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 import { readStoredCombinerSelection, effectiveCombinerId, isReadableProjectId } from '@/lib/combinerSelection/storedRead';
+import { gateProjectAccess } from '@/lib/projectAccess';
 
 // ── Helper: Inject structural items into V4 result (preserves manufacturer/model/partNumber) ──
 // This is the MASTER TASK merge: V4 owns electrical, structural profile owns structural.
@@ -173,7 +174,17 @@ export async function POST(req: NextRequest) {
     // be read leaves the posted value: only the permit, the sealed package, refuses.
     if (isReadableProjectId(body?.projectId)) {
       const { getDbReady } = await import('@/lib/db-neon');
-      const _stored = await readStoredCombinerSelection(getDbReady, body.projectId);
+      // TENANT BOUNDARY first: the stored selection belongs to the project's
+      // owner (lib/projectAccess.ts — owner or platform admin). A check that
+      // cannot run skips the stored read; the posted value stands, as it does
+      // for an unreadable store.
+      const _gate = await gateProjectAccess(getDbReady, body.projectId, _auth.user);
+      if (_gate.kind === 'denied') {
+        return NextResponse.json({ success: false, error: _gate.error }, { status: _gate.status });
+      }
+      const _stored = _gate.kind === 'unavailable'
+        ? { kind: 'unreadable' as const, error: _gate.error }
+        : await readStoredCombinerSelection(getDbReady, body.projectId);
       if (_stored.kind === 'stored') {
         const _id = effectiveCombinerId(body.selectedCombinerId, _stored, 'bom/POST');
         if (_id) body.selectedCombinerId = _id; else delete body.selectedCombinerId;

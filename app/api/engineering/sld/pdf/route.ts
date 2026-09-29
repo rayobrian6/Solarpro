@@ -18,6 +18,7 @@ import { generatePdfFromHtml, CanonicalFontError } from '@/lib/pdf/generatePdf';
 import { fontFaceCss, CSS_FONT_SANS_STACK } from '@/lib/permit/fonts/fontPack';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 import { readStoredCombinerSelection, effectiveCombinerId, isReadableProjectId } from '@/lib/combinerSelection/storedRead';
+import { gateProjectAccess } from '@/lib/projectAccess';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -146,7 +147,17 @@ export async function POST(req: NextRequest) {
     // be read leaves the posted value: only the permit, the sealed package, refuses.
     if (isReadableProjectId(buildInput?.projectId)) {
       const { getDbReady } = await import('@/lib/db-neon');
-      const _stored = await readStoredCombinerSelection(getDbReady, buildInput.projectId);
+      // TENANT BOUNDARY first: the stored selection belongs to the project's
+      // owner (lib/projectAccess.ts — owner or platform admin). A check that
+      // cannot run skips the stored read; the posted value stands, as it does
+      // for an unreadable store.
+      const _gate = await gateProjectAccess(getDbReady, buildInput.projectId, user);
+      if (_gate.kind === 'denied') {
+        return NextResponse.json({ success: false, error: _gate.error }, { status: _gate.status });
+      }
+      const _stored = _gate.kind === 'unavailable'
+        ? { kind: 'unreadable' as const, error: _gate.error }
+        : await readStoredCombinerSelection(getDbReady, buildInput.projectId);
       if (_stored.kind === 'stored') {
         const _id = effectiveCombinerId(buildInput.selectedCombinerId, _stored, 'sld/pdf/POST');
         if (_id) buildInput.selectedCombinerId = _id; else delete buildInput.selectedCombinerId;

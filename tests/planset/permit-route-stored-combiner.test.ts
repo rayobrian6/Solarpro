@@ -89,6 +89,11 @@ vi.mock('@/lib/db-neon', () => ({
     }
     return (strings: TemplateStringsArray, ...values: unknown[]) => {
       const q = strings.join(' ').replace(/\s+/g, ' ').trim();
+      // The tenant check (lib/projectAccess.ts) runs first: the session user
+      // owns the project whenever a row exists.
+      if (/^SELECT id, user_id FROM projects WHERE id =/i.test(q)) {
+        return Promise.resolve(h.store.mode === 'absent' ? [] : [{ id: values[0], user_id: '11111111-1111-4111-8111-111111111111' }]);
+      }
       if (/SELECT selected_equipment FROM projects/i.test(q)) {
         h.reads.push(String(values[0]));
         if (h.store.mode === 'throw') return Promise.reject(new Error('Connection terminated unexpectedly'));
@@ -228,10 +233,16 @@ describe('permit POST · the recorded combiner is read by the route, not trusted
     expect(seen.selectedCombinerId).toBe(SIX_C);
   }, 60_000);
 
-  it('NO PROJECT ROW for the id — the posted value stands', async () => {
+  it('NO PROJECT ROW for the id — refused (404) before anything is generated', async () => {
+    // This used to generate from the posted value. A permit package for a
+    // project id with no (live) row is now refused at the tenant check
+    // (lib/projectAccess.ts): there is no owner to authorize against and no
+    // project to file the package under. The DB-less and no-project-id paths
+    // below still generate from the posted value.
     h.store.mode = 'absent';
-    const seen = await generated({ posted: SIX_C });
-    expect(seen.selectedCombinerId).toBe(SIX_C);
+    const { res } = await generate({ posted: SIX_C });
+    expect(res.status).toBe(404);
+    expect(h.seen).toEqual([]);
   }, 60_000);
 
   it('NO readable project id — the store is not consulted and the posted value stands', async () => {
