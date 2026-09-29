@@ -27,9 +27,11 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import type { ServiceTopology } from '@/lib/electrical/serviceTopology';
-import { evaluateServiceTopology } from '@/lib/electrical/serviceTopology';
 import {
-  equipmentInstancesFromTopology, equipmentQuantities,
+  evaluateServiceTopology, sizeAggregationPanel, governingArticleFor,
+} from '@/lib/electrical/serviceTopology';
+import {
+  equipmentInstancesFromTopology, equipmentQuantities, type EquipmentInstanceKind,
 } from '@/lib/electrical/topologyEquipment';
 import { getBatteryById, getBackupInterfaceById } from '@/lib/equipment-db';
 import { requiredInputs, type EngineeringCheck } from '@/lib/engineering/engineeringStatus';
@@ -41,7 +43,19 @@ export type ScheduleDeviceType =
   | 'backup-gateway'
   | 'ess-ac-source'
   | 'battery-expansion'
-  | 'disconnect';
+  | 'disconnect'
+  /** A panel that gathers DER circuits ahead of the point of interconnection. */
+  | 'der-aggregation-panel'
+  /** A PV inverter, a generator, or any other non-storage DER source. */
+  | 'generation-unit'
+  /**
+   * The point of interconnection itself.
+   *
+   * It is a LOCATION, not a purchasable device, so it appears in the instance schedule an inspector
+   * reads and never in the procurement summary. Ray: "No diagram-only invented equipment" — and its
+   * converse: no purchase line for a connection point.
+   */
+  | 'point-of-interconnection';
 
 export interface ServiceScheduleRow {
   /** The instance tag an inspector reads — unique on the sheet. */
@@ -186,6 +200,59 @@ export function serviceTopologyScheduleRows(t: ServiceTopology | null | undefine
     }
   }
 
+  // ── DER AGGREGATION PANELS ────────────────────────────────────────────────
+  //
+  // 🚨 THE RATING COLUMN STATES WHAT IT WAS SIZED FROM. A reviewer looking at a 125 A panel on a
+  // 400 A service has to be able to see WHY it is 125 A without re-deriving it — and that it was
+  // not sized from the service.
+  for (const agg of t.aggregationPanels ?? []) {
+    const sizing = sizeAggregationPanel(t, agg);
+    const n = agg.inputs.length;
+    rows.push({
+      tag: agg.id.toUpperCase(),
+      deviceType: 'der-aggregation-panel',
+      manufacturer: '', model: '',
+      domain: '',
+      rating: agg.busbarRatingA === null
+        ? 'NOT EVALUATED — BUSBAR RATING REQUIRED'
+        : `${agg.busbarRatingA} A bus`
+          + (agg.mainLugOnly ? ', MLO' : agg.mainBreakerA === null ? '' : `, ${agg.mainBreakerA} A main`),
+      ocpd: agg.outputOcpdA === null
+        ? 'NOT EVALUATED — OUTPUT OCPD REQUIRED' : `${agg.outputOcpdA} A output`,
+      notes: [
+        `${n} DER circuit${n === 1 ? '' : 's'}`,
+        sizing.aggregateContinuousA === null
+          ? 'NOT EVALUATED — AGGREGATED DER CURRENT REQUIRED'
+          : `${sizing.aggregateContinuousA} A aggregated, ${sizing.standardOcpdA} A minimum at 125%`,
+        agg.carriesPremisesLoad === null
+          ? 'NOT EVALUATED — DER-ONLY OR LOAD-CARRYING REQUIRED'
+          : agg.carriesPremisesLoad ? 'Carries premises load' : 'DER only, no premises load',
+        agg.sccrA === null ? 'NOT EVALUATED — SCCR REQUIRED' : `${agg.sccrA} A SCCR`,
+      ].filter(Boolean).join('; '),
+    });
+  }
+
+  // ── POINTS OF INTERCONNECTION ─────────────────────────────────────────────
+  for (const poi of t.pointsOfInterconnection ?? []) {
+    const article = governingArticleFor(poi.relationship);
+    rows.push({
+      tag: poi.id.toUpperCase(),
+      deviceType: 'point-of-interconnection',
+      manufacturer: '', model: '',
+      domain: '',
+      rating: poi.relationship === 'unresolved'
+        ? 'INTERCONNECTION ARRANGEMENT REQUIRED'
+        : poi.relationship.replace(/-/g, ' '),
+      ocpd: poi.ocpdA === null ? '—' : `${poi.ocpdA} A`,
+      notes: [
+        poi.connectedToNodeId
+          ? `Connects to ${poi.connectedToNodeId}`
+          : 'NOT EVALUATED — PREMISES CONNECTION POINT REQUIRED',
+        article ?? '',
+      ].filter(Boolean).join('; '),
+    });
+  }
+
   for (const dev of t.devices) {
     rows.push({
       tag: dev.id.toUpperCase(),
@@ -198,6 +265,8 @@ export function serviceTopologyScheduleRows(t: ServiceTopology | null | undefine
         dev.roles.map(r => ROLE_TEXT[r] ?? r).join(' + '),
         dev.lockableOpen === true ? 'lockable open' : '',
         dev.visibleOpen === true ? 'visible open' : '',
+        // Where it sits is what decides what opening it actually disconnects.
+        dev.feedsNodeId ? `on the path to ${dev.feedsNodeId}` : '',
         dev.locationNote ?? '',
       ].filter(Boolean).join('; '),
     });
@@ -231,18 +300,24 @@ export function serviceTopologyProcurement(t: ServiceTopology | null | undefined
     l.push(i);
     byProduct.set(i.productId, l);
   }
-  const typeOf: Record<string, ScheduleDeviceType> = {
+  // 🚨 TOTAL OVER THE INSTANCE KINDS, WITH NO SILENT DEFAULT. The old `?? 'disconnect'` meant a new
+  // kind of equipment was scheduled as a Disconnect — the wrong device type on the sheet an
+  // inspector reads, reached by a fallback nobody would ever see fire. Typed as a total record, a
+  // new kind is a compile error instead.
+  const typeOf: Record<EquipmentInstanceKind, ScheduleDeviceType> = {
     gateway: 'backup-gateway',
     'storage-inverter': 'ess-ac-source',
     'storage-expansion': 'battery-expansion',
     panelboard: 'panelboard',
     disconnect: 'disconnect',
+    'der-aggregation-panel': 'der-aggregation-panel',
+    'generation-unit': 'generation-unit',
   };
   return [...byProduct.entries()].map(([productId, list]) => ({
     productId,
     ...productName(productId),
     quantity: list.length,
-    deviceType: typeOf[list[0].kind] ?? 'disconnect',
+    deviceType: typeOf[list[0].kind],
     instanceTags: list.map(i => i.instanceId.toUpperCase()),
   }));
 }
@@ -301,12 +376,33 @@ export function serviceTopologyReleaseReadiness(
   if (needs.includes('domain.storageConnection')) {
     requirements.push('NOT EVALUATED — ESS POINT OF CONNECTION REQUIRED');
   }
+  // 🚨 A DESIGN DECISION READS DIFFERENTLY FROM A MISSING MEASUREMENT. One is owed by the designer,
+  // the other by the utility, and a stamping engineer needs to know which of the two is holding the
+  // sheet up.
+  if (needs.includes('interconnection.derArrangement')) {
+    requirements.push('DESIGN DECISION REQUIRED — DER INTERCONNECTION ARRANGEMENT');
+  }
+  if (needs.includes('poi.relationship') || needs.includes('poi.connectedToNodeId')) {
+    requirements.push('INTERCONNECTION ARRANGEMENT REQUIRED — POINT OF INTERCONNECTION');
+  }
+  if (needs.includes('poi.supplySideTapConductors')) {
+    requirements.push('NOT EVALUATED — SUPPLY-SIDE TAP CONDUCTORS AND OCPD REQUIRED (NEC 705.11)');
+  }
+  if (needs.includes('aggregation.carriesPremisesLoad')) {
+    requirements.push('NOT EVALUATED — DER AGGREGATION PANEL LOAD-CARRYING STATUS REQUIRED');
+  }
+  if (needs.includes('interconnection.isolationArrangement')) {
+    requirements.push('NOT EVALUATED — UTILITY DER ISOLATION ARRANGEMENT REQUIRED');
+  }
   for (const n of needs.filter(x => x.startsWith('sccr:'))) {
     requirements.push(`NOT EVALUATED — INTERRUPTING RATING REQUIRED (${n.slice(5)})`);
   }
   // Anything else that is missing, named rather than dropped.
   const covered = new Set([
     'service.availableFaultCurrentA', 'device.role:service-disconnect', 'domain.storageConnection',
+    'interconnection.derArrangement', 'poi.relationship', 'poi.connectedToNodeId',
+    'poi.supplySideTapConductors', 'aggregation.carriesPremisesLoad',
+    'interconnection.isolationArrangement',
   ]);
   for (const n of needs) {
     if (covered.has(n)) continue;
@@ -315,7 +411,9 @@ export function serviceTopologyReleaseReadiness(
   }
 
   return {
-    drawable: t.domains.length > 0 || t.panels.length > 0,
+    // A topology with an aggregation panel and no backup domain is still a drawable shape.
+    drawable: t.domains.length > 0 || t.panels.length > 0
+      || (t.aggregationPanels ?? []).length > 0,
     releaseReady: indeterminate.length === 0 && failures.length === 0,
     requirements,
     indeterminate,

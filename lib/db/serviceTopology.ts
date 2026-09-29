@@ -61,10 +61,19 @@ import { getDbReady, isValidUUID } from '@/lib/db-neon';
 import type {
   ServiceTopology, ServiceBranch, PanelBoard, BackupDomain, StorageUnit,
   ProtectiveDevice, GatewayInstance, DeviceRole,
+  GenerationUnit, DerAggregationPanel, DerAggregationInput, PointOfInterconnection,
+  PoiRelationship,
 } from '@/lib/electrical/serviceTopology';
 
-/** Bumped only when the stored shape changes in a way a reader must know about. */
-export const SERVICE_TOPOLOGY_SCHEMA_VERSION = 1;
+/**
+ * Bumped only when the stored shape changes in a way a reader must know about.
+ *
+ * 2 — DER sources, aggregation panels and points of interconnection. Version 1 graphs read back
+ * with empty lists and no chosen arrangement, which is exactly what they meant: those designs
+ * never stated how their DER reaches the service, and the engineering now says so rather than
+ * inheriting a default.
+ */
+export const SERVICE_TOPOLOGY_SCHEMA_VERSION = 2;
 
 export interface StoredServiceTopology {
   schemaVersion: number;
@@ -99,6 +108,14 @@ function parseDevice(v: unknown): ProtectiveDevice | null {
     roleCombinationAuthority: typeof v.roleCombinationAuthority === 'string'
       ? v.roleCombinationAuthority : null,
     locationNote: typeof v.locationNote === 'string' ? v.locationNote : null,
+    // 🚨 WHERE THE DEVICE SITS SURVIVES THE SAVE.
+    //
+    // Dropped, a disconnect placed on a DER feeder reloads onto the DEFAULT service chain — and
+    // that flips DER ISOLATION COVERAGE from FAIL to PASS across a save, which is the worst
+    // direction for a safety check to move. The same parse guards the PUT, so losing it here loses
+    // it on the way in as well as on the way out.
+    ...(typeof v.feedsNodeId === 'string' && v.feedsNodeId
+      ? { feedsNodeId: v.feedsNodeId } : {}),
   };
 }
 
@@ -167,6 +184,79 @@ function parseStorage(v: unknown): StorageUnit | null {
   };
 }
 
+function parseGeneration(v: unknown): GenerationUnit | null {
+  if (!isObj(v) || !str(v.id)) return null;
+  const kind = v.kind;
+  return {
+    id: str(v.id),
+    label: str(v.label) || str(v.id),
+    productId: typeof v.productId === 'string' ? v.productId : null,
+    // The kind decides how it is drawn and scheduled; an unrecognised one reads back as 'other'
+    // rather than being dropped, because a source that vanishes is a source nobody isolates.
+    kind: kind === 'pv-inverter' || kind === 'generator' ? kind : 'other',
+    continuousOutputA: numOrNull(v.continuousOutputA),
+    ocpdA: numOrNull(v.ocpdA),
+    domainId: typeof v.domainId === 'string' ? v.domainId : null,
+  };
+}
+
+function parseAggregationInput(v: unknown): DerAggregationInput | null {
+  if (!isObj(v) || !str(v.sourceId)) return null;
+  const tap = v.tap;
+  return {
+    id: str(v.id) || `input-${str(v.sourceId)}`,
+    sourceId: str(v.sourceId),
+    // 🚨 THE TAP POINT IS READ BACK, NOT RE-INFERRED. It is the field that decides whether a
+    // topology parallels two islands, and defaulting it would default that answer.
+    tap: tap === 'gateway-grid-side' || tap === 'backed-up-busbar' ? tap : 'der-output',
+    ocpdA: numOrNull(v.ocpdA),
+    ...(typeof v.conductorGauge === 'string' ? { conductorGauge: v.conductorGauge } : {}),
+  };
+}
+
+function parseAggregationPanel(v: unknown): DerAggregationPanel | null {
+  if (!isObj(v) || !str(v.id)) return null;
+  return {
+    id: str(v.id),
+    label: str(v.label) || str(v.id),
+    // Tri-state on purpose: false and "nobody said" are different answers and only one of them
+    // lets the busbar check run.
+    carriesPremisesLoad: boolOrNull(v.carriesPremisesLoad),
+    busbarRatingA: numOrNull(v.busbarRatingA),
+    mainBreakerA: numOrNull(v.mainBreakerA),
+    mainLugOnly: v.mainLugOnly === true,
+    sccrA: numOrNull(v.sccrA),
+    inputs: (Array.isArray(v.inputs) ? v.inputs : [])
+      .map(parseAggregationInput).filter((x): x is DerAggregationInput => x !== null),
+    outputOcpdA: numOrNull(v.outputOcpdA),
+    ...(typeof v.outputConductorGauge === 'string'
+      ? { outputConductorGauge: v.outputConductorGauge } : {}),
+    feedsNodeId: typeof v.feedsNodeId === 'string' && v.feedsNodeId ? v.feedsNodeId : null,
+  };
+}
+
+const POI_RELATIONSHIPS: readonly PoiRelationship[] = [
+  'load-side-busbar', 'load-side-feeder-tap', 'supply-side', 'aggregation-to-supply-side',
+  'manufacturer-integrated', 'meter-collar', 'unresolved',
+];
+
+function parsePoi(v: unknown): PointOfInterconnection | null {
+  if (!isObj(v) || !str(v.id)) return null;
+  const rel = v.relationship;
+  // An unrecognised relationship is NOT coerced to a governed one — a stored value this build does
+  // not know must not read back as "load side busbar" and inherit 705.12(B).
+  if (!POI_RELATIONSHIPS.includes(rel as PoiRelationship)) return null;
+  return {
+    id: str(v.id),
+    label: str(v.label) || str(v.id),
+    relationship: rel as PoiRelationship,
+    derNodeId: typeof v.derNodeId === 'string' && v.derNodeId ? v.derNodeId : null,
+    connectedToNodeId:
+      typeof v.connectedToNodeId === 'string' && v.connectedToNodeId ? v.connectedToNodeId : null,
+    ocpdA: numOrNull(v.ocpdA),
+  };
+}
+
 function parseDomain(v: unknown): BackupDomain | null {
   if (!isObj(v) || !str(v.id)) return null;
   const gateway = parseGateway(v.gateway);
@@ -184,7 +274,9 @@ function parseDomain(v: unknown): BackupDomain | null {
     generationOutputA: numOrNull(v.generationOutputA),
     backedUpDemandA: numOrNull(v.backedUpDemandA),
     storageConnection:
-      conn === 'backed-up-panel-busbar' || conn === 'gateway-panelboard' ? conn : 'unresolved',
+      conn === 'backed-up-panel-busbar' || conn === 'gateway-panelboard'
+        || conn === 'der-aggregation-panel'
+        ? conn : 'unresolved',
   };
 }
 
@@ -221,6 +313,15 @@ export function parseServiceTopology(raw: unknown): StoredServiceTopology | null
     .map(parseStorage).filter((x): x is StorageUnit => x !== null);
   const devices = (Array.isArray(t.devices) ? t.devices : [])
     .map(parseDevice).filter((x): x is ProtectiveDevice => x !== null);
+  // 🚨 THE DER SIDE OF THE GRAPH SURVIVES THE ROUND TRIP TOO. A saved design must come back still
+  // saying where its generation aggregates and where it interconnects — a graph that reloads
+  // without its point of interconnection is a graph that reloads as a different design.
+  const generation = (Array.isArray(t.generation) ? t.generation : [])
+    .map(parseGeneration).filter((x): x is GenerationUnit => x !== null);
+  const aggregationPanels = (Array.isArray(t.aggregationPanels) ? t.aggregationPanels : [])
+    .map(parseAggregationPanel).filter((x): x is DerAggregationPanel => x !== null);
+  const pointsOfInterconnection = (Array.isArray(t.pointsOfInterconnection) ? t.pointsOfInterconnection : [])
+    .map(parsePoi).filter((x): x is PointOfInterconnection => x !== null);
 
   const ic = isObj(t.interconnection) ? t.interconnection : {};
   const doc = isObj(ic.multiGatewayMeteringDoc) ? ic.multiGatewayMeteringDoc : null;
@@ -242,9 +343,18 @@ export function parseServiceTopology(raw: unknown): StoredServiceTopology | null
       panels,
       domains,
       storage,
+      generation,
+      aggregationPanels,
+      pointsOfInterconnection,
       calculatedServiceDemandA: numOrNull(t.calculatedServiceDemandA),
       interconnection: {
         utilityId: typeof ic.utilityId === 'string' ? ic.utilityId : null,
+        // A graph written before the arrangement existed has NOT chosen one, and must come back
+        // saying so rather than reloading as whichever shape happened to be first in the union.
+        derArrangement:
+          ic.derArrangement === 'independent-branch' || ic.derArrangement === 'common-aggregation'
+            || ic.derArrangement === 'custom'
+            ? ic.derArrangement : null,
         meterCollarPermitted: boolOrNull(ic.meterCollarPermitted),
         meterCollarSelected: ic.meterCollarSelected === true,
         externalDerIsolationRequired: boolOrNull(ic.externalDerIsolationRequired),

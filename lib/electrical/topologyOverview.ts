@@ -27,12 +27,72 @@ import { foldConclusions, type EngineeringConclusion } from '@/lib/engineering/e
 
 /** Where a requirement sends the operator. `nodeId` addresses a node in the visual topology. */
 export interface OverviewFocus {
-  kind: 'service' | 'branch' | 'panel' | 'domain' | 'interconnection';
+  kind: 'service' | 'branch' | 'panel' | 'domain' | 'interconnection' | 'aggregation' | 'poi';
   /** The topology id of the node to select, or 'service' / 'interconnection'. */
   nodeId: string;
   /** The specific field inside that node's inspector, when one answers it. */
   field?: string;
 }
+
+/**
+ * 🚨 WHO OWES THIS, AND THEREFORE WHAT TO DO ABOUT IT.
+ *
+ * Ray: "Don't present all five categories as equivalent text boxes." A calculation SolarPro will
+ * run once loads are entered, a number only the utility can give, a ruling only the jurisdiction
+ * can make, a document only the manufacturer has, and a choice only the designer can make are five
+ * different kinds of blocked — and a screen that lists them identically tells an installer nothing
+ * about which one they can act on this afternoon.
+ *
+ * The sixth is the one Ray's list implies rather than names: facts about equipment that is already
+ * on the wall, which somebody has to go and read off a label.
+ */
+export type RequirementOwner =
+  | 'solarpro-can-calculate'
+  | 'utility-must-provide'
+  | 'jurisdiction-authority'
+  | 'manufacturer-authority'
+  | 'design-decision'
+  | 'field-verification';
+
+export interface RequirementOwnerSpec {
+  owner: RequirementOwner;
+  heading: string;
+  /** What an operator can do about this category. */
+  action: string;
+}
+
+export const REQUIREMENT_OWNERS: ReadonlyArray<RequirementOwnerSpec> = [
+  {
+    owner: 'design-decision',
+    heading: 'Design decision',
+    action: 'Yours to choose. Nothing downstream can resolve until it is made.',
+  },
+  {
+    owner: 'solarpro-can-calculate',
+    heading: 'SolarPro can calculate',
+    action: 'Enter the inputs and SolarPro computes these — they are not blocked on anyone.',
+  },
+  {
+    owner: 'field-verification',
+    heading: 'Field verify',
+    action: 'Read off the equipment that is already installed.',
+  },
+  {
+    owner: 'utility-must-provide',
+    heading: 'Utility must provide',
+    action: 'Request from the utility. Nothing on site establishes it.',
+  },
+  {
+    owner: 'jurisdiction-authority',
+    heading: 'Jurisdiction / utility authority',
+    action: 'A ruling, not a measurement. SolarPro will not assume one.',
+  },
+  {
+    owner: 'manufacturer-authority',
+    heading: 'Manufacturer authority',
+    action: 'Governed by a document SolarPro does not hold.',
+  },
+];
 
 export interface RequiredInput {
   /** The canonical `requires` token. Two checks needing the same thing are ONE entry. */
@@ -41,7 +101,14 @@ export interface RequiredInput {
   label: string;
   /** Why it is needed — the first check that asked for it. */
   because: string;
+  /** Who owes it. */
+  owner: RequirementOwner;
   focus: OverviewFocus;
+}
+
+export interface RequirementGroup {
+  spec: RequirementOwnerSpec;
+  items: RequiredInput[];
 }
 
 export interface LevelStatus {
@@ -75,6 +142,14 @@ export interface ServiceSummary {
   panelCount: number;
   domainCount: number;
   gatewayCount: number;
+  /** DER aggregation panels. Zero on an independent-branch arrangement, which is complete. */
+  aggregationPanelCount: number;
+  /** Points of interconnection recorded. */
+  poiCount: number;
+  /** PV inverters, generators and other non-storage DER. */
+  generationUnitCount: number;
+  /** How the DER reaches the service, in words — or null when nobody has chosen. */
+  derArrangementLabel: string | null;
   invertingUnitCount: number;
   expansionUnitCount: number;
   /** Aggregate usable energy, or null when a unit does not state it. */
@@ -91,6 +166,10 @@ export interface ServiceOverview {
   branches: Record<string, LevelStatus>;
   /** Keyed by domain id. */
   domains: Record<string, LevelStatus>;
+  /** Keyed by DER aggregation panel id. */
+  aggregationPanels: Record<string, LevelStatus>;
+  /** Keyed by point-of-interconnection id. */
+  pois: Record<string, LevelStatus>;
   /** Distinct, deduplicated, ordered: the site's requirements first. */
   requiredInputs: RequiredInput[];
   evaluation: TopologyEvaluation;
@@ -106,6 +185,12 @@ export interface ServiceOverview {
 export function conclusionWord(c: EngineeringConclusion): 'Ready' | 'Needs input' | 'Fails' {
   return c === 'PASS' ? 'Ready' : c === 'FAIL' ? 'Fails' : 'Needs input';
 }
+
+const DER_ARRANGEMENT_LABEL: Record<string, string> = {
+  'independent-branch': 'Independent branch interconnection',
+  'common-aggregation': 'Common DER aggregation',
+  'custom': 'Custom engineered topology',
+};
 
 const PHASE_LABEL: Record<string, string> = {
   'split-240': '120/240 V split phase',
@@ -126,7 +211,11 @@ function labelForToken(token: string, t: ServiceTopology): string {
     const dev = t.devices.find(d => d.id === id);
     const gw = t.domains.find(d => d.gateway.id === id)?.gateway;
     const panel = t.panels.find(p => p.id === id);
-    const name = dev?.label ?? gw?.label ?? panel?.label ?? id;
+    // 🚨 THE AGGREGATION PANEL BELONGS IN THIS LOOKUP TOO. Left out, the screen asked an installer
+    // for "the interrupting rating for agg-1" — a database id, which is the same defect as printing
+    // msp-1 instead of MSP #1.
+    const agg = (t.aggregationPanels ?? []).find(a => a.id === id);
+    const name = dev?.label ?? gw?.label ?? panel?.label ?? agg?.label ?? id;
     return `Interrupting rating (SCCR) for ${name}`;
   }
   if (token.startsWith('manufacturer-limit:')) {
@@ -141,6 +230,9 @@ function labelForToken(token: string, t: ServiceTopology): string {
   if (token.startsWith('device.role:')) {
     return `A device carrying the ${token.slice('device.role:'.length)} role`;
   }
+  if (token.startsWith('aggregation.input-source:')) {
+    return `A DER source for the aggregation input '${token.slice('aggregation.input-source:'.length)}'`;
+  }
   const FIXED: Record<string, string> = {
     'service.availableFaultCurrentA': 'Available fault current at the service',
     'calculatedServiceDemandA': 'Calculated service demand',
@@ -151,15 +243,72 @@ function labelForToken(token: string, t: ServiceTopology): string {
     'gateway.continuousRatingA': 'Gateway continuous rating',
     'domain.storageConnection': 'Storage point of connection',
     'domain.generationOutputA': 'Generation output in the domain',
+    'domain.backedUpPanelIds': 'The panels this backup domain backs up',
     'storage.continuousOutputA': 'Storage continuous output',
     'backedUpDemandA': 'Backed-up load calculation',
     'storage.usableKwh': 'Storage usable energy',
+    'branch.panelIds': 'The panelboards this branch feeds',
     'interconnection.meterCollarPermitted': 'Whether the utility permits a meter-collar interconnection',
     'interconnection.externalDerIsolationRequired': 'Whether this utility requires an external DER isolation device',
+    'interconnection.isolationArrangement': 'An acceptable utility DER isolation arrangement',
     'device.lockableOpen': 'Isolation device: lockable open',
     'device.visibleOpen': 'Isolation device: visible open',
+    // ── The DER side ──────────────────────────────────────────────────────
+    'interconnection.derArrangement': 'How the DER systems interconnect with the service',
+    'der.continuousOutputA': 'Continuous AC output of every DER source',
+    'der.pointOfInterconnection': 'Where this DER source meets the premises wiring',
+    // Phrased as a noun so the headline that appends "required" reads as a sentence.
+    'poi.relationship': 'The point of interconnection\'s governed arrangement',
+    'poi.connectedToNodeId': 'Where on the premises wiring the interconnection lands',
+    'poi.supplySideTapConductors': 'Supply-side tap conductors, OCPD and disconnect (NEC 705.11)',
+    'aggregation.inputs': 'The DER circuits entering the aggregation panel',
+    'aggregation.carriesPremisesLoad': 'Whether the aggregation panel also carries premises load',
+    'aggregation.busbarRatingA': 'Aggregation panel busbar rating',
+    'aggregation.mainBreakerA': 'Aggregation panel main breaker',
+    'aggregation.outputOcpdA': 'Aggregation panel output OCPD',
+    'aggregation.feedsNodeId': 'What the aggregation panel\'s output connects to',
+    'aggregation.panel': 'The aggregation panel this refers to',
   };
   return FIXED[token] ?? token;
+}
+
+/**
+ * Who owes a requirement.
+ *
+ * 🚨 THE SPLIT THAT MATTERS IS "EXISTING EQUIPMENT" vs "EQUIPMENT SOLARPRO IS SIZING". A panel
+ * already on the wall has a busbar somebody must go and read; a DER aggregation panel that does not
+ * exist yet has one SolarPro computes from the sources feeding it. Same kind of number, completely
+ * different thing to do about it.
+ */
+function ownerForToken(token: string): RequirementOwner {
+  if (token.startsWith('manufacturer-document:') || token.startsWith('manufacturer-limit:')
+      || token.startsWith('sccr:') || token === 'gateway.continuousRatingA') {
+    return 'manufacturer-authority';
+  }
+  if (token === 'service.availableFaultCurrentA') return 'utility-must-provide';
+  if (token.startsWith('interconnection.')) {
+    return token === 'interconnection.derArrangement' ? 'design-decision' : 'jurisdiction-authority';
+  }
+  if (token === 'domain.storageConnection' || token.startsWith('poi.')
+      || token === 'der.pointOfInterconnection' || token === 'aggregation.feedsNodeId'
+      || token === 'aggregation.carriesPremisesLoad' || token.startsWith('aggregation.input-source:')
+      || token === 'aggregation.inputs' || token === 'branch.panelIds'
+      || token === 'domain.backedUpPanelIds' || token.startsWith('device.role:')) {
+    return 'design-decision';
+  }
+  if (token === 'calculatedServiceDemandA' || token === 'calculatedDemandA'
+      || token === 'backedUpDemandA' || token.startsWith('aggregation.')) {
+    return 'solarpro-can-calculate';
+  }
+  // Everything left describes equipment that is already installed.
+  return 'field-verification';
+}
+
+/** Group the requirements by who owes them, dropping the categories nothing lands in. */
+export function groupRequirements(items: readonly RequiredInput[]): RequirementGroup[] {
+  return REQUIREMENT_OWNERS
+    .map(spec => ({ spec, items: items.filter(i => i.owner === spec.owner) }))
+    .filter(g => g.items.length > 0);
 }
 
 /**
@@ -183,6 +332,18 @@ function focusFor(check: TopologyCheck, token: string, t: ServiceTopology): Over
   if (check.scope.startsWith('branch:')) {
     return { kind: 'branch', nodeId: check.scope.slice('branch:'.length), field: token };
   }
+  if (check.scope.startsWith('aggregation:')) {
+    return {
+      kind: 'aggregation', nodeId: check.scope.slice('aggregation:'.length),
+      field: token.startsWith('aggregation.') ? token.slice('aggregation.'.length) : token,
+    };
+  }
+  if (check.scope.startsWith('poi:')) {
+    return {
+      kind: 'poi', nodeId: check.scope.slice('poi:'.length),
+      field: token.startsWith('poi.') ? token.slice('poi.'.length) : token,
+    };
+  }
   if (check.scope.startsWith('domain:')) {
     const domainId = check.scope.slice('domain:'.length);
     if (token.startsWith('panel.')) {
@@ -202,6 +363,41 @@ function focusFor(check: TopologyCheck, token: string, t: ServiceTopology): Over
   }
   if (token.startsWith('manufacturer-document:') || token.startsWith('device.role:')
       || token.startsWith('device.')) {
+    return { kind: 'interconnection', nodeId: 'interconnection', field: token };
+  }
+
+  // 🚨 A SITE-SCOPED CHECK CAN STILL NEED A NODE-LEVEL ANSWER.
+  //
+  // DER isolation coverage is scoped to the site and its `requires` name a domain's storage
+  // connection, an aggregation panel's output or a point of interconnection's landing. Those fell
+  // through to the catch-all and sent the operator to the SERVICE inspector, where none of them
+  // can be answered — and the guard that was supposed to catch it accepted 'service' as a legal
+  // destination for anything.
+  if (token.startsWith('domain.')) {
+    const field = token.slice('domain.'.length);
+    const wanting = field === 'storageConnection'
+      ? t.domains.find(d => d.storageConnection === 'unresolved')
+      : undefined;
+    const target = wanting ?? t.domains[0];
+    if (target) return { kind: 'domain', nodeId: target.id, field };
+  }
+  if (token.startsWith('aggregation.')) {
+    const target = (t.aggregationPanels ?? [])[0];
+    if (target) return { kind: 'aggregation', nodeId: target.id, field: token.slice('aggregation.'.length) };
+  }
+  if (token.startsWith('poi.') || token === 'der.pointOfInterconnection') {
+    const target = (t.pointsOfInterconnection ?? [])[0];
+    if (target) {
+      return {
+        kind: 'poi', nodeId: target.id,
+        field: token.startsWith('poi.') ? token.slice('poi.'.length) : token,
+      };
+    }
+    // No point of interconnection exists yet, so the place to create one is the interconnection
+    // node — not the service.
+    return { kind: 'interconnection', nodeId: 'interconnection', field: token };
+  }
+  if (token.startsWith('der.') || token.startsWith('branch.')) {
     return { kind: 'interconnection', nodeId: 'interconnection', field: token };
   }
   return { kind: 'service', nodeId: 'service', field: token };
@@ -274,6 +470,18 @@ export function buildServiceOverview(
     };
   }
 
+  const aggregationPanels: Record<string, LevelStatus> = {};
+  for (const a of topology.aggregationPanels ?? []) {
+    const cs = evalResult.checks.filter(c => c.scope === `aggregation:${a.id}`);
+    aggregationPanels[a.id] = { conclusion: foldConclusions(cs), headline: headlineFor(cs, topology) };
+  }
+
+  const pois: Record<string, LevelStatus> = {};
+  for (const poi of topology.pointsOfInterconnection ?? []) {
+    const cs = evalResult.checks.filter(c => c.scope === `poi:${poi.id}`);
+    pois[poi.id] = { conclusion: foldConclusions(cs), headline: headlineFor(cs, topology) };
+  }
+
   // ── WHAT IS STILL REQUIRED, ONCE EACH ─────────────────────────────────────
   const seen = new Set<string>();
   const requiredInputs: RequiredInput[] = [];
@@ -290,6 +498,7 @@ export function buildServiceOverview(
         key: token,
         label: labelForToken(token, topology),
         because: `${c.title} — ${c.detail}`,
+        owner: ownerForToken(token),
         focus: focusFor(c, token, topology),
       });
     }
@@ -304,6 +513,10 @@ export function buildServiceOverview(
       panelCount: topology.panels.length,
       domainCount: topology.domains.length,
       gatewayCount: topology.domains.length,
+      aggregationPanelCount: (topology.aggregationPanels ?? []).length,
+      poiCount: (topology.pointsOfInterconnection ?? []).length,
+      generationUnitCount: (topology.generation ?? []).length,
+      derArrangementLabel: DER_ARRANGEMENT_LABEL[topology.interconnection.derArrangement ?? ''] ?? null,
       invertingUnitCount: storage.inverterUnitCount,
       expansionUnitCount: storage.expansionUnitCount,
       usableKwh: storage.totalUsableKwh,
@@ -313,6 +526,8 @@ export function buildServiceOverview(
     site,
     branches,
     domains,
+    aggregationPanels,
+    pois,
     requiredInputs,
     evaluation: evalResult,
   };

@@ -39,6 +39,10 @@ function fullySpecified(): ServiceTopology {
     branchDemandA: [160, 150],
     generationOutputA: [0, 0],
     storageConnection: 'backed-up-panel-busbar',
+    // 🚨 "EVERYTHING ESTABLISHED" NOW INCLUDES THE DESIGN DECISION. How the DER reaches the
+    // service is a choice somebody has to make, and a job that has not made it is not fully
+    // specified — which is exactly what this suite went red to say when the check was added.
+    derArrangement: 'independent-branch',
   });
   // Establish the remaining instance facts the fixture deliberately leaves open.
   for (const d of topology.devices) d.sccrA = 22_000;

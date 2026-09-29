@@ -28,7 +28,14 @@ export type EquipmentInstanceKind =
   | 'storage-inverter'
   | 'storage-expansion'
   | 'panelboard'
-  | 'disconnect';
+  | 'disconnect'
+  /**
+   * A DER aggregation panel. Real hardware — it is bought, scheduled and inspected — and it
+   * contributes no AC source of its own: it gathers other sources' current, it does not make any.
+   */
+  | 'der-aggregation-panel'
+  /** A PV inverter, a generator, or any other non-storage DER source. */
+  | 'generation-unit';
 
 export interface EquipmentInstance {
   /** Unique within the topology — the instance, not the product. */
@@ -99,9 +106,32 @@ export function equipmentInstancesFromTopology(t: ServiceTopology): EquipmentIns
     }
   }
 
+  // 🚨 GENERATION IS AN AC SOURCE AND MUST APPEAR HERE, or this list and `derSources` disagree the
+  // first time a PV inverter is recorded — the engineering would count it and the BOM, the pricing
+  // and the SLD would not. The two enumerations are held equal by a test, not by coincidence.
+  for (const g of t.generation ?? []) {
+    out.push({
+      instanceId: g.id,
+      productId: g.productId ?? '',
+      kind: 'generation-unit',
+      label: g.label,
+      ...(g.domainId ? { domainId: g.domainId } : {}),
+      contributesAcSource: true,
+      continuousOutputA: g.continuousOutputA,
+      usableKwh: null,
+    });
+  }
+
   for (const p of t.panels ?? []) {
     out.push({
       instanceId: p.id, productId: '', kind: 'panelboard', label: p.label,
+      contributesAcSource: false, continuousOutputA: null, usableKwh: null,
+    });
+  }
+
+  for (const agg of t.aggregationPanels ?? []) {
+    out.push({
+      instanceId: agg.id, productId: '', kind: 'der-aggregation-panel', label: agg.label,
       contributesAcSource: false, continuousOutputA: null, usableKwh: null,
     });
   }

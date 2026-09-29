@@ -36,7 +36,9 @@ import { ServiceNodeInspector } from './ServiceNodeInspector';
 import { ServiceTopologyWizard } from './ServiceTopologyWizard';
 import { StatusBadge } from './StatusBadge';
 import type { ServiceTopology } from '@/lib/electrical/serviceTopology';
-import { buildServiceOverview, conclusionWord } from '@/lib/electrical/topologyOverview';
+import {
+  buildServiceOverview, conclusionWord, groupRequirements,
+} from '@/lib/electrical/topologyOverview';
 import {
   createServiceTopology, addServiceBranch, addPanel, addBackupDomain, addProtectiveDevice,
   setInterconnection,
@@ -195,6 +197,16 @@ export function ServiceTopologyBuilder({ projectId, fetchImpl }: ServiceTopology
           <span className="text-sm font-bold text-slate-100">
             {summary.continuousOutputA === null ? '— A' : `${summary.continuousOutputA} A`} AC storage output
           </span>
+          {summary.aggregationPanelCount > 0 ? (
+            <span className="text-sm text-emerald-300">
+              {summary.aggregationPanelCount} DER aggregation panel
+              {summary.aggregationPanelCount === 1 ? '' : 's'}
+            </span>
+          ) : null}
+          <span data-testid="topology-arrangement" className={`text-sm ${
+            summary.derArrangementLabel ? 'text-slate-300' : 'text-amber-300'}`}>
+            {summary.derArrangementLabel ?? 'DER interconnection not chosen'}
+          </span>
           <span className="ml-auto flex items-center gap-2">
             <StatusBadge status={overview.site.conclusion} />
             <span data-testid="topology-needs-count" className="text-xs text-slate-300">
@@ -268,25 +280,41 @@ export function ServiceTopologyBuilder({ projectId, fetchImpl }: ServiceTopology
         </div>
       ) : null}
 
-      {/* ── 3. NEEDS INPUT — each item goes to the field that answers it ───── */}
+      {/* ── 3. NEEDS INPUT — grouped by WHO OWES IT ─────────────────────────
+          Ray: "Don't present all five categories as equivalent text boxes." A number the utility
+          owes, a ruling the jurisdiction owes, a document the manufacturer owes, a calculation
+          SolarPro will run and a choice the designer has not made are five different kinds of
+          blocked, and only some of them can be cleared this afternoon. */}
       {needs.length > 0 ? (
         <div data-testid="topology-needs-input"
              className="rounded-xl border border-amber-500/40 bg-amber-500/5 p-4">
           <div className="text-sm font-black text-amber-300">
             NEEDS INPUT — {needs.length} item{needs.length === 1 ? '' : 's'} required to finish engineering
           </div>
-          <ul className="mt-2 space-y-1">
-            {needs.map(n => (
-              <li key={n.key}>
-                <button type="button" data-testid={`need-${n.key}`}
-                        className="w-full rounded px-2 py-1 text-left text-xs text-amber-100 hover:bg-amber-500/10"
-                        onClick={() => { setSelectedId(n.focus.nodeId); setFocusField(n.focus.field ?? null); }}>
-                  <span className="font-bold">{n.label}</span>
-                  <span className="block text-[11px] text-amber-200/70">{n.because}</span>
-                </button>
-              </li>
+          <div className="mt-3 space-y-3">
+            {groupRequirements(needs).map(group => (
+              <div key={group.spec.owner} data-testid={`needs-group-${group.spec.owner}`}>
+                <div className="flex flex-wrap items-baseline gap-2">
+                  <span className="text-[11px] font-black uppercase tracking-widest text-amber-200">
+                    {group.spec.heading}
+                  </span>
+                  <span className="text-[10px] text-amber-200/60">{group.spec.action}</span>
+                </div>
+                <ul className="mt-1 space-y-1">
+                  {group.items.map(n => (
+                    <li key={n.key}>
+                      <button type="button" data-testid={`need-${n.key}`}
+                              className="w-full rounded px-2 py-1 text-left text-xs text-amber-100 hover:bg-amber-500/10"
+                              onClick={() => { setSelectedId(n.focus.nodeId); setFocusField(n.focus.field ?? null); }}>
+                        <span className="font-bold">{n.label}</span>
+                        <span className="block text-[11px] text-amber-200/70">{n.because}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             ))}
-          </ul>
+          </div>
         </div>
       ) : null}
 

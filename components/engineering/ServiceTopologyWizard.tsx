@@ -24,6 +24,7 @@ import React, { useMemo, useState } from 'react';
 import type { ServiceTopology, DeviceRole, ServicePhase } from '@/lib/electrical/serviceTopology';
 import {
   DISTRIBUTION_PRESETS, SERVICE_SIZE_CHOICES, DISCONNECT_ROLES, buildServiceFromPreset,
+  DER_ARRANGEMENT_CHOICES, applyDerArrangement,
 } from '@/lib/electrical/topologyPresets';
 import {
   addBackupDomain, removeBackupDomain, setDomainEquipment, updatePanel, updateDomain,
@@ -57,6 +58,7 @@ export function ServiceTopologyWizard({
   const [distribution, setDistribution] = useState('two-main-panels');
   const [customBranches, setCustomBranches] = useState(2);
   const [draft, setDraft] = useState<ServiceTopology | null>(null);
+  const [arrangementNotes, setArrangementNotes] = useState<string[]>([]);
   const [gatewayId, setGatewayId] = useState(() => GATEWAYS()[0]?.id ?? '');
   const [notes, setNotes] = useState<string[]>([]);
 
@@ -331,7 +333,48 @@ export function ServiceTopologyWizard({
         {/* ── 5. INTERCONNECTION ───────────────────────────────────────────── */}
         {step === 4 && draft ? (
           <div className="space-y-2">
-            <div className="text-xs font-bold text-slate-200">How does this system interconnect?</div>
+            {/* 🚨 RAY'S QUESTION, ASKED FIRST.
+                "After Ray builds 400 A → 2 × 200 A MSP → 2 backup domains, the next step should not
+                be a pile of unresolved text. Ask: HOW DO THESE DER SYSTEMS INTERCONNECT? Show only
+                topology choices SolarPro can represent."
+                Choosing one BUILDS the nodes. It claims nothing about whether the arrangement is
+                permitted — that is the manufacturer's and the jurisdiction's answer, and both stay
+                exactly as unresolved as they were. */}
+            <div className="text-xs font-bold text-slate-200">
+              How do these DER systems interconnect?
+            </div>
+            {DER_ARRANGEMENT_CHOICES.map(c => (
+              <label key={c.id} data-testid={`wizard-arrangement-${c.id}`}
+                     className={`flex cursor-pointer items-start gap-2 rounded-lg border p-2 ${
+                       draft.interconnection.derArrangement === c.id
+                         ? 'border-sky-400 bg-sky-500/10' : 'border-slate-700 hover:border-slate-500'}`}>
+                <input type="radio" name="derArrangement" className="mt-1"
+                       checked={draft.interconnection.derArrangement === c.id}
+                       onChange={() => {
+                         const r = applyDerArrangement(draft, c.id);
+                         setDraft(r.topology);
+                         setArrangementNotes(r.created);
+                       }} />
+                <span>
+                  <span className="block text-xs font-bold text-slate-100">{c.label}</span>
+                  <span className="block text-[11px] text-slate-400">{c.describe}</span>
+                  <span className="block text-[11px] text-slate-500">{c.builds}</span>
+                </span>
+              </label>
+            ))}
+            {arrangementNotes.length > 0 ? (
+              <ul data-testid="wizard-arrangement-built"
+                  className="list-disc space-y-0.5 pl-5 text-[11px] text-emerald-300">
+                {arrangementNotes.map((nte, i) => <li key={i}>{nte}</li>)}
+              </ul>
+            ) : null}
+            <div className="pt-1 text-[10px] text-slate-500">
+              Neither standard option is claimed to be permitted here. The manufacturer's
+              multi-controller guidance and the utility&apos;s interconnection requirements decide
+              that, and both remain listed as unresolved until they are supplied.
+            </div>
+
+            <div className="mt-3 text-xs font-bold text-slate-200">Point of connection</div>
 
             {/* The project's own authority, RECORDED — not inferred from the equipment chosen. */}
             <label className="block text-xs text-slate-400">
@@ -378,7 +421,19 @@ export function ServiceTopologyWizard({
               </span>
             </label>
 
-            {draft.domains.map(d => (
+            {/* 🚨 NOT OFFERED WHEN THE ARRANGEMENT HAS ALREADY ANSWERED IT. With a common
+                aggregation panel the storage no longer lands on a panel busbar or in a controller,
+                and leaving these selects on screen invited the operator to undo the arrangement
+                they had just chosen — two controls for one fact, which is the shape Ray rejected. */}
+            {draft.interconnection.derArrangement === 'common-aggregation'
+              ? draft.domains.map(d => (
+                  <div key={d.id} data-testid={`wizard-${d.id}-connection-aggregated`}
+                       className="rounded-lg border border-slate-700 p-2 text-xs text-slate-300">
+                    <span className="font-bold">{d.label}</span> — its storage lands in the DER
+                    aggregation panel and interconnects there.
+                  </div>
+                ))
+              : draft.domains.map(d => (
               <label key={d.id} className="block rounded-lg border border-slate-700 p-2 text-xs text-slate-200">
                 <span className="font-bold">{d.label}</span> — point of connection
                 <select data-testid={`wizard-${d.id}-connection`} value={d.storageConnection}

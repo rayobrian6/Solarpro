@@ -153,9 +153,32 @@ describe('🚨 NEEDS INPUT names the thing and knows where it lives', () => {
     const ids = new Set<string>([
       'service', 'interconnection',
       ...t.branches.map(b => b.id), ...t.panels.map(p => p.id), ...t.domains.map(d => d.id),
+      ...(t.aggregationPanels ?? []).map(a => a.id),
+      ...(t.pointsOfInterconnection ?? []).map(p => p.id),
     ]);
     for (const r of o.requiredInputs) {
       expect(ids.has(r.focus.nodeId), `${r.key} → ${r.focus.nodeId}`).toBe(true);
+    }
+  });
+
+  it('🚨 AND NO REQUIREMENT SILENTLY LANDS ON THE SERVICE NODE BECAUSE NOTHING CLAIMED IT', () => {
+    // This guard was blind: `focusFor` routed anything it did not recognise to 'service', and
+    // 'service' is in the legal id set above, so a whole new family of requirements could point at
+    // the wrong inspector and the test would still pass. A requirement may only focus the service
+    // node when it is genuinely ABOUT the service.
+    const SERVICE_FIELDS = new Set([
+      'availableFaultCurrentA', 'calculatedServiceDemandA', 'ratedAmps', 'devices',
+    ]);
+    for (const r of o.requiredInputs) {
+      if (r.focus.nodeId !== 'service') continue;
+      expect(SERVICE_FIELDS.has(r.focus.field ?? ''),
+        `'${r.key}' fell through to the service inspector with field '${r.focus.field}'`).toBe(true);
+    }
+  });
+
+  it('🚨 and no requirement is shown to the operator as its own raw token', () => {
+    for (const r of o.requiredInputs) {
+      expect(r.label, `'${r.key}' is printed at the operator as the key itself`).not.toBe(r.key);
     }
   });
 

@@ -69,6 +69,36 @@ export interface TopologyBomResult {
  * Every line's quantity is a count of instances in the graph. Nothing is defaulted, nothing is
  * scaled by a site-level number.
  */
+/**
+ * A DC expansion and the harness it cannot be installed without.
+ *
+ * One harness per expansion, because that is how many are needed — an expansion that arrives
+ * without its harness is not installable, and a BOM that omits it is the reason a crew makes a
+ * second trip.
+ */
+function emitExpansion(
+  items: BOMLineItemV4[], productId: string, count: number, where: string,
+): void {
+  items.push(line(
+    `topology-ess-expansion-${productId}`, 'Energy Storage', productId, count,
+    `DC battery expansion — energy only, no AC output and no OCPD of its own (${where})`,
+    'service topology: energy-expansion storage instances',
+    'Contributes usable energy. Contributes NO inverter, NO AC ESS breaker and NO source '
+    + 'current to any busbar calculation.',
+  ));
+  items.push({
+    ...line(
+      `topology-ess-expansion-harness-${productId}`, 'Energy Storage',
+      `${productId}-harness`, count,
+      'Expansion harness / accessory kit — one per DC expansion unit',
+      'service topology: one harness per energy-expansion instance',
+    ),
+    // The harness is an accessory of a product, not a catalogue product in its own right.
+    manufacturer: nameOf(productId).manufacturer,
+    model: `${nameOf(productId).model} expansion harness`,
+  });
+}
+
 export function bomFromServiceTopology(t: ServiceTopology): TopologyBomResult {
   const instances = equipmentInstancesFromTopology(t);
   const items: BOMLineItemV4[] = [];
@@ -84,49 +114,75 @@ export function bomFromServiceTopology(t: ServiceTopology): TopologyBomResult {
 
   for (const [productId, list] of byProduct) {
     const kind = list[0].kind;
-    quantities[productId] = list.length;
     const where = list.map(i => i.domainId ?? '—').join(', ');
 
-    if (kind === 'gateway') {
-      items.push(line(
-        `topology-gateway-${productId}`, 'Backup Gateway', productId, list.length,
-        `Backup gateway / controller — one per backup domain (${where})`,
-        'service topology: one gateway per backup domain',
-      ));
-      continue;
+    // 🚨 EXHAUSTIVE, SO A NEW KIND CANNOT BE FORGOTTEN QUIETLY.
+    //
+    // This used to be a chain of `if`s with `quantities[productId]` stamped ABOVE them and no
+    // default. A kind with no branch therefore produced a QUANTITY WITH NO LINE — pricing would
+    // multiply something the bill of materials never listed, and the reconciliation compared the
+    // stamped number against itself and agreed. The switch below makes the omission a compile
+    // error, and `quantities` is now derived from the lines that were actually emitted.
+    switch (kind) {
+      case 'gateway':
+        items.push(line(
+          `topology-gateway-${productId}`, 'Backup Gateway', productId, list.length,
+          `Backup gateway / controller — one per backup domain (${where})`,
+          'service topology: one gateway per backup domain',
+        ));
+        break;
+      case 'generation-unit':
+        items.push(line(
+          `topology-generation-${productId}`, 'Inverter', productId, list.length,
+          `DER generation unit — inverter-class AC source (${where})`,
+          'service topology: generation-unit instances',
+        ));
+        break;
+      case 'der-aggregation-panel':
+        items.push(line(
+          `topology-der-aggregation-${productId}`, 'Electrical', productId, list.length,
+          'DER aggregation / AC generation panel — gathers the DER circuits ahead of the point of '
+          + 'interconnection',
+          'service topology: der-aggregation-panel instances',
+          'Sized from the aggregated DER current, not from the service rating.',
+        ));
+        break;
+      case 'panelboard':
+        items.push(line(
+          `topology-panelboard-${productId}`, 'Electrical', productId, list.length,
+          `Panelboard (${where})`, 'service topology: panelboard instances',
+        ));
+        break;
+      case 'disconnect':
+        items.push(line(
+          `topology-disconnect-${productId}`, 'Electrical', productId, list.length,
+          'Disconnecting means', 'service topology: protective-device instances',
+        ));
+        break;
+      case 'storage-inverter':
+        items.push(line(
+          `topology-ess-${productId}`, 'Energy Storage', productId, list.length,
+          `Energy storage unit with integrated inverter (${where})`,
+          'service topology: inverter-bearing storage instances',
+        ));
+        break;
+      case 'storage-expansion':
+        emitExpansion(items, productId, list.length, where);
+        break;
+      default: {
+        // A new EquipmentInstanceKind reaches here only if this switch was not extended with it.
+        const _exhaustive: never = kind;
+        void _exhaustive;
+      }
     }
-    if (kind === 'storage-inverter') {
-      items.push(line(
-        `topology-ess-${productId}`, 'Energy Storage', productId, list.length,
-        `Energy storage unit with integrated inverter (${where})`,
-        'service topology: inverter-bearing storage instances',
-      ));
-      continue;
-    }
-    if (kind === 'storage-expansion') {
-      items.push(line(
-        `topology-ess-expansion-${productId}`, 'Energy Storage', productId, list.length,
-        `DC battery expansion — energy only, no AC output and no OCPD of its own (${where})`,
-        'service topology: energy-expansion storage instances',
-        'Contributes usable energy. Contributes NO inverter, NO AC ESS breaker and NO source '
-        + 'current to any busbar calculation.',
-      ));
-      // 🚨 AND THE HARNESS IT CANNOT BE INSTALLED WITHOUT. One per expansion, because that is how
-      // many are needed — an expansion that arrives without its harness is not installable, and a
-      // BOM that omits it is the reason a crew makes a second trip.
-      items.push({
-        ...line(
-          `topology-ess-expansion-harness-${productId}`, 'Energy Storage',
-          `${productId}-harness`, list.length,
-          'Expansion harness / accessory kit — one per DC expansion unit',
-          'service topology: one harness per energy-expansion instance',
-        ),
-        // The harness is an accessory of a product, not a catalogue product in its own right.
-        manufacturer: nameOf(productId).manufacturer,
-        model: `${nameOf(productId).model} expansion harness`,
-      });
-      continue;
-    }
+  }
+
+  // Quantities come from the lines that were EMITTED, so "BOM quantity" and "priced quantity"
+  // cannot drift from each other, and a kind with no line shows up as a real disagreement in
+  // `reconcileQuantities` instead of agreeing with a number nobody printed.
+  for (const item of items) {
+    if (item.partNumber.endsWith('-harness')) continue;
+    quantities[item.partNumber] = (quantities[item.partNumber] ?? 0) + item.quantity;
   }
 
   // Price from the same lines, so "BOM quantity" and "priced quantity" are one number.

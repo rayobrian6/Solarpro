@@ -38,7 +38,7 @@
 
 import type { SLDNode, SLDEdge, RunSegment } from '@/lib/topology-engine';
 import {
-  evaluateServiceTopology,
+  evaluateServiceTopology, sizeAggregationPanel, governingArticleFor, sourcesForAggregationInput,
   type ServiceTopology, type TopologyEvaluation,
 } from '@/lib/electrical/serviceTopology';
 import { notEvaluatedLabel } from '@/lib/engineering/engineeringStatus';
@@ -208,6 +208,105 @@ export function buildServiceTopologyGraph(
       { ocpdAmps: topology.service.ratedAmps }),
   }), distribution.id);
 
+  // ── THE DER SIDE: AGGREGATION AND THE POINT OF INTERCONNECTION ────────────
+  //
+  // Drawn before the branches so a storage unit that leaves its domain has somewhere to land.
+  //
+  // 🚨 NO WIRE IS INVENTED. Ray: "If any physical arrangement is unresolved: draw only what is
+  // known and label the unresolved connection INTERCONNECTION ARRANGEMENT REQUIRED. Do not invent
+  // wire." An aggregation panel whose output connects to nothing yet gets its callout and no run
+  // segment; a point of interconnection with no premises-side node gets the same.
+  const aggregationForSource = new Map<string, string>();
+  for (const agg of topology.aggregationPanels ?? []) {
+    const sizing = sizeAggregationPanel(topology, agg);
+    const aggNode = add({
+      id: agg.id, type: 'DER_AGGREGATION_PANEL',
+      label: agg.label,
+      ratedCurrent: amps(agg.busbarRatingA),
+      ocpdRating: agg.mainLugOnly ? 'MLO — no main OCPD' : amps(agg.mainBreakerA),
+      // Stated on the node, because "why is this 125 A on a 400 A service" is the first question
+      // a reviewer asks about it.
+      necReference: sizing.aggregateContinuousA === null
+        ? undefined
+        : `${sizing.aggregateContinuousA} A aggregated DER — ${sizing.standardOcpdA} A at 125%`,
+      unresolvedCallouts: [
+        ...(agg.carriesPremisesLoad === null
+          ? [{ field: 'carries-load',
+               label: 'NOT EVALUATED — DER-ONLY OR LOAD-CARRYING REQUIRED',
+               requires: ['aggregation.carriesPremisesLoad'] }] : []),
+        ...(agg.sccrA === null
+          ? [{ field: 'sccr', label: 'NOT EVALUATED — INTERRUPTING RATING REQUIRED',
+               requires: [`sccr:${agg.id}`] }] : []),
+        ...(agg.feedsNodeId === null
+          ? [{ field: 'output', label: 'INTERCONNECTION ARRANGEMENT REQUIRED',
+               requires: ['aggregation.feedsNodeId'] }] : []),
+      ],
+    });
+    for (const input of agg.inputs) {
+      for (const s of sourcesForAggregationInput(topology, input)) {
+        if (input.tap === 'der-output') aggregationForSource.set(s.id, aggNode.id);
+      }
+    }
+  }
+
+  for (const poi of topology.pointsOfInterconnection ?? []) {
+    const article = governingArticleFor(poi.relationship);
+    add({
+      id: poi.id, type: 'POINT_OF_INTERCONNECTION',
+      label: poi.label,
+      ratedCurrent: amps(poi.ocpdA),
+      ocpdRating: poi.relationship === 'unresolved'
+        ? 'INTERCONNECTION ARRANGEMENT REQUIRED'
+        : poi.relationship.replace(/-/g, ' ').toUpperCase(),
+      necReference: article ?? undefined,
+      unresolvedCallouts: [
+        ...(poi.relationship === 'unresolved'
+          ? [{ field: 'relationship', label: 'INTERCONNECTION ARRANGEMENT REQUIRED',
+               requires: ['poi.relationship'] }] : []),
+        ...(!poi.connectedToNodeId
+          ? [{ field: 'connection',
+               label: 'INTERCONNECTION ARRANGEMENT REQUIRED — PREMISES CONNECTION POINT',
+               requires: ['poi.connectedToNodeId'] }] : []),
+      ],
+    });
+  }
+
+  // The aggregated feeder, and the utility isolation device on it where the topology puts it.
+  for (const agg of topology.aggregationPanels ?? []) {
+    if (!agg.feedsNodeId) continue;
+    link(agg.id, add({
+      id: `run-${agg.id}`, type: 'RUN_SEGMENT',
+      label: `${agg.label} aggregated DER feeder`,
+      runSegment: run('AGGREGATION_FEEDER_RUN', `${agg.label} aggregated DER feeder`,
+        { ocpdAmps: agg.outputOcpdA ?? 0 }),
+    }), agg.feedsNodeId);
+  }
+  for (const d of topology.devices) {
+    if (!d.feedsNodeId) continue;
+    if (!nodes.some(n => n.id === d.id)) {
+      add({
+        id: d.id, type: d.roles.includes('der-isolation-disconnect')
+          ? 'DER_ISOLATION_DISCONNECT' : 'SERVICE_DISCONNECT',
+        label: d.label,
+        ratedCurrent: amps(d.ratedAmps),
+        ocpdRating: d.sccrA === null ? 'SCCR NOT EVALUATED' : `${d.sccrA} A SCCR`,
+        necReference: d.locationNote ?? undefined,
+      });
+    }
+    link(d.id, add({
+      id: `run-placed-${d.id}`, type: 'RUN_SEGMENT', label: `${d.label} to ${d.feedsNodeId}`,
+      runSegment: run('DER_ISOLATION_RUN', `${d.label} to ${d.feedsNodeId}`,
+        { ocpdAmps: d.ratedAmps ?? 0 }),
+    }), d.feedsNodeId);
+  }
+  for (const poi of topology.pointsOfInterconnection ?? []) {
+    if (!poi.connectedToNodeId) continue;
+    link(poi.id, add({
+      id: `run-${poi.id}`, type: 'RUN_SEGMENT', label: `${poi.label} conductors`,
+      runSegment: run('POI_RUN', `${poi.label} conductors`, { ocpdAmps: poi.ocpdA ?? 0 }),
+    }), poi.connectedToNodeId);
+  }
+
   // ── ONE PATH PER BRANCH ───────────────────────────────────────────────────
   for (const branch of topology.branches) {
     const domain = topology.domains.find(d => d.branchId === branch.id) ?? null;
@@ -307,6 +406,10 @@ export function buildServiceTopologyGraph(
       : gwNode.id;
 
     for (const u of units.filter(x => x.role === 'inverter-unit')) {
+      // 🚨 A UNIT THAT LEFT ITS DOMAIN LANDS WHERE IT WENT. Drawn back into its gateway it would
+      // show a connection that is not there, and the drawing would disagree with the engineering
+      // that just moved its busbar check to the aggregation panel.
+      const landsAt = aggregationForSource.get(u.id) ?? acTargetId;
       const n = add({
         id: u.id, type: 'ESS_AC_SOURCE',
         label: `ESS ${u.productId}`,
@@ -327,7 +430,7 @@ export function buildServiceTopologyGraph(
         runSegment: run('ESS_AC_RUN', `${u.productId} AC connection`, { ocpdAmps: u.ocpdA ?? 0 }),
         domainId: domain.id,
       });
-      link(n.id, seg, acTargetId);
+      link(n.id, seg, landsAt);
       domainNodeIds.push(n.id, seg.id);
     }
 

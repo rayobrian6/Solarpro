@@ -43,6 +43,15 @@ function productName(productId: string): string {
   return b ? `${b.manufacturer} ${b.model}` : productId;
 }
 
+/** The name on the enclosure for any node id — never the internal key. */
+function nodeName(t: ServiceTopology, nodeId: string): string {
+  return t.devices.find(d => d.id === nodeId)?.label
+    ?? t.panels.find(p => p.id === nodeId)?.label
+    ?? t.domains.find(d => d.gateway.id === nodeId)?.gateway.label
+    ?? (t.aggregationPanels ?? []).find(a => a.id === nodeId)?.label
+    ?? (nodeId === 'service-distribution' ? 'the service distribution' : nodeId);
+}
+
 function StatusDot({ conclusion }: { conclusion: EngineeringConclusion }) {
   const cls = conclusion === 'FAIL' ? 'bg-red-400'
     : conclusion === 'NOT_EVALUATED' ? 'bg-amber-400' : 'bg-emerald-400';
@@ -313,6 +322,71 @@ export function ServiceTopologyMap({
           </div>
         );
       })()}
+
+      {/* ── WHERE THE DER ACTUALLY CONVERGES ─────────────────────────────────
+          Ray: "Ray should be able to see Gateway / PW domain A and Gateway / PW domain B
+          converging where they actually converge. Then visibly show: DER aggregation panel →
+          external DER disconnect → 400 A service point of interconnection." */}
+      {(topology.aggregationPanels ?? []).length > 0 || (topology.pointsOfInterconnection ?? []).length > 0 ? (
+        <div className="mt-5" data-testid="der-interconnection-group">
+          <div className="text-[10px] font-bold uppercase tracking-widest text-slate-500">
+            DER interconnection
+            {overview.summary.derArrangementLabel
+              ? <span className="ml-2 normal-case tracking-normal text-slate-400">
+                  {overview.summary.derArrangementLabel}
+                </span>
+              : <span className="ml-2 normal-case tracking-normal text-amber-300">
+                  arrangement not chosen
+                </span>}
+          </div>
+          <div className="mt-2 flex flex-wrap items-stretch gap-3">
+            {(topology.aggregationPanels ?? []).map(agg => {
+              const sourceCount = agg.inputs.length;
+              return (
+                <button key={agg.id} type="button" data-testid={`node-${agg.id}`}
+                        className={`${sel(agg.id)} max-w-xs flex-1`} onClick={() => onSelect(agg.id)}>
+                  <div className="text-[10px] font-bold uppercase tracking-widest text-slate-500">
+                    DER aggregation panel
+                  </div>
+                  <div className="text-sm font-black text-slate-100">{agg.label}</div>
+                  <div className="text-[11px] text-slate-300">
+                    {A(agg.busbarRatingA)} bus · {agg.mainLugOnly ? 'MLO' : `${A(agg.mainBreakerA)} main`}
+                    {' · '}{A(agg.outputOcpdA)} output
+                  </div>
+                  <div className="text-[11px] text-slate-500">
+                    {sourceCount} DER circuit{sourceCount === 1 ? '' : 's'}
+                    {agg.carriesPremisesLoad === false ? ' · DER only, no premises load' : ''}
+                  </div>
+                  <StatusLine status={overview.aggregationPanels?.[agg.id]
+                    ?? { conclusion: 'NOT_EVALUATED', headline: null }} />
+                </button>
+              );
+            })}
+            {(topology.pointsOfInterconnection ?? []).map(poi => (
+              <button key={poi.id} type="button" data-testid={`node-${poi.id}`}
+                      className={`${sel(poi.id)} max-w-xs flex-1`} onClick={() => onSelect(poi.id)}>
+                <div className="text-[10px] font-bold uppercase tracking-widest text-slate-500">
+                  Point of interconnection
+                </div>
+                <div className="text-sm font-black text-slate-100">{poi.label}</div>
+                <div className={`text-[11px] ${poi.relationship === 'unresolved'
+                  ? 'font-bold text-amber-300' : 'text-slate-300'}`}>
+                  {poi.relationship === 'unresolved'
+                    ? 'Arrangement not chosen'
+                    : poi.relationship.replace(/-/g, ' ')}
+                </div>
+                <div className="text-[11px] text-slate-500">
+                  {poi.connectedToNodeId
+                    ? `lands on ${nodeName(topology, poi.connectedToNodeId)}`
+                    : 'landing point not established'}
+                </div>
+                <StatusLine status={overview.pois?.[poi.id]
+                  ?? { conclusion: 'NOT_EVALUATED', headline: null }} />
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       {/* ── THE UTILITY-FACING ARRANGEMENT ───────────────────────────────── */}
       <div className="mt-5 flex flex-wrap items-stretch gap-3">

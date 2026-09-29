@@ -126,7 +126,12 @@ describe('🚨 NOT EVALUATED names what would settle it', () => {
     // own panelboard the busbar check is legitimately NOT_EVALUATED — the governing limit is the
     // manufacturer's and SolarPro does not hold it — so this case puts them on a panel busbar
     // that can take them. The first version of this test forgot, and the panel was right.
-    const t = rayJob({ storageConnection: 'backed-up-panel-busbar' });
+    // And it now includes the DER interconnection arrangement — the decision the designer owes the
+    // drawing. The same forgetting, one level up, and the model was right again.
+    const t = rayJob({
+      storageConnection: 'backed-up-panel-busbar',
+      derArrangement: 'independent-branch',
+    });
     t.interconnection.multiGatewayMeteringDoc = {
       title: 'Multiple Backup Gateways on a Single Site — Application Note',
       source: 'archived', present: true, governs: ['metering'],

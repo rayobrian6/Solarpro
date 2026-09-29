@@ -50,10 +50,31 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { maxLoadSideBackfeedA } from '@/lib/nec/rule705_12';
+import { nextStandardOcpd } from '@/lib/electrical/stdSizes';
+import { wireGaugeForOcpd } from '@/lib/permit/utils/conductorAuthority';
+import { derSources, sourcesForAggregationInput } from '@/lib/electrical/derSources';
+import { buildConnectionGraph, derIsolationCoverage } from '@/lib/electrical/connectionGraph';
 import {
   foldConclusions,
   type EngineeringConclusion, type EngineeringCheck,
 } from '@/lib/engineering/engineeringStatus';
+
+// The source list and the traversal live in their own modules so this file can run the
+// DER-isolation-coverage check without the two importing each other at run time. Re-exported here
+// because a caller reaching for "the topology's DER sources" looks in the topology module first.
+export { derSources, sourcesForAggregationInput };
+export {
+  buildConnectionGraph, derIsolationCoverage, UTILITY_NODE_ID,
+  type ConnectionGraph, type ConnNode, type ConnEdge, type DerIsolationCoverage,
+} from '@/lib/electrical/connectionGraph';
+
+/**
+ * The continuous-duty factor an inverter output circuit is sized at.
+ *
+ * NEC 690.8(A)/705.60 — the same 1.25 `lib/electrical/acDisconnect.ts` documents on its own input.
+ * Named once here so a reader can see which factor this is rather than meeting a bare literal.
+ */
+const CONTINUOUS_DUTY_FACTOR = 1.25;
 
 // ── The service ─────────────────────────────────────────────────────────────
 
@@ -106,6 +127,17 @@ export interface ProtectiveDevice {
   roleCombinationAuthority?: string | null;
   /** Where it sits relative to the revenue meter, when a utility rule cares. */
   locationNote?: string | null;
+  /**
+   * The next node TOWARD THE UTILITY from this device, when the arrangement places it somewhere
+   * other than the default service chain (distribution → service disconnect → isolation → meter).
+   *
+   * 🚨 IT IS WHAT MAKES ISOLATION COVERAGE ANSWERABLE. A disconnect that sits on the DER feeder out
+   * of an aggregation panel interrupts a completely different set of paths from one on the service
+   * conductors, and "does opening it disconnect every DER source" cannot be answered without
+   * knowing which. Absent ⇒ the default chain, which is what every graph written before this field
+   * existed means.
+   */
+  feedsNodeId?: string | null;
 }
 
 // ── The graph ───────────────────────────────────────────────────────────────
@@ -222,14 +254,204 @@ export interface BackupDomain {
    *     ahead of the panel. That is a different connection with the MANUFACTURER's limits, not the
    *     panel's busbar rule, and SolarPro does not have those limits: the check reports
    *     NOT_EVALUATED naming the document rather than passing or failing on the wrong rule.
+   * 'der-aggregation-panel'  — the storage does not land on this domain's panel or in its
+   *     controller at all: its output goes to a DER aggregation panel that interconnects
+   *     elsewhere. This panel's busbar then carries no storage, and the governing check moves to
+   *     the aggregation panel's own.
    * 'unresolved'             — nobody has said. The default, and it is NOT_EVALUATED.
    *
    * Getting this wrong in either direction is expensive. Assuming the busbar produces a FAIL on a
    * perfectly standard gateway installation; assuming the gateway silently skips the one check
    * that protects the panel.
    */
-  storageConnection: 'backed-up-panel-busbar' | 'gateway-panelboard' | 'unresolved';
+  storageConnection:
+    'backed-up-panel-busbar' | 'gateway-panelboard' | 'der-aggregation-panel' | 'unresolved';
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DER SOURCES, AGGREGATION, AND THE POINT OF INTERCONNECTION.
+//
+// Ray, after live-testing the 400 A workflow: "It does not yet adequately describe how the two DER
+// systems aggregate and actually interconnect with the 400 A service... Do not assume that exact
+// hardware arrangement is correct merely because Ray suggested it. Instead, give SolarPro enough
+// electrical vocabulary to represent and engineer it correctly."
+//
+// 🚨 TWO THINGS THAT ARE NOT THE SAME PANEL, AND MUST NEVER SHARE A FIELD.
+//
+//   SERVICE DISTRIBUTION — equipment that splits the utility service into its branches. Its rating
+//     follows the SERVICE. That is `UtilityService` + `ServiceBranch[]` and it already exists.
+//   DER AGGREGATION      — a panel whose purpose is to gather several DER AC circuits before a
+//     common point of interconnection. Its rating follows the DER CURRENT THAT ACTUALLY FLOWS IN
+//     IT, and it is not 400 A because the service is 400 A.
+//
+// Ray: "Do not create a generic `combinerPanelAmps`." So there is no such field anywhere below:
+// the aggregation panel is its own node with its own inputs, its own busbar and its own OCPD, and
+// the check that sizes it reads the sources, never the service.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Anything on the premises that can push current toward the utility. */
+export type DerSourceKind = 'ess-inverter' | 'pv-inverter' | 'generator' | 'other';
+
+/**
+ * Generation that is not storage: a PV inverter, a generator, anything else with an AC output.
+ *
+ * Storage inverter units are DER sources too and are NOT duplicated here — they are
+ * `StorageUnit`s with role `'inverter-unit'`, and `derSources()` returns both kinds as one list.
+ * One authority per unit; two would be how a BOM starts counting an inverter twice.
+ */
+export interface GenerationUnit {
+  id: string;
+  label: string;
+  productId?: string | null;
+  kind: Exclude<DerSourceKind, 'ess-inverter'>;
+  /** Manufacturer-governed continuous AC output. null ⇒ NOT_EVALUATED, never zero. */
+  continuousOutputA: number | null;
+  ocpdA: number | null;
+  /** The backup domain it lands inside, when it does. null ⇒ outside every domain. */
+  domainId?: string | null;
+}
+
+/** A DER source, whatever kind of equipment it is, as the traversal and the sizing see it. */
+export interface DerSource {
+  id: string;
+  label: string;
+  kind: DerSourceKind;
+  continuousOutputA: number | null;
+  ocpdA: number | null;
+  domainId: string | null;
+}
+
+/**
+ * WHERE on a source or a controller a circuit is taken from.
+ *
+ * 🚨 THIS IS THE FIELD THAT PREVENTS AN INVALID TOPOLOGY. Ray: "The two Gateways remain separate
+ * islanding/backup domains. Do not create a common bus that electrically defeats Gateway
+ * isolation, independent domain control... A common aggregation/interconnection point is not
+ * permission to parallel arbitrary backed-up Gateway outputs."
+ *
+ * Tying two controllers' BACKED-UP buses together parallels two islands. Tying their GRID SIDES
+ * together is an ordinary utility-side arrangement. Without this field the graph cannot tell those
+ * two apart, and therefore cannot refuse the first one.
+ */
+export type DerTapPoint =
+  /** The source's own AC output conductors. */
+  | 'der-output'
+  /** The line/grid side of a backup controller — outside the island. */
+  | 'gateway-grid-side'
+  /** The backed-up bus behind a backup controller — inside the island. */
+  | 'backed-up-busbar';
+
+export interface DerAggregationInput {
+  id: string;
+  /** A storage unit id, a generation unit id, or a backup domain id. */
+  sourceId: string;
+  tap: DerTapPoint;
+  /** The OCPD in THIS panel protecting that circuit. null ⇒ NOT_EVALUATED. */
+  ocpdA: number | null;
+  conductorGauge?: string | null;
+}
+
+/**
+ * A panel that aggregates DER AC circuits before a common point of interconnection.
+ *
+ * Generic on purpose: its inputs name source ids, not products, so several batteries, several PV
+ * inverters, a generator or a mix of brands aggregate through the same node.
+ */
+export interface DerAggregationPanel {
+  id: string;
+  label: string;
+  /**
+   * 🚨 DOES THIS PANEL ALSO CARRY PREMISES LOAD?
+   *
+   * Ray: "If the panel also carries service/load current rather than DER-only current, its
+   * governing calculation changes accordingly. SolarPro must know which kind of panel it is."
+   *
+   * `true`  ⇒ it is a load centre with DER backfed into it: the 120% busbar allowance governs.
+   * `false` ⇒ it is a DER-only generation panel: its busbar carries only the aggregated output.
+   * `null`  ⇒ nobody has said, and the sizing check reports NOT_EVALUATED naming this field.
+   */
+  carriesPremisesLoad: boolean | null;
+  busbarRatingA: number | null;
+  /** The main OCPD, where it has one. */
+  mainBreakerA: number | null;
+  /** Main-lug-only: no main OCPD by design, which is a different thing from "not established". */
+  mainLugOnly: boolean;
+  sccrA: number | null;
+  inputs: DerAggregationInput[];
+  /** The OCPD protecting the feeder LEAVING this panel. */
+  outputOcpdA: number | null;
+  outputConductorGauge?: string | null;
+  /**
+   * The node this panel's output lands on — a point of interconnection, a protective device or a
+   * panel. null ⇒ the arrangement is unresolved, and nothing downstream may assume one.
+   */
+  feedsNodeId: string | null;
+}
+
+/**
+ * The governed relationships a point of interconnection may have with the premises wiring.
+ *
+ * Ray: "The POI must identify exactly where the DER meets the premises/service electrical system."
+ * Meter collar stays a separate topology and remains unavailable when prohibited.
+ */
+export type PoiRelationship =
+  | 'load-side-busbar'
+  | 'load-side-feeder-tap'
+  | 'supply-side'
+  | 'aggregation-to-supply-side'
+  | 'manufacturer-integrated'
+  | 'meter-collar'
+  /**
+   * 🚨 A REAL MEMBER, NOT A MISSING ONE. A point of interconnection can exist on a drawing before
+   * anybody has decided which governed relationship it is — that is the state the sheet prints
+   * INTERCONNECTION ARRANGEMENT REQUIRED for. Without it, creating a POI would force a guess, and
+   * the guess would silently inherit that relationship's code article.
+   */
+  | 'unresolved';
+
+export interface PointOfInterconnection {
+  id: string;
+  label: string;
+  relationship: PoiRelationship;
+  /** The DER-side node whose output arrives here. */
+  derNodeId: string | null;
+  /** The premises / service-side node it lands on. */
+  connectedToNodeId: string | null;
+  ocpdA: number | null;
+}
+
+/**
+ * The NEC article that governs a relationship.
+ *
+ * 🚨 DERIVED, NOT STORED. A stored article can disagree with the relationship beside it; a
+ * function cannot.
+ */
+export function governingArticleFor(r: PoiRelationship): string | null {
+  switch (r) {
+    case 'load-side-busbar': return 'NEC 705.12(B)';
+    case 'load-side-feeder-tap': return 'NEC 705.12(A) / 240.21';
+    case 'supply-side':
+    case 'aggregation-to-supply-side': return 'NEC 705.11';
+    // A manufacturer-integrated connection is governed by the manufacturer's listing, and naming
+    // an NEC article for it would be the guess this model exists to refuse.
+    case 'manufacturer-integrated': return null;
+    case 'meter-collar': return null;
+    case 'unresolved': return null;
+  }
+}
+
+/**
+ * How the site's DER reaches the service — the DESIGN DECISION, recorded rather than inferred.
+ *
+ * `null` means nobody has chosen, and the engineering says so instead of picking one.
+ */
+export type DerArrangement =
+  /** Each backup domain interconnects through its own governed service branch arrangement. */
+  | 'independent-branch'
+  /** The DER branches aggregate in an AC generation panel before a common service POI. */
+  | 'common-aggregation'
+  /** Advanced: the operator has built something the two presets do not describe. */
+  | 'custom';
 
 /**
  * Where the neutral-to-ground bond is, and therefore what everything downstream must be.
@@ -260,6 +482,18 @@ export interface ServiceTopology {
   panels: PanelBoard[];
   domains: BackupDomain[];
   storage: StorageUnit[];
+  /** PV inverters, generators — DER that is not storage. Empty on a storage-only site. */
+  generation: GenerationUnit[];
+  /**
+   * DER aggregation panels. Empty in the independent-branch arrangement, which is a complete,
+   * valid topology — an empty list is not a missing one.
+   */
+  aggregationPanels: DerAggregationPanel[];
+  /**
+   * Every point at which DER meets the premises wiring. One per domain in the independent
+   * arrangement; one shared in the common-aggregation arrangement.
+   */
+  pointsOfInterconnection: PointOfInterconnection[];
   /** Site-wide calculated service demand. null ⇒ NOT_EVALUATED. */
   calculatedServiceDemandA: number | null;
   /** Jurisdictional facts that change what is legal, supplied by the AHJ/utility layer. */
@@ -268,6 +502,14 @@ export interface ServiceTopology {
 
 export interface InterconnectionContext {
   utilityId: string | null;
+  /**
+   * 🚨 THE DESIGN DECISION, RECORDED — how the site's DER reaches the service.
+   *
+   * null ⇒ nobody has chosen. That is its own kind of missing input: not a number the utility owes
+   * us and not a document a manufacturer owes us, but a decision the designer owes the drawing.
+   * The engineering reports it as such and the sheet refuses to draw a connection nobody chose.
+   */
+  derArrangement: DerArrangement | null;
   /** Ray's constraint on this job: meter-collar interconnection is NOT permitted. */
   meterCollarPermitted: boolean | null;
   /** Meter-collar actually selected in the design. */
@@ -388,6 +630,82 @@ export function summariseStorage(topology: ServiceTopology): StorageSummary {
     totalContinuousOutputA: sumCurrent(topology.storage),
     totalUsableKwh: sumEnergy(topology.storage),
     byDomain,
+  };
+}
+
+/**
+ * The generation landing inside one backup domain, as continuous AC amps.
+ *
+ * 🚨 ONE READER FOR TWO STORES, AND THE UNITS WIN. `BackupDomain.generationOutputA` is the scalar
+ * that existed before generation could be recorded as units; where units exist it is their sum, and
+ * the scalar is the derived compatibility projection. Reading both and adding them would double
+ * count; reading only the scalar would hide a recorded inverter from the busbar it backfeeds.
+ *
+ * Returns null when a unit in the domain states no output — unknown, never zero.
+ */
+export function domainGeneration(
+  topology: ServiceTopology, domain: BackupDomain,
+): number | null {
+  const units = (topology.generation ?? []).filter(g => g.domainId === domain.id);
+  if (units.length === 0) return domain.generationOutputA;
+  if (units.some(u => !num(u.continuousOutputA))) return null;
+  return units.reduce((n, u) => n + (u.continuousOutputA as number), 0);
+}
+
+export interface AggregationSizing {
+  /** Σ continuous AC output of everything feeding this panel. null when any source is unknown. */
+  aggregateContinuousA: number | null;
+  /** 125% of the above, per the continuous-duty factor the conductor authority already applies. */
+  requiredOcpdA: number | null;
+  /** The next standard NEC 240.6(A) rating at or above that. */
+  standardOcpdA: number | null;
+  /** Suggested feeder conductor for that OCPD, from the canonical conductor authority. */
+  outputConductorGauge: string | null;
+  /** Everything the panel could not be sized against, named. */
+  requires: string[];
+}
+
+/**
+ * Size a DER aggregation panel FROM THE CURRENT THAT FLOWS IN IT.
+ *
+ * Ray: "Do not infer its rating from `serviceAmps = 400`. Calculate from the actual topology... the
+ * two inverter-bearing Powerwall units contribute the manufacturer-governed AC current. Expansion
+ * units contribute no independent AC current."
+ *
+ * 🚨 THE SERVICE RATING IS NOT READ HERE, AT ALL. This function takes the panel and the sources
+ * that feed it and nothing else; a 400 A service with 96 A of DER produces a 125 A answer, which is
+ * the whole point.
+ */
+export function sizeAggregationPanel(
+  topology: ServiceTopology, panel: DerAggregationPanel,
+): AggregationSizing {
+  const requires: string[] = [];
+  let total: number | null = 0;
+  if (panel.inputs.length === 0) {
+    requires.push('aggregation.inputs');
+    total = null;
+  }
+  for (const input of panel.inputs) {
+    const sources = sourcesForAggregationInput(topology, input);
+    if (sources.length === 0) {
+      requires.push(`aggregation.input-source:${input.sourceId}`);
+      total = null;
+      continue;
+    }
+    for (const s of sources) {
+      if (!num(s.continuousOutputA)) { requires.push('der.continuousOutputA'); total = null; continue; }
+      if (total !== null) total += s.continuousOutputA as number;
+    }
+  }
+
+  const required = total === null ? null : total * CONTINUOUS_DUTY_FACTOR;
+  const standard = required === null ? null : nextStandardOcpd(required);
+  return {
+    aggregateContinuousA: total,
+    requiredOcpdA: required,
+    standardOcpdA: standard,
+    outputConductorGauge: standard === null ? null : wireGaugeForOcpd(standard),
+    requires: [...new Set(requires)],
   };
 }
 
@@ -547,12 +865,50 @@ export function evaluateServiceTopology(topology: ServiceTopology): TopologyEval
       }
 
       // 705.12(B) per domain — each gateway is its own point of connection.
+      //
+      // 🚨 THE GENERATION IN THIS DOMAIN IS READ FROM THE UNITS WHERE THERE ARE UNITS, AND FROM THE
+      // SCALAR ONLY WHERE THERE ARE NOT. `generationOutputA` predates `topology.generation`; left as
+      // the sole reader it would be a lid on a real array — a PV inverter recorded as a unit would
+      // be invisible to the busbar it backfeeds while being visible to the aggregation sizing and
+      // the isolation traversal, and an operator who filled in both would be counted twice.
       const domainStorage = storageSummary.byDomain[d.id];
-      const backfeedA = num(domainStorage?.continuousOutputA) && num(d.generationOutputA)
-        ? domainStorage.continuousOutputA + d.generationOutputA
+      const domainGenerationA = domainGeneration(topology, d);
+      const backfeedA = num(domainStorage?.continuousOutputA) && num(domainGenerationA)
+        ? domainStorage.continuousOutputA + domainGenerationA
         : null;
 
       // 🚨 THE BUSBAR RULE ONLY APPLIES IF THE BREAKER IS IN THE BUSBAR.
+      //
+      // Storage that leaves the domain for a DER aggregation panel is not on THIS busbar at all.
+      // That is a real PASS for this panel — nothing is connected to it to limit — and the
+      // governing calculation moves to the aggregation panel's own check. Any OTHER generation
+      // inside the domain is still on the busbar and is still checked.
+      if (d.storageConnection === 'der-aggregation-panel') {
+        const otherGenerationA = num(d.generationOutputA) ? d.generationOutputA : null;
+        if (otherGenerationA === 0) {
+          checks.push(pass('domain.busbar-705-12', scope, `${p.label} 120% busbar allowance`,
+            `No source is connected to ${p.label}'s busbar: the storage in ${d.label} lands in a `
+            + 'DER aggregation panel and interconnects there.', 'NEC 705.12(B)'));
+        } else if (otherGenerationA !== null && num(p.busbarRatingA) && num(p.mainBreakerA)) {
+          const allowed = maxLoadSideBackfeedA(p.busbarRatingA, p.mainBreakerA);
+          checks.push(otherGenerationA <= allowed
+            ? pass('domain.busbar-705-12', scope, `${p.label} 120% busbar allowance`,
+                `${otherGenerationA.toFixed(1)} A of generation against ${allowed.toFixed(1)} A `
+                + 'allowed; the storage is aggregated elsewhere.', 'NEC 705.12(B)')
+            : fail('domain.busbar-705-12', scope, `${p.label} 120% busbar allowance`,
+                `${otherGenerationA.toFixed(1)} A of generation exceeds the ${allowed.toFixed(1)} A `
+                + 'allowed on this busbar.', 'NEC 705.12(B)'));
+        } else {
+          const missing: string[] = [];
+          if (!num(p.busbarRatingA)) missing.push('panel.busbarRatingA');
+          if (!num(p.mainBreakerA)) missing.push('panel.mainBreakerA');
+          if (otherGenerationA === null) missing.push('domain.generationOutputA');
+          checks.push(unknown('domain.busbar-705-12', scope, `${p.label} 120% busbar allowance`,
+            'The storage in this domain is aggregated elsewhere, but the generation that remains '
+            + 'on this busbar has not been established.', missing, 'NEC 705.12(B)'));
+        }
+        continue;
+      }
       if (d.storageConnection === 'gateway-panelboard') {
         checks.push(unknown('domain.busbar-705-12', scope, `${p.label} 120% busbar allowance`,
           `The storage in ${d.label} lands in ${d.gateway.label}'s own panelboard, not on `
@@ -732,6 +1088,190 @@ export function evaluateServiceTopology(topology: ServiceTopology): TopologyEval
           : pass('interconnection.der-isolation', 'site', 'Utility DER isolation device',
               `${isolators.map(d => d.label).join(', ')} isolates all on-site DER from the utility, `
               + 'lockable open with a visible open.'));
+    }
+  }
+
+  // ── HOW THE DER ACTUALLY REACHES THE SERVICE ──────────────────────────────
+  //
+  // 🚨 A DESIGN DECISION IS ITS OWN KIND OF MISSING INPUT. It is not a number the utility owes us
+  // and not a document a manufacturer owes us — it is a choice the designer has not made, and the
+  // drawing must not pick one to look finished.
+  const sources = derSources(topology);
+  if (sources.length > 0) {
+    checks.push(ic.derArrangement
+      ? pass('interconnection.arrangement', 'site', 'DER interconnection arrangement',
+          ic.derArrangement === 'common-aggregation'
+            ? 'The DER branches aggregate in an AC generation panel before a common point of '
+              + 'interconnection.'
+            : ic.derArrangement === 'independent-branch'
+              ? 'Each backup domain interconnects through its own governed service branch '
+                + 'arrangement.'
+              : 'A custom engineered interconnection arrangement has been recorded.')
+      : unknown('interconnection.arrangement', 'site', 'DER interconnection arrangement',
+          `This site has ${sources.length} DER source(s) and no interconnection arrangement has `
+          + 'been selected, so how they reach the service is not established.',
+          ['interconnection.derArrangement']));
+  }
+
+  // ── DER ISOLATION COVERAGE ────────────────────────────────────────────────
+  //
+  // Ray: "the SLD must make it obvious whether opening the modeled DER isolation device actually
+  // disconnects every DER source from the utility."
+  //
+  // Only asked where the utility requires an external isolation device, or where nobody has
+  // resolved whether it does. A utility that explicitly does not require one is answered by the
+  // existing `interconnection.der-isolation` check; asking coverage of a device that is not
+  // required would invent a requirement.
+  if (sources.length > 0 && ic.externalDerIsolationRequired !== false) {
+    const graph = buildConnectionGraph(topology);
+    const coverage = derIsolationCoverage(topology, graph);
+    checks.push(coverage.conclusion === 'PASS'
+      ? pass('interconnection.der-isolation-coverage', 'site', 'DER isolation coverage',
+          coverage.detail, 'NEC 705.20 / utility interconnection agreement')
+      : coverage.conclusion === 'FAIL'
+        ? fail('interconnection.der-isolation-coverage', 'site', 'DER isolation coverage',
+            coverage.detail, 'NEC 705.20 / utility interconnection agreement')
+        : unknown('interconnection.der-isolation-coverage', 'site', 'DER isolation coverage',
+            coverage.detail, coverage.requires,
+            'NEC 705.20 / utility interconnection agreement'));
+  }
+
+  // ── POINTS OF INTERCONNECTION ─────────────────────────────────────────────
+  for (const poi of topology.pointsOfInterconnection ?? []) {
+    const scope = `poi:${poi.id}`;
+    const article = governingArticleFor(poi.relationship);
+    if (poi.relationship === 'meter-collar' && ic.meterCollarPermitted === false) {
+      checks.push(fail('poi.relationship', scope, `${poi.label} arrangement`,
+        'A meter-collar point of interconnection is recorded on a project where a meter-collar '
+        + 'interconnection is not permitted.'));
+    } else if (poi.relationship === 'unresolved') {
+      checks.push(unknown('poi.relationship', scope, `${poi.label} arrangement`,
+        'INTERCONNECTION ARRANGEMENT REQUIRED — which governed relationship this point of '
+        + 'interconnection has (load-side busbar, feeder tap, supply-side, manufacturer-integrated) '
+        + 'has not been decided, and it is what selects the code section that governs it.',
+        ['poi.relationship']));
+    } else if (!poi.connectedToNodeId) {
+      checks.push(unknown('poi.relationship', scope, `${poi.label} arrangement`,
+        'INTERCONNECTION ARRANGEMENT REQUIRED — the point of interconnection does not state where '
+        + 'on the premises wiring it lands, so nothing downstream may assume one.',
+        ['poi.connectedToNodeId'], article ?? undefined));
+    } else {
+      checks.push(pass('poi.relationship', scope, `${poi.label} arrangement`,
+        `${poi.label} connects the DER to ${poi.connectedToNodeId} as a `
+        + `${poi.relationship.replace(/-/g, ' ')} arrangement.`, article ?? undefined));
+    }
+
+    // A supply-side arrangement is a different scope of work, and SolarPro does not yet evaluate
+    // the tap conductors and the OCPD that go with it. It says so rather than passing quietly.
+    if (poi.relationship === 'supply-side' || poi.relationship === 'aggregation-to-supply-side') {
+      checks.push(unknown('poi.supply-side-conductors', scope,
+        `${poi.label} supply-side tap conductors`,
+        'A supply-side connection is governed by the tap conductor, OCPD and disconnect '
+        + 'requirements of NEC 705.11, which this topology does not yet size.',
+        ['poi.supplySideTapConductors'], 'NEC 705.11'));
+    }
+  }
+
+  // ── DER AGGREGATION PANELS ────────────────────────────────────────────────
+  //
+  // 🚨 SIZED FROM THE CURRENT THAT FLOWS IN IT, NEVER FROM THE SERVICE RATING. Ray: "It is not
+  // automatically 400 A because the utility service is 400 A."
+  for (const panel of topology.aggregationPanels ?? []) {
+    const scope = `aggregation:${panel.id}`;
+    const sizing = sizeAggregationPanel(topology, panel);
+
+    if (sizing.standardOcpdA === null) {
+      checks.push(unknown('aggregation.output-ocpd', scope, `${panel.label} output OCPD`,
+        'The aggregated DER current is not established, so the panel\'s output OCPD and feeder '
+        + 'cannot be sized.', sizing.requires.length ? sizing.requires : ['der.continuousOutputA'],
+        'NEC 705.60 / 690.8(A)'));
+    } else if (!num(panel.outputOcpdA)) {
+      checks.push(unknown('aggregation.output-ocpd', scope, `${panel.label} output OCPD`,
+        `${sizing.aggregateContinuousA} A of aggregated DER at 125% needs at least `
+        + `${sizing.standardOcpdA} A; no output OCPD is recorded on this panel.`,
+        ['aggregation.outputOcpdA'], 'NEC 705.60 / 690.8(A)'));
+    } else {
+      checks.push(panel.outputOcpdA >= (sizing.standardOcpdA as number)
+        ? pass('aggregation.output-ocpd', scope, `${panel.label} output OCPD`,
+            `${panel.outputOcpdA} A protects ${sizing.aggregateContinuousA} A of aggregated DER `
+            + `(125% = ${(sizing.requiredOcpdA as number).toFixed(1)} A).`,
+            'NEC 705.60 / 690.8(A)')
+        : fail('aggregation.output-ocpd', scope, `${panel.label} output OCPD`,
+            `${panel.outputOcpdA} A is below the ${sizing.standardOcpdA} A required for `
+            + `${sizing.aggregateContinuousA} A of aggregated DER at 125%.`,
+            'NEC 705.60 / 690.8(A)'));
+    }
+
+    // WHICH KIND OF PANEL IS IT? The governing busbar calculation is different, so an unstated
+    // answer is unevaluated rather than assumed to be the easier one.
+    if (panel.carriesPremisesLoad === null || panel.carriesPremisesLoad === undefined) {
+      checks.push(unknown('aggregation.busbar', scope, `${panel.label} busbar`,
+        'Whether this panel also carries premises load has not been stated. A DER-only generation '
+        + 'panel and a load centre with DER backfed into it are governed by different '
+        + 'calculations.', ['aggregation.carriesPremisesLoad'], 'NEC 705.12(B)'));
+    } else if (panel.carriesPremisesLoad) {
+      if (num(panel.busbarRatingA) && num(panel.mainBreakerA) && num(sizing.aggregateContinuousA)) {
+        const allowed = maxLoadSideBackfeedA(panel.busbarRatingA, panel.mainBreakerA);
+        checks.push(sizing.aggregateContinuousA <= allowed
+          ? pass('aggregation.busbar', scope, `${panel.label} 120% busbar allowance`,
+              `${sizing.aggregateContinuousA} A of DER against ${allowed.toFixed(1)} A allowed `
+              + `(${panel.busbarRatingA} A bus, ${panel.mainBreakerA} A main).`, 'NEC 705.12(B)')
+          : fail('aggregation.busbar', scope, `${panel.label} 120% busbar allowance`,
+              `${sizing.aggregateContinuousA} A of DER exceeds the ${allowed.toFixed(1)} A allowed `
+              + `on a ${panel.busbarRatingA} A bus with a ${panel.mainBreakerA} A main.`,
+              'NEC 705.12(B)'));
+      } else {
+        const missing: string[] = [];
+        if (!num(panel.busbarRatingA)) missing.push('aggregation.busbarRatingA');
+        if (!num(panel.mainBreakerA)) missing.push('aggregation.mainBreakerA');
+        if (!num(sizing.aggregateContinuousA)) missing.push('der.continuousOutputA');
+        checks.push(unknown('aggregation.busbar', scope, `${panel.label} 120% busbar allowance`,
+          'This panel carries premises load, so the 120% busbar allowance governs and it cannot '
+          + 'be computed yet.', missing, 'NEC 705.12(B)'));
+      }
+    } else if (num(panel.busbarRatingA) && sizing.standardOcpdA !== null) {
+      checks.push(panel.busbarRatingA >= sizing.standardOcpdA
+        ? pass('aggregation.busbar', scope, `${panel.label} busbar`,
+            `${panel.busbarRatingA} A busbar carries the ${sizing.standardOcpdA} A of aggregated `
+            + 'DER output this panel is built for; it serves no premises load.')
+        : fail('aggregation.busbar', scope, `${panel.label} busbar`,
+            `${panel.busbarRatingA} A busbar is below the ${sizing.standardOcpdA} A the aggregated `
+            + 'DER output requires.'));
+    } else {
+      checks.push(unknown('aggregation.busbar', scope, `${panel.label} busbar`,
+        'The busbar rating of this DER generation panel is not established.',
+        num(panel.busbarRatingA) ? ['der.continuousOutputA'] : ['aggregation.busbarRatingA']));
+    }
+
+    // 🚨 A COMMON AGGREGATION POINT IS NOT PERMISSION TO PARALLEL TWO ISLANDS.
+    const islandTaps = panel.inputs.filter(i => i.tap === 'backed-up-busbar');
+    const islandDomains = new Set(islandTaps.map(i => {
+      const direct = sources.find(s => s.id === i.sourceId);
+      return direct?.domainId ?? i.sourceId;
+    }).filter(Boolean) as string[]);
+    if (islandDomains.size > 1) {
+      checks.push(fail('aggregation.island-integrity', scope, `${panel.label} island integrity`,
+        `${panel.label} takes circuits from the backed-up bus of ${islandDomains.size} separate `
+        + 'backup domains. That parallels two islands through one bus and defeats the independent '
+        + 'islanding each controller provides. Aggregate the grid-side circuits, not the '
+        + 'backed-up ones.'));
+    } else {
+      checks.push(pass('aggregation.island-integrity', scope, `${panel.label} island integrity`,
+        islandTaps.length === 0
+          ? `${panel.label} takes no circuit from a backed-up bus, so no backup domain's island is `
+            + 'paralleled with another.'
+          : `${panel.label} takes backed-up circuits from one domain only.`));
+    }
+
+    // SCCR, on the same terms as every other device in the chain.
+    if (num(afc) && num(panel.sccrA) && (panel.sccrA as number) < afc) {
+      checks.push(fail('aggregation.sccr', scope, `${panel.label} interrupting rating`,
+        `${panel.sccrA} A SCCR is below the ${afc} A available at the service.`,
+        'NEC 110.9 / 110.24'));
+    } else if (!num(panel.sccrA)) {
+      checks.push(unknown('aggregation.sccr', scope, `${panel.label} interrupting rating`,
+        `${panel.label} states no interrupting rating.`, [`sccr:${panel.id}`],
+        'NEC 110.9 / 110.24'));
     }
   }
 

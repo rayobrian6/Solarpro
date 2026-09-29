@@ -486,6 +486,23 @@ export type SLDNodeType =
   | 'NEUTRAL_GROUND_BOND'
   /** Current transformers / metering point. Its arrangement may be manufacturer-governed. */
   | 'CT_METERING'
+  /**
+   * A panel that gathers several DER AC circuits before a common point of interconnection.
+   *
+   * 🚨 NOT `SERVICE_DISTRIBUTION`. Service distribution splits the utility service and its rating
+   * follows the service; this gathers generation and its rating follows the DER current that
+   * actually flows in it. One noun for both would be the `combinerPanelAmps` field this model
+   * exists to refuse.
+   */
+  | 'DER_AGGREGATION_PANEL'
+  /**
+   * The point at which the DER meets the premises wiring — a LOCATION, not a device.
+   *
+   * It carries the governed relationship (load-side busbar, feeder tap, supply-side,
+   * manufacturer-integrated) and therefore the code section that applies. Drawn because an
+   * inspector's first question is where the connection is made.
+   */
+  | 'POINT_OF_INTERCONNECTION'
   | 'RUN_SEGMENT';   // ← the mandatory connector node
 
 export type RunSegmentId =

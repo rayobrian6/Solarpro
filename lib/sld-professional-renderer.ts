@@ -41,9 +41,12 @@ import { combinerBasisIsDecided } from '@/lib/combinerSelection/service';
 // 🚨 THE SERVICE SIDE'S ONE AUTHORITY. Where a project has a service graph, the tail of this sheet
 // is drawn from it — not from `mainPanelAmps`, `batteryCount` or a gateway count.
 import {
-  evaluateServiceTopology,
+  evaluateServiceTopology, sizeAggregationPanel,
+  governingArticleFor as poiArticle,
+  sourcesForAggregationInput as sourcesForAggregationInputSld,
   type ServiceTopology as ServiceTopologyForSld,
   type TopologyEvaluation as TopologyEvaluationForSld,
+  type DerAggregationPanel as DerAggregationPanelForSld,
 } from '@/lib/electrical/serviceTopology';
 import { foldConclusions } from '@/lib/engineering/engineeringStatus';
 
@@ -2829,6 +2832,23 @@ const SEC_DC    = '#E65100';
 const SEC_BLUE  = '#0D47A1';
 
 /**
+ * The name written on the enclosure, for any node id in the graph.
+ *
+ * 🚨 A SHEET NEVER PRINTS AN INTERNAL KEY. `device-1` means nothing to an inspector standing in
+ * front of a 400 A service disconnect; the id is how the model refers to it, and the label is how
+ * the job does.
+ */
+function nodeLabel(t: ServiceTopologyForSld, nodeId: string): string {
+  return t.devices.find(d => d.id === nodeId)?.label
+    ?? t.panels.find(p => p.id === nodeId)?.label
+    ?? t.branches.find(b => b.id === nodeId)?.label
+    ?? t.domains.find(d => d.gateway.id === nodeId)?.gateway.label
+    ?? (t.aggregationPanels ?? []).find(a => a.id === nodeId)?.label
+    ?? (t.pointsOfInterconnection ?? []).find(x => x.id === nodeId)?.label
+    ?? (nodeId === 'service-distribution' ? `${t.service.ratedAmps} A service distribution` : nodeId);
+}
+
+/**
  * 🚨 ONE SHEET, ONE ANSWER.
  *
  * The AC SYSTEM CALCULATIONS and EQUIPMENT SCHEDULE panels are printed on the SAME sheet as the
@@ -2857,6 +2877,7 @@ function overlayServiceTopologyRows(
   const CONNECTION: Record<string, string> = {
     'backed-up-panel-busbar': 'Load side — panel busbar',
     'gateway-panelboard': 'Gateway panelboard',
+    'der-aggregation-panel': 'DER aggregation panel',
     'unresolved': 'NOT ESTABLISHED',
   };
   const connections = [...new Set(t.domains.map(d => CONNECTION[d.storageConnection] ?? 'NOT ESTABLISHED'))];
@@ -2998,13 +3019,34 @@ export function renderTopologyServiceSection(opts: {
   };
 
   // ── COLUMN GEOMETRY ───────────────────────────────────────────────────────
+  //
+  // 🚨 THE SPAN IS NOT THE SAME ON EVERY SHEET, AND THE FIRST VERSION ASSUMED IT WAS.
+  //
+  // What is left of the title block after the PV chain, MEASURED: 784 uu on a micro sheet, 773 on a
+  // string sheet with an integrated DC disconnect — and 533 on a string sheet with an external one,
+  // because that chain carries an extra node. Three columns plus their minimum gaps need 614, so on
+  // that third sheet the columns were clamped on top of each other: nine overlapping boxes, drawn
+  // on a permit-grade sheet. The audit was running the whole time; the TEST fed it a hand-written
+  // 903 uu span that the product never produces, so the guard never saw the sheet that was wrong.
+  //
+  // So the layout is chosen from the span it actually gets. WIDE puts the panelboard beside its
+  // gateway; NARROW stacks it underneath and drops a column. Vertical room is the one thing this
+  // sheet has plenty of.
   const W_PANEL = 158, W_GW = 178, W_DIST = 186, W_DEV = 172, W_ESS = 168, W_EXP = 168;
+  const MIN_GAP = 46;
   const available = opts.endX - opts.startX;
-  const colGap = Math.max(46, Math.min(140,
-    Math.floor((available - (W_PANEL + W_GW + W_DIST)) / 2)));
-  const cxPanel = opts.startX + W_PANEL / 2;
-  const cxGw    = cxPanel + W_PANEL / 2 + colGap + W_GW / 2;
-  const cxDist  = Math.min(opts.endX - W_DIST / 2, cxGw + W_GW / 2 + colGap + W_DIST / 2);
+  const wide = available >= W_PANEL + W_GW + W_DIST + 2 * MIN_GAP;
+  const spanOf = (widths: number[]) =>
+    widths.reduce((a, b) => a + b, 0) + (widths.length - 1) * MIN_GAP;
+  const colWidths = wide ? [W_PANEL, W_GW, W_DIST] : [W_GW, W_DIST];
+  const colGap = Math.max(MIN_GAP, Math.min(140,
+    Math.floor((available - spanOf(colWidths) + (colWidths.length - 1) * MIN_GAP)
+      / (colWidths.length - 1))));
+  // Right-anchored: the distribution column sits at the utility end whatever the span, so the
+  // service chain always drops in the same place and the PV feeder always arrives at the far left.
+  const cxDist = opts.endX - W_DIST / 2;
+  const cxGw = cxDist - W_DIST / 2 - colGap - W_GW / 2;
+  const cxPanel = wide ? cxGw - W_GW / 2 - colGap - W_PANEL / 2 : cxGw;
 
   // ── ROWS: ONE PER SERVICE BRANCH ──────────────────────────────────────────
   const branches = t.branches.length > 0 ? t.branches : [];
@@ -3015,32 +3057,61 @@ export function renderTopologyServiceSection(opts: {
     : Math.max(190, Math.min(wantPitch, Math.floor(((opts.busY - opts.minY) * 2) / n)));
   const rowY = (i: number) => opts.busY + (i - (n - 1) / 2) * rowPitch;
 
+  // 🚨 A NARROW COLUMN IS TALLER THAN ANY FIXED PITCH. With the panelboard stacked under its
+  // gateway a domain column runs ~420 uu, and a pitch chosen from the sheet's height dropped the
+  // next domain's gateway into the previous domain's expansion. So on the narrow sheet rows are
+  // placed SEQUENTIALLY — each one starts below whatever the last one actually reached — which
+  // cannot collide however tall a column turns out to be.
+  //
+  // The same applies whenever a DER aggregation group has to fit UNDER the rows: centred rows
+  // leave it nothing but the bottom margin, and it ran 150 uu off the sheet.
+  const hasAggregation = (t.aggregationPanels ?? []).length > 0;
+  const sequentialRows = !wide || hasAggregation;
+  const rowCenterY: number[] = [];
+  let rowCursor = opts.minY + 24;
+  /** How far down the DOMAIN columns reach — the service chain is in another column. */
+  let rowsBottom = opts.minY;
+
   const panelById = new Map(t.panels.map(x => [x.id, x]));
   const storageById = new Map(t.storage.map(x => [x.id, x]));
 
+  // Which sources leave their domain for an aggregation panel, and which panel takes them.
+  const aggregated = new Map<string, DerAggregationPanelForSld>();
+  for (const agg of t.aggregationPanels ?? []) {
+    for (const input of agg.inputs) {
+      if (input.tap !== 'der-output') continue;
+      for (const s of sourcesForAggregationInputSld(t, input)) aggregated.set(s.id, agg);
+    }
+  }
+
   let entryX = opts.startX, entryY = opts.busY, entryLabel = '';
-  let lowest = opts.busY, highest = opts.busY;
+  // 🚨 STARTS AT THE TOP OF THE BAND, NOT AT THE CHAIN. Seeded at `busY` this floor made a row of
+  // boxes that all sat ABOVE the chain report a bottom of `busY`, so the sequential layout pushed
+  // the next row 120 uu lower than it needed to be and the DER group below them ran off the sheet.
+  let lowest = opts.minY, highest = opts.busY;
 
   branches.forEach((branch, i) => {
-    const y = rowY(i);
     const domain = t.domains.find(d => d.branchId === branch.id) ?? null;
     const panel = (domain?.backedUpPanelIds ?? branch.panelIds ?? [])
       .map(id => panelById.get(id)).find(Boolean)
       ?? t.panels[i] ?? null;
+    // Wide: rows are centred on the chain, as the eye expects. Narrow: sequential, so a tall
+    // column simply pushes the next one down.
+    const y = sequentialRows ? rowCursor + 40 : rowY(i);
+    rowCenterY[i] = y;
 
-    // PANEL
+    const panelLines: Line[] = panel ? [
+      { t: panel.label, sz: F.hdr, bold: true },
+      { t: `${amps(panel.busbarRatingA)} BUS`, sz: F.sub },
+      { t: `${amps(panel.mainBreakerA)} MAIN`, sz: F.sub },
+      ...(panel.backedUp ? [{ t: 'BACKED UP', sz: F.tiny, fill: SEC_BLUE } as Line] : []),
+    ] : [];
+
+    // PANEL — beside its gateway where the sheet is wide enough, stacked under it where it is not.
     let panelBox: ReturnType<typeof drawBox> | null = null;
-    if (panel) {
-      panelBox = drawBox(`panel-${panel.id}`, cxPanel, y, W_PANEL, [
-        { t: panel.label, sz: F.hdr, bold: true },
-        { t: `${amps(panel.busbarRatingA)} BUS`, sz: F.sub },
-        { t: `${amps(panel.mainBreakerA)} MAIN`, sz: F.sub },
-        ...(panel.backedUp ? [{ t: 'BACKED UP', sz: F.tiny, fill: SEC_BLUE } as Line] : []),
-      ]);
-      if (!entryLabel) {
-        entryLabel = panel.label;
-        entryX = panelBox.left; entryY = y;
-      }
+    if (panel && wide) {
+      panelBox = drawBox(`panel-${panel.id}`, cxPanel, y, W_PANEL, panelLines);
+      if (!entryLabel) { entryLabel = panel.label; entryX = panelBox.left; entryY = y; }
       highest = Math.min(highest, panelBox.top);
       lowest = Math.max(lowest, panelBox.bottom);
     }
@@ -3064,12 +3135,12 @@ export function renderTopologyServiceSection(opts: {
       highest = Math.min(highest, gwBox.top);
       lowest = Math.max(lowest, gwBox.bottom);
 
+      const feederLabel = `${branch.label} — ${amps(panel?.mainBreakerA ?? branch.ratedAmps)} FEEDER`;
+
       // GATEWAY → PANEL feeder
       if (panelBox) {
         p.push(ln(gwBox.left, y, panelBox.right, y, { sw: SW_MED }));
-        spanLabel(`feeder-${branch.id}`, panelBox.right, gwBox.left, y - 8, [
-          `${branch.label} — ${amps(panel?.mainBreakerA ?? branch.ratedAmps)} FEEDER`,
-        ]);
+        spanLabel(`feeder-${branch.id}`, panelBox.right, gwBox.left, y - 8, [feederLabel]);
         // 🚨 THE CALLOUT GOES BELOW THE CONDUCTOR, and it is REGISTERED. Drawn above it at the same
         // midpoint, its white disc sat on the callout text and hid the word "FEEDER" — and the
         // audit could not see it because a circle nobody put in the box list is not in the audit.
@@ -3077,7 +3148,25 @@ export function renderTopologyServiceSection(opts: {
         p.push(callout(coX, y + 20, calloutN++));
         boxes.push({ id: `feeder-callout-${branch.id}`, x: coX - 10, y: y + 10, w: 20, h: 20,
                      kind: 'device' });
+      } else if (panel) {
+        // NARROW: the panel hangs under its gateway and the feeder is a short drop. Same conductor,
+        // same label — only the direction it is drawn in changes.
+        panelBox = drawBox(`panel-${panel.id}`, cxGw, gwBox.bottom + 46, W_PANEL, panelLines,
+          { anchor: 'top' });
+        p.push(ln(cxGw, gwBox.bottom, cxGw, panelBox.top, { sw: SW_MED }));
+        const lw = textWidthUu(feederLabel, F.seg);
+        p.push(txt(cxGw + 8, +((gwBox.bottom + panelBox.top) / 2).toFixed(2), feederLabel,
+          { sz: F.seg, anc: 'start' }));
+        boxes.push({ id: `feeder-${branch.id}`, x: cxGw + 8,
+                     y: (gwBox.bottom + panelBox.top) / 2 - capUu(F.seg), w: lw, h: LBL_PITCH,
+                     kind: 'label' });
+        if (!entryLabel) { entryLabel = panel.label; entryX = panelBox.left; entryY = panelBox.cy; }
+        lowest = Math.max(lowest, panelBox.bottom);
       }
+
+      // Whatever is lowest in this column so far — the gateway when the panel sits beside it, the
+      // panel when it sits under it.
+      let stackTop = panelBox && !wide ? panelBox.bottom : gwBox.bottom;
 
       // METERING CTs — the arrangement may be governed by a document we do not hold.
       const multi = t.domains.length > 1;
@@ -3085,21 +3174,27 @@ export function renderTopologyServiceSection(opts: {
       if (multi && !doc?.present) {
         const ctLines = ['CTs — MANUFACTURER DOCUMENT REQUIRED'];
         const lw = Math.max(...ctLines.map(l => textWidthUu(l, F.tiny, true)));
-        p.push(tspan(cxGw, +(gwBox.bottom + 12 + capUu(F.tiny)).toFixed(2), ctLines,
+        p.push(tspan(cxGw, +(stackTop + 12 + capUu(F.tiny)).toFixed(2), ctLines,
           { sz: F.tiny, anc: 'middle', fill: SEC_AMBER, bold: true, lh: LBL_PITCH }));
-        boxes.push({ id: `ct-${domain.id}`, x: cxGw - lw / 2, y: gwBox.bottom + 12,
+        boxes.push({ id: `ct-${domain.id}`, x: cxGw - lw / 2, y: stackTop + 12,
                      w: lw, h: LBL_PITCH + 2, kind: 'label' });
-        lowest = Math.max(lowest, gwBox.bottom + 12 + LBL_PITCH + 2);
+        stackTop += 12 + LBL_PITCH + 2;
+        lowest = Math.max(lowest, stackTop);
       }
 
       // ── STORAGE: inverting units on AC, expansions on the DC harness ──────
       const units = domain.storageUnitIds
         .map(id => storageById.get(id))
         .filter((u): u is NonNullable<typeof u> => !!u);
-      const inverting = units.filter(u => u.role === 'inverter-unit');
-      const expansions = units.filter(u => u.role === 'energy-expansion');
+      // 🚨 A UNIT THAT LEFT ITS DOMAIN IS NOT DRAWN IN IT. Where an aggregation panel takes a
+      // source's own output, that source lands in the aggregation group below — drawing it back
+      // under its gateway would show a connection that is not there and contradict the busbar
+      // check that just moved with it.
+      const inverting = units.filter(u => u.role === 'inverter-unit' && !aggregated.has(u.id));
+      const expansions = units.filter(u => u.role === 'energy-expansion'
+        && !(u.attachedToUnitId && aggregated.has(u.attachedToUnitId)));
 
-      let essY = gwBox.bottom + 58;
+      let essY = stackTop + 58;
       const essBoxes = new Map<string, ReturnType<typeof drawBox>>();
       inverting.forEach(u => {
         const b = drawBox(`ess-${u.id}`, cxGw, essY, W_ESS, [
@@ -3109,7 +3204,7 @@ export function renderTopologyServiceSection(opts: {
         ], { stroke: '#1B5E20' });
         essBoxes.set(u.id, b);
         // AC connection up into the gateway (or across to the panel busbar).
-        p.push(ln(cxGw, b.top, cxGw, gwBox!.bottom, { sw: SW_MED, stroke: '#1B5E20' }));
+        p.push(ln(cxGw, b.top, cxGw, stackTop, { sw: SW_MED, stroke: '#1B5E20' }));
         essY = b.bottom + 58;
         lowest = Math.max(lowest, b.bottom);
       });
@@ -3118,7 +3213,7 @@ export function renderTopologyServiceSection(opts: {
       expansions.forEach((u, k) => {
         const host = u.attachedToUnitId ? essBoxes.get(u.attachedToUnitId) : undefined;
         const anchor = host ?? essBoxes.values().next().value;
-        const ey = (anchor ? anchor.bottom : gwBox!.bottom) + 56 + k * 62;
+        const ey = (anchor ? anchor.bottom : stackTop) + 56 + k * 62;
         const b = drawBox(`exp-${u.id}`, cxGw, ey, W_EXP, [
           { t: u.label ?? u.productId, sz: F.sub, bold: true, fill: SEC_DC },
           { t: `${u.usableKwh ?? '—'} kWh — DC EXPANSION`, sz: F.tiny, fill: SEC_DC },
@@ -3149,6 +3244,9 @@ export function renderTopologyServiceSection(opts: {
         `${branch.label} — ${amps(branch.ocpdAmps ?? branch.ratedAmps)} FEEDER`,
       ]);
     }
+    // The next row starts below whatever this one actually reached.
+    rowsBottom = Math.max(rowsBottom, lowest);
+    rowCursor = Math.max(rowCursor, lowest) + 34;
   });
 
   // ── THE SERVICE DISTRIBUTION, AND EVERY BRANCH FEEDER INTO IT ─────────────
@@ -3161,7 +3259,9 @@ export function renderTopologyServiceSection(opts: {
 
   // Each branch leaves the distribution by its own OCPD and turns to its row.
   branches.forEach((branch, i) => {
-    const y = rowY(i);
+    // The row's ACTUAL centre line, which on the narrow sheet is wherever the sequential layout
+    // put it — not a pitch this loop recomputes and hopes matches.
+    const y = rowCenterY[i] ?? rowY(i);
     const hasDomain = t.domains.some(d => d.branchId === branch.id);
     const targetRight = hasDomain ? cxGw + W_GW / 2 : cxGw + W_GW / 2;
     const jogX = (dist.left + targetRight) / 2;
@@ -3172,6 +3272,183 @@ export function renderTopologyServiceSection(opts: {
       { sz: F.tiny, anc: 'start' }));
   });
 
+  // ── THE DER SIDE: AGGREGATION, ITS ISOLATION, AND THE POINT OF INTERCONNECTION ──
+  //
+  // Ray: "Once selected, draw it directly... Ray should be able to see Gateway / PW domain A and
+  // Gateway / PW domain B converging where they actually converge. Then visibly show: DER
+  // aggregation panel → external DER disconnect → 400 A service point of interconnection."
+  //
+  // 🚨 AND WHERE THE ARRANGEMENT IS UNRESOLVED, NO WIRE IS DRAWN. "Do not invent wire." The output
+  // of a panel that connects to nothing yet ends in a labelled stub, not in a conductor to a node
+  // somebody guessed.
+  const derGroupCx = wide ? (cxPanel + cxGw) / 2 : cxGw;
+  // Below the DOMAIN columns, not below everything: the service chain drops in its own column to
+  // the right, and measuring from it wasted ~120 uu the DER group needed.
+  let derY = Math.max(rowsBottom, opts.minY) + 40;
+  const aggBoxes = new Map<string, ReturnType<typeof drawBox>>();
+
+  for (const agg of t.aggregationPanels ?? []) {
+    const sizing = sizeAggregationPanel(t, agg);
+    // The sources this panel takes, drawn as a row above it so each drops straight in.
+    const taken = agg.inputs.flatMap(i =>
+      i.tap === 'der-output' ? sourcesForAggregationInputSld(t, i) : []);
+    const step = W_ESS + 40;
+    const rowLeft = derGroupCx - ((taken.length - 1) * step) / 2;
+    const sourceBoxes: ReturnType<typeof drawBox>[] = [];
+    taken.forEach((s, k) => {
+      const unit = storageById.get(s.id);
+      const b = drawBox(`ess-${s.id}`, rowLeft + k * step, derY, W_ESS, [
+        { t: s.label, sz: F.sub, bold: true },
+        { t: `${amps(s.continuousOutputA)} AC${unit?.usableKwh != null ? ` · ${unit.usableKwh} kWh` : ''}`,
+          sz: F.tiny },
+        { t: `${amps(s.ocpdA)} OCPD`, sz: F.tiny },
+      ], { stroke: '#1B5E20', anchor: 'top' });
+      sourceBoxes.push(b);
+      lowest = Math.max(lowest, b.bottom);
+    });
+
+    // Each expansion still hangs off its own host, on the DC harness.
+    let expBottom = sourceBoxes.length ? Math.max(...sourceBoxes.map(b => b.bottom)) : derY;
+    taken.forEach((s, k) => {
+      const exps = t.storage.filter(u => u.role === 'energy-expansion' && u.attachedToUnitId === s.id);
+      let top = sourceBoxes[k].bottom + 34;
+      for (const u of exps) {
+        const b = drawBox(`exp-${u.id}`, sourceBoxes[k].cx, top, W_EXP, [
+          { t: u.label ?? u.productId, sz: F.sub, bold: true, fill: SEC_DC },
+          { t: `${u.usableKwh ?? '—'} kWh — DC EXPANSION`, sz: F.tiny, fill: SEC_DC },
+          { t: 'NO AC OUTPUT · NO OCPD', sz: F.tiny, fill: SEC_DC, bold: true },
+        ], { stroke: SEC_DC, dash: '6 4', anchor: 'top' });
+        p.push(ln(b.cx, sourceBoxes[k].bottom, b.cx, b.top,
+          { sw: SW_MED, stroke: SEC_DC, dash: '6 4' }));
+        top = b.bottom + 34;
+        expBottom = Math.max(expBottom, b.bottom);
+        lowest = Math.max(lowest, b.bottom);
+      }
+    });
+
+    const aggLines: Line[] = [
+      { t: agg.label.toUpperCase(), sz: F.hdr, bold: true },
+      { t: agg.busbarRatingA === null
+          ? 'NOT EVALUATED — BUSBAR RATING REQUIRED' : `${agg.busbarRatingA} A BUS`,
+        sz: F.sub, ...(agg.busbarRatingA === null ? { fill: SEC_AMBER, bold: true } : {}) },
+      { t: agg.mainLugOnly ? 'MLO — NO MAIN OCPD' : `${amps(agg.mainBreakerA)} MAIN`, sz: F.tiny },
+      { t: agg.outputOcpdA === null
+          ? 'NOT EVALUATED — OUTPUT OCPD REQUIRED' : `${agg.outputOcpdA} A OUTPUT OCPD`,
+        sz: F.tiny, ...(agg.outputOcpdA === null ? { fill: SEC_AMBER, bold: true } : {}) },
+    ];
+    // 🚨 WHY IT IS THIS SIZE, ON THE DRAWING. A 125 A panel on a 400 A service is the whole point,
+    // and a reviewer must not have to re-derive it to believe it.
+    if (sizing.aggregateContinuousA !== null) {
+      aggLines.push({
+        t: `${sizing.aggregateContinuousA} A AGGREGATED DER · ${sizing.standardOcpdA} A AT 125%`,
+        sz: F.tiny,
+      });
+    }
+    if (agg.carriesPremisesLoad === null) {
+      aggLines.push({ t: 'NOT EVALUATED — DER-ONLY OR LOAD-CARRYING REQUIRED',
+                      sz: F.tiny, fill: SEC_AMBER, bold: true });
+    } else {
+      aggLines.push({ t: agg.carriesPremisesLoad ? 'CARRIES PREMISES LOAD' : 'DER ONLY — NO PREMISES LOAD',
+                      sz: F.tiny });
+    }
+    if (agg.sccrA === null) {
+      aggLines.push({ t: 'NOT EVALUATED — INTERRUPTING RATING REQUIRED',
+                      sz: F.tiny, fill: SEC_AMBER, bold: true });
+    }
+
+    const aggBox = drawBox(`aggregation-${agg.id}`, derGroupCx, expBottom + 38, W_GW + 40, aggLines,
+      { stroke: '#1B5E20', anchor: 'top' });
+    aggBoxes.set(agg.id, aggBox);
+    // 🚨 THE AC COLLECTION CONDUCTOR GOES ROUND THE EXPANSION, NOT THROUGH IT.
+    //
+    // Dropped straight from the unit to the aggregation panel it ran down the same centre line the
+    // DC expansion sits on, and the picture showed an AC conductor drawn through the middle of a
+    // battery. Nothing in the data was wrong and no audit of boxes could see it: a line is not a
+    // box. It leaves each unit by the side and drops clear.
+    for (const b of sourceBoxes) {
+      const riserX = b.right + 16;
+      p.push(ln(b.cx, b.bottom, b.cx, b.bottom + 10, { sw: SW_MED, stroke: '#1B5E20' }));
+      p.push(ln(b.cx, b.bottom + 10, riserX, b.bottom + 10, { sw: SW_MED, stroke: '#1B5E20' }));
+      p.push(ln(riserX, b.bottom + 10, riserX, aggBox.top - 14, { sw: SW_MED, stroke: '#1B5E20' }));
+      p.push(ln(riserX, aggBox.top - 14, derGroupCx, aggBox.top - 14, { sw: SW_MED, stroke: '#1B5E20' }));
+    }
+    if (sourceBoxes.length) p.push(ln(derGroupCx, aggBox.top - 14, derGroupCx, aggBox.top, { sw: SW_MED, stroke: '#1B5E20' }));
+    lowest = Math.max(lowest, aggBox.bottom);
+    derY = aggBox.bottom + 34;
+  }
+
+  // The isolation device the topology placed on a DER path, then the point of interconnection.
+  const placedDevices = t.devices.filter(d => !!d.feedsNodeId);
+  const derChain: Array<{ id: string; box: ReturnType<typeof drawBox> }> = [];
+  for (const d of placedDevices) {
+    const b = drawBox(`device-${d.id}`, derGroupCx, derY, W_DEV, [
+      { t: d.label.toUpperCase(), sz: F.sub, bold: true },
+      { t: amps(d.ratedAmps), sz: F.tiny },
+      ...(d.sccrA === null
+        ? [{ t: 'NOT EVALUATED — INTERRUPTING RATING REQUIRED', sz: F.tiny, fill: SEC_AMBER, bold: true } as Line]
+        : [{ t: `${d.sccrA} A SCCR`, sz: F.tiny } as Line]),
+      ...(d.visibleOpen ? [{ t: 'LOCKABLE · VISIBLE OPEN', sz: F.tiny } as Line] : []),
+    ], { anchor: 'top' });
+    derChain.push({ id: d.id, box: b });
+    lowest = Math.max(lowest, b.bottom);
+    derY = b.bottom + 34;
+  }
+
+  for (const poi of t.pointsOfInterconnection ?? []) {
+    // A point of interconnection drawn beside its own domain belongs in that domain's column; the
+    // shared one belongs at the bottom of the DER chain. Only the shared kind is drawn here.
+    if (!(t.aggregationPanels ?? []).length) continue;
+    const article = poiArticle(poi.relationship);
+    const b = drawBox(`poi-${poi.id}`, derGroupCx, derY, W_DEV + 30, [
+      { t: 'POINT OF INTERCONNECTION', sz: F.hdr, bold: true },
+      { t: poi.relationship === 'unresolved'
+          ? 'INTERCONNECTION ARRANGEMENT REQUIRED'
+          : poi.relationship.replace(/-/g, ' ').toUpperCase(),
+        sz: F.sub, ...(poi.relationship === 'unresolved' ? { fill: SEC_AMBER, bold: true } : {}) },
+      ...(article ? [{ t: article, sz: F.tiny } as Line] : []),
+      // 🚨 THE NAME ON THE ENCLOSURE, NOT THE INTERNAL KEY. "TO DEVICE-1" on a permit sheet is a
+      // database id shown to an inspector — the same defect as printing a panel's id instead of
+      // MSP #1, one layer along.
+      ...(poi.connectedToNodeId
+        ? [{ t: `TO ${nodeLabel(t, poi.connectedToNodeId).toUpperCase()}`, sz: F.tiny } as Line]
+        : [{ t: 'NOT EVALUATED — PREMISES CONNECTION POINT REQUIRED',
+             sz: F.tiny, fill: SEC_AMBER, bold: true } as Line]),
+    ], { stroke: SEC_AMBER, anchor: 'top' });
+    derChain.push({ id: poi.id, box: b });
+    lowest = Math.max(lowest, b.bottom);
+    derY = b.bottom + 34;
+  }
+
+  // Join the DER chain, starting at whatever aggregation panel feeds it.
+  {
+    const order = [
+      ...[...aggBoxes.values()].slice(-1),
+      ...derChain.map(c => c.box),
+    ];
+    for (let i = 0; i + 1 < order.length; i++) {
+      p.push(ln(derGroupCx, order[i].bottom, derGroupCx, order[i + 1].top, { sw: SW_MED }));
+    }
+    // And out to the service, where the arrangement says where. Nothing is drawn when it does not.
+    const last = order[order.length - 1];
+    const lastPoi = (t.pointsOfInterconnection ?? []).find(x => x.connectedToNodeId);
+    if (last && lastPoi && (t.aggregationPanels ?? []).length) {
+      p.push(ln(last.right, last.cy, cxDist, last.cy, { sw: SW_MED }));
+      p.push(ln(cxDist, last.cy, cxDist, opts.busY, { sw: SW_MED }));
+      const lbl = `AGGREGATED DER FEEDER TO ${nodeLabel(t, String(lastPoi.connectedToNodeId)).toUpperCase()}`;
+      const lw = textWidthUu(lbl, F.tiny);
+      p.push(txt(last.right + 8, +(last.cy - 6).toFixed(2), lbl, { sz: F.tiny, anc: 'start' }));
+      boxes.push({ id: 'aggregated-feeder-label', x: last.right + 8, y: last.cy - 6 - capUu(F.tiny),
+                   w: lw, h: LBL_PITCH, kind: 'label' });
+    } else if (last && (t.aggregationPanels ?? []).length) {
+      const lbl = 'INTERCONNECTION ARRANGEMENT REQUIRED';
+      const lw = textWidthUu(lbl, F.tiny, true);
+      p.push(txt(last.right + 10, +last.cy.toFixed(2), lbl,
+        { sz: F.tiny, anc: 'start', fill: SEC_AMBER, bold: true }));
+      boxes.push({ id: 'aggregated-feeder-unresolved', x: last.right + 10,
+                   y: last.cy - capUu(F.tiny), w: lw, h: LBL_PITCH, kind: 'label' });
+    }
+  }
+
   // ── THE SHARED SERVICE CHAIN, DROPPING TOWARD THE UTILITY ─────────────────
   //
   // Order going DOWN is order going toward the grid: service disconnect, the utility's isolation
@@ -3180,9 +3457,13 @@ export function renderTopologyServiceSection(opts: {
   let chainY = dist.bottom + 46;
   let lastX = cxDist, lastY = dist.bottom;
 
+  // A device the topology PLACED on a DER path was already drawn there. Drawn again on the service
+  // chain it would appear twice on one sheet, in two places, and an inspector would have no way to
+  // know which one is the device.
+  const onDerPath = new Set(placedDevices.map(d => d.id));
   const chainDevices = [
-    ...t.devices.filter(d => d.roles.includes('service-disconnect')),
-    ...t.devices.filter(d => d.roles.includes('der-isolation-disconnect')),
+    ...t.devices.filter(d => d.roles.includes('service-disconnect') && !onDerPath.has(d.id)),
+    ...t.devices.filter(d => d.roles.includes('der-isolation-disconnect') && !onDerPath.has(d.id)),
   ];
   for (const d of chainDevices) {
     const lines: Line[] = [
@@ -3197,18 +3478,21 @@ export function renderTopologyServiceSection(opts: {
     p.push(ln(lastX, lastY, cxDist, b.top, { sw: SW_MED }));
     // 🚨 THE CANONICAL N-G BOND, WHERE THE TOPOLOGY PUTS IT — once.
     if (bondedAt.has(d.id)) {
-      // 🚨 LEFT, NOT RIGHT. The chain is the RIGHTMOST column on the sheet; a bond tag hung off its
-      // right wall ran 14 uu past the drawing edge and into the title block — which is exactly the
-      // class of defect `auditServiceSectionLayout` exists to catch, and did.
-      const bx = b.left - 26;
+      // 🚨 IN ITS OWN COLUMN, UNDER THE DEVICE. Hung off the right wall it ran into the title
+      // block; hung off the left wall it reached back into the gateway column on a wide sheet.
+      // Under the box it is inside the chain's own width whatever the layout does around it.
+      const bx = b.left - 22;
       p.push(ln(b.left, b.cy, bx, b.cy, { stroke: GRN, sw: SW_MED }));
       p.push(gnd(bx, b.cy));
       groundX.push(bx);
       const lbl = 'N-G BOND — NEC 250.24';
       const lw = textWidthUu(lbl, F.tiny, true);
-      p.push(txt(bx - 12, +(b.cy - 4).toFixed(2), lbl, { sz: F.tiny, anc: 'end', fill: GRN, bold: true }));
-      boxes.push({ id: `bond-label-${d.id}`, x: bx - 12 - lw, y: b.cy - 4 - capUu(F.tiny),
+      const ly = b.bottom + 10 + capUu(F.tiny);
+      p.push(txt(b.cx, +ly.toFixed(2), lbl, { sz: F.tiny, anc: 'middle', fill: GRN, bold: true }));
+      boxes.push({ id: `bond-label-${d.id}`, x: b.cx - lw / 2, y: b.bottom + 10,
                    w: lw, h: LBL_PITCH, kind: 'label' });
+      chainY = Math.max(chainY, b.bottom + 10 + LBL_PITCH + 12);
+      lowest = Math.max(lowest, b.bottom + 10 + LBL_PITCH);
     }
     lastX = cxDist; lastY = b.bottom;
     chainY = b.bottom + 46;
@@ -4519,6 +4803,13 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     const _svcDefects = auditServiceSectionLayout(_svcSection.boxes, {
       minX: SCH_X, maxX: TB_X - 10, minY: SCH_Y + 10, maxY: CALC_Y - 10,
     });
+    // 🚨 THE BUDGET IS LOGGED, NOT ASSUMED. The span this section gets depends on how long the PV
+    // chain in front of it is, and it is 250 uu narrower on a string sheet with an external DC
+    // disconnect than on a micro one. A test that hand-feeds a roomy span proves nothing about the
+    // sheet that is actually drawn.
+    console.log(`[SLD SERVICE SECTION BUDGET] startX=${(xMSP - 79).toFixed(0)} `
+      + `endX=${(TB_X - 30).toFixed(0)} available=${(TB_X - 30 - (xMSP - 79)).toFixed(0)} `
+      + `defects=${_svcDefects.length}`);
     for (const d of _svcDefects) console.log(`[SLD SERVICE SECTION LAYOUT DEFECT] ${d}`);
 
     _auxBottom = Math.max(_auxBottom, _svcSection.bottomY + 16);

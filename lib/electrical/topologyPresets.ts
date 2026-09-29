@@ -14,8 +14,14 @@
 
 import {
   createServiceTopology, addServiceBranch, addPanel, updateBranch,
+  addAggregationPanel, updateAggregationPanel, addPointOfInterconnection, setDerArrangement,
+  placeDevice, recommendAggregationRatings, updatePointOfInterconnection,
+  type AggregationRecommendation,
 } from '@/lib/electrical/topologyAuthoring';
-import type { ServiceTopology, ServicePhase } from '@/lib/electrical/serviceTopology';
+import { derSources } from '@/lib/electrical/derSources';
+import type {
+  ServiceTopology, ServicePhase, DerArrangement, PoiRelationship,
+} from '@/lib/electrical/serviceTopology';
 
 /** The sizes the picker offers. `null` is "Custom" — the operator types the rating. */
 export const SERVICE_SIZE_CHOICES: ReadonlyArray<number> = [100, 125, 150, 200, 320, 400, 600, 800];
@@ -143,6 +149,162 @@ export function addBranchWithPanel(
     topology: updateBranch(panel.topology, branch.branch.id, { panelIds: [panel.panel.id] }),
     created: [`${branch.branch.label} — ${ratedAmps} A → ${panel.panel.label}`],
   };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// "HOW DO THESE DER SYSTEMS INTERCONNECT?" — THE ANSWER, TURNED INTO A GRAPH.
+//
+// Ray: "After Ray builds 400 A → 2 × 200 A MSP → 2 backup domains, the next step should not be a
+// pile of unresolved text. Ask: HOW DO THESE DER SYSTEMS INTERCONNECT? Show only topology choices
+// SolarPro can represent... Do not claim either standard option is permitted until
+// manufacturer/jurisdiction rules validate it."
+//
+// 🚨 SO THIS BUILDS THE SHAPE AND CLAIMS NOTHING ABOUT ITS LEGALITY. It creates the nodes; the
+// governed relationship at the point of interconnection is left 'unresolved' for the designer, and
+// the manufacturer and jurisdiction authorities that decide whether the shape is allowed stay
+// exactly as unresolved as they were.
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface DerArrangementChoice {
+  id: DerArrangement;
+  label: string;
+  describe: string;
+  /** What it will build, so the choice is not a surprise. */
+  builds: string;
+}
+
+export const DER_ARRANGEMENT_CHOICES: ReadonlyArray<DerArrangementChoice> = [
+  {
+    id: 'independent-branch',
+    label: 'Independent branch interconnection',
+    describe: 'Each backup domain connects through its own governed service branch arrangement.',
+    builds: 'One point of interconnection per backup domain, at that domain\'s own equipment.',
+  },
+  {
+    id: 'common-aggregation',
+    label: 'Common DER aggregation',
+    describe: 'The DER branches aggregate in an AC generation panel before the common service '
+      + 'point of interconnection.',
+    builds: 'One DER aggregation panel taking every source, one shared point of interconnection, '
+      + 'and the utility isolation device placed on the aggregated feeder.',
+  },
+  {
+    id: 'custom',
+    label: 'Custom engineered topology',
+    describe: 'Something neither preset describes — build it node by node in Advanced.',
+    builds: 'Nothing. The arrangement is recorded and the nodes are yours to add.',
+  },
+];
+
+export interface ApplyArrangementResult {
+  topology: ServiceTopology;
+  /** Human sentences describing exactly what was created. */
+  created: string[];
+  /** What SolarPro computed, so the operator sees the arithmetic rather than a number. */
+  recommendation: AggregationRecommendation | null;
+}
+
+/**
+ * Apply an interconnection arrangement to a topology that already has its domains.
+ *
+ * 🚨 THE AGGREGATION PANEL IS SIZED FROM ITS SOURCES. `recommendAggregationRatings` reads the DER
+ * that actually feeds it — on a 400 A service with two 48 A inverting units that is 96 A, 125% of
+ * it, and the next standard OCPD. The service rating is not an input to it anywhere.
+ */
+export function applyDerArrangement(
+  t: ServiceTopology, arrangement: DerArrangement,
+): ApplyArrangementResult {
+  const created: string[] = [];
+  let next = setDerArrangement(t, arrangement);
+
+  if (arrangement === 'custom') {
+    created.push('Recorded a custom engineered arrangement.');
+    return { topology: next, created, recommendation: null };
+  }
+
+  if (arrangement === 'independent-branch') {
+    for (const d of next.domains) {
+      // The relationship IS the domain's storage connection, where that has been established.
+      const relationship: PoiRelationship =
+        d.storageConnection === 'backed-up-panel-busbar' ? 'load-side-busbar'
+          : d.storageConnection === 'gateway-panelboard' ? 'manufacturer-integrated'
+            : 'unresolved';
+      const connectedTo = d.storageConnection === 'backed-up-panel-busbar'
+        ? (d.backedUpPanelIds[0] ?? null)
+        : d.storageConnection === 'gateway-panelboard' ? d.gateway.id : null;
+      const r = addPointOfInterconnection(next, {
+        label: `${d.label} point of interconnection`,
+        relationship,
+        derNodeId: d.storageUnitIds[0] ?? null,
+        connectedToNodeId: connectedTo,
+      });
+      next = r.topology;
+      created.push(`${r.poi.label}${relationship === 'unresolved'
+        ? ' — arrangement still to be decided' : ` — ${relationship.replace(/-/g, ' ')}`}`);
+    }
+    return { topology: next, created, recommendation: null };
+  }
+
+  // ── COMMON AGGREGATION ────────────────────────────────────────────────────
+  const sources = derSources(next);
+  const added = addAggregationPanel(next, {
+    label: 'DER aggregation panel',
+    // A generation panel serving no premises load. Stated, because which kind of panel it is
+    // decides which calculation governs its busbar.
+    carriesPremisesLoad: false,
+    mainLugOnly: true,
+    inputs: sources.map(s => ({ sourceId: s.id, tap: 'der-output' as const, ocpdA: s.ocpdA })),
+  });
+  next = added.topology;
+  created.push(`${added.panel.label} taking ${sources.length} DER source(s)`);
+
+  // Storage that leaves its domain for the aggregation panel is no longer on its panel's busbar.
+  next = {
+    ...next,
+    domains: next.domains.map(d => ({ ...d, storageConnection: 'der-aggregation-panel' as const })),
+  };
+
+  const recommendation = recommendAggregationRatings(next, added.panel.id);
+  if (recommendation.outputOcpdA !== null) {
+    next = updateAggregationPanel(next, added.panel.id, {
+      busbarRatingA: recommendation.busbarRatingA,
+      outputOcpdA: recommendation.outputOcpdA,
+      outputConductorGauge: recommendation.outputConductorGauge,
+    });
+    created.push(`${recommendation.aggregateContinuousA} A aggregated → `
+      + `${recommendation.outputOcpdA} A output OCPD, ${recommendation.outputConductorGauge} feeder, `
+      + `${recommendation.busbarRatingA} A busbar`);
+  }
+
+  // One shared point of interconnection. Its governed relationship is the designer's to choose.
+  const poiAdded = addPointOfInterconnection(next, {
+    label: 'Point of interconnection',
+    relationship: 'unresolved',
+    derNodeId: added.panel.id,
+    connectedToNodeId: null,
+  });
+  next = poiAdded.topology;
+  created.push(`${poiAdded.poi.label} — arrangement still to be decided`);
+
+  // The utility isolation device, where one exists, moves onto the aggregated feeder: that is what
+  // makes opening it disconnect every source, and it is what the coverage check verifies.
+  const isolator = next.devices.find(d => d.roles.includes('der-isolation-disconnect'));
+  if (isolator) {
+    next = updateAggregationPanel(next, added.panel.id, { feedsNodeId: isolator.id });
+    next = placeDevice(next, isolator.id, poiAdded.poi.id);
+    // 🚨 AND THE POINT OF INTERCONNECTION'S DER SIDE MOVES TO THE ISOLATOR.
+    //
+    // Left pointing at the panel it produced a SECOND edge, panel → POI, running straight past the
+    // disconnect that was just inserted between them — a parallel path around the isolation. The
+    // DER-isolation-coverage check reported FAIL on this very preset, which is precisely what it is
+    // for: a drawing that looks right and a switch that does not open everything.
+    next = updatePointOfInterconnection(next, poiAdded.poi.id, { derNodeId: isolator.id });
+    created.push(`${isolator.label} placed on the aggregated DER feeder`);
+  } else {
+    next = updateAggregationPanel(next, added.panel.id, { feedsNodeId: poiAdded.poi.id });
+  }
+
+  return { topology: next, created, recommendation };
 }
 
 /**

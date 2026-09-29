@@ -83,6 +83,73 @@ async function rayJob() {
   return topology;
 }
 
+/**
+ * The same job with the DER side built: an aggregation panel, a point of interconnection, and the
+ * utility isolation device PLACED on the aggregated feeder.
+ *
+ * 🚨 THE PLACEMENT IS WHY THIS FIXTURE EXISTS. `ProtectiveDevice.feedsNodeId` is what tells the
+ * traversal that the disconnect sits on the DER feeder rather than on the service conductors, and a
+ * parse that dropped it reloaded the device onto the default chain — which moves DER ISOLATION
+ * COVERAGE from FAIL to PASS across a save. A safety check that gets safer by being saved is the
+ * worst direction for one to move, and no fixture exercised the field until this one.
+ */
+async function rayJobAggregated() {
+  const { applyDerArrangement } = await import('@/lib/electrical/topologyPresets');
+  const { updatePointOfInterconnection } = await import('@/lib/electrical/topologyAuthoring');
+  const built = applyDerArrangement(await rayJob(), 'common-aggregation').topology;
+  return updatePointOfInterconnection(built, 'poi-1', {
+    relationship: 'aggregation-to-supply-side', connectedToNodeId: 'svc-disco',
+  });
+}
+
+describe('🚨 the DER side survives the save too', () => {
+  it('the aggregation panel, its inputs, the POI and the device PLACEMENT all come back', async () => {
+    const { writeServiceTopology, readServiceTopology } = await import('@/lib/db/serviceTopology');
+    const before = await rayJobAggregated();
+    expect(await writeServiceTopology(PROJECT, USER_ID, before)).toBe(true);
+    const after = (await readServiceTopology(PROJECT, USER_ID))!.topology;
+
+    expect(after.interconnection.derArrangement).toBe('common-aggregation');
+    expect(after.aggregationPanels).toHaveLength(1);
+    const agg = after.aggregationPanels[0];
+    expect(agg.busbarRatingA).toBe(125);
+    expect(agg.outputOcpdA).toBe(125);
+    expect(agg.mainLugOnly).toBe(true);
+    expect(agg.carriesPremisesLoad).toBe(false);
+    expect(agg.inputs).toHaveLength(2);
+    expect(agg.inputs.every(i => i.tap === 'der-output')).toBe(true);
+
+    expect(after.pointsOfInterconnection).toHaveLength(1);
+    expect(after.pointsOfInterconnection[0].relationship).toBe('aggregation-to-supply-side');
+    expect(after.pointsOfInterconnection[0].connectedToNodeId).toBe('svc-disco');
+
+    // 🚨 THE PLACEMENT.
+    const iso = after.devices.find(d => d.roles.includes('der-isolation-disconnect'))!;
+    expect(iso.feedsNodeId, 'the device reloaded onto the default service chain')
+      .toBe('poi-1');
+    expect(agg.feedsNodeId).toBe(iso.id);
+    expect(after.domains.every(d => d.storageConnection === 'der-aggregation-panel')).toBe(true);
+  });
+
+  it('🚨 and the isolation-coverage VERDICT is the same after the reload', async () => {
+    const { writeServiceTopology, readServiceTopology } = await import('@/lib/db/serviceTopology');
+    const { derIsolationCoverage } = await import('@/lib/electrical/serviceTopology');
+    const before = await rayJobAggregated();
+    await writeServiceTopology(PROJECT, USER_ID, before);
+    const after = (await readServiceTopology(PROJECT, USER_ID))!.topology;
+    expect(derIsolationCoverage(before).conclusion).toBe('PASS');
+    expect(derIsolationCoverage(after).conclusion).toBe('PASS');
+
+    // And the same holds for a topology that FAILS it: a save must not launder a failure either.
+    const { updateAggregationPanel } = await import('@/lib/electrical/topologyAuthoring');
+    const bypassed = updateAggregationPanel(before, 'agg-1', { feedsNodeId: 'poi-1' });
+    await writeServiceTopology(PROJECT, USER_ID, bypassed);
+    const reloaded = (await readServiceTopology(PROJECT, USER_ID))!.topology;
+    expect(derIsolationCoverage(bypassed).conclusion).toBe('FAIL');
+    expect(derIsolationCoverage(reloaded).conclusion).toBe('FAIL');
+  });
+});
+
 describe('🚨 the service graph survives a save and a reload', () => {
   it('round-trips through a real PostgreSQL column with every part intact', async () => {
     const { writeServiceTopology, readServiceTopology } = await import('@/lib/db/serviceTopology');

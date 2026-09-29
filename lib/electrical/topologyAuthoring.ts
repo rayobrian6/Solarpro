@@ -20,7 +20,10 @@ import {
 import type {
   ServiceTopology, ServiceBranch, PanelBoard, BackupDomain, StorageUnit,
   GatewayInstance, ProtectiveDevice, DeviceRole, ServicePhase,
+  GenerationUnit, DerAggregationPanel, DerTapPoint, PointOfInterconnection, PoiRelationship,
 } from '@/lib/electrical/serviceTopology';
+import { sizeAggregationPanel } from '@/lib/electrical/serviceTopology';
+import { nextStandardOcpd } from '@/lib/electrical/stdSizes';
 
 /** A new, empty service. Branches, panels and domains are added onto it. */
 export function createServiceTopology(opts: {
@@ -42,9 +45,15 @@ export function createServiceTopology(opts: {
     panels: [],
     domains: [],
     storage: [],
+    generation: [],
+    aggregationPanels: [],
+    pointsOfInterconnection: [],
     calculatedServiceDemandA: null,
     interconnection: {
       utilityId: opts.utilityId ?? null,
+      // 🚨 NOT DEFAULTED TO A SHAPE. How the DER reaches the service is a design decision, and a
+      // new service has not made it.
+      derArrangement: null,
       meterCollarPermitted: null,
       meterCollarSelected: false,
       externalDerIsolationRequired: null,
@@ -378,6 +387,224 @@ export function updateProtectiveDevice(
 
 export function removeProtectiveDevice(t: ServiceTopology, deviceId: string): ServiceTopology {
   return { ...t, devices: t.devices.filter(d => d.id !== deviceId) };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// THE DER SIDE: GENERATION, AGGREGATION, AND THE POINT OF INTERCONNECTION.
+//
+// Ray: "give SolarPro enough electrical vocabulary to represent and engineer it correctly." These
+// are the operations that build that vocabulary into a real graph. Same rule as everything above:
+// pure, no catalogue guesswork, no rating invented — a number this file does not know comes back
+// null and the engineering names it.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Add a PV inverter, a generator or any other non-storage DER source. */
+export function addGenerationUnit(
+  t: ServiceTopology,
+  opts: {
+    kind: GenerationUnit['kind'];
+    label?: string;
+    productId?: string | null;
+    continuousOutputA?: number | null;
+    ocpdA?: number | null;
+    domainId?: string | null;
+  },
+): { topology: ServiceTopology; unit: GenerationUnit } {
+  const id = nextId(t.generation ?? [], 'gen');
+  const unit: GenerationUnit = {
+    id,
+    label: opts.label ?? `${opts.kind === 'pv-inverter' ? 'PV inverter' : opts.kind === 'generator' ? 'Generator' : 'DER source'} ${(t.generation ?? []).length + 1}`,
+    productId: opts.productId ?? null,
+    kind: opts.kind,
+    // 🚨 NOT ZERO. A source whose output nobody stated has not been shown to contribute nothing.
+    continuousOutputA: opts.continuousOutputA ?? null,
+    ocpdA: opts.ocpdA ?? null,
+    domainId: opts.domainId ?? null,
+  };
+  return { topology: { ...t, generation: [...(t.generation ?? []), unit] }, unit };
+}
+
+/**
+ * Add a DER aggregation panel.
+ *
+ * 🚨 IT TAKES NO SERVICE RATING AND INFERS NONE. Every rating is passed in or left null; the panel
+ * is sized from the sources that feed it by `sizeAggregationPanel`, and an operator who wants that
+ * answer asks for it through `recommendAggregationRatings` rather than receiving it silently.
+ */
+export function addAggregationPanel(
+  t: ServiceTopology,
+  opts: {
+    label?: string;
+    carriesPremisesLoad?: boolean | null;
+    busbarRatingA?: number | null;
+    mainBreakerA?: number | null;
+    mainLugOnly?: boolean;
+    sccrA?: number | null;
+    inputs?: Array<{ sourceId: string; tap?: DerTapPoint; ocpdA?: number | null }>;
+    outputOcpdA?: number | null;
+    outputConductorGauge?: string | null;
+    feedsNodeId?: string | null;
+  } = {},
+): { topology: ServiceTopology; panel: DerAggregationPanel } {
+  const existing = t.aggregationPanels ?? [];
+  const id = nextId(existing, 'agg');
+  const panel: DerAggregationPanel = {
+    id,
+    label: opts.label ?? `DER aggregation panel ${existing.length + 1}`,
+    carriesPremisesLoad: opts.carriesPremisesLoad ?? null,
+    busbarRatingA: opts.busbarRatingA ?? null,
+    mainBreakerA: opts.mainBreakerA ?? null,
+    mainLugOnly: opts.mainLugOnly ?? false,
+    sccrA: opts.sccrA ?? null,
+    inputs: (opts.inputs ?? []).map((input, i) => ({
+      id: `${id}-in-${i + 1}`,
+      sourceId: input.sourceId,
+      // The default is the source's own output. The two tap points that change which rules apply
+      // have to be said out loud.
+      tap: input.tap ?? 'der-output',
+      ocpdA: input.ocpdA ?? null,
+    })),
+    outputOcpdA: opts.outputOcpdA ?? null,
+    outputConductorGauge: opts.outputConductorGauge ?? null,
+    feedsNodeId: opts.feedsNodeId ?? null,
+  };
+  return { topology: { ...t, aggregationPanels: [...existing, panel] }, panel };
+}
+
+export function addAggregationInput(
+  t: ServiceTopology, panelId: string,
+  opts: { sourceId: string; tap?: DerTapPoint; ocpdA?: number | null },
+): ServiceTopology {
+  return {
+    ...t,
+    aggregationPanels: (t.aggregationPanels ?? []).map(p => p.id === panelId ? {
+      ...p,
+      inputs: [...p.inputs, {
+        id: `${p.id}-in-${p.inputs.length + 1}`,
+        sourceId: opts.sourceId,
+        tap: opts.tap ?? 'der-output',
+        ocpdA: opts.ocpdA ?? null,
+      }],
+    } : p),
+  };
+}
+
+export function updateAggregationPanel(
+  t: ServiceTopology, panelId: string, patch: Partial<Omit<DerAggregationPanel, 'id' | 'inputs'>>,
+): ServiceTopology {
+  return {
+    ...t,
+    aggregationPanels: (t.aggregationPanels ?? []).map(p => p.id === panelId ? { ...p, ...patch } : p),
+  };
+}
+
+export function removeAggregationPanel(t: ServiceTopology, panelId: string): ServiceTopology {
+  return {
+    ...t,
+    aggregationPanels: (t.aggregationPanels ?? []).filter(p => p.id !== panelId),
+    // A point of interconnection that fed off it, and a device that fed it, stop pointing at
+    // something that is gone. Leaving the reference would leave the graph naming a missing node.
+    pointsOfInterconnection: (t.pointsOfInterconnection ?? []).map(poi =>
+      poi.derNodeId === panelId ? { ...poi, derNodeId: null } : poi),
+    devices: t.devices.map(d => d.feedsNodeId === panelId ? { ...d, feedsNodeId: null } : d),
+  };
+}
+
+export function addPointOfInterconnection(
+  t: ServiceTopology,
+  opts: {
+    relationship: PoiRelationship;
+    label?: string;
+    derNodeId?: string | null;
+    connectedToNodeId?: string | null;
+    ocpdA?: number | null;
+  },
+): { topology: ServiceTopology; poi: PointOfInterconnection } {
+  const existing = t.pointsOfInterconnection ?? [];
+  const id = nextId(existing, 'poi');
+  const poi: PointOfInterconnection = {
+    id,
+    label: opts.label ?? `Point of interconnection ${existing.length + 1}`,
+    relationship: opts.relationship,
+    derNodeId: opts.derNodeId ?? null,
+    connectedToNodeId: opts.connectedToNodeId ?? null,
+    ocpdA: opts.ocpdA ?? null,
+  };
+  return { topology: { ...t, pointsOfInterconnection: [...existing, poi] }, poi };
+}
+
+export function updatePointOfInterconnection(
+  t: ServiceTopology, poiId: string, patch: Partial<Omit<PointOfInterconnection, 'id'>>,
+): ServiceTopology {
+  return {
+    ...t,
+    pointsOfInterconnection: (t.pointsOfInterconnection ?? [])
+      .map(p => p.id === poiId ? { ...p, ...patch } : p),
+  };
+}
+
+export function removePointOfInterconnection(t: ServiceTopology, poiId: string): ServiceTopology {
+  return {
+    ...t,
+    pointsOfInterconnection: (t.pointsOfInterconnection ?? []).filter(p => p.id !== poiId),
+    devices: t.devices.map(d => d.feedsNodeId === poiId ? { ...d, feedsNodeId: null } : d),
+  };
+}
+
+/** Record the DESIGN DECISION. It is never inferred from what equipment happens to be present. */
+export function setDerArrangement(
+  t: ServiceTopology, arrangement: ServiceTopology['interconnection']['derArrangement'],
+): ServiceTopology {
+  return { ...t, interconnection: { ...t.interconnection, derArrangement: arrangement } };
+}
+
+/** Place a protective device on a specific path rather than the default service chain. */
+export function placeDevice(
+  t: ServiceTopology, deviceId: string, feedsNodeId: string | null,
+): ServiceTopology {
+  return { ...t, devices: t.devices.map(d => d.id === deviceId ? { ...d, feedsNodeId } : d) };
+}
+
+export interface AggregationRecommendation {
+  /** Σ of the sources feeding the panel. */
+  aggregateContinuousA: number | null;
+  /** The next standard OCPD at or above 125% of it. */
+  outputOcpdA: number | null;
+  /** The feeder for that OCPD, from the canonical conductor authority. */
+  outputConductorGauge: string | null;
+  /** A DER-only busbar has to carry the output; this is the smallest standard one that does. */
+  busbarRatingA: number | null;
+  /** Everything the recommendation could not be computed from, named. */
+  requires: string[];
+}
+
+/**
+ * What SolarPro CAN calculate about an aggregation panel.
+ *
+ * Ray's own split: the aggregation current, the panel's minimum electrical requirements, the
+ * conductor and the OCPD are things SolarPro computes; the available fault current is the
+ * utility's and the arrangement is the designer's. This is the first list, and nothing here is
+ * applied to the graph until somebody asks for it — an authoring step that quietly sizes its own
+ * equipment is a check that verifies its own arithmetic.
+ */
+export function recommendAggregationRatings(
+  t: ServiceTopology, panelId: string,
+): AggregationRecommendation {
+  const panel = (t.aggregationPanels ?? []).find(p => p.id === panelId);
+  if (!panel) {
+    return {
+      aggregateContinuousA: null, outputOcpdA: null, outputConductorGauge: null,
+      busbarRatingA: null, requires: ['aggregation.panel'],
+    };
+  }
+  const sizing = sizeAggregationPanel(t, panel);
+  return {
+    aggregateContinuousA: sizing.aggregateContinuousA,
+    outputOcpdA: sizing.standardOcpdA,
+    outputConductorGauge: sizing.outputConductorGauge,
+    busbarRatingA: sizing.standardOcpdA === null ? null : nextStandardOcpd(sizing.standardOcpdA),
+    requires: sizing.requires,
+  };
 }
 
 /** Record the interconnection facts the jurisdiction and the project constrain. */

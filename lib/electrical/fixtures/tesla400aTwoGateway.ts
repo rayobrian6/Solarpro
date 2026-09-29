@@ -23,6 +23,7 @@ import {
 } from '@/lib/electrical/adapters/tesla';
 import type {
   ServiceTopology, ProtectiveDevice, ServiceBranch, PanelBoard, BackupDomain, StorageUnit,
+  DerArrangement, DerAggregationPanel, PointOfInterconnection,
 } from '@/lib/electrical/serviceTopology';
 
 export interface Tesla400AOptions {
@@ -45,7 +46,32 @@ export interface Tesla400AOptions {
    * Ray's own note is that this "must follow selected topology/manufacturer authority", and nobody
    * has selected it yet on this job.
    */
-  storageConnection?: 'backed-up-panel-busbar' | 'gateway-panelboard' | 'unresolved';
+  storageConnection?: BackupDomain['storageConnection'];
+  /**
+   * 🚨 HOW THE DER ACTUALLY REACHES THE 400 A SERVICE — the thing Ray found missing after live
+   * testing: "It does not yet adequately describe how the two DER systems aggregate and actually
+   * interconnect with the 400 A service."
+   *
+   * `undefined` — nobody has chosen. The honest default for this job, and the engineering reports
+   *     the decision as required rather than drawing one.
+   * `'independent-branch'` — each domain interconnects through its own governed branch, with one
+   *     point of interconnection each.
+   * `'common-aggregation'` — the two Powerwalls' AC outputs leave their domains, aggregate in one
+   *     DER generation panel, pass through one utility isolation device and interconnect at a
+   *     single point on the service.
+   *
+   * Both are built from the SAME data model. That is the proof Ray asked for — not that either is
+   * permitted on this job, which is Tesla's and ComEd's and the AHJ's answer, not SolarPro's.
+   */
+  derArrangement?: DerArrangement;
+  /** Reproduce a real defect: aggregate only ONE domain, leaving the other's path uncut. */
+  aggregateOnlyFirstDomain?: boolean;
+  /** Reproduce the invalid topology: aggregate both domains' BACKED-UP buses, paralleling islands. */
+  aggregateBackedUpBuses?: boolean;
+  /** The output OCPD fitted in the aggregation panel; omitted ⇒ not recorded. */
+  aggregationOutputOcpdA?: number | null;
+  /** The aggregation panel's busbar; omitted ⇒ not recorded. */
+  aggregationBusbarA?: number | null;
 }
 
 const DOMAIN_INTENTS: TeslaDomainIntent[] = [
@@ -79,6 +105,11 @@ export function buildTesla400ATwoGateway(opts: Tesla400AOptions = {}): Tesla400A
     collapseToSingleGateway = false,
     selectMeterCollar = false,
     storageConnection = 'unresolved',
+    derArrangement,
+    aggregateOnlyFirstDomain = false,
+    aggregateBackedUpBuses = false,
+    aggregationOutputOcpdA = null,
+    aggregationBusbarA = null,
   } = opts;
 
   const intents = collapseToSingleGateway ? [DOMAIN_INTENTS[0]] : DOMAIN_INTENTS;
@@ -139,6 +170,82 @@ export function buildTesla400ATwoGateway(opts: Tesla400AOptions = {}): Tesla400A
 
   const storage: StorageUnit[] = builds.flatMap(b => b.storage);
 
+  // ── HOW THE DER REACHES THE SERVICE ───────────────────────────────────────
+  //
+  // Two arrangements, one data model. Neither is asserted to be permitted on this job: Tesla's
+  // multi-gateway guidance and ComEd's interconnection requirements decide that, and both are
+  // already reported as unresolved authorities.
+  const aggregationPanels: DerAggregationPanel[] = [];
+  const pointsOfInterconnection: PointOfInterconnection[] = [];
+  const inverterUnits = storage.filter(u => u.role === 'inverter-unit');
+  let effectiveStorageConnection = storageConnection;
+
+  if (derArrangement === 'common-aggregation') {
+    const taken = aggregateOnlyFirstDomain ? inverterUnits.slice(0, 1) : inverterUnits;
+    // 🚨 THE STORAGE CONNECTION HAS TO AGREE WITH WHAT THE PANEL ACTUALLY TAKES.
+    //
+    //  · backed-up-bus taps  — the units still land on their own panels' busbars; it is the ISLAND
+    //        that is tied to the aggregation panel. Saying they left for it would make the graph
+    //        name a landing nobody provides.
+    //  · only the first domain — the second unit never left, so only a real landing is honest.
+    //  · both units taken     — they left their domains, and the panels carry no storage.
+    effectiveStorageConnection = aggregateBackedUpBuses
+      ? (storageConnection === 'unresolved' ? 'backed-up-panel-busbar' : storageConnection)
+      : aggregateOnlyFirstDomain
+        ? storageConnection
+        : 'der-aggregation-panel';
+
+    aggregationPanels.push({
+      id: 'der-agg-1',
+      label: 'DER aggregation panel',
+      // A DER-only generation panel: it serves no premises load.
+      carriesPremisesLoad: false,
+      busbarRatingA: aggregationBusbarA,
+      mainBreakerA: null,
+      mainLugOnly: true,
+      sccrA: null,
+      inputs: aggregateBackedUpBuses
+        // 🚨 THE INVALID TOPOLOGY, ON PURPOSE: both islands' backed-up buses onto one panel.
+        ? domains.map((d, i) => ({
+            id: `agg-in-${i + 1}`, sourceId: d.id, tap: 'backed-up-busbar' as const, ocpdA: 60,
+          }))
+        : taken.map((u, i) => ({
+            id: `agg-in-${i + 1}`, sourceId: u.id, tap: 'der-output' as const, ocpdA: u.ocpdA,
+          })),
+      outputOcpdA: aggregationOutputOcpdA,
+      feedsNodeId: 'der-isolation',
+      outputConductorGauge: null,
+    });
+    pointsOfInterconnection.push({
+      id: 'poi-1',
+      label: 'Point of interconnection',
+      relationship: 'aggregation-to-supply-side',
+      derNodeId: 'der-isolation',
+      connectedToNodeId: 'svc-disco',
+      ocpdA: aggregationOutputOcpdA,
+    });
+    // The utility isolation device now sits on the DER feeder, not on the service conductors.
+    const iso = devices.find(d => d.id === 'der-isolation');
+    if (iso) iso.feedsNodeId = 'poi-1';
+  } else if (derArrangement === 'independent-branch') {
+    for (const d of domains) {
+      pointsOfInterconnection.push({
+        id: `poi-${d.id}`,
+        label: `${d.label} point of interconnection`,
+        relationship: storageConnection === 'gateway-panelboard'
+          ? 'manufacturer-integrated' : 'load-side-busbar',
+        derNodeId: d.storageUnitIds[0] ?? null,
+        connectedToNodeId: storageConnection === 'gateway-panelboard'
+          ? d.gateway.id : (d.backedUpPanelIds[0] ?? null),
+        ocpdA: null,
+      });
+    }
+  }
+
+  if (effectiveStorageConnection !== storageConnection) {
+    for (const d of domains) d.storageConnection = effectiveStorageConnection;
+  }
+
   const topology: ServiceTopology = {
     service: {
       ratedAmps: 400,
@@ -151,9 +258,14 @@ export function buildTesla400ATwoGateway(opts: Tesla400AOptions = {}): Tesla400A
     panels,
     domains,
     storage,
+    generation: [],
+    aggregationPanels,
+    pointsOfInterconnection,
     calculatedServiceDemandA,
     interconnection: {
       utilityId: 'comed',
+      // Undefined ⇒ nobody has chosen, which is the honest state of this job today.
+      derArrangement: derArrangement ?? null,
       // Ray's project constraint, stated by him: no meter-collar / Backup Switch on this job.
       meterCollarPermitted: false,
       meterCollarSelected: selectMeterCollar,

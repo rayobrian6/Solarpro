@@ -21,7 +21,20 @@ import type { ServiceTopology, DeviceRole } from '@/lib/electrical/serviceTopolo
 import {
   updateService, updateBranch, updatePanel, updateDomain, setDomainEquipment,
   removeBackupDomain, addProtectiveDevice, removeProtectiveDevice, setInterconnection,
+  updateAggregationPanel, updatePointOfInterconnection, recommendAggregationRatings,
 } from '@/lib/electrical/topologyAuthoring';
+import { governingArticleFor } from '@/lib/electrical/serviceTopology';
+
+const A = (v: number | null | undefined) => (typeof v === 'number' ? `${v} A` : 'not established');
+
+/** The name of whatever a DER aggregation input points at — a unit, or a whole backup domain. */
+function sourceLabel(t: ServiceTopology, sourceId: string): string {
+  return t.storage.find(u => u.id === sourceId)?.label
+    ?? t.storage.find(u => u.id === sourceId)?.productId
+    ?? (t.generation ?? []).find(g => g.id === sourceId)?.label
+    ?? t.domains.find(d => d.id === sourceId)?.label
+    ?? sourceId;
+}
 import { DISCONNECT_ROLES, SERVICE_SIZE_CHOICES } from '@/lib/electrical/topologyPresets';
 import { BACKUP_INTERFACES, BATTERIES } from '@/lib/equipment-db';
 
@@ -485,6 +498,199 @@ export function ServiceNodeInspector({
         </div>
       </div>
     );
+  }
+
+  // ── DER AGGREGATION PANEL ─────────────────────────────────────────────────
+  const agg = (topology.aggregationPanels ?? []).find(a => a.id === selectedId);
+  if (agg) {
+    const rec = recommendAggregationRatings(topology, agg.id);
+    return (
+      <div data-testid="node-inspector" className="rounded-xl border border-sky-500/30 bg-slate-900/70 p-4">
+        <div className="text-[10px] font-bold uppercase tracking-widest text-sky-400">Editing</div>
+        <div className="text-sm font-black text-slate-100">{agg.label} — DER aggregation panel</div>
+
+        {/* 🚨 WHAT SOLARPRO COMPUTED, AND FROM WHAT. Ray: "Do not infer its rating from
+            serviceAmps = 400. Calculate from the actual topology." So the arithmetic is shown, and
+            the operator applies it rather than finding it already applied. */}
+        <div data-testid="inspector-agg-recommendation"
+             className="mt-3 rounded-lg border border-emerald-600/40 bg-emerald-500/5 p-2 text-[11px]">
+          {rec.aggregateContinuousA === null ? (
+            <span className="text-amber-300">
+              The aggregated DER current is not established, so SolarPro cannot size this panel yet.
+            </span>
+          ) : (
+            <>
+              <span className="text-emerald-200">
+                {rec.aggregateContinuousA} A of DER enters this panel. At 125% that needs{' '}
+                <b>{rec.outputOcpdA} A</b>, a <b>{rec.outputConductorGauge}</b> feeder and a{' '}
+                <b>{rec.busbarRatingA} A</b> busbar.
+              </span>
+              <span className="block text-slate-500">
+                From the sources feeding it. The service rating is not an input to this.
+              </span>
+              <button type="button" data-testid="inspector-agg-apply"
+                      className="mt-1 rounded bg-emerald-600/30 px-2 py-1 text-[11px] font-bold text-emerald-100 hover:bg-emerald-600/50"
+                      onClick={() => onChange(updateAggregationPanel(topology, agg.id, {
+                        busbarRatingA: rec.busbarRatingA,
+                        outputOcpdA: rec.outputOcpdA,
+                        outputConductorGauge: rec.outputConductorGauge,
+                      }))}>
+                Apply the calculated ratings
+              </button>
+            </>
+          )}
+        </div>
+
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <Field label="Does this panel also carry premises load?"
+                 focused={isFocus('carriesPremisesLoad')}
+                 hint="A DER-only generation panel and a load centre with DER backfed into it are governed by different calculations.">
+            <select data-testid="inspector-agg-carries-load"
+                    className={`mt-1 ${box} ${isFocus('carriesPremisesLoad') ? ring : ''}`}
+                    value={agg.carriesPremisesLoad === true ? 'yes'
+                      : agg.carriesPremisesLoad === false ? 'no' : 'unknown'}
+                    onChange={e => onChange(updateAggregationPanel(topology, agg.id, {
+                      carriesPremisesLoad: e.target.value === 'yes' ? true
+                        : e.target.value === 'no' ? false : null,
+                    }))}>
+              <option value="unknown">Not established</option>
+              <option value="no">No — DER only (AC generation panel)</option>
+              <option value="yes">Yes — it also serves load (NEC 705.12(B) governs)</option>
+            </select>
+          </Field>
+          <Field label="Busbar rating (A)" focused={isFocus('busbarRatingA')}>
+            <NumberInput testId="inspector-agg-bus" value={agg.busbarRatingA} placeholder="REQUIRED"
+                         focused={isFocus('busbarRatingA')}
+                         onChange={v => onChange(updateAggregationPanel(topology, agg.id, { busbarRatingA: v }))} />
+          </Field>
+          <Field label="Main breaker (A)" focused={isFocus('mainBreakerA')}>
+            <NumberInput testId="inspector-agg-main" value={agg.mainBreakerA}
+                         placeholder={agg.mainLugOnly ? 'MLO — none by design' : 'REQUIRED'}
+                         focused={isFocus('mainBreakerA')}
+                         onChange={v => onChange(updateAggregationPanel(topology, agg.id, { mainBreakerA: v }))} />
+            <label className="mt-1 flex items-center gap-2 text-[11px] text-slate-300">
+              <input type="checkbox" data-testid="inspector-agg-mlo" checked={agg.mainLugOnly}
+                     onChange={e => onChange(updateAggregationPanel(topology, agg.id, {
+                       mainLugOnly: e.target.checked,
+                     }))} />
+              Main lug only — no main OCPD by design
+            </label>
+          </Field>
+          <Field label="Output OCPD (A)" focused={isFocus('outputOcpdA')}>
+            <NumberInput testId="inspector-agg-output" value={agg.outputOcpdA} placeholder="REQUIRED"
+                         focused={isFocus('outputOcpdA')}
+                         onChange={v => onChange(updateAggregationPanel(topology, agg.id, { outputOcpdA: v }))} />
+          </Field>
+          <Field label="Interrupting rating / SCCR (A)" focused={isFocus('sccrA')}>
+            <NumberInput testId="inspector-agg-sccr" value={agg.sccrA} placeholder="REQUIRED"
+                         focused={isFocus('sccrA')}
+                         onChange={v => onChange(updateAggregationPanel(topology, agg.id, { sccrA: v }))} />
+          </Field>
+          <Field label="Its output connects to" focused={isFocus('feedsNodeId')}>
+            <select data-testid="inspector-agg-feeds" className={`mt-1 ${box}`}
+                    value={agg.feedsNodeId ?? ''}
+                    onChange={e => onChange(updateAggregationPanel(topology, agg.id, {
+                      feedsNodeId: e.target.value || null,
+                    }))}>
+              <option value="">Not established</option>
+              {topology.devices.map(d => (
+                <option key={d.id} value={d.id}>{d.label}</option>
+              ))}
+              {(topology.pointsOfInterconnection ?? []).map(poi => (
+                <option key={poi.id} value={poi.id}>{poi.label}</option>
+              ))}
+            </select>
+          </Field>
+        </div>
+
+        <div className="mt-3 text-[10px] font-bold uppercase tracking-widest text-slate-500">
+          DER circuits entering it
+        </div>
+        <div className="mt-1 space-y-1">
+          {agg.inputs.length === 0
+            ? <div className="text-[11px] text-amber-300">None recorded.</div>
+            : agg.inputs.map(input => (
+                <div key={input.id} data-testid={`inspector-agg-input-${input.id}`}
+                     className="rounded bg-slate-950/50 px-2 py-1 text-[11px] text-slate-200">
+                  {sourceLabel(topology, input.sourceId)} · {A(input.ocpdA)} OCPD
+                  <span className="text-slate-500"> · taken at the {input.tap.replace(/-/g, ' ')}</span>
+                </div>
+              ))}
+        </div>
+      </div>
+    );
+  }
+
+  // ── POINT OF INTERCONNECTION ──────────────────────────────────────────────
+  const poi = (topology.pointsOfInterconnection ?? []).find(x => x.id === selectedId);
+  if (poi) {
+    const article = governingArticleFor(poi.relationship);
+    return shell('Editing', `${poi.label} — point of interconnection`, (
+      <>
+        <Field label="Governed arrangement" focused={isFocus('relationship')}
+               hint="This is what selects the code section that governs the connection.">
+          <select data-testid="inspector-poi-relationship"
+                  className={`mt-1 ${box} ${isFocus('relationship') ? ring : ''}`}
+                  value={poi.relationship}
+                  onChange={e => onChange(updatePointOfInterconnection(topology, poi.id, {
+                    relationship: e.target.value as typeof poi.relationship,
+                  }))}>
+            <option value="unresolved">Not established</option>
+            <option value="load-side-busbar">Load side — panel busbar (NEC 705.12(B))</option>
+            <option value="load-side-feeder-tap">Load side — feeder tap (NEC 705.12(A) / 240.21)</option>
+            <option value="supply-side">Supply side / service side (NEC 705.11)</option>
+            <option value="aggregation-to-supply-side">
+              DER aggregation panel to a supply-side connection (NEC 705.11)
+            </option>
+            <option value="manufacturer-integrated">Manufacturer-integrated connection</option>
+            <option value="meter-collar"
+                    disabled={topology.interconnection.meterCollarPermitted === false}>
+              Meter collar{topology.interconnection.meterCollarPermitted === false
+                ? ' — not permitted on this project' : ''}
+            </option>
+          </select>
+          <span className="mt-0.5 block text-[10px] text-slate-500">
+            {article ? `Governed by ${article}.` : 'No NEC article is asserted for this arrangement.'}
+          </span>
+        </Field>
+        <Field label="Lands on" focused={isFocus('connectedToNodeId')}>
+          <select data-testid="inspector-poi-connected"
+                  className={`mt-1 ${box} ${isFocus('connectedToNodeId') ? ring : ''}`}
+                  value={poi.connectedToNodeId ?? ''}
+                  onChange={e => onChange(updatePointOfInterconnection(topology, poi.id, {
+                    connectedToNodeId: e.target.value || null,
+                  }))}>
+            <option value="">Not established</option>
+            {topology.devices.map(d => <option key={d.id} value={d.id}>{d.label}</option>)}
+            {topology.panels.map(pp => <option key={pp.id} value={pp.id}>{pp.label}</option>)}
+            {topology.domains.map(d => (
+              <option key={d.gateway.id} value={d.gateway.id}>{d.gateway.label}</option>
+            ))}
+          </select>
+        </Field>
+        <Field label="OCPD at the connection (A)" focused={isFocus('ocpdA')}>
+          <NumberInput testId="inspector-poi-ocpd" value={poi.ocpdA}
+                       focused={isFocus('ocpdA')}
+                       onChange={v => onChange(updatePointOfInterconnection(topology, poi.id, { ocpdA: v }))} />
+        </Field>
+        <Field label="Fed from">
+          <select data-testid="inspector-poi-der" className={`mt-1 ${box}`}
+                  value={poi.derNodeId ?? ''}
+                  onChange={e => onChange(updatePointOfInterconnection(topology, poi.id, {
+                    derNodeId: e.target.value || null,
+                  }))}>
+            <option value="">Not established</option>
+            {(topology.aggregationPanels ?? []).map(a => (
+              <option key={a.id} value={a.id}>{a.label}</option>
+            ))}
+            {topology.devices.map(d => <option key={d.id} value={d.id}>{d.label}</option>)}
+            {topology.storage.filter(u => u.role === 'inverter-unit').map(u => (
+              <option key={u.id} value={u.id}>{u.label ?? u.productId}</option>
+            ))}
+          </select>
+        </Field>
+      </>
+    ));
   }
 
   return (

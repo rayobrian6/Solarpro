@@ -109,7 +109,13 @@ describe('🚨 a drawable topology is not necessarily a releasable one', () => {
   });
 
   it('a fully resolved topology IS release-ready and asks for nothing', () => {
-    const t = job({ storageConnection: 'backed-up-panel-busbar' });
+    // 🚨 "FULLY RESOLVED" NOW INCLUDES HOW THE DER REACHES THE SERVICE. That is a decision the
+    // designer owes the drawing, and until it is made the topology is not release-ready — which is
+    // exactly what this assertion went red to say when the check was added.
+    const t = job({
+      storageConnection: 'backed-up-panel-busbar',
+      derArrangement: 'independent-branch',
+    });
     t.interconnection.multiGatewayMeteringDoc = {
       title: 'Multiple Backup Gateways on a Single Site — Application Note',
       source: 'archived', present: true, governs: ['metering'],
