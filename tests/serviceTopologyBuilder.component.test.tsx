@@ -153,16 +153,26 @@ describe('🚨 Ray builds his job through the guided flow', () => {
     const f = makeFetch();
     await buildRaysJobGuided(f);
     const bar = screen.getByTestId('topology-summary').textContent ?? '';
+    // 🚨 THE SYSTEM AS IT IS DESCRIBED ON SITE. This used to read "2 backup domains · 2 gateways",
+    // and Ray could not find his own installation in it: a branch, a panel and a backup domain are
+    // three names for one 200 A system to the person installing it.
     expect(bar).toContain('400 A service');
-    expect(bar).toContain('2 backup domains');
-    expect(bar).toContain('2 gateways');
-    expect(bar).toContain('2 expansions');
+    expect(bar).toContain('Two 200 A systems');
+    expect(bar).toContain('2 Tesla Backup Gateway 3');
+    expect(bar).toContain('2 Tesla Powerwall 3');
+    expect(bar).toContain('2 Expansion');
     expect(bar).toContain('54.0 kWh');
     expect(bar).toContain('96 A');
-    // Ray: "plus: Engineering: 3 inputs required. This immediately tells Ray whether SolarPro
-    // understood the system."
-    expect(screen.getByTestId('topology-needs-count').textContent)
-      .toMatch(/Engineering: \d+ inputs? required/);
+    expect(bar).toContain('1 external isolation switch');
+    // The engineering counts are kept, underneath, for a plan reviewer.
+    expect(screen.getByTestId('topology-engineering-counts').textContent)
+      .toContain('2 service branches');
+    // 🚨 NOT "8 INPUTS REQUIRED". Ray: "Do not say `8 inputs required` when several are calculations
+    // or optional." Required and optional are counted apart, in two sentences.
+    const count = screen.getByTestId('topology-needs-count').textContent ?? '';
+    expect(count).toMatch(/\d+ required items? unresolved/);
+    expect(count).toMatch(/1 optional calculation not provided/);
+    expect(count).not.toMatch(/inputs? required/);
   });
 
   it('🚨 the visual topology shows the system without reading engineering text', async () => {
@@ -204,7 +214,9 @@ describe('🚨 Ray builds his job through the guided flow', () => {
     const f = makeFetch();
     await buildRaysJobGuided(f);
     const needs = screen.getByTestId('topology-needs-input');
-    expect(needs.textContent).toMatch(/NEEDS INPUT — \d+ items? required to finish engineering/);
+    expect(needs.textContent).toMatch(/NEEDS INPUT — \d+ required items? unresolved/);
+    // And the optional one is named as optional, in its own clause.
+    expect(needs.textContent).toMatch(/optional calculation not provided/);
     // The available fault current is the site's, and it lives on the service node.
     fireEvent.click(within(needs).getByTestId('need-service.availableFaultCurrentA'));
     const field = screen.getByTestId('inspector-fault-current') as HTMLInputElement;
@@ -245,6 +257,159 @@ describe('🚨 Ray builds his job through the guided flow', () => {
     expect(screen.getByTestId('node-domain-2')).toBeTruthy();
     expect(screen.getByTestId('topology-summary').textContent).toContain('400 A service');
     expect(screen.getByTestId('qty-tesla-powerwall-3-expansion').textContent).toContain('2 ×');
+  });
+});
+
+describe('🚨 a SAVED topology can be reopened and EDITED', () => {
+  // Ray, after live testing: "Ray saved a topology and then had no obvious way to edit it. Fix this.
+  // Required lifecycle: View topology → Edit topology → change equipment/service/interconnection →
+  // Save changes → view."
+  //
+  // The old screen had no modes: a saved design landed straight in the editing surface with no Edit
+  // to press, no Save changes to finish with and nothing to discard — so there was no moment at
+  // which Ray could tell whether he was looking at the saved design or his unsaved changes.
+
+  /** Build and save Ray's job, then remount — which is what reopening the project is. */
+  async function saveThenReopen() {
+    const f = makeFetch();
+    await buildRaysJobGuided(f);
+    cleanup();
+    render(<ServiceTopologyBuilder projectId={PROJECT} fetchImpl={f.impl} />);
+    await waitFor(() => expect(screen.getByTestId('node-msp-2')).toBeTruthy());
+    return f;
+  }
+
+  it('reopens in VIEW mode, with an Edit button and no editor', async () => {
+    await saveThenReopen();
+    expect(screen.getByTestId('topology-edit')).toBeTruthy();
+    // Nothing that changes the design is on screen until it is asked for.
+    expect(screen.queryByTestId('node-inspector')).toBeNull();
+    expect(screen.queryByTestId('topology-save')).toBeNull();
+    expect(screen.queryByTestId('advanced-toggle')).toBeNull();
+  });
+
+  it('Edit → change → Save changes → back to view, and the change was stored', async () => {
+    const f = await saveThenReopen();
+    fireEvent.click(screen.getByTestId('topology-edit'));
+    expect(screen.getByTestId('node-inspector')).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId('node-msp-1'));
+    fireEvent.change(within(screen.getByTestId('node-inspector')).getByTestId('inspector-panel-bus'),
+      { target: { value: '225' } });
+    fireEvent.click(screen.getByTestId('topology-save'));
+    await waitFor(() => expect(screen.getByTestId('topology-message').textContent).toMatch(/saved/i));
+
+    // Back in view, and what is in the store is the edit.
+    expect(screen.queryByTestId('topology-save')).toBeNull();
+    expect(screen.getByTestId('topology-edit')).toBeTruthy();
+    expect((f.stored as any).panels.find((p: any) => p.id === 'msp-1').busbarRatingA).toBe(225);
+  });
+
+  it('🚨 clicking a box in the diagram is itself the way into editing', async () => {
+    await saveThenReopen();
+    // Ray: "The visual diagram itself should remain editable by clicking: service / branch / panel /
+    // switch / Gateway / Powerwall / Expansion."
+    expect(screen.queryByTestId('node-inspector')).toBeNull();
+    fireEvent.click(screen.getByTestId('node-domain-1'));
+    const inspector = screen.getByTestId('node-inspector');
+    // The LABEL, which is what the diagram shows — the id is `domain-1`.
+    expect(inspector.textContent).toContain('Domain A — backup domain');
+    expect(screen.getByTestId('topology-save')).toBeTruthy();
+  });
+
+  it('🚨 Discard restores the saved design rather than keeping the edit', async () => {
+    const f = await saveThenReopen();
+    fireEvent.click(screen.getByTestId('topology-edit'));
+    fireEvent.click(screen.getByTestId('node-service'));
+    fireEvent.change(screen.getByTestId('inspector-service-amps'), { target: { value: '600' } });
+    expect(screen.getByTestId('topology-summary').textContent).toContain('600 A service');
+
+    fireEvent.click(screen.getByTestId('topology-discard'));
+    await waitFor(() =>
+      expect(screen.getByTestId('topology-summary').textContent).toContain('400 A service'));
+    // And nothing was written on the way past.
+    expect(f.calls.filter(c => c.startsWith('PUT'))).toHaveLength(1);
+  });
+
+  it('🚨 the guided flow REOPENS on the existing graph — it is not the only way to edit, '
+     + 'and it is still a way to edit', async () => {
+    const f = await saveThenReopen();
+    fireEvent.click(screen.getByTestId('topology-edit'));
+    fireEvent.click(screen.getByTestId('topology-guided'));
+    const wiz = screen.getByTestId('service-topology-wizard');
+    expect(wiz.textContent).toContain('editing this service');
+    // It opened ON the saved design: the panels it offers to back up are the ones that exist.
+    expect(within(wiz).getByTestId('wizard-backup-msp-1')).toBeTruthy();
+    expect(within(wiz).getByTestId('wizard-backup-msp-2')).toBeTruthy();
+
+    // Walk to the safety-switch step and choose one per system.
+    next(); next(); next();
+    fireEvent.click(within(screen.getByTestId('wizard-isolation-one-per-path')).getByRole('radio'));
+    // 🚨 TWO DEVICES, EACH RATED FOR ITS OWN PATH — not one 400 A device because the service is
+    // 400 A. And acceptance is a separate, unanswered question.
+    const summary = screen.getByTestId('wizard-isolation-summary').textContent ?? '';
+    expect(summary).toContain('2 disconnects');
+    expect(summary).toContain('both systems independently isolated');
+    expect(summary).toContain('200 A');
+    expect(screen.getByTestId('wizard-isolation-unverified').textContent)
+      .toContain('needs verification');
+
+    fireEvent.click(screen.getByTestId('wizard-finish'));
+    await waitFor(() => expect(screen.queryByTestId('service-topology-wizard')).toBeNull());
+    fireEvent.click(screen.getByTestId('topology-save'));
+    await waitFor(() => expect(screen.getByTestId('topology-message').textContent).toMatch(/saved/i));
+
+    const t = f.stored as any;
+    const iso = t.devices.filter((d: any) => d.roles.includes('der-isolation-disconnect'));
+    expect(iso).toHaveLength(2);
+    expect(iso.map((d: any) => d.ratedAmps)).toEqual([200, 200]);
+    // Each one names the gateway it is in line ahead of — the field that makes opening it mean
+    // something.
+    expect(iso.every((d: any) => !!d.inlineOnNodeId)).toBe(true);
+    expect(new Set(iso.map((d: any) => d.inlineOnNodeId)).size).toBe(2);
+    expect(t.interconnection.isolationArrangementAccepted ?? null).toBeNull();
+  });
+
+  it('🚨 the optional load analysis is entered ONCE, and the branches derive from it', async () => {
+    await saveThenReopen();
+    fireEvent.click(screen.getByTestId('node-service'));
+    const loads = screen.getByTestId('inspector-loads');
+    expect(loads.textContent).toContain('optional');
+    fireEvent.click(within(loads).getByTestId('inspector-add-loads'));
+
+    fireEvent.change(screen.getByTestId('inspector-load-msp-1'), { target: { value: '118' } });
+    // 🚨 A PARTIAL MODEL IS NOT A SMALLER LOAD, and the screen says so where the total would go.
+    expect(screen.getByTestId('inspector-loads').textContent)
+      .toContain('cannot be summed until every panelboard');
+    fireEvent.change(screen.getByTestId('inspector-load-msp-2'), { target: { value: '96' } });
+    expect(screen.getByTestId('inspector-loads').textContent).toContain('214.0 A aggregate');
+
+    // And the branch shows its share as DERIVED — there is no second box to type it into.
+    fireEvent.click(screen.getByTestId('node-branch-1'));
+    const branch = screen.getByTestId('node-inspector');
+    expect(within(branch).getByTestId('inspector-branch-demand-derived').textContent)
+      .toContain('118.0 A');
+    expect(within(branch).queryByTestId('inspector-branch-demand')).toBeNull();
+  });
+
+  it('🚨 the existing service assembly is a thing to READ, and is never priced', async () => {
+    const f = await saveThenReopen();
+    fireEvent.click(screen.getByTestId('node-service'));
+    fireEvent.click(screen.getByTestId('inspector-service-existing'));
+    const block = screen.getByTestId('inspector-existing-equipment');
+    expect(block.textContent).toContain('configuration to verify');
+    fireEvent.change(within(block).getByTestId('inspector-existing-mfr'),
+      { target: { value: 'Eaton' } });
+    fireEvent.click(screen.getByTestId('topology-save'));
+    await waitFor(() => expect(screen.getByTestId('topology-message').textContent).toMatch(/saved/i));
+
+    const t = f.stored as any;
+    expect(t.service.existingEquipment.manufacturer).toBe('Eaton');
+    expect(t.service.existingEquipment.verified).toBe(false);
+    // Ray: "Do not automatically add replacement 400 A service distribution equipment."
+    expect(Object.keys(equipmentQuantities(t)).sort()).toEqual([
+      'tesla-backup-gateway-3', 'tesla-powerwall-3', 'tesla-powerwall-3-expansion',
+    ]);
   });
 });
 

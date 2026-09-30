@@ -142,7 +142,11 @@ describe('🚨 the generated sheet is the system Ray built', () => {
 
   it('🚨 what is unresolved is on the drawing, as the requirement — not as a release verdict', () => {
     expect(svg).toContain('SERVICE ENGINEERING — INPUT REQUIRED');
-    expect(svg).toContain('service.availableFaultCurrentA');
+    // 🚨 IN WORDS, NOT IN TOKENS. This used to assert the sheet printed
+    // 'service.availableFaultCurrentA' — a TypeScript field path, on a permit-grade drawing,
+    // for an inspector to read. The assertion was pinning the defect.
+    expect(svg).toContain('Available fault current at the service');
+    expect(svg).not.toContain('service.availableFaultCurrentA');
     expect(svg).toContain('MANUFACTURER DOCUMENT REQUIRED');
     // Ray, 2026-09-18, three times: no release banner on an outbound sheet.
     for (const banner of ['DESIGN COMPLETE', 'RELEASE GATE', 'NOT FOR CONSTRUCTION', 'releaseReady']) {

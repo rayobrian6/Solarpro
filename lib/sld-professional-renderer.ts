@@ -41,13 +41,16 @@ import { combinerBasisIsDecided } from '@/lib/combinerSelection/service';
 // 🚨 THE SERVICE SIDE'S ONE AUTHORITY. Where a project has a service graph, the tail of this sheet
 // is drawn from it — not from `mainPanelAmps`, `batteryCount` or a gateway count.
 import {
-  evaluateServiceTopology, sizeAggregationPanel,
+  evaluateServiceTopology, sizeAggregationPanel, isOptionalCheck,
   governingArticleFor as poiArticle,
   sourcesForAggregationInput as sourcesForAggregationInputSld,
   type ServiceTopology as ServiceTopologyForSld,
   type TopologyEvaluation as TopologyEvaluationForSld,
   type DerAggregationPanel as DerAggregationPanelForSld,
 } from '@/lib/electrical/serviceTopology';
+// The canonical token → words function the needs-input screen uses. Imported rather than reimplemented
+// so a requirement is asked for in the same words on the sheet and on the screen.
+import { labelForToken } from '@/lib/electrical/topologyOverview';
 import { foldConclusions } from '@/lib/engineering/engineeringStatus';
 
 // ── Canvas ──────────────────────────────────────────────────────────────────
@@ -1828,6 +1831,28 @@ function wrapToWidth(line: string, maxW: number, sz: number): string[] {
   const tail = line.slice(pick.at + pick.keep).trimStart();
   return [head, ...wrapToWidth(tail, maxW, sz)];
 }
+/**
+ * Wrap PROSE at spaces, to a real width.
+ *
+ * 🚨 `wrapToWidth` IS FOR CALLOUTS AND REFUSES TO BREAK AT A SPACE — deliberately, so that
+ * 'EGC: PENDING MFR AUTHORITY' is read whole. Applied to a sentence it breaks only at ' — ' and
+ * ' / ', so the service-engineering notes block ran its first line far past its own right edge and
+ * out across the sheet. That was true before this requirement list was ever worded in English; the
+ * raw tokens simply made a long line look like a long token. Prose needs a prose wrapper.
+ */
+function wrapWords(line: string, maxW: number, sz: number, bold = false): string[] {
+  if (maxW <= 0 || textWidthUu(line, sz, bold) <= maxW) return [line];
+  const out: string[] = [];
+  let cur = '';
+  for (const word of line.split(' ')) {
+    const next = cur ? `${cur} ${word}` : word;
+    if (cur && textWidthUu(next, sz, bold) > maxW) { out.push(cur); cur = word; }
+    else cur = next;
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+
 /** The widest piece of a callout once broken at EVERY joint: the least span
  *  its run needs to carry the callout without it overhanging a symbol. */
 function widestCalloutPiece(lines: string[], sz: number): number {
@@ -3250,11 +3275,29 @@ export function renderTopologyServiceSection(opts: {
   });
 
   // ── THE SERVICE DISTRIBUTION, AND EVERY BRANCH FEEDER INTO IT ─────────────
-  const dist = drawBox('service-distribution', cxDist, opts.busY, W_DIST, [
-    { t: `${t.service.ratedAmps} A SERVICE DISTRIBUTION`, sz: F.hdr, bold: true },
+  // 🚨 EXISTING EQUIPMENT IS LABELLED AS EXISTING, AND ITS UNKNOWNS ARE ON THE SHEET.
+  //
+  // Ray: "The Eaton 400 A meter/service assembly already exists. SolarPro must represent it as
+  // EXISTING 400 A SERVICE EQUIPMENT — CONFIGURATION TO VERIFY until exact equipment data is
+  // supplied. Do not automatically add replacement 400 A service distribution equipment." A drawing
+  // that shows it as new service distribution tells an inspector SolarPro is replacing it.
+  const ex = t.service.existingEquipment ?? null;
+  const distLines: Line[] = [
+    { t: `${ex ? 'EXISTING ' : ''}${t.service.ratedAmps} A SERVICE `
+        + `${ex ? 'EQUIPMENT' : 'DISTRIBUTION'}`, sz: F.hdr, bold: true },
     { t: `${t.service.voltage} V ${t.service.phase === 'split-240' ? '1Ø 3W' : t.service.phase}`, sz: F.sub },
     { t: `${t.branches.length} SERVICE BRANCH${t.branches.length === 1 ? '' : 'ES'}`, sz: F.tiny },
-  ]);
+  ];
+  if (ex) {
+    const name = [ex.manufacturer, ex.catalogNumber].filter(Boolean).join(' ');
+    if (name) distLines.push({ t: name.toUpperCase(), sz: F.tiny });
+    if (ex.mainArrangement) distLines.push({ t: ex.mainArrangement.toUpperCase(), sz: F.tiny });
+    if (!ex.verified || !ex.catalogNumber || !ex.mainArrangement || ex.sccrA === null) {
+      distLines.push({ t: 'CONFIGURATION TO VERIFY', sz: F.tiny, fill: SEC_AMBER, bold: true });
+    }
+    distLines.push({ t: 'EXISTING — NOT IN SCOPE OF SUPPLY', sz: F.tiny });
+  }
+  const dist = drawBox('service-distribution', cxDist, opts.busY, W_DIST, distLines);
   highest = Math.min(highest, dist.top);
 
   // Each branch leaves the distribution by its own OCPD and turns to its row.
@@ -3262,14 +3305,138 @@ export function renderTopologyServiceSection(opts: {
     // The row's ACTUAL centre line, which on the narrow sheet is wherever the sequential layout
     // put it — not a pitch this loop recomputes and hopes matches.
     const y = rowCenterY[i] ?? rowY(i);
-    const hasDomain = t.domains.some(d => d.branchId === branch.id);
-    const targetRight = hasDomain ? cxGw + W_GW / 2 : cxGw + W_GW / 2;
-    const jogX = (dist.left + targetRight) / 2;
+    const domain = t.domains.find(d => d.branchId === branch.id) ?? null;
+    const targetRight = cxGw + W_GW / 2;
+    // 🚨 THE JOG HUGS THE DISTRIBUTION, LEAVING THE CORRIDOR CLEAR.
+    //
+    // Centred in the corridor it came down exactly where an in-line disconnect's tag belongs, and
+    // the PICTURE showed the branch conductor drawn straight through the words "UTILITY ISOLATION /
+    // 200 A / LOCKABLE/VISIBLE". No box audit could see it — a line is not a box — and it is the
+    // same class of defect as the AC collection conductors that ran down the middle of a DC
+    // expansion. Hard against the distribution it is out of the way of everything.
+    const inlineHere = t.devices.filter(d => d.inlineOnNodeId
+      && (d.inlineOnNodeId === branch.id
+          || (domain && (d.inlineOnNodeId === domain.gateway.id
+              || domain.backedUpPanelIds.includes(d.inlineOnNodeId)))));
+    // 🚨 AND EACH BRANCH GETS ITS OWN COLUMN. Both jogs at one x is two 200 A feeders drawn as one
+    // line, and with the jog moved against the distribution the lower one came down straight
+    // through the N-G bond's ground symbol under the service disconnect — which the box audit
+    // could not see either, because that glyph had never been registered.
+    const jogX = inlineHere.length > 0 || t.devices.some(d => d.inlineOnNodeId)
+      ? dist.left - 16 - i * 16
+      : (dist.left + targetRight) / 2;
     p.push(ln(dist.left, opts.busY, jogX, opts.busY, { sw: SW_MED }));
     p.push(ln(jogX, opts.busY, jogX, y, { sw: SW_MED }));
     p.push(ln(jogX, y, targetRight, y, { sw: SW_MED }));
-    p.push(txt(jogX + 5, +(y - 6).toFixed(2), `${amps(branch.ocpdAmps ?? branch.ratedAmps)} OCPD`,
-      { sz: F.tiny, anc: 'start' }));
+    // 🚨 INSIDE THE CORRIDOR, AND REGISTERED SO THE AUDIT CAN SEE IT.
+    //
+    // Drawn to the RIGHT of the jog this label sat in the service chain's column: with the jog moved
+    // hard against the distribution, the picture showed "200 A OCPD" printed over the N-G bond
+    // symbol under the 400 A service disconnect. It had never been in the box list, so no audit
+    // could ever have caught it — an unregistered label is invisible to the guard by construction.
+    const ocpdLbl = `${amps(branch.ocpdAmps ?? branch.ratedAmps)} OCPD`;
+    const ocpdW = textWidthUu(ocpdLbl, F.tiny);
+    // Lifted clear of the knife blade: an open blade rises 10 uu above the conductor, and at
+    // y-6 the text sat across its tip. The audit sees boxes, and a blade is a line.
+    const ocpdY = inlineHere.length > 0 ? y - 16 : y - 6;
+    p.push(txt(jogX - 6, +ocpdY.toFixed(2), ocpdLbl, { sz: F.tiny, anc: 'end' }));
+    boxes.push({ id: `branch-ocpd-${branch.id}`, x: jogX - 6 - ocpdW, y: ocpdY - capUu(F.tiny),
+                 w: ocpdW, h: LBL_PITCH, kind: 'label' });
+
+    // ── A DISCONNECT IN THIS PATH IS DRAWN IN THIS PATH ─────────────────────
+    //
+    // 🚨 THE WHOLE POINT OF RAY'S ARRANGEMENT, ON THE SHEET:
+    //
+    //     200 A path A → knife switch A → Gateway #1 → MSP #1
+    //
+    // Drawn anywhere else — on the shared service chain, or as a box hung off the side — the sheet
+    // would show a switch that does not interrupt this feeder, which is the same lie the model used
+    // to tell before `inlineOnNodeId` existed. It is an IEEE 315 knife switch ON the conductor,
+    // because a disconnect in a feeder is a symbol in the line, not another enclosure: there is
+    // only `colGap` between the gateway and the distribution and no box fits there. The audit's
+    // registered footprint is the label, which is the only ink that can collide.
+    // 🚨 THE CORRIDOR IS MEASURED, NOT ASSUMED — the defect this whole section already shipped once.
+    //
+    // The feeder runs RIGHT TO LEFT: the distribution sits at the utility end of the sheet and the
+    // gateway column is inboard of it, so the run goes from `jogX` leftward to `targetRight`.
+    // Stepping the symbol the other way put every switch past the end of its own conductor, the room
+    // check rejected all of them, and the picture showed the pair stacked at the bottom of the sheet
+    // in series with each other, on nothing.
+    //
+    // Then the TAG overlapped the gateway and its CT note, four defects on two sheet variants,
+    // because it was sized like a device box (172 uu) and the corridor between the gateway's right
+    // edge and the distribution's left edge is only 131 uu on a micro sheet. So the corridor is
+    // computed from the boxes that bound it and the text is wrapped into it.
+    // Stops clear of the vertical jog, so the tag and the conductor never share a column.
+    const corridorR = jogX - 12;
+    inlineHere.forEach((dev, k) => {
+      // 🚨 THE CORRIDOR'S LEFT EDGE IS NOT THE GATEWAY'S RIGHT EDGE. Measured: the gateway box ends
+      // at 1657 and its "CTs — MANUFACTURER DOCUMENT REQUIRED" note, centred on the same column,
+      // ends at 1670 — so a tag that cleared the box still clipped the note by 5 uu. The bound comes
+      // from whatever is ALREADY REGISTERED in the band this tag will occupy, which is the only
+      // number that cannot be out of date.
+      const bandTop = y + 18;
+      const bandBottom = bandTop + 6 * LBL_PITCH + 2;
+      const corridorL = boxes
+        .filter(b => b.y < bandBottom && b.y + b.h > bandTop)
+        .reduce((m, b) => Math.max(m, b.x + b.w + 4), cxGw + W_GW / 2 + 4);
+      const corridorW = corridorR - corridorL;
+      const sx = (targetRight + jogX) / 2 - k * 46;
+      if (sx - 20 < targetRight || corridorW < 60) {
+        // No room on this run. Said out loud rather than drawn over the gateway — the schedule
+        // carries the placement, and a sheet that draws a switch on top of an enclosure is worse
+        // than one that names where to read about it.
+        notes.push(`${dev.label} is in line in ${branch.label} and there is no room to draw it on `
+          + 'that feeder at this sheet size — see the SERVICE EQUIPMENT SCHEDULE for its placement.');
+        return;
+      }
+      // 🚨 THE SYMBOL AND ITS CALLOUT ARE NEVER SEPARATED. The tag fits or it does not — the fit
+      // check used to sit BELOW the symbol, so a narrow corridor produced an UNLABELLED knife switch
+      // on a permit sheet with no callout number either: a device an inspector cannot look up.
+      // The callout is the identification; the tag is the convenience.
+      p.push(knifeSwitch(sx, y, 40));
+      p.push(callout(sx, y - 38, calloutN++));
+      boxes.push({ id: `inline-callout-${dev.id}`, x: sx - 10, y: y - 48, w: 20, h: 20,
+                   kind: 'device' });
+
+      // Short tags: the enclosure's own name is in the schedule beside that callout number, which is
+      // how a device in a feeder is identified on a single-line diagram.
+      // 🚨 EVERY TAG IS BREAKABLE OR SHORT. `wrapToWidth` cannot split a single long token, so
+      // "LOCKABLE/VISIBLE" came out 95 uu wide in an 86 uu corridor and clipped the gateway's CT
+      // note by 0.6 uu — a measured overlap, not a visible one, and exactly the kind that becomes
+      // visible on the next sheet variant.
+      // MEASURED: "UTILITY ISOLATION" is 80.9 uu and `wrapToWidth` returned it whole even at 69.9,
+      // so the tag was dropped on the lower branch — one of two identical switches lettered and the
+      // other bare. Pre-split into words that each fit the narrowest corridor this layout produces.
+      const tags = [
+        'UTILITY', 'ISOLATION',
+        amps(dev.ratedAmps),
+        ...(dev.visibleOpen ? ['LOCK/VIS OPEN'] : []),
+        ...(dev.sccrA === null ? ['SCCR NOT EVAL'] : []),
+      ];
+      // 🚨 WRAPPED AND MEASURED IN THE SAME WEIGHT AS IT IS DRAWN. `wrapToWidth` measures regular
+      // type; drawn BOLD the same words are wider, so lines that "fitted" overflowed and the tag was
+      // dropped — one of Ray's two identical switches ended up lettered and the other bare. The tag
+      // is regular weight now and measured as such; only the amber colour marks the unresolved line.
+      const lines = tags.flatMap(l => wrapToWidth(l, corridorW, F.tiny));
+      const lw = Math.max(...lines.map(l => textWidthUu(l, F.tiny)));
+      if (lw > corridorW) {
+        // Too wide even wrapped: the callout above still identifies it, and the schedule carries
+        // the rating and the roles. Drawing the words over a neighbour would be worse than this.
+        notes.push(`${dev.label} is drawn in ${branch.label} at callout ${calloutN - 1}; its rating `
+          + 'and roles are in the SERVICE EQUIPMENT SCHEDULE — there is no room to letter them on '
+          + 'that feeder at this sheet size.');
+        return;
+      }
+      const cx = (corridorL + corridorR) / 2;
+      const ly = bandTop;
+      p.push(tspan(cx, +(ly + capUu(F.tiny)).toFixed(2), lines,
+        { sz: F.tiny, anc: 'middle',
+          fill: dev.sccrA === null ? SEC_AMBER : BLK, lh: LBL_PITCH }));
+      boxes.push({ id: `inline-device-${dev.id}`, x: cx - lw / 2, y: ly,
+                   w: lw, h: lines.length * LBL_PITCH + 2, kind: 'label' });
+      lowest = Math.max(lowest, ly + lines.length * LBL_PITCH);
+    });
   });
 
   // ── THE DER SIDE: AGGREGATION, ITS ISOLATION, AND THE POINT OF INTERCONNECTION ──
@@ -3378,7 +3545,13 @@ export function renderTopologyServiceSection(opts: {
   }
 
   // The isolation device the topology placed on a DER path, then the point of interconnection.
-  const placedDevices = t.devices.filter(d => !!d.feedsNodeId);
+  //
+  // 🚨 AN IN-LINE DEVICE IS NOT A DER-CHAIN DEVICE. Both kinds name a `feedsNodeId`, so this filter
+  // caught Ray's two per-path knife switches and drew them as a stacked pair at the bottom of the
+  // sheet — in series with each other, nowhere near the 200 A feeders they interrupt. They were
+  // drawn in their own branch rows above; here they must be left alone.
+  const placedDevices = t.devices.filter(d => !!d.feedsNodeId && !d.inlineOnNodeId);
+  const inlineDeviceIds = new Set(t.devices.filter(d => !!d.inlineOnNodeId).map(d => d.id));
   const derChain: Array<{ id: string; box: ReturnType<typeof drawBox> }> = [];
   for (const d of placedDevices) {
     const b = drawBox(`device-${d.id}`, derGroupCx, derY, W_DEV, [
@@ -3460,7 +3633,9 @@ export function renderTopologyServiceSection(opts: {
   // A device the topology PLACED on a DER path was already drawn there. Drawn again on the service
   // chain it would appear twice on one sheet, in two places, and an inspector would have no way to
   // know which one is the device.
-  const onDerPath = new Set(placedDevices.map(d => d.id));
+  // …and neither is a device drawn in one branch's feeder. Drawn here as well it would appear on the
+  // SHARED service conductors, which is the opposite of what per-path isolation means.
+  const onDerPath = new Set([...placedDevices.map(d => d.id), ...inlineDeviceIds]);
   const chainDevices = [
     ...t.devices.filter(d => d.roles.includes('service-disconnect') && !onDerPath.has(d.id)),
     ...t.devices.filter(d => d.roles.includes('der-isolation-disconnect') && !onDerPath.has(d.id)),
@@ -3484,6 +3659,10 @@ export function renderTopologyServiceSection(opts: {
       const bx = b.left - 22;
       p.push(ln(b.left, b.cy, bx, b.cy, { stroke: GRN, sw: SW_MED }));
       p.push(gnd(bx, b.cy));
+      // Registered, so a conductor routed across it is a defect the audit reports rather than one
+      // only the rendered picture shows.
+      boxes.push({ id: `bond-symbol-${d.id}`, x: bx - 10, y: b.cy - 2, w: 20, h: 18,
+                   kind: 'device' });
       groundX.push(bx);
       const lbl = 'N-G BOND — NEC 250.24';
       const lw = textWidthUu(lbl, F.tiny, true);
@@ -3553,11 +3732,30 @@ export function renderTopologyServiceSection(opts: {
   // required, in one line each, and says nothing about whether the design may be released.
   {
     const lines: string[] = [];
+    // 🚨 THE NAME OF THE THING, NOT ITS KEY IN THE CODE. This block printed
+    // "REQUIRES service.existingEquipment.catalogNumber, service.existingEquipment.mainArrangement"
+    // — a list of TypeScript field paths, on a permit-grade sheet, to be read by an inspector. It is
+    // the same defect as `TO DEVICE-1` and "backs msp-1", in the one place nobody had looked.
+    // `requirementLabel` is the canonical token→words function the needs-input screen already uses,
+    // so the sheet and the screen ask for the same thing in the same words.
+    const words = (tokens: readonly string[]) =>
+      tokens.map(tk => labelForToken(tk, t as ServiceTopologyForSld)).join('; ') || 'input';
+    // 🚨 AND THE OPTIONAL CALCULATION IS ONE LINE, NOT SIX. Six checks depend on the dwelling load
+    // (the service demand, each branch, each domain, and the calculation itself), so the sheet
+    // printed "REQUIRES loads.model" six times — the very "five requests for one house" shape Ray
+    // rejected on the screen, leaking onto the drawing.
+    const optionalChecks = ev.checks.filter(c => c.conclusion === 'NOT_EVALUATED' && isOptionalCheck(c));
     for (const c of ev.checks) {
       if (c.conclusion === 'FAIL') lines.push(`FAIL — ${c.title}`);
-      else if (c.conclusion === 'NOT_EVALUATED') {
-        lines.push(`${c.title} — REQUIRES ${(c.requires ?? []).join(', ') || 'input'}`);
+      else if (c.conclusion === 'NOT_EVALUATED' && !isOptionalCheck(c)) {
+        lines.push(`${c.title} — REQUIRES ${words(c.requires ?? [])}`);
       }
+    }
+    if (optionalChecks.length > 0) {
+      const tokens = [...new Set(optionalChecks.flatMap(c => c.requires ?? []))];
+      lines.push(`OPTIONAL, NOT PROVIDED — ${words(tokens)}. `
+        + `${optionalChecks.length} check${optionalChecks.length === 1 ? '' : 's'} `
+        + 'not evaluated for want of it; the rest of this design does not depend on it.');
     }
     if (opts.hasGenerator) lines.push('GENERATOR / TRANSFER EQUIPMENT NOT REPRESENTED IN THE SERVICE GRAPH');
     if (lines.length) {
@@ -3571,7 +3769,8 @@ export function renderTopologyServiceSection(opts: {
       y += LBL_PITCH + 2;
       let drawn = 0;
       for (const l of lines) {
-        const wrapped = wrapToWidth(`· ${l}`, blockW, F.tiny);
+        // Prose, wrapped at spaces to the block's real width — see `wrapWords`.
+        const wrapped = wrapWords(`· ${l}`, blockW, F.tiny);
         if (y + wrapped.length * LBL_PITCH > opts.notes.maxY - LBL_PITCH) break;
         for (const piece of wrapped) {
           p.push(txt(blockX, +y.toFixed(2), piece, { sz: F.tiny, fill: SEC_AMBER }));
@@ -7283,10 +7482,23 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
     tag: `CT×${consMeter.md.consumption.ctCount ?? '?'}`,
     drawnLead: consMeter.drawnLeads && !!consMeter.md.leads?.some(l => l.channel === 'consumption'),
   } : {};
+  // 🚨 ONE ANSWER PER NUMBER, EVEN ON THE SHEET THAT DOES NOT DRAW THE WHOLE GRAPH.
+  //
+  // Ray: "If PV is also present, adding PV must not resurrect the old single-service tail." This
+  // sheet's horizontal tail (panel → disconnect → POI → MSP → meter) is not the topology's column
+  // layout and is not replaced here — the note below says so. What it must NOT do is print a
+  // `mainPanelAmps` SCALAR on the panel it does draw while the equipment schedule beside it lists
+  // the real panelboards: that is two answers to "how big is the panel the PV lands in". So where a
+  // graph exists, the drawn panel's rating comes from the graph.
+  const _mlTopology = input.serviceTopology ?? null;
+  const _mlPanel = _mlTopology
+    ? (_mlTopology.panels.find(p => p.backedUp) ?? _mlTopology.panels[0] ?? null)
+    : null;
+  const _mlPanelAmps = _mlPanel?.busbarRatingA ?? input.mainPanelAmps;
   if (isLoadSide) {
-    mspResult = renderMSPLoad(xMSP, tailY, input.mainPanelAmps, totalBackfeedAmps, ++calloutN, _mspCtLoc, _mspCt, LBL_PITCH);
+    mspResult = renderMSPLoad(xMSP, tailY, _mlPanelAmps, totalBackfeedAmps, ++calloutN, _mspCtLoc, _mspCt, LBL_PITCH);
   } else {
-    mspResult = renderMSPSupply(xMSP, tailY, input.mainPanelAmps, totalBackfeedAmps, isSupplySide, ++calloutN, _mspCtLoc, _mspCt, LBL_PITCH);
+    mspResult = renderMSPSupply(xMSP, tailY, _mlPanelAmps, totalBackfeedAmps, isSupplySide, ++calloutN, _mspCtLoc, _mspCt, LBL_PITCH);
   }
   parts.push(mspResult.svg);
   {
@@ -7415,15 +7627,40 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
   // which one it is showing rather than letting a reader assume.
   if (input.serviceTopology) {
     const t = input.serviceTopology;
-    parts.push(txt(xMSP, _noteY,
-      `NOTE: SERVICE TOPOLOGY (${t.service.ratedAmps} A, ${t.branches.length} BRANCH`
-      + `${t.branches.length === 1 ? '' : 'ES'}, ${t.panels.length} PANELBOARD`
-      + `${t.panels.length === 1 ? '' : 'S'}, ${t.domains.length} BACKUP DOMAIN`
-      + `${t.domains.length === 1 ? '' : 'S'}) IS NOT DRAWN ON THE MULTI-SOURCE DIAGRAM `
-      + '— SEE THE SERVICE EQUIPMENT SCHEDULE',
-      {sz:F.tiny, anc:'middle', italic:true, fill:'#E65100'}));
-    _lastNoteY = _noteY;
-    _noteY += 11;
+    // 🚨 NAME WHAT IS NOT HERE, ITEM BY ITEM. "The service topology is not drawn" leaves a reviewer
+    // to work out for themselves that the panel above is one of two, that there are controllers
+    // between it and the service, and that each path has its own utility isolation switch. The
+    // panel that IS drawn is now the graph's, so the two do not contradict — but everything the
+    // graph has and this sheet does not is listed, not summarised.
+    const missing: string[] = [];
+    const drawn = t.panels.find(p => p.backedUp) ?? t.panels[0] ?? null;
+    if (t.panels.length > 1 && drawn) {
+      missing.push(`${t.panels.length - 1} FURTHER PANELBOARD`
+        + `${t.panels.length === 2 ? '' : 'S'} (${t.panels.filter(p => p.id !== drawn.id)
+          .map(p => p.label.toUpperCase()).join(', ')})`);
+    }
+    if (t.domains.length > 0) {
+      missing.push(`${t.domains.length} BACKUP CONTROLLER${t.domains.length === 1 ? '' : 'S'} `
+        + 'AND THEIR STORAGE');
+    }
+    const iso = t.devices.filter(d => d.roles.includes('der-isolation-disconnect'));
+    if (iso.length > 0) {
+      missing.push(`${iso.length} UTILITY ISOLATION SWITCH${iso.length === 1 ? '' : 'ES'}`
+        + (iso.every(d => d.inlineOnNodeId) && iso.length > 1 ? ' (ONE PER PATH)' : ''));
+    }
+    const lines = [
+      `NOTE: THIS SHEET DRAWS ${drawn ? drawn.label.toUpperCase() : 'THE SERVICE PANEL'} AND THE `
+      + `PV SOURCES. THE ${t.service.ratedAmps} A SERVICE TOPOLOGY IS DRAWN IN FULL ON THE `
+      + 'STORAGE SINGLE-LINE AND LISTED IN THE SERVICE EQUIPMENT SCHEDULE.',
+      ...(missing.length ? [`NOT SHOWN HERE: ${missing.join('; ')}.`] : []),
+    ];
+    for (const l of lines) {
+      for (const piece of wrapWords(l, 560, F.tiny)) {
+        parts.push(txt(xMSP, _noteY, piece, {sz:F.tiny, anc:'middle', italic:true, fill:'#E65100'}));
+        _lastNoteY = _noteY;
+        _noteY += 11;
+      }
+    }
   }
 
   // ── THE GATEWAYS AND THEIR CT LEADS (hybrid) ──────────────────────────────
@@ -7873,11 +8110,21 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
     ['Battery Storage', input.hasBattery ? esc(input.batteryModel || input.batteryBrand || 'YES') : 'NONE'],
     ...(input.hasBattery ? [['Battery Capacity', batteryCapacityCell(input.batteryKwh, input.batteryKwhLabel)]] : []),
   ];
+  // 🚨 THE SAME OVERLAY THE SINGLE-LANE SHEET ALREADY HAD. Without it this table printed
+  // "Main Panel 125 A" and "Battery Storage NONE" on a project whose graph has two 200 A
+  // panelboards and two Powerwalls — the exact contradiction Ray rejected the first time, sitting
+  // on the OTHER sheet where nobody had looked. One sheet, one answer, on both of them.
+  const p3final: string[][] = _mlTopology
+    ? overlayServiceTopologyRows(
+        p3rows.map(r => [r[0], r[1]] as [string, string]),
+        _mlTopology, evaluateServiceTopology(_mlTopology),
+      ).map(r => [r[0], r[1]])
+    : p3rows;
   const _eqY = BAND_TOP + T3A_H + BGAP + T3B_H + BGAP;
   const _eqH = BAND_BOT - _eqY;
   placeTable('b3', X3, _eqY, W3, _eqH, 'EQUIPMENT SCHEDULE',
     [{ label: 'ITEM', w: 0.38 }, { label: 'SPECIFICATION', w: 0.62, align: 'end' as const }],
-    p3rows, { rowH: Math.min(24, (_eqH - 34) / p3rows.length), cellSz: 7 });
+    p3final, { rowH: Math.min(24, (_eqH - 34) / p3final.length), cellSz: 7 });
 
   // ── E-1.1: the same seven tables, stacked in two columns on the schedules
   //    canvas — the conductor schedule, the voltage drop and the max system

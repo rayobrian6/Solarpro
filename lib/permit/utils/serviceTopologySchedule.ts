@@ -28,7 +28,8 @@
 
 import type { ServiceTopology } from '@/lib/electrical/serviceTopology';
 import {
-  evaluateServiceTopology, sizeAggregationPanel, governingArticleFor,
+  evaluateServiceTopology, sizeAggregationPanel, governingArticleFor, topologyNodeLabel,
+  isOptionalCheck,
 } from '@/lib/electrical/serviceTopology';
 import {
   equipmentInstancesFromTopology, equipmentQuantities, type EquipmentInstanceKind,
@@ -121,7 +122,7 @@ export function serviceTopologyScheduleRows(t: ServiceTopology | null | undefine
 
   for (const b of t.branches) {
     const d = t.domains.find(x => x.branchId === b.id);
-    const fed = d ? d.backedUpPanelIds.join(', ') : '—';
+    const fed = d ? d.backedUpPanelIds.map(id => topologyNodeLabel(t, id)).join(', ') : '—';
     rows.push({
       tag: b.label.toUpperCase(),
       deviceType: 'service-branch',
@@ -157,7 +158,8 @@ export function serviceTopologyScheduleRows(t: ServiceTopology | null | undefine
       ocpd: d.gateway.mainBreakerA === null ? 'NOT EVALUATED' : `${d.gateway.mainBreakerA} A main`,
       notes: [
         d.gateway.serviceEntranceRated ? 'Service entrance rated' : '',
-        `Fed by ${d.branchId}; backs up ${d.backedUpPanelIds.join(', ')}`,
+        `Fed by ${topologyNodeLabel(t, d.branchId)}; backs up `
+          + `${d.backedUpPanelIds.map(id => topologyNodeLabel(t, id)).join(', ')}`,
         d.gateway.sccrA === null ? 'NOT EVALUATED — INTERRUPTING RATING REQUIRED' : '',
       ].filter(Boolean).join('. '),
     });
@@ -194,7 +196,7 @@ export function serviceTopologyScheduleRows(t: ServiceTopology | null | undefine
         notes: d.storageConnection === 'gateway-panelboard'
           ? `Lands in ${d.gateway.label}'s panelboard`
           : d.storageConnection === 'backed-up-panel-busbar'
-            ? `Lands on ${d.backedUpPanelIds.join(', ')} busbar`
+            ? `Lands on ${d.backedUpPanelIds.map(id => topologyNodeLabel(t, id)).join(', ')} busbar`
             : 'NOT EVALUATED — POINT OF CONNECTION REQUIRED',
       });
     }
@@ -246,7 +248,7 @@ export function serviceTopologyScheduleRows(t: ServiceTopology | null | undefine
       ocpd: poi.ocpdA === null ? '—' : `${poi.ocpdA} A`,
       notes: [
         poi.connectedToNodeId
-          ? `Connects to ${poi.connectedToNodeId}`
+          ? `Connects to ${topologyNodeLabel(t, poi.connectedToNodeId)}`
           : 'NOT EVALUATED — PREMISES CONNECTION POINT REQUIRED',
         article ?? '',
       ].filter(Boolean).join('; '),
@@ -254,20 +256,36 @@ export function serviceTopologyScheduleRows(t: ServiceTopology | null | undefine
   }
 
   for (const dev of t.devices) {
+    // 🚨 WHICH SYSTEM IS THIS SWITCH IN? Two identical 200 A knife switches, same model, same
+    // rating, one per path — and with a blank domain column an inspector has no way to tell which
+    // enclosure is which. Ray: "Equipment schedule must keep Domain A and Domain B identifiable
+    // even when models match." The domain comes from what the device is in line with.
+    const inlineOn = dev.inlineOnNodeId ?? null;
+    const owningDomain = inlineOn
+      ? t.domains.find(d => d.gateway.id === inlineOn
+          || d.branchId === inlineOn
+          || d.backedUpPanelIds.includes(inlineOn)
+          || d.storageUnitIds.includes(inlineOn))
+      : undefined;
     rows.push({
       tag: dev.id.toUpperCase(),
       deviceType: 'disconnect',
-      manufacturer: '', model: '',
-      domain: '',
+      manufacturer: '',
+      // The part actually selected, where one has been. A blank is a requirement, not a product.
+      model: dev.productId ? productName(dev.productId).model : '',
+      domain: owningDomain?.label ?? '',
       rating: A(dev.ratedAmps),
       ocpd: dev.sccrA === null ? 'NOT EVALUATED — SCCR REQUIRED' : `${dev.sccrA} A SCCR`,
       notes: [
         dev.roles.map(r => ROLE_TEXT[r] ?? r).join(' + '),
         dev.lockableOpen === true ? 'lockable open' : '',
         dev.visibleOpen === true ? 'visible open' : '',
-        // Where it sits is what decides what opening it actually disconnects.
-        dev.feedsNodeId ? `on the path to ${dev.feedsNodeId}` : '',
+        // 🚨 WHERE IT SITS, IN THE NAME ON THE ENCLOSURE. "on the path to branch-a" is a database
+        // key printed on a permit sheet — the same defect as `TO DEVICE-1` on the diagram.
+        inlineOn ? `in line ahead of ${topologyNodeLabel(t, inlineOn)}` : '',
+        dev.feedsNodeId ? `on the path to ${topologyNodeLabel(t, dev.feedsNodeId)}` : '',
         dev.locationNote ?? '',
+        dev.productId ? '' : 'NOT EVALUATED — EQUIPMENT SELECTION REQUIRED',
       ].filter(Boolean).join('; '),
     });
   }
@@ -341,6 +359,17 @@ export interface ReleaseReadiness {
   releaseReady: boolean;
   /** The requirement lines, already phrased for a sheet cell. */
   requirements: string[];
+  /**
+   * 🚨 OPTIONAL CALCULATIONS, KEPT OUT OF THE REQUIREMENT LINES AND NOT HIDDEN EITHER.
+   *
+   * Ray: "Standard design must allow completion of topology, equipment, disconnects, conductor
+   * engineering where possible, SLD, BOM, schedule, permit drawing without a complete
+   * appliance/load inventory... Do not block unrelated design work. Do not call the entire project
+   * broken." A line in `requirements` says the sheet is waiting on something; a missing dwelling
+   * load calculation is not. Its engineering conclusion is still NOT_EVALUATED — it appears here,
+   * and in `indeterminate` with everything else, so nothing is concealed.
+   */
+  optional: string[];
   /** Every indeterminate check, for a screen that wants the detail. */
   indeterminate: EngineeringCheck[];
   /** Every failure, which is a different thing from an unknown. */
@@ -352,14 +381,26 @@ export function serviceTopologyReleaseReadiness(
   t: ServiceTopology | null | undefined,
 ): ReleaseReadiness {
   if (!t) {
-    return { drawable: false, releaseReady: false, requirements: [], indeterminate: [], failures: [] };
+    return {
+      drawable: false, releaseReady: false, requirements: [], optional: [],
+      indeterminate: [], failures: [],
+    };
   }
   const e = evaluateServiceTopology(t);
   const indeterminate = e.checks.filter(c => c.conclusion === 'NOT_EVALUATED');
   const failures = e.checks.filter(c => c.conclusion === 'FAIL');
+  // Split before anything is phrased: a requirement line and an optional-calculation line are two
+  // different statements to a reviewer and only one of them is holding the sheet up.
+  const blocking = indeterminate.filter(c => !isOptionalCheck(c));
+  const optionalChecks = indeterminate.filter(isOptionalCheck);
+  const optional = optionalChecks.some(c => c.id === 'load.calculation'
+      || (c.requires ?? []).includes('loads.model'))
+    ? ['OPTIONAL — LOAD CALCULATION NOT PROVIDED. Topology, equipment, disconnects, diagram, '
+       + 'schedule and permit drawing are engineered without it.']
+    : [];
 
   const requirements: string[] = [];
-  const needs = requiredInputs(indeterminate);
+  const needs = requiredInputs(blocking);
   if (needs.includes('service.availableFaultCurrentA')) {
     requirements.push('NOT EVALUATED — AVAILABLE FAULT CURRENT REQUIRED');
   }
@@ -394,6 +435,23 @@ export function serviceTopologyReleaseReadiness(
   if (needs.includes('interconnection.isolationArrangement')) {
     requirements.push('NOT EVALUATED — UTILITY DER ISOLATION ARRANGEMENT REQUIRED');
   }
+  // 🚨 THE RULING, PHRASED AS A RULING. A stamping engineer must not read a proven traversal as a
+  // utility approval, so this says whose answer is outstanding.
+  if (needs.includes('interconnection.isolationArrangementAccepted')) {
+    requirements.push('JURISDICTION / UTILITY ACCEPTANCE REQUIRED — DER ISOLATION ARRANGEMENT AS DRAWN');
+  }
+  if (needs.some(n => n.startsWith('service.existingEquipment.'))) {
+    requirements.push('FIELD VERIFY — EXISTING SERVICE EQUIPMENT CONFIGURATION TO VERIFY');
+  }
+  if (needs.includes('device.productId')) {
+    requirements.push('NOT EVALUATED — DISCONNECT / SWITCH EQUIPMENT SELECTION REQUIRED');
+  }
+  if (needs.includes('device.inlineOnNodeId')) {
+    requirements.push('NOT EVALUATED — SAFETY SWITCH PLACEMENT REQUIRED (WHICH PATH IT INTERRUPTS)');
+  }
+  if (needs.includes('device.ratedAmps')) {
+    requirements.push('NOT EVALUATED — SAFETY SWITCH RATING REQUIRED');
+  }
   for (const n of needs.filter(x => x.startsWith('sccr:'))) {
     requirements.push(`NOT EVALUATED — INTERRUPTING RATING REQUIRED (${n.slice(5)})`);
   }
@@ -402,10 +460,12 @@ export function serviceTopologyReleaseReadiness(
     'service.availableFaultCurrentA', 'device.role:service-disconnect', 'domain.storageConnection',
     'interconnection.derArrangement', 'poi.relationship', 'poi.connectedToNodeId',
     'poi.supplySideTapConductors', 'aggregation.carriesPremisesLoad',
-    'interconnection.isolationArrangement',
+    'interconnection.isolationArrangement', 'interconnection.isolationArrangementAccepted',
+    'loads.model', 'device.productId', 'device.inlineOnNodeId', 'device.ratedAmps',
   ]);
   for (const n of needs) {
     if (covered.has(n)) continue;
+    if (n.startsWith('service.existingEquipment.')) continue;
     if (n.startsWith('manufacturer-document:') || n.startsWith('manufacturer-limit:') || n.startsWith('sccr:')) continue;
     requirements.push(`NOT EVALUATED — ${n.toUpperCase()} REQUIRED`);
   }
@@ -414,8 +474,12 @@ export function serviceTopologyReleaseReadiness(
     // A topology with an aggregation panel and no backup domain is still a drawable shape.
     drawable: t.domains.length > 0 || t.panels.length > 0
       || (t.aggregationPanels ?? []).length > 0,
-    releaseReady: indeterminate.length === 0 && failures.length === 0,
+    // 🚨 AN OPTIONAL CALCULATION DOES NOT HOLD A DESIGN SHUT. Gating on every indeterminate check
+    // made a missing dwelling-load inventory block the whole job for ever — which is the shape Ray
+    // rejected. The CONCLUSIONS are untouched: `indeterminate` still carries every one of them.
+    releaseReady: blocking.length === 0 && failures.length === 0,
     requirements,
+    optional,
     indeterminate,
     failures,
   };

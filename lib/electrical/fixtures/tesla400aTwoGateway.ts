@@ -24,6 +24,7 @@ import {
 import type {
   ServiceTopology, ProtectiveDevice, ServiceBranch, PanelBoard, BackupDomain, StorageUnit,
   DerArrangement, DerAggregationPanel, PointOfInterconnection,
+  ExistingServiceEquipment, LoadModel,
 } from '@/lib/electrical/serviceTopology';
 
 export interface Tesla400AOptions {
@@ -72,6 +73,24 @@ export interface Tesla400AOptions {
   aggregationOutputOcpdA?: number | null;
   /** The aggregation panel's busbar; omitted ⇒ not recorded. */
   aggregationBusbarA?: number | null;
+  /**
+   * 🚨 HOW THE UTILITY'S ISOLATION IS ARRANGED — Ray's intended design is TWO switches, not one.
+   *
+   * 'common-service' — one 400 A device on the service conductors (the earlier default).
+   * 'one-per-path'   — one lockable, visible-open switch IN LINE in each 200 A path, ahead of that
+   *                    path's gateway. This is what Ray intends to install, and his own note is
+   *                    that utility/AHJ acceptance of it "remains something to verify".
+   */
+  isolationArrangement?: 'common-service' | 'one-per-path';
+  /**
+   * The existing service assembly, when there is one.
+   *
+   * On the real job there is: an Eaton 400 A meter/service assembly already on the wall whose
+   * internals nobody has read yet. Absent ⇒ new service equipment.
+   */
+  existingServiceEquipment?: Partial<ExistingServiceEquipment>;
+  /** The optional dwelling load calculation. Absent on the real job, by product decision. */
+  loads?: LoadModel | null;
 }
 
 const DOMAIN_INTENTS: TeslaDomainIntent[] = [
@@ -110,6 +129,9 @@ export function buildTesla400ATwoGateway(opts: Tesla400AOptions = {}): Tesla400A
     aggregateBackedUpBuses = false,
     aggregationOutputOcpdA = null,
     aggregationBusbarA = null,
+    isolationArrangement = 'common-service',
+    existingServiceEquipment,
+    loads = null,
   } = opts;
 
   const intents = collapseToSingleGateway ? [DOMAIN_INTENTS[0]] : DOMAIN_INTENTS;
@@ -130,14 +152,16 @@ export function buildTesla400ATwoGateway(opts: Tesla400AOptions = {}): Tesla400A
       lockableOpen: true, visibleOpen: null,
       locationNote: 'Ahead of the service distribution, upstream of both gateways.',
     },
-    {
+  ];
+  if (isolationArrangement === 'common-service') {
+    devices.push({
       id: 'der-isolation', label: 'Utility DER isolation disconnect',
       roles: ['der-isolation-disconnect'],
       ratedAmps: 400, sccrA: null,
       lockableOpen: true, visibleOpen: true,
       locationNote: 'Adjacent to the revenue meter, accessible to the utility.',
-    },
-  ];
+    });
+  }
 
   // ── BRANCHES ──────────────────────────────────────────────────────────────
   const branches: ServiceBranch[] = collapseToSingleGateway
@@ -169,6 +193,30 @@ export function buildTesla400ATwoGateway(opts: Tesla400AOptions = {}): Tesla400A
   }));
 
   const storage: StorageUnit[] = builds.flatMap(b => b.storage);
+
+  // ── ONE KNIFE SWITCH PER 200 A PATH ───────────────────────────────────────
+  //
+  // 🚨 IN LINE, AHEAD OF THAT PATH'S GATEWAY — which is the whole point. Modelled as a device merely
+  // pointing at the branch it would be a stub beside an untouched conductor, and opening both
+  // switches would leave both Powerwalls connected to the utility. `inlineOnNodeId` is what makes
+  // the connection graph route the branch feeder THROUGH it.
+  //
+  // Ray's own note on this arrangement: "Utility/AHJ acceptance of the two-switch arrangement
+  // remains something to verify." Nothing here asserts it is acceptable.
+  if (isolationArrangement === 'one-per-path') {
+    branches.forEach((b, i) => {
+      const domain = domains.find(d => d.branchId === b.id);
+      devices.push({
+        id: `knife-${String.fromCharCode(97 + i)}`,
+        label: `${b.ratedAmps} A utility isolation switch — ${b.label}`,
+        roles: ['der-isolation-disconnect'],
+        ratedAmps: b.ratedAmps, sccrA: null,
+        lockableOpen: true, visibleOpen: true,
+        locationNote: `In line in ${b.label}, ahead of ${domain?.gateway.label ?? 'its panelboard'}.`,
+        ...(domain ? { inlineOnNodeId: domain.gateway.id, feedsNodeId: b.id } : {}),
+      });
+    });
+  }
 
   // ── HOW THE DER REACHES THE SERVICE ───────────────────────────────────────
   //
@@ -252,6 +300,13 @@ export function buildTesla400ATwoGateway(opts: Tesla400AOptions = {}): Tesla400A
       voltage: 240,
       phase: 'split-240',
       availableFaultCurrentA,
+      ...(existingServiceEquipment ? {
+        existingEquipment: {
+          manufacturer: null, catalogNumber: null, mainArrangement: null,
+          feederArrangement: null, sccrA: null, verified: false,
+          ...existingServiceEquipment,
+        },
+      } : {}),
     },
     devices,
     branches,
@@ -262,6 +317,7 @@ export function buildTesla400ATwoGateway(opts: Tesla400AOptions = {}): Tesla400A
     aggregationPanels,
     pointsOfInterconnection,
     calculatedServiceDemandA,
+    loads,
     interconnection: {
       utilityId: 'comed',
       // Undefined ⇒ nobody has chosen, which is the honest state of this job today.
@@ -280,4 +336,45 @@ export function buildTesla400ATwoGateway(opts: Tesla400AOptions = {}): Tesla400A
   };
 
   return { topology, unresolved };
+}
+
+/**
+ * 🚨 THE JOB AS RAY INTENDS TO BUILD IT. Not an illustration and not the maximal case — the
+ * specific arrangement he described after live-testing the workflow:
+ *
+ *   existing Eaton 400 A meter/service assembly, internals NOT yet verified
+ *   two 200 A systems, independent, nothing recombined downstream
+ *   one knife switch IN LINE in each path, ahead of that path's Gateway
+ *   Gateway 3 + Powerwall 3 + one Expansion per system
+ *   no meter collar, no common combiner, no house-load inventory
+ *
+ * Ray: "Do not invent a common 400 A knife-blade switch or common DER combiner merely because the
+ * service is 400 A." Nothing here does, and nothing here claims the two-switch arrangement is
+ * accepted — `interconnection.externalDerIsolationRequired` is true because ComEd requires isolation
+ * for this service class, and whether TWO devices satisfy it is a jurisdiction ruling the
+ * engineering still lists as unresolved.
+ *
+ * The load calculation is deliberately absent. That is the product decision, and this fixture is
+ * what proves a design completes without one.
+ */
+export function buildRaysIntendedJob(
+  overrides: Tesla400AOptions = {},
+): Tesla400ABuild {
+  return buildTesla400ATwoGateway({
+    derArrangement: 'independent-branch',
+    // 🚨 THE POWERWALL LANDS IN ITS GATEWAY, which is what Ray's own diagram shows —
+    //
+    //     GW #1 → MSP #1        PW3 #1 → Expansion #1
+    //
+    // — and what a Gateway 3 actually is. It matters: land the same Powerwall on a 200 A busbar
+    // with a 200 A main instead and NEC 705.12(B) allows 40 A of backfeed against a 50 A breaker,
+    // which FAILS. `the Powerwall cannot land on a 200 A/200 A MSP busbar` in
+    // tests/raysRealFourHundredAmpJob.test.ts is that arrangement, kept as a test rather than
+    // buried in a fixture choice.
+    storageConnection: 'gateway-panelboard',
+    isolationArrangement: 'one-per-path',
+    existingServiceEquipment: { manufacturer: 'Eaton' },
+    loads: null,
+    ...overrides,
+  });
 }

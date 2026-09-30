@@ -80,6 +80,37 @@ const CONTINUOUS_DUTY_FACTOR = 1.25;
 
 export type ServicePhase = 'split-240' | 'wye-208' | 'wye-480';
 
+/**
+ * 🚨 THE SERVICE EQUIPMENT IS ALREADY ON THE WALL, AND NOBODY HAS READ IT YET.
+ *
+ * Ray, on the real job: "existing Eaton meter/service equipment visible on site — exact internal
+ * breaker/distribution configuration still needs field/model verification... SolarPro must
+ * represent it as EXISTING 400 A SERVICE EQUIPMENT — CONFIGURATION TO VERIFY until exact equipment
+ * data is supplied. Do not automatically add replacement 400 A service distribution equipment."
+ *
+ * So this is the difference between a service SolarPro is DESIGNING and one it is CONNECTING TO.
+ * Its presence means: do not price it, do not schedule it as new, and do not assume its internals.
+ * Every field is separately null because they arrive separately — a catalog number off the door
+ * label, the internal arrangement off the deadfront, the AIC off the nameplate.
+ */
+export interface ExistingServiceEquipment {
+  manufacturer: string | null;
+  catalogNumber: string | null;
+  /** The internal main / disconnect arrangement, in the words of whoever read it. */
+  mainArrangement: string | null;
+  /** How the outgoing feeders leave the assembly. */
+  feederArrangement: string | null;
+  /** AIC / SCCR of the existing assembly, from its own label — never inferred from the rating. */
+  sccrA: number | null;
+  /**
+   * Somebody has been to site (or has the submittal) and the fields above are read, not assumed.
+   *
+   * 🚨 IT IS NOT DERIVED FROM THE FIELDS BEING FULL. A design can be complete on paper and still
+   * never have been verified, and a verified assembly can legitimately have an unknown AIC.
+   */
+  verified: boolean;
+}
+
 export interface UtilityService {
   /** Aggregate service rating. 400 on this job. */
   ratedAmps: number;
@@ -93,6 +124,14 @@ export interface UtilityService {
    * not been shown to be adequate.
    */
   availableFaultCurrentA: number | null;
+  /**
+   * The service equipment that is already installed, when it is.
+   *
+   * Absent ⇒ new service equipment, which SolarPro engineers and prices. Present ⇒ existing
+   * equipment, whose configuration is a field-verification item and which is never replaced by
+   * SolarPro's own initiative.
+   */
+  existingEquipment?: ExistingServiceEquipment | null;
 }
 
 // ── Devices, and the roles they play ────────────────────────────────────────
@@ -138,6 +177,34 @@ export interface ProtectiveDevice {
    * existed means.
    */
   feedsNodeId?: string | null;
+  /**
+   * The node on this device's LOAD side — the node whose supply toward the utility it interrupts.
+   *
+   * 🚨 A STUB IS NOT AN IN-LINE DEVICE, AND THE FIRST VERSION COULD ONLY DRAW A STUB. `feedsNodeId`
+   * alone says what is upstream, which is enough to hang a device off the graph and NOT enough to
+   * put it IN a conductor that already exists. Ray's real job is exactly that shape:
+   *
+   *     200 A path A → knife switch A → Gateway #1 → MSP #1
+   *
+   * With only `feedsNodeId` the switch is a second branch off the distribution while the original
+   * gateway-to-branch conductor is still there, so opening the switch disconnects nothing and DER
+   * ISOLATION COVERAGE correctly reports a bypass the installer never built. Naming the load side
+   * makes the connection graph RE-ROUTE the existing edge through the device, which is what a
+   * disconnect physically does.
+   *
+   * Absent ⇒ the device is not in line on any particular node's supply, which is what every graph
+   * written before this field existed means.
+   */
+  inlineOnNodeId?: string | null;
+  /**
+   * The catalogue part actually selected, once one has been.
+   *
+   * 🚨 A CALCULATION IS NOT A PURCHASE ORDER. Ray: "Calculations determine minimum required rating.
+   * They do not automatically invent a purchasable device." So the engineering establishes
+   * `ratedAmps` as the REQUIREMENT, this names the part chosen to meet it, and
+   * `device.selection` reports the gap between them rather than filling it.
+   */
+  productId?: string | null;
 }
 
 // ── The graph ───────────────────────────────────────────────────────────────
@@ -474,6 +541,55 @@ export interface BondingModel {
   basis: string;
 }
 
+// ── The load calculation, which is OPTIONAL and asked for ONCE ──────────────
+
+/**
+ * How the dwelling load was calculated. The method is recorded because the same house gives
+ * different answers under 220 Part III and 220.82, and a reviewer has to know which one this is.
+ */
+export type LoadCalculationMethod =
+  | 'standard-220-part-iii'
+  | 'optional-220-82'
+  | 'existing-dwelling-220-87'
+  | 'engineer-supplied';
+
+/** Calculated demand in one panelboard. Loads live in panels, so this is where the number lives. */
+export interface PanelLoad {
+  panelId: string;
+  calculatedDemandA: number;
+}
+
+/**
+ * 🚨 ONE LOAD MODEL, FOUR ANSWERS — AND IT IS OPTIONAL.
+ *
+ * Ray, firm product decision: "Ray is not going to verify every load in every house just to create
+ * a valid design. Full load calculations remain available for users/projects that want or require
+ * them. But they are optional... Standard design must allow completion of topology, equipment,
+ * disconnects, conductor engineering where possible, SLD, BOM, schedule, permit drawing without a
+ * complete appliance/load inventory."
+ *
+ * And: "DO NOT ASK FOR THE SAME LOAD MULTIPLE TIMES. If a user chooses Full Load Analysis, one load
+ * model should derive: aggregate service demand, Branch A demand, Branch B demand, backed-up load
+ * per domain. Do not independently ask for four amperage values."
+ *
+ * So the model holds demand PER PANELBOARD and `resolveDemands` sums it up the graph: a branch's
+ * demand is the sum of the panels it feeds, a domain's backed-up demand is the sum of the panels it
+ * backs up, and the service demand is the sum of the lot. Those are derivations, not four inputs —
+ * and they are derivations the topology already has the structure to make.
+ */
+export interface LoadModel {
+  method: LoadCalculationMethod;
+  /** Why this method applies, in the words of whoever ran it. Never generated here. */
+  basis: string;
+  /** Calculated demand per panelboard. Branch and service totals are SUMS of these. */
+  byPanel: PanelLoad[];
+  /**
+   * Service load that is not inside any modelled panelboard — a direct-feed appliance, a detached
+   * structure feeder. Null is "none recorded", which is not the same as zero being asserted.
+   */
+  otherDemandA?: number | null;
+}
+
 export interface ServiceTopology {
   service: UtilityService;
   /** Everything protective, by role. */
@@ -494,8 +610,23 @@ export interface ServiceTopology {
    * arrangement; one shared in the common-aggregation arrangement.
    */
   pointsOfInterconnection: PointOfInterconnection[];
-  /** Site-wide calculated service demand. null ⇒ NOT_EVALUATED. */
+  /**
+   * Site-wide calculated service demand, recorded directly.
+   *
+   * 🚨 SUPERSEDED BY `loads` WHEN ONE EXISTS, and kept because graphs saved before `loads` existed
+   * carry their demand here. `resolveDemands` is the one reader: the load model wins, this is the
+   * fallback, and neither being present is an OPTIONAL calculation that was not provided — not a
+   * broken design.
+   */
   calculatedServiceDemandA: number | null;
+  /**
+   * The optional dwelling load calculation. Absent on most designs, by product decision.
+   *
+   * `null`/absent ⇒ `load.calculation` reports NOT_EVALUATED — LOAD CALCULATION NOT PROVIDED, once,
+   * and every load-dependent check names THIS as the one thing it needs rather than asking for its
+   * own amperage.
+   */
+  loads?: LoadModel | null;
   /** Jurisdictional facts that change what is legal, supplied by the AHJ/utility layer. */
   interconnection: InterconnectionContext;
 }
@@ -523,6 +654,24 @@ export interface InterconnectionContext {
   externalDerIsolationRequired: boolean | null;
   /** Why — the utility rule, quoted by the caller. Never invented here. */
   externalDerIsolationBasis?: string | null;
+  /**
+   * 🚨 HAS THE UTILITY / AHJ ACCEPTED THE ARRANGEMENT ACTUALLY MODELLED?
+   *
+   * A different question from "is an isolation device required", and the one Ray named on his real
+   * job: "current intended external isolation is two independent knife-blade switches, one per
+   * 200 A path... Utility/AHJ acceptance of the two-switch arrangement remains something to verify"
+   * and "Do not claim approval that SolarPro does not have."
+   *
+   * Without this field the engineering could not express the gap: a required device, two devices
+   * present, every path proven cut — and a PASS that silently implied ComEd had signed off on an
+   * arrangement nobody had submitted. Isolation COVERAGE is a fact about the graph; this is a
+   * ruling, and only the jurisdiction makes it.
+   *
+   * null ⇒ nobody has asked. false ⇒ it was put to them and refused.
+   */
+  isolationArrangementAccepted?: boolean | null;
+  /** Who accepted it and under what — quoted by the caller, never composed here. */
+  isolationArrangementBasis?: string | null;
   /**
    * 🚨 MANUFACTURER DOCUMENT REQUIRED.
    *
@@ -594,6 +743,33 @@ const unknown = (
 const num = (v: number | null | undefined): v is number => typeof v === 'number' && Number.isFinite(v);
 
 /**
+ * 🚨 THE TOKENS NOBODY IS OBLIGED TO SUPPLY — ONE LIST, READ BY EVERY SURFACE.
+ *
+ * Ray's product decision made "unresolved" two different things: a fact the design genuinely waits
+ * on, and a calculation the design completes without. A check whose every requirement is in here is
+ * OPTIONAL: its conclusion is still NOT_EVALUATED (missing information never becomes PASS) and it
+ * must not be counted, phrased or gated as something holding the job up.
+ *
+ * Declared here, in the module that owns the vocabulary, so the needs-input screen and the permit
+ * readiness cannot disagree about which items those are.
+ */
+export const OPTIONAL_REQUIREMENT_TOKENS: ReadonlySet<string> = new Set(['loads.model']);
+
+/** Is this check one the design completes without? True only when EVERY token it needs is optional. */
+export function isOptionalCheck(c: TopologyCheck): boolean {
+  const req = c.requires ?? [];
+  return req.length > 0 && req.every(r => OPTIONAL_REQUIREMENT_TOKENS.has(r));
+}
+
+/** The method, named the way a plan reviewer names it. */
+const METHOD_LABEL: Record<LoadCalculationMethod, string> = {
+  'standard-220-part-iii': 'Standard calculation, NEC 220 Part III',
+  'optional-220-82': 'Optional dwelling calculation, NEC 220.82',
+  'existing-dwelling-220-87': 'Existing dwelling, NEC 220.87 (12-month demand data)',
+  'engineer-supplied': 'Engineer-supplied load calculation',
+};
+
+/**
  * Aggregate storage, with power and energy kept apart.
  *
  * 🚨 THE EXPANSION RULE IS ENFORCED HERE AND IN THE CHECK BELOW, BOTH. This function simply never
@@ -650,6 +826,97 @@ export function domainGeneration(
   if (units.length === 0) return domain.generationOutputA;
   if (units.some(u => !num(u.continuousOutputA))) return null;
   return units.reduce((n, u) => n + (u.continuousOutputA as number), 0);
+}
+
+/** Which panelboards a branch feeds, as the graph knows it. */
+function panelsOfBranch(topology: ServiceTopology, branch: ServiceBranch): string[] {
+  if (branch.panelIds && branch.panelIds.length > 0) return branch.panelIds;
+  // A branch that never recorded its panels is still linked to them through its backup domain,
+  // which is what the SLD and the busbar checks already read.
+  const domain = topology.domains.find(d => d.branchId === branch.id);
+  return domain ? [...domain.backedUpPanelIds] : [];
+}
+
+export interface ResolvedDemands {
+  /**
+   * Where these numbers came from. 'load-model' — derived from `topology.loads`. 'recorded' — the
+   * demand scalars somebody typed. 'none' — the optional calculation was not provided.
+   */
+  source: 'load-model' | 'recorded' | 'none';
+  /** Aggregate service demand, or null. */
+  serviceA: number | null;
+  /** Per branch id. A branch whose panels are not modelled is null, not zero. */
+  branchA: Record<string, number | null>;
+  /** Per domain id: the demand of the panels that domain backs up. */
+  domainBackedUpA: Record<string, number | null>;
+  /** Panelboards the load model does not cover, when it covers some of them. */
+  unmodelledPanelIds: string[];
+}
+
+/**
+ * 🚨 THE ONE READER OF LOAD. Four numbers, one model, and a single missing-input token behind all
+ * of them.
+ *
+ * Before this existed the engineering asked for `calculatedServiceDemandA`, then each branch's
+ * `calculatedDemandA`, then each domain's `backedUpDemandA` — on Ray's two-domain job that is FIVE
+ * separate amperage requests for one house, each rendered as its own line on the needs-input
+ * screen. He read that as "Engineering: 8 inputs required" and reasonably concluded the product was
+ * asking him to survey every circuit twice.
+ *
+ * With a load model the sums are derivations. Without one, every load-dependent check still reports
+ * NOT_EVALUATED — the conclusion is untouched — but they all name `loads.model`, so the screen shows
+ * ONE optional calculation that was not provided.
+ */
+export function resolveDemands(topology: ServiceTopology): ResolvedDemands {
+  const branchA: Record<string, number | null> = {};
+  const domainBackedUpA: Record<string, number | null> = {};
+  const loads = topology.loads ?? null;
+
+  if (loads && loads.byPanel.length > 0) {
+    const byPanel = new Map(loads.byPanel.map(l => [l.panelId, l.calculatedDemandA]));
+    const sumOf = (ids: readonly string[]): number | null => {
+      if (ids.length === 0) return null;
+      let total = 0;
+      for (const id of ids) {
+        const v = byPanel.get(id);
+        // 🚨 A PANEL THE MODEL DOES NOT COVER MAKES THE SUM UNKNOWN, NOT SMALLER. Treating a
+        // missing entry as zero is how a half-entered load calculation reports a branch as
+        // comfortably inside its rating.
+        if (!num(v)) return null;
+        total += v;
+      }
+      return total;
+    };
+
+    for (const b of topology.branches) branchA[b.id] = sumOf(panelsOfBranch(topology, b));
+    for (const d of topology.domains) domainBackedUpA[d.id] = sumOf(d.backedUpPanelIds);
+
+    const other = num(loads.otherDemandA) ? loads.otherDemandA : 0;
+    const allPanels = sumOf(topology.panels.map(p => p.id));
+    return {
+      source: 'load-model',
+      serviceA: allPanels === null ? null : allPanels + other,
+      branchA,
+      domainBackedUpA,
+      unmodelledPanelIds: topology.panels.filter(p => !byPanel.has(p.id)).map(p => p.id),
+    };
+  }
+
+  for (const b of topology.branches) branchA[b.id] = num(b.calculatedDemandA) ? b.calculatedDemandA : null;
+  for (const d of topology.domains) {
+    domainBackedUpA[d.id] = num(d.backedUpDemandA) ? d.backedUpDemandA : null;
+  }
+  const serviceA = num(topology.calculatedServiceDemandA) ? topology.calculatedServiceDemandA : null;
+  const anyRecorded = serviceA !== null
+    || Object.values(branchA).some(v => v !== null)
+    || Object.values(domainBackedUpA).some(v => v !== null);
+  return {
+    source: anyRecorded ? 'recorded' : 'none',
+    serviceA,
+    branchA,
+    domainBackedUpA,
+    unmodelledPanelIds: [],
+  };
 }
 
 export interface AggregationSizing {
@@ -717,6 +984,56 @@ export function sizeAggregationPanel(
  * arrangement, where each 200 A device is service equipment) ⇒ each is bonded and nothing below is.
  * No service disconnect identified ⇒ nothing is asserted, and the check reports NOT_EVALUATED.
  */
+/**
+ * The name written on the enclosure, for any node id in the graph.
+ *
+ * 🚨 NO SURFACE PRINTS AN INTERNAL KEY. "on the path to device-1" on an equipment schedule is a
+ * database id handed to an inspector — the same defect as `TO DEVICE-1` on a sheet or "backs msp-1"
+ * on a screen, one layer along. Exported so the schedule, the sheet and the screen resolve ids the
+ * same way instead of each growing its own lookup.
+ */
+export function topologyNodeLabel(t: ServiceTopology, nodeId: string): string {
+  return t.devices.find(d => d.id === nodeId)?.label
+    ?? t.panels.find(p => p.id === nodeId)?.label
+    ?? t.branches.find(b => b.id === nodeId)?.label
+    ?? t.domains.find(d => d.gateway.id === nodeId)?.gateway.label
+    ?? t.domains.find(d => d.id === nodeId)?.label
+    ?? t.storage.find(u => u.id === nodeId)?.label
+    ?? (t.generation ?? []).find(g => g.id === nodeId)?.label
+    ?? (t.aggregationPanels ?? []).find(a => a.id === nodeId)?.label
+    ?? (t.pointsOfInterconnection ?? []).find(x => x.id === nodeId)?.label
+    ?? (nodeId === 'service-distribution'
+      ? `the ${t.service.ratedAmps} A service distribution`
+      : nodeId);
+}
+
+const nodeName = topologyNodeLabel;
+
+/**
+ * What a device placed in line ahead of `nodeId` has to carry.
+ *
+ * 🚨 IT COMES FROM THE PATH, NOT FROM THE SERVICE. A switch ahead of a 200 A gateway is a 200 A
+ * question even on a 400 A service — the same rule that keeps a DER aggregation panel off the
+ * service rating, applied to a disconnect.
+ */
+function inlineRequirementA(t: ServiceTopology, nodeId: string): number | null {
+  const branch = t.branches.find(b => b.id === nodeId);
+  if (branch) return branch.ratedAmps;
+  const domain = t.domains.find(d => d.gateway.id === nodeId);
+  if (domain) {
+    if (num(domain.gateway.continuousRatingA)) return domain.gateway.continuousRatingA;
+    const fed = t.branches.find(b => b.id === domain.branchId);
+    return fed ? fed.ratedAmps : null;
+  }
+  const panel = t.panels.find(p => p.id === nodeId);
+  if (panel) return num(panel.mainBreakerA) ? panel.mainBreakerA
+    : num(panel.busbarRatingA) ? panel.busbarRatingA : null;
+  const agg = (t.aggregationPanels ?? []).find(a => a.id === nodeId);
+  if (agg) return sizeAggregationPanel(t, agg).standardOcpdA;
+  if (nodeId === 'service-distribution') return t.service.ratedAmps;
+  return null;
+}
+
 export function deriveBonding(topology: ServiceTopology): BondingModel {
   const serviceDisconnects = topology.devices.filter(d => d.roles.includes('service-disconnect'));
   const downstream = [
@@ -768,6 +1085,7 @@ export function evaluateServiceTopology(topology: ServiceTopology): TopologyEval
   const panelById = new Map(topology.panels.map(p => [p.id, p]));
   const branchById = new Map(topology.branches.map(b => [b.id, b]));
   const storageById = new Map(topology.storage.map(u => [u.id, u]));
+  const demands = resolveDemands(topology);
 
   // ── SERVICE ───────────────────────────────────────────────────────────────
 
@@ -781,17 +1099,77 @@ export function evaluateServiceTopology(topology: ServiceTopology): TopologyEval
         + `${topology.service.ratedAmps} A service rating. A 400 A service does not make two 200 A `
         + 'panels automatically valid — the split has to be engineered, not assumed.'));
 
-  checks.push(num(topology.calculatedServiceDemandA)
-    ? (topology.calculatedServiceDemandA <= topology.service.ratedAmps
+  // ── THE EXISTING SERVICE EQUIPMENT ────────────────────────────────────────
+  //
+  // 🚨 EXISTING EQUIPMENT IS A THING TO GO AND READ, NOT A THING TO DESIGN. It is reported only
+  // when the topology says the assembly is already there — a new service has nothing to verify.
+  const existing = topology.service.existingEquipment ?? null;
+  if (existing) {
+    const missing: string[] = [];
+    if (!existing.catalogNumber) missing.push('service.existingEquipment.catalogNumber');
+    if (!existing.mainArrangement) missing.push('service.existingEquipment.mainArrangement');
+    if (!existing.feederArrangement) missing.push('service.existingEquipment.feederArrangement');
+    if (!num(existing.sccrA)) missing.push('service.existingEquipment.sccrA');
+    if (!existing.verified) missing.push('service.existingEquipment.verified');
+    const name = [existing.manufacturer, existing.catalogNumber].filter(Boolean).join(' ');
+    checks.push(missing.length === 0
+      ? pass('service.existing-equipment', 'site', 'Existing service equipment',
+          `${name || 'The existing service assembly'} is field verified: `
+          + `${existing.mainArrangement}; ${existing.feederArrangement}; ${existing.sccrA} A AIC.`)
+      : unknown('service.existing-equipment', 'site', 'Existing service equipment',
+          `EXISTING ${topology.service.ratedAmps} A SERVICE EQUIPMENT — CONFIGURATION TO VERIFY. `
+          + `${name || 'The assembly'} is already installed, so its internal arrangement and `
+          + 'interrupting rating are facts to be read off it rather than chosen. SolarPro does not '
+          + 'replace it and does not assume its internals.',
+          missing));
+  }
+
+  const svcDemand = demands.serviceA;
+  checks.push(num(svcDemand)
+    ? (svcDemand <= topology.service.ratedAmps
         ? pass('service.demand', 'site', 'Aggregate service demand',
-            `${topology.calculatedServiceDemandA.toFixed(1)} A calculated demand against a `
+            `${svcDemand.toFixed(1)} A calculated demand against a `
             + `${topology.service.ratedAmps} A service.`, 'NEC 220')
         : fail('service.demand', 'site', 'Aggregate service demand',
-            `${topology.calculatedServiceDemandA.toFixed(1)} A calculated demand exceeds the `
+            `${svcDemand.toFixed(1)} A calculated demand exceeds the `
             + `${topology.service.ratedAmps} A service.`, 'NEC 220'))
     : unknown('service.demand', 'site', 'Aggregate service demand',
-        'No aggregate service load calculation has been supplied, so the service rating has not '
-        + 'been shown to be adequate.', ['calculatedServiceDemandA'], 'NEC 220'));
+        'No load calculation has been provided, so the service rating has not been shown to be '
+        + 'adequate for the dwelling load. Nothing else in this design depends on it.',
+        ['loads.model'], 'NEC 220'));
+
+  // ── THE LOAD CALCULATION — OPTIONAL, AND ASKED FOR ONCE ───────────────────
+  //
+  // 🚨 OPTIONAL DOES NOT MEAN PASS. Ray: "Preserve NOT_EVALUATED as real engineering truth. Do not
+  // weaken it... Missing information can never become PASS." What changes is only that this is ONE
+  // item, owned by the operator's own choice of whether to run the calculation at all — not five
+  // amperage boxes on a needs-input screen, and not a reason to call the design broken.
+  if (demands.source === 'none') {
+    checks.push(unknown('load.calculation', 'site', 'Dwelling load calculation',
+      'LOAD CALCULATION NOT PROVIDED. Optional: the topology, the equipment, the disconnects, the '
+      + 'single-line diagram, the schedule and the permit drawing are all engineered without it. '
+      + 'Supply one and the service, branch and backed-up load checks all resolve from it.',
+      ['loads.model'], 'NEC 220'));
+  } else if (demands.source === 'recorded') {
+    checks.push(pass('load.calculation', 'site', 'Dwelling load calculation',
+      'Calculated demand was recorded directly on the service and its branches rather than built '
+      + 'from a load model. The numbers are used as supplied.', 'NEC 220'));
+  } else if (demands.unmodelledPanelIds.length > 0) {
+    const names = demands.unmodelledPanelIds
+      .map(id => panelById.get(id)?.label ?? id).join(', ');
+    checks.push(unknown('load.calculation', 'site', 'Dwelling load calculation',
+      `The load calculation covers some panelboards and not others: ${names} `
+      + `${demands.unmodelledPanelIds.length === 1 ? 'has' : 'have'} no calculated demand, so the `
+      + 'sums up the service cannot be completed. A partial load model is not a smaller load.',
+      ['loads.model'], 'NEC 220'));
+  } else {
+    const t = topology.loads as LoadModel;
+    checks.push(pass('load.calculation', 'site', 'Dwelling load calculation',
+      `${METHOD_LABEL[t.method]} — ${t.byPanel.length} panelboard`
+      + `${t.byPanel.length === 1 ? '' : 's'}, ${demands.serviceA?.toFixed(1)} A aggregate. `
+      + 'The branch and backed-up load figures are sums of this one model, not separate entries.',
+      'NEC 220'));
+  }
 
   // ── BRANCHES ──────────────────────────────────────────────────────────────
 
@@ -808,16 +1186,22 @@ export function evaluateServiceTopology(topology: ServiceTopology): TopologyEval
         'No OCPD rating on this branch.', ['ocpdAmps']));
     }
 
-    checks.push(num(b.calculatedDemandA)
-      ? (b.calculatedDemandA <= b.ratedAmps
+    // 🚨 SUMMED FROM THE ONE LOAD MODEL, NOT ASKED FOR AGAIN. A branch's demand is the demand of
+    // the panels it feeds; the operator is never asked for it as a separate number.
+    const bDemand = demands.branchA[b.id] ?? null;
+    checks.push(num(bDemand)
+      ? (bDemand <= b.ratedAmps
           ? pass('branch.demand', scope, `${b.label} calculated demand`,
-              `${b.calculatedDemandA.toFixed(1)} A on a ${b.ratedAmps} A branch.`, 'NEC 220')
+              `${bDemand.toFixed(1)} A on a ${b.ratedAmps} A branch`
+              + `${demands.source === 'load-model' ? ', summed from the load model' : ''}.`,
+              'NEC 220')
           : fail('branch.demand', scope, `${b.label} calculated demand`,
-              `${b.calculatedDemandA.toFixed(1)} A exceeds the ${b.ratedAmps} A branch.`, 'NEC 220'))
+              `${bDemand.toFixed(1)} A exceeds the ${b.ratedAmps} A branch.`, 'NEC 220'))
       : unknown('branch.demand', scope, `${b.label} calculated demand`,
-          'This branch has no load calculation of its own. An aggregate service calculation does '
-          + 'not establish that an individual branch panel is adequate.',
-          ['calculatedDemandA'], 'NEC 220'));
+          'No load calculation covers the panelboards on this branch, so its feeder has not been '
+          + 'shown to be adequate for the load. An aggregate service figure does not establish an '
+          + 'individual branch.',
+          ['loads.model'], 'NEC 220'));
   }
 
   // ── DOMAINS ───────────────────────────────────────────────────────────────
@@ -945,11 +1329,16 @@ export function evaluateServiceTopology(topology: ServiceTopology): TopologyEval
       }
     }
 
-    checks.push(num(d.backedUpDemandA)
+    const dDemand = demands.domainBackedUpA[d.id] ?? null;
+    checks.push(num(dDemand)
       ? pass('domain.backed-up-load', scope, `${d.label} backed-up load`,
-          `${d.backedUpDemandA.toFixed(1)} A of backed-up load recorded.`)
+          `${dDemand.toFixed(1)} A of backed-up load`
+          + `${demands.source === 'load-model'
+              ? `, summed from the load model over ${d.backedUpPanelIds.length} panelboard`
+                + `${d.backedUpPanelIds.length === 1 ? '' : 's'}` : ' recorded'}.`)
       : unknown('domain.backed-up-load', scope, `${d.label} backed-up load`,
-          'The backed-up load for this domain has not been calculated.', ['backedUpDemandA']));
+          'No load calculation covers the panelboards this domain backs up, so the load the island '
+          + 'must carry is not established.', ['loads.model']));
   }
 
   // ── STORAGE ───────────────────────────────────────────────────────────────
@@ -1039,6 +1428,46 @@ export function evaluateServiceTopology(topology: ServiceTopology): TopologyEval
       checks.push(fail('device.role-combination', 'site', `${dev.label} role combination`,
         `${dev.label} is declared as ${dev.roles.join(' + ')} with no authority naming why one `
         + 'piece of hardware may perform both.'));
+    }
+
+    // ── IN-LINE PLACEMENT: IS IT BIG ENOUGH FOR WHAT IT IS IN LINE WITH? ────
+    //
+    // A disconnect in a 200 A path has to carry the path. The requirement comes from the node the
+    // device is in line on — which is precisely the thing `inlineOnNodeId` records.
+    if (dev.inlineOnNodeId) {
+      const required = inlineRequirementA(topology, dev.inlineOnNodeId);
+      const where = nodeName(topology, dev.inlineOnNodeId);
+      if (required === null) {
+        checks.push(unknown('device.inline-rating', 'site', `${dev.label} rating vs its path`,
+          `${dev.label} is in line ahead of ${where}, whose continuous rating is not established, `
+          + 'so the device has not been shown to carry the path it interrupts.',
+          ['device.inlineOnNodeId']));
+      } else if (!num(dev.ratedAmps)) {
+        checks.push(unknown('device.inline-rating', 'site', `${dev.label} rating vs its path`,
+          `${dev.label} is in line ahead of ${where}, which needs at least ${required} A, and the `
+          + 'device has no rating.', ['device.ratedAmps']));
+      } else {
+        checks.push(dev.ratedAmps >= required
+          ? pass('device.inline-rating', 'site', `${dev.label} rating vs its path`,
+              `${dev.ratedAmps} A device in line ahead of ${where}, which carries ${required} A.`)
+          : fail('device.inline-rating', 'site', `${dev.label} rating vs its path`,
+              `${dev.ratedAmps} A device in line ahead of ${where}, which carries ${required} A.`));
+      }
+    }
+
+    // ── THE ENGINEERED REQUIREMENT IS NOT A PURCHASABLE PART ────────────────
+    //
+    // Ray: "engineering requirement → actual catalog equipment selection → verify selected
+    // equipment satisfies requirement → BOM. Unknown catalog/equipment detail remains unresolved."
+    // So an un-selected device is reported as the SELECTION being open, with the requirement stated
+    // — never as a part SolarPro chose on the operator's behalf.
+    if (!dev.productId) {
+      checks.push(unknown('device.selection', 'site', `${dev.label} equipment selection`,
+        `The requirement is established (${num(dev.ratedAmps) ? `${dev.ratedAmps} A` : 'rating not '
+        + 'yet established'}${num(dev.sccrA) ? `, ${dev.sccrA} A interrupting` : ''}) and no `
+        + 'catalogue part has been selected to meet it. A calculated minimum rating is not a '
+        + 'purchase: nothing is ordered and nothing is drawn as a specific device until one is '
+        + 'chosen.', ['device.productId']));
     }
   }
 
@@ -1134,6 +1563,34 @@ export function evaluateServiceTopology(topology: ServiceTopology): TopologyEval
         : unknown('interconnection.der-isolation-coverage', 'site', 'DER isolation coverage',
             coverage.detail, coverage.requires,
             'NEC 705.20 / utility interconnection agreement'));
+
+    // 🚨 COVERAGE IS A FACT ABOUT THE GRAPH. ACCEPTANCE IS A RULING, AND IT IS SEPARATE.
+    //
+    // Two switches that provably cut every path is a complete engineering answer and is NOT the
+    // utility agreeing to two switches. Ray: "Utility/AHJ acceptance of the two-switch arrangement
+    // remains something to verify... Do not claim approval that SolarPro does not have." Reported
+    // wherever an isolation device is required, whatever coverage concluded, so a green traversal
+    // can never be read as a green submission.
+    const isolators = topology.devices.filter(d => d.roles.includes('der-isolation-disconnect'));
+    if (isolators.length > 0) {
+      const how = isolators.length === 1
+        ? `a single ${isolators[0].ratedAmps ?? '—'} A device`
+        : `${isolators.length} separate devices `
+          + `(${isolators.map(d => `${d.ratedAmps ?? '—'} A`).join(', ')})`;
+      checks.push(ic.isolationArrangementAccepted === true
+        ? pass('interconnection.isolation-accepted', 'site', 'Utility acceptance of the isolation arrangement',
+            `The utility has accepted ${how}. ${ic.isolationArrangementBasis ?? ''}`.trim())
+        : ic.isolationArrangementAccepted === false
+          ? fail('interconnection.isolation-accepted', 'site', 'Utility acceptance of the isolation arrangement',
+              `The utility has NOT accepted ${how}. `
+              + `${ic.isolationArrangementBasis ?? 'The arrangement must be changed or re-submitted.'}`)
+          : unknown('interconnection.isolation-accepted', 'site',
+              'Utility acceptance of the isolation arrangement',
+              `This design isolates its DER with ${how}. Whether the utility and the AHJ accept `
+              + 'that arrangement is a ruling neither the topology nor the code text establishes, '
+              + 'and SolarPro does not claim an approval it does not hold.',
+              ['interconnection.isolationArrangementAccepted']));
+    }
   }
 
   // ── POINTS OF INTERCONNECTION ─────────────────────────────────────────────

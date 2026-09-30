@@ -166,8 +166,18 @@ describe('🚨 NEEDS INPUT names the thing and knows where it lives', () => {
     // 'service' is in the legal id set above, so a whole new family of requirements could point at
     // the wrong inspector and the test would still pass. A requirement may only focus the service
     // node when it is genuinely ABOUT the service.
+    // 🚨 EVERY NAME HERE IS A CONTROL `ServiceNodeInspector` ACTUALLY RENDERS ON THE SERVICE NODE.
+    // Adding one to this list without adding the control is how the guard goes blind again — the
+    // requirement then lands on an inspector where it cannot be answered, which is exactly what it
+    // caught when `domain.storageConnection` was routed here.
     const SERVICE_FIELDS = new Set([
       'availableFaultCurrentA', 'calculatedServiceDemandA', 'ratedAmps', 'devices',
+      // The optional load analysis, entered once, on the service.
+      'loads',
+      // The existing assembly's field-verification items.
+      'existingEquipment.catalogNumber', 'existingEquipment.mainArrangement',
+      'existingEquipment.feederArrangement', 'existingEquipment.sccrA',
+      'existingEquipment.verified', 'existingEquipment.manufacturer',
     ]);
     for (const r of o.requiredInputs) {
       if (r.focus.nodeId !== 'service') continue;

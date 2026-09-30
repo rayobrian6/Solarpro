@@ -22,8 +22,11 @@ import {
   updateService, updateBranch, updatePanel, updateDomain, setDomainEquipment,
   removeBackupDomain, addProtectiveDevice, removeProtectiveDevice, setInterconnection,
   updateAggregationPanel, updatePointOfInterconnection, recommendAggregationRatings,
+  setExistingServiceEquipment, setLoadModel, setPanelLoad,
+  placeDevice, placeDeviceInline, selectDeviceProduct,
 } from '@/lib/electrical/topologyAuthoring';
-import { governingArticleFor } from '@/lib/electrical/serviceTopology';
+import { governingArticleFor, resolveDemands } from '@/lib/electrical/serviceTopology';
+import type { LoadCalculationMethod } from '@/lib/electrical/serviceTopology';
 
 const A = (v: number | null | undefined) => (typeof v === 'number' ? `${v} A` : 'not established');
 
@@ -35,7 +38,9 @@ function sourceLabel(t: ServiceTopology, sourceId: string): string {
     ?? t.domains.find(d => d.id === sourceId)?.label
     ?? sourceId;
 }
-import { DISCONNECT_ROLES, SERVICE_SIZE_CHOICES } from '@/lib/electrical/topologyPresets';
+import {
+  DISCONNECT_ROLES, SERVICE_SIZE_CHOICES, ISOLATION_ARRANGEMENTS, applyIsolationArrangement,
+} from '@/lib/electrical/topologyPresets';
 import { BACKUP_INTERFACES, BATTERIES } from '@/lib/equipment-db';
 
 const GATEWAYS = () => BACKUP_INTERFACES.filter(g => g.subcategory === 'gateway_controller');
@@ -103,6 +108,9 @@ export function ServiceNodeInspector({
   // ── SERVICE ───────────────────────────────────────────────────────────────
   if (selectedId === 'service') {
     const s = topology.service;
+    // The sums, from the canonical reader — so the screen shows the same four numbers the
+    // engineering does and cannot compute its own.
+    const derived = resolveDemands(topology);
     return shell('Editing', `${s.ratedAmps} A service`, (
       <>
         {/* 🚨 ONE CONTROL FOR ONE NUMBER. A picker with a free-text box permanently under it is two
@@ -147,12 +155,178 @@ export function ServiceNodeInspector({
                        onChange={v => onChange(updateService(topology, { availableFaultCurrentA: v }))} />
         </Field>
 
-        <Field label="Calculated service demand (A)" focused={isFocus('calculatedServiceDemandA')}
-               hint="NEC 220 aggregate demand for the whole service.">
-          <NumberInput testId="inspector-service-demand" value={topology.calculatedServiceDemandA}
-                       placeholder="REQUIRED" focused={isFocus('calculatedServiceDemandA')}
-                       onChange={v => onChange(updateService(topology, { calculatedServiceDemandA: v }))} />
-        </Field>
+        {/* 🚨 ONE EDITOR FOR ONE FACT. With a load analysis attached this box is a SECOND place to
+            state the same demand and `resolveDemands` would ignore whichever the operator had just
+            typed — the two-controls-for-one-number shape Ray rejected. Offered only while there is
+            no analysis, so a design saved with a recorded total keeps it editable. */}
+        {topology.loads ? null : (
+          <Field label="Recorded service demand (A)" focused={isFocus('calculatedServiceDemandA')}
+                 hint="Optional. A total you already have — or use the full load analysis below.">
+            <NumberInput testId="inspector-service-demand" value={topology.calculatedServiceDemandA}
+                         placeholder="optional" focused={isFocus('calculatedServiceDemandA')}
+                         onChange={v => onChange(updateService(topology, { calculatedServiceDemandA: v }))} />
+          </Field>
+        )}
+
+        {/* ── THE SERVICE EQUIPMENT ALREADY ON THE WALL ──────────────────────
+            🚨 EXISTING EQUIPMENT IS READ, NOT DESIGNED. Ray's job has an Eaton 400 A assembly
+            already there whose internals nobody has opened. SolarPro must say
+            "CONFIGURATION TO VERIFY" and must not quietly add replacement service gear. */}
+        <div className="sm:col-span-2">
+          <label className="flex items-start gap-2 text-xs text-slate-300">
+            <input type="checkbox" data-testid="inspector-service-existing" className="mt-0.5"
+                   checked={!!s.existingEquipment}
+                   onChange={e => onChange(setExistingServiceEquipment(
+                     topology, e.target.checked ? {} : null))} />
+            <span>
+              The service equipment is already installed
+              <span className="block text-[10px] text-slate-500">
+                SolarPro connects to it. It is not priced, not scheduled as new, and its internals
+                are field-verified rather than assumed.
+              </span>
+            </span>
+          </label>
+        </div>
+
+        {s.existingEquipment ? (
+          <div data-testid="inspector-existing-equipment"
+               className="sm:col-span-2 rounded-lg border border-amber-500/40 bg-amber-500/5 p-3">
+            <div className="text-[11px] font-black uppercase tracking-widest text-amber-300">
+              Existing {s.ratedAmps} A service equipment
+              {s.existingEquipment.verified ? '' : ' — configuration to verify'}
+            </div>
+            <div className="mt-2 grid gap-3 sm:grid-cols-2">
+              <Field label="Manufacturer">
+                <input type="text" data-testid="inspector-existing-mfr" className={`mt-1 ${box}`}
+                       value={s.existingEquipment.manufacturer ?? ''}
+                       onChange={e => onChange(setExistingServiceEquipment(
+                         topology, { manufacturer: e.target.value || null }))} />
+              </Field>
+              <Field label="Model / catalog number" focused={isFocus('catalogNumber')}>
+                <input type="text" data-testid="inspector-existing-catalog"
+                       className={`mt-1 ${box} ${isFocus('catalogNumber') ? ring : ''}`}
+                       placeholder="off the door label"
+                       value={s.existingEquipment.catalogNumber ?? ''}
+                       onChange={e => onChange(setExistingServiceEquipment(
+                         topology, { catalogNumber: e.target.value || null }))} />
+              </Field>
+              <Field label="Internal main / disconnect arrangement" focused={isFocus('mainArrangement')}
+                     hint="What is actually inside it — this is what decides where the bond belongs.">
+                <input type="text" data-testid="inspector-existing-main"
+                       className={`mt-1 ${box} ${isFocus('mainArrangement') ? ring : ''}`}
+                       placeholder="e.g. two 200 A mains, factory-grouped"
+                       value={s.existingEquipment.mainArrangement ?? ''}
+                       onChange={e => onChange(setExistingServiceEquipment(
+                         topology, { mainArrangement: e.target.value || null }))} />
+              </Field>
+              <Field label="Outgoing feeder arrangement" focused={isFocus('feederArrangement')}>
+                <input type="text" data-testid="inspector-existing-feeders"
+                       className={`mt-1 ${box} ${isFocus('feederArrangement') ? ring : ''}`}
+                       placeholder="how the feeders leave the assembly"
+                       value={s.existingEquipment.feederArrangement ?? ''}
+                       onChange={e => onChange(setExistingServiceEquipment(
+                         topology, { feederArrangement: e.target.value || null }))} />
+              </Field>
+              <Field label="AIC / SCCR from its nameplate (A)" focused={isFocus('sccrA')}>
+                <NumberInput testId="inspector-existing-sccr" value={s.existingEquipment.sccrA}
+                             placeholder="off the nameplate" focused={isFocus('sccrA')}
+                             onChange={v => onChange(setExistingServiceEquipment(
+                               topology, { sccrA: v }))} />
+              </Field>
+              <label className="flex items-start gap-2 self-end text-xs text-slate-300">
+                <input type="checkbox" data-testid="inspector-existing-verified" className="mt-0.5"
+                       checked={s.existingEquipment.verified}
+                       onChange={e => onChange(setExistingServiceEquipment(
+                         topology, { verified: e.target.checked }))} />
+                <span>
+                  Verified on site
+                  {/* 🚨 NOT DERIVED FROM THE BOXES BEING FULL. A design can be complete on paper
+                      and never have been looked at. */}
+                  <span className="block text-[10px] text-slate-500">
+                    Somebody read these off the equipment.
+                  </span>
+                </span>
+              </label>
+            </div>
+          </div>
+        ) : null}
+
+        {/* ── THE ONE LOAD CALCULATION, AND IT IS OPTIONAL ───────────────────
+            🚨 ASKED FOR ONCE, HERE. Ray: "DO NOT ASK FOR THE SAME LOAD MULTIPLE TIMES. If a user
+            chooses Full Load Analysis, one load model should derive aggregate service demand,
+            Branch A demand, Branch B demand, backed-up load per domain." So there are no per-branch
+            and no per-domain amperage boxes anywhere: the demand is entered per PANELBOARD, which is
+            where loads physically are, and every other figure is a sum of these. */}
+        <div data-testid="inspector-loads"
+             className={`sm:col-span-2 rounded-lg border p-3 ${isFocus('loads')
+               ? 'border-amber-400 bg-amber-500/5' : 'border-slate-700 bg-slate-900/40'}`}>
+          <div className="flex flex-wrap items-baseline gap-2">
+            <span className="text-[11px] font-black uppercase tracking-widest text-slate-300">
+              Full load analysis
+            </span>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-300">
+              optional
+            </span>
+          </div>
+          <div className="mt-1 text-[10px] text-slate-500">
+            The topology, equipment, disconnects, diagram, schedule and permit drawing are all
+            engineered without this. Fill it in if the project or the reviewer wants it.
+          </div>
+
+          {topology.loads ? (
+            <div className="mt-2 space-y-2">
+              <Field label="Method">
+                <select data-testid="inspector-load-method" className={`mt-1 ${box}`}
+                        value={topology.loads.method}
+                        onChange={e => onChange(setLoadModel(topology, {
+                          ...topology.loads!,
+                          method: e.target.value as LoadCalculationMethod,
+                        }))}>
+                  <option value="optional-220-82">Optional dwelling calculation — NEC 220.82</option>
+                  <option value="standard-220-part-iii">Standard calculation — NEC 220 Part III</option>
+                  <option value="existing-dwelling-220-87">Existing dwelling — NEC 220.87</option>
+                  <option value="engineer-supplied">Engineer supplied</option>
+                </select>
+              </Field>
+              {topology.panels.length === 0 ? (
+                <div className="text-[11px] text-slate-500">
+                  Add a panelboard and the demand is entered against it.
+                </div>
+              ) : topology.panels.map(p => {
+                const entry = topology.loads!.byPanel.find(l => l.panelId === p.id) ?? null;
+                return (
+                  <Field key={p.id} label={`${p.label} — calculated demand (A)`}>
+                    <NumberInput testId={`inspector-load-${p.id}`} value={entry?.calculatedDemandA ?? null}
+                                 placeholder="not entered"
+                                 onChange={v => onChange(setPanelLoad(topology, p.id, v))} />
+                  </Field>
+                );
+              })}
+              <div className="text-[11px] text-slate-400">
+                {derived.serviceA === null
+                  // 🚨 A PARTIAL MODEL IS NOT A SMALLER LOAD, and the screen says so where the
+                  // number would have been rather than showing a comfortable subtotal.
+                  ? 'Aggregate demand cannot be summed until every panelboard has a figure.'
+                  : `${derived.serviceA.toFixed(1)} A aggregate · `
+                    + topology.branches.map(b => `${b.label} ${derived.branchA[b.id]?.toFixed(1)
+                      ?? '—'} A`).join(' · ')}
+              </div>
+              <button type="button" data-testid="inspector-clear-loads"
+                      className="rounded border border-slate-600 px-2 py-1 text-[11px] text-slate-300 hover:bg-slate-800"
+                      onClick={() => onChange(setLoadModel(topology, null))}>
+                Remove the load analysis
+              </button>
+            </div>
+          ) : (
+            <button type="button" data-testid="inspector-add-loads"
+                    className="mt-2 rounded bg-slate-700 px-2 py-1 text-[11px] text-slate-100 hover:bg-slate-600"
+                    onClick={() => onChange(setLoadModel(topology, {
+                      method: 'optional-220-82', basis: '', byPanel: [], otherDemandA: null,
+                    }))}>
+              Add a full load analysis
+            </button>
+          )}
+        </div>
       </>
     ));
   }
@@ -161,6 +335,7 @@ export function ServiceNodeInspector({
   if (selectedId === 'interconnection') {
     const ic = topology.interconnection;
     const doc = ic.multiGatewayMeteringDoc;
+    const isolators = topology.devices.filter(d => d.roles.includes('der-isolation-disconnect'));
     return (
       <div data-testid="node-inspector" className="rounded-xl border border-sky-500/30 bg-slate-900/70 p-4">
         <div className="text-[10px] font-bold uppercase tracking-widest text-sky-400">Editing</div>
@@ -207,9 +382,86 @@ export function ServiceNodeInspector({
                    onChange={e => onChange(setInterconnection(topology, {
                      externalDerIsolationRequired: e.target.checked,
                    }))} />
-            <span>This utility requires an external DER isolation device</span>
+            {/* Installer wording: a utility-accessible safety switch. The role it creates is
+                still `der-isolation-disconnect` in the model and on the sheet. */}
+            <span>This utility requires an external, utility-accessible safety switch
+              <span className="block text-[10px] text-slate-500">
+                One that isolates every generator and battery on site from the grid.
+              </span>
+            </span>
           </label>
         </div>
+
+        {/* ── THE SAFETY-SWITCH ARRANGEMENT ─────────────────────────────────
+            🚨 ONE SWITCH PER SYSTEM IS A REAL CHOICE, AND IT IS NOT AUTOMATIC. Ray: "Do not invent a
+            common 400 A knife-blade switch... merely because the service is 400 A." Choosing
+            per-path builds one switch IN LINE in each path, rated for THAT path. */}
+        {ic.externalDerIsolationRequired === true || isolators.length > 0 ? (
+          <div data-testid="ic-isolation-arrangement" className="mt-4">
+            <div className="text-[10px] font-bold uppercase tracking-widest text-slate-500">
+              Safety switch arrangement
+            </div>
+            <div className="mt-1 space-y-2">
+              {ISOLATION_ARRANGEMENTS.map(choice => {
+                const selected = choice.id === 'one-per-path'
+                  ? isolators.length > 1 && isolators.every(d => !!d.inlineOnNodeId)
+                  : isolators.length === 1 && !isolators[0].inlineOnNodeId;
+                return (
+                  <label key={choice.id} data-testid={`ic-isolation-${choice.id}`}
+                         className={`flex cursor-pointer items-start gap-2 rounded-lg border p-2 text-xs ${
+                           selected ? 'border-sky-400 bg-sky-500/10' : 'border-slate-700 hover:border-slate-500'}`}>
+                    <input type="radio" name="isolationArrangement" className="mt-1" checked={selected}
+                           onChange={() => {
+                             const r = applyIsolationArrangement(topology, choice.id);
+                             onChange(r.topology);
+                             onUnresolved?.(r.unresolved);
+                           }} />
+                    <span>
+                      <span className="block font-bold text-slate-100">{choice.label}</span>
+                      <span className="block text-[11px] text-slate-400">{choice.describe}</span>
+                      <span className="block text-[11px] text-slate-500">{choice.builds}</span>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+
+            {/* 🚨 A PROVEN TRAVERSAL IS NOT A UTILITY APPROVAL. Two switches that demonstrably cut
+                every path is a complete engineering answer and says nothing about whether ComEd
+                accepts two switches. Ray: "Do not claim approval that SolarPro does not have." */}
+            <div className="mt-2 rounded-lg border border-slate-700 p-2">
+              <Field label="Utility / AHJ acceptance of this arrangement"
+                     focused={isFocus('isolationArrangementAccepted')}
+                     hint="A ruling, not a measurement. SolarPro will not assume one.">
+                <select data-testid="ic-isolation-accepted"
+                        className={`mt-1 ${box} ${isFocus('isolationArrangementAccepted') ? ring : ''}`}
+                        value={ic.isolationArrangementAccepted === true ? 'yes'
+                          : ic.isolationArrangementAccepted === false ? 'no' : 'unknown'}
+                        onChange={e => onChange(setInterconnection(topology, {
+                          isolationArrangementAccepted: e.target.value === 'yes' ? true
+                            : e.target.value === 'no' ? false : null,
+                        }))}>
+                  <option value="unknown">Needs verification — not submitted / not answered</option>
+                  <option value="yes">Accepted as drawn</option>
+                  <option value="no">Not accepted</option>
+                </select>
+              </Field>
+              {isolators.length > 0 ? (
+                <div data-testid="ic-isolation-summary" className="mt-1 text-[11px] text-slate-400">
+                  {isolators.length} disconnect{isolators.length === 1 ? '' : 's'} —{' '}
+                  {isolators.length > 1 && isolators.every(d => !!d.inlineOnNodeId)
+                    ? 'each system independently isolated'
+                    : 'one device isolating the whole service'}
+                  {ic.isolationArrangementAccepted === true ? null : (
+                    <span className="block font-bold text-amber-300">
+                      Utility / AHJ acceptance: needs verification
+                    </span>
+                  )}
+                </div>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
 
         {/* 🚨 THE ROLES, WITH WHERE THEY SIT — not four unlabelled buttons. */}
         <div className="mt-4 text-[10px] font-bold uppercase tracking-widest text-slate-500">
@@ -244,18 +496,63 @@ export function ServiceNodeInspector({
                   <div className="mt-1 text-[11px] text-slate-500">None recorded.</div>
                 ) : devices.map(d => (
                   <div key={d.id} data-testid={`ic-device-${d.id}`}
-                       className="mt-1 flex items-center justify-between gap-2 rounded bg-slate-950/50 px-2 py-1">
-                    <span className="text-[11px] text-slate-200">
-                      {d.label} · {d.ratedAmps === null ? '—' : `${d.ratedAmps} A`} ·{' '}
-                      {d.sccrA === null
-                        ? <span className="text-amber-300">SCCR not established</span>
-                        : `${d.sccrA} A SCCR`}
-                    </span>
-                    <button type="button" data-testid={`ic-remove-${d.id}`}
-                            className="rounded px-1.5 text-[11px] text-slate-400 hover:text-red-300"
-                            onClick={() => onChange(removeProtectiveDevice(topology, d.id))}>
-                      Remove
-                    </button>
+                       className="mt-1 rounded bg-slate-950/50 px-2 py-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[11px] text-slate-200">
+                        {d.label} · {d.ratedAmps === null ? '—' : `${d.ratedAmps} A`} ·{' '}
+                        {d.sccrA === null
+                          ? <span className="text-amber-300">SCCR not established</span>
+                          : `${d.sccrA} A SCCR`}
+                      </span>
+                      <button type="button" data-testid={`ic-remove-${d.id}`}
+                              className="rounded px-1.5 text-[11px] text-slate-400 hover:text-red-300"
+                              onClick={() => onChange(removeProtectiveDevice(topology, d.id))}>
+                        Remove
+                      </button>
+                    </div>
+                    {/* 🚨 WHICH PATH IS IT IN? A switch beside a conductor disconnects nothing, so
+                        this is the field that decides what opening it actually does — and the
+                        engineering's DER ISOLATION COVERAGE reads exactly this. */}
+                    <div className="mt-1 grid gap-2 sm:grid-cols-2">
+                      <Field label="In line ahead of" focused={isFocus('inlineOnNodeId')}>
+                        <select data-testid={`ic-inline-${d.id}`}
+                                className={`mt-1 ${box} ${isFocus('inlineOnNodeId') ? ring : ''}`}
+                                value={d.inlineOnNodeId ?? ''}
+                                onChange={e => {
+                                  const target = e.target.value || null;
+                                  let next = placeDeviceInline(topology, d.id, target);
+                                  // The upstream side follows from the path: the branch that feeds
+                                  // whatever it now sits ahead of.
+                                  const dom = topology.domains.find(x => x.gateway.id === target);
+                                  next = placeDevice(next, d.id,
+                                    dom ? dom.branchId : (target ? d.feedsNodeId ?? null : null));
+                                  onChange(next);
+                                }}>
+                          <option value="">Nothing — on the service chain</option>
+                          {topology.domains.map(dom => (
+                            <option key={dom.gateway.id} value={dom.gateway.id}>
+                              {dom.gateway.label} ({dom.label})
+                            </option>
+                          ))}
+                          {topology.panels.map(p => (
+                            <option key={p.id} value={p.id}>{p.label}</option>
+                          ))}
+                        </select>
+                      </Field>
+                      {/* 🚨 THE REQUIREMENT IS NOT THE PART. Ray: "Calculations determine minimum
+                          required rating. They do not automatically invent a purchasable device." */}
+                      <Field label="Selected equipment" focused={isFocus('productId')}
+                             hint={d.productId ? undefined
+                               : `Requirement: ${d.ratedAmps === null ? 'rating not established'
+                                 : `${d.ratedAmps} A`}. Nothing is ordered until a part is chosen.`}>
+                        <input type="text" data-testid={`ic-product-${d.id}`}
+                               className={`mt-1 ${box} ${isFocus('productId') ? ring : ''}`}
+                               placeholder="catalog number — not selected"
+                               value={d.productId ?? ''}
+                               onChange={e => onChange(selectDeviceProduct(
+                                 topology, d.id, e.target.value || null))} />
+                      </Field>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -283,6 +580,7 @@ export function ServiceNodeInspector({
     const fed = branch.panelIds
       ?? topology.domains.find(d => d.branchId === branch.id)?.backedUpPanelIds
       ?? [];
+    const branchDemand = resolveDemands(topology).branchA[branch.id] ?? null;
     return shell('Editing', `${branch.label} — service branch`, (
       <>
         <Field label="Branch rating (A)" focused={isFocus('ratedAmps')}>
@@ -294,11 +592,24 @@ export function ServiceNodeInspector({
                        focused={isFocus('ocpdAmps')}
                        onChange={v => onChange(updateBranch(topology, branch.id, { ocpdAmps: v }))} />
         </Field>
-        <Field label="Calculated demand on this branch (A)" focused={isFocus('calculatedDemandA')}
-               hint="An aggregate service calculation does not establish that this branch is adequate.">
-          <NumberInput testId="inspector-branch-demand" value={branch.calculatedDemandA}
-                       placeholder="REQUIRED" focused={isFocus('calculatedDemandA')}
-                       onChange={v => onChange(updateBranch(topology, branch.id, { calculatedDemandA: v }))} />
+        {/* 🚨 NO PER-BRANCH DEMAND BOX. Ray: "DO NOT ASK FOR THE SAME LOAD MULTIPLE TIMES... Do not
+            independently ask for four amperage values." This branch's demand is the demand of the
+            panelboards it feeds, summed from the one load analysis on the service. Shown, never
+            typed — a second editor here is how the service total and the branch totals diverge. */}
+        <Field label="Calculated demand on this branch (A)">
+          <div data-testid="inspector-branch-demand-derived"
+               className={`mt-1 ${box} ${isFocus('calculatedDemandA') || isFocus('loads.model')
+                 ? ring : ''}`}>
+            {branchDemand === null
+              ? <span className="text-slate-500">
+                  not calculated — the load analysis is optional
+                </span>
+              : `${branchDemand.toFixed(1)} A`}
+          </div>
+          <span className="mt-0.5 block text-[10px] text-slate-500">
+            Summed from the load analysis on the service, over the panelboards below. Entered once,
+            there.
+          </span>
         </Field>
         <Field label="Panels this branch feeds"
                hint="Which panelboards the branch conductors land in. Backup is set on the domain.">
@@ -358,6 +669,7 @@ export function ServiceNodeInspector({
   // ── BACKUP DOMAIN ─────────────────────────────────────────────────────────
   const domain = topology.domains.find(d => d.id === selectedId);
   if (domain) {
+    const domainDemand = resolveDemands(topology).domainBackedUpA[domain.id] ?? null;
     const units = domain.storageUnitIds
       .map(id => topology.storage.find(u => u.id === id))
       .filter((u): u is NonNullable<typeof u> => !!u);
@@ -466,10 +778,22 @@ export function ServiceNodeInspector({
             </span>
           </Field>
 
-          <Field label="Backed-up load (A)" focused={isFocus('backedUpDemandA')}>
-            <NumberInput testId="inspector-domain-backed-up-demand" value={domain.backedUpDemandA}
-                         placeholder="REQUIRED" focused={isFocus('backedUpDemandA')}
-                         onChange={v => onChange(updateDomain(topology, domain.id, { backedUpDemandA: v }))} />
+          {/* Derived, for the same reason the branch's is: the backed-up load is the demand of the
+              panelboards this domain backs up. One model, four answers. */}
+          <Field label="Backed-up load (A)">
+            <div data-testid="inspector-domain-backed-up-derived"
+                 className={`mt-1 ${box} ${isFocus('backedUpDemandA') || isFocus('loads.model')
+                   ? ring : ''}`}>
+              {domainDemand === null
+                ? <span className="text-slate-500">
+                    not calculated — the load analysis is optional
+                  </span>
+                : `${domainDemand.toFixed(1)} A`}
+            </div>
+            <span className="mt-0.5 block text-[10px] text-slate-500">
+              Summed from the load analysis over {domain.backedUpPanelIds
+                .map(id => topology.panels.find(p => p.id === id)?.label ?? id).join(', ') || '—'}.
+            </span>
           </Field>
 
           <Field label="Generation in this domain (A)" focused={isFocus('generationOutputA')}

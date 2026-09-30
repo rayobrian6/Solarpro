@@ -360,6 +360,10 @@ describe('🚨 the aggregation panel reaches every output', () => {
     expect(r.releaseReady).toBe(false);
     for (const req of r.requirements) expect(req).toMatch(/REQUIRED/);
     expect(r.requirements.join(' ')).toContain('SUPPLY-SIDE TAP CONDUCTORS');
+    // A requirement line means the sheet is waiting on something. An optional calculation is not,
+    // so it has its own list and never dilutes that meaning.
+    expect(r.requirements.join(' ')).not.toContain('LOAD CALCULATION');
+    expect(r.optional.join(' ')).toContain('LOAD CALCULATION NOT PROVIDED');
   });
 });
 
@@ -411,7 +415,12 @@ describe('🚨 NEEDS INPUT says who owes each thing', () => {
       arranged('common-aggregation'), 'agg-1', { carriesPremisesLoad: null, busbarRatingA: null }));
     const un = (k: string) => unstated.requiredInputs.find(r => r.key === k)?.owner;
     expect(un('aggregation.carriesPremisesLoad')).toBe('design-decision');
-    expect(ownerOf('calculatedDemandA')).toBe('solarpro-can-calculate');
+    // 🚨 AND THE DWELLING LOAD IS NOT IN ANY OF THOSE BUCKETS. It used to be asked for five times
+    // over as `calculatedServiceDemandA`, `calculatedDemandA` × 2 and `backedUpDemandA` × 2, all
+    // owned by 'solarpro-can-calculate' — which read as five things SolarPro was waiting on. It is
+    // one optional model now, and nothing asks for those tokens again.
+    expect(ownerOf('calculatedDemandA')).toBeUndefined();
+    expect(ownerOf('loads.model')).toBe('optional-calculation');
     expect(buildServiceOverview(buildTesla400ATwoGateway().topology)
       .requiredInputs.find(r => r.key === 'panel.busbarRatingA')?.owner ?? 'field-verification')
       .toBe('field-verification');

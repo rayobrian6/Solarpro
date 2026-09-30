@@ -62,7 +62,7 @@ import type {
   ServiceTopology, ServiceBranch, PanelBoard, BackupDomain, StorageUnit,
   ProtectiveDevice, GatewayInstance, DeviceRole,
   GenerationUnit, DerAggregationPanel, DerAggregationInput, PointOfInterconnection,
-  PoiRelationship,
+  PoiRelationship, ExistingServiceEquipment, LoadModel, LoadCalculationMethod, PanelLoad,
 } from '@/lib/electrical/serviceTopology';
 
 /**
@@ -72,8 +72,14 @@ import type {
  * with empty lists and no chosen arrangement, which is exactly what they meant: those designs
  * never stated how their DER reaches the service, and the engineering now says so rather than
  * inheriting a default.
+ *
+ * 3 — existing service equipment, in-line device placement, the selected catalogue part, and the
+ * optional load model. Earlier graphs read back with no existing-equipment record (so nothing is
+ * claimed about an assembly nobody described), no in-line placement (the default service chain,
+ * which is what they meant) and no load model — which, with their demand scalars intact, still
+ * resolves through `resolveDemands` exactly as it did before.
  */
-export const SERVICE_TOPOLOGY_SCHEMA_VERSION = 2;
+export const SERVICE_TOPOLOGY_SCHEMA_VERSION = 3;
 
 export interface StoredServiceTopology {
   schemaVersion: number;
@@ -116,7 +122,58 @@ function parseDevice(v: unknown): ProtectiveDevice | null {
     // it on the way in as well as on the way out.
     ...(typeof v.feedsNodeId === 'string' && v.feedsNodeId
       ? { feedsNodeId: v.feedsNodeId } : {}),
+    // 🚨 AND SO DOES WHAT IT IS IN LINE WITH — for exactly the same reason, one field along. A
+    // per-path knife switch that reloads without its load side is a switch beside the conductor
+    // instead of in it, so both Powerwalls keep a path to the utility across a save.
+    ...(typeof v.inlineOnNodeId === 'string' && v.inlineOnNodeId
+      ? { inlineOnNodeId: v.inlineOnNodeId } : {}),
+    // The part actually bought. Dropped, `device.selection` reopens on a design that had settled it.
+    ...(typeof v.productId === 'string' && v.productId ? { productId: v.productId } : {}),
   };
+}
+
+/**
+ * The service equipment already on the wall.
+ *
+ * 🚨 `verified` MUST NOT BE INFERRED FROM THE FIELDS BEING FULL. Reloading a half-read assembly as
+ * verified is how "CONFIGURATION TO VERIFY" disappears without anybody going to site.
+ */
+function parseExistingEquipment(v: unknown): ExistingServiceEquipment | null {
+  if (!isObj(v)) return null;
+  const strOrNull = (x: unknown) => (typeof x === 'string' && x ? x : null);
+  return {
+    manufacturer: strOrNull(v.manufacturer),
+    catalogNumber: strOrNull(v.catalogNumber),
+    mainArrangement: strOrNull(v.mainArrangement),
+    feederArrangement: strOrNull(v.feederArrangement),
+    sccrA: numOrNull(v.sccrA),
+    verified: v.verified === true,
+  };
+}
+
+const LOAD_METHODS: LoadCalculationMethod[] = [
+  'standard-220-part-iii', 'optional-220-82', 'existing-dwelling-220-87', 'engineer-supplied',
+];
+
+/**
+ * The optional load model.
+ *
+ * 🚨 A PANEL ENTRY WITH NO NUMBER IS DROPPED, NOT ZEROED. `resolveDemands` treats a panel the model
+ * does not cover as making the sum UNKNOWN; reading a corrupt entry back as 0 A would turn a partial
+ * calculation into a comfortable pass.
+ */
+function parseLoadModel(v: unknown): LoadModel | null {
+  if (!isObj(v)) return null;
+  const method = LOAD_METHODS.includes(v.method as LoadCalculationMethod)
+    ? (v.method as LoadCalculationMethod) : 'engineer-supplied';
+  const byPanel = (Array.isArray(v.byPanel) ? v.byPanel : [])
+    .map((e): PanelLoad | null => {
+      if (!isObj(e) || !str(e.panelId)) return null;
+      const a = numOrNull(e.calculatedDemandA);
+      return a === null ? null : { panelId: str(e.panelId), calculatedDemandA: a };
+    })
+    .filter((x): x is PanelLoad => x !== null);
+  return { method, basis: str(v.basis), byPanel, otherDemandA: numOrNull(v.otherDemandA) };
 }
 
 function parseBranch(v: unknown): ServiceBranch | null {
@@ -337,6 +394,7 @@ export function parseServiceTopology(raw: unknown): StoredServiceTopology | null
         voltage: numOrNull(service?.voltage) ?? 240,
         phase: phase === 'wye-208' || phase === 'wye-480' ? phase : 'split-240',
         availableFaultCurrentA: numOrNull(service?.availableFaultCurrentA),
+        existingEquipment: parseExistingEquipment(service?.existingEquipment),
       },
       devices,
       branches,
@@ -347,6 +405,7 @@ export function parseServiceTopology(raw: unknown): StoredServiceTopology | null
       aggregationPanels,
       pointsOfInterconnection,
       calculatedServiceDemandA: numOrNull(t.calculatedServiceDemandA),
+      loads: parseLoadModel(t.loads),
       interconnection: {
         utilityId: typeof ic.utilityId === 'string' ? ic.utilityId : null,
         // A graph written before the arrangement existed has NOT chosen one, and must come back
@@ -360,6 +419,12 @@ export function parseServiceTopology(raw: unknown): StoredServiceTopology | null
         externalDerIsolationRequired: boolOrNull(ic.externalDerIsolationRequired),
         externalDerIsolationBasis: typeof ic.externalDerIsolationBasis === 'string'
           ? ic.externalDerIsolationBasis : null,
+        // 🚨 AN ACCEPTANCE THAT DOES NOT SURVIVE THE SAVE REOPENS AS "NOT ASKED" — annoying. One
+        // that APPEARS across a save would be SolarPro inventing a utility approval, which is why
+        // `=== true` and nothing looser.
+        isolationArrangementAccepted: boolOrNull(ic.isolationArrangementAccepted),
+        isolationArrangementBasis: typeof ic.isolationArrangementBasis === 'string'
+          ? ic.isolationArrangementBasis : null,
         // 🚨 THE UNRESOLVED MANUFACTURER AUTHORITY SURVIVES THE ROUND TRIP. Ray listed it in the
         // things reload must preserve: a saved design must come back still saying the Tesla
         // multi-gateway note is missing, not quietly forget and report a pass.

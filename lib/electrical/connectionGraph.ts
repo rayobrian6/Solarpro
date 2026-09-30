@@ -234,10 +234,11 @@ export function buildConnectionGraph(t: ServiceTopology): ConnectionGraph {
 
   // Devices placed explicitly on a DER path rather than the default service chain.
   for (const d of t.devices) {
-    if (!d.feedsNodeId) continue;
+    if (!d.feedsNodeId || d.inlineOnNodeId) continue;
     node({ id: d.id, label: d.label, kind: 'device' });
     edge(d.id, d.feedsNodeId, 'service-feeder', d.ratedAmps);
   }
+
 
   // Points of interconnection.
   for (const poi of t.pointsOfInterconnection ?? []) {
@@ -310,6 +311,57 @@ export function buildConnectionGraph(t: ServiceTopology): ConnectionGraph {
     // Best-known landing: inside the controller. The edge is drawn either way — an omitted edge
     // would make an unproven source look isolated.
     edge(s.id, domain.gateway.id, 'der-output', s.ocpdA);
+  }
+
+  // ── IN-LINE DEVICES: THE CONDUCTOR IS RE-ROUTED THROUGH THEM ──────────────
+  //
+  // 🚨 A DISCONNECT ADDED BESIDE A CONDUCTOR DISCONNECTS NOTHING. This is Ray's real arrangement —
+  //
+  //     200 A path A → knife switch A → Gateway #1 → MSP #1
+  //
+  // — and a device that merely POINTS at the branch is a second stub off it while the original
+  // gateway-to-branch conductor stays put. Open both switches and both Powerwalls still have an
+  // untouched path to the utility: coverage would report FAIL, correctly, on a bypass the installer
+  // never built.
+  //
+  // So a device that names its LOAD side takes over that node's utility-ward edges. This runs LAST,
+  // after every structural edge exists, because the edge being re-routed may belong to a branch, a
+  // gateway, a panel, a storage unit or an aggregation panel — and this pass does not care which.
+  const labelOf = (id: string) => nodes.find(n => n.id === id)?.label ?? id;
+  for (const d of t.devices) {
+    if (!d.inlineOnNodeId) continue;
+    const target = d.inlineOnNodeId;
+    if (!seen.has(target)) {
+      unresolved.push({
+        what: `${d.label} is declared in line ahead of '${target}', which is not a node in this `
+          + 'topology, so what opening it interrupts is not established.',
+        requires: ['device.inlineOnNodeId'],
+        nodeId: d.id,
+      });
+      continue;
+    }
+    node({ id: d.id, label: d.label, kind: 'device' });
+    // Only edges that actually LEAVE the node toward the utility — and, when the device also names
+    // its upstream, only the one that goes there.
+    const moved = edges.filter(e => e.from === target && e.to !== d.id
+      && (!d.feedsNodeId || e.to === d.feedsNodeId));
+    if (moved.length === 0) {
+      unresolved.push({
+        what: `${d.label} is in line ahead of ${labelOf(target)}, which has no connection toward `
+          + 'the utility in this topology, so the path it interrupts is not established.',
+        requires: ['device.inlineOnNodeId'],
+        nodeId: d.id,
+      });
+      // Its own upstream edge is still drawn where it names one, so the device is not silently
+      // dropped out of the graph.
+      if (d.feedsNodeId) edge(d.id, d.feedsNodeId, 'service-feeder', d.ratedAmps);
+      continue;
+    }
+    for (const e of moved) {
+      const wasTo = e.to;
+      e.to = d.id;
+      edge(d.id, wasTo, e.kind, d.ratedAmps ?? e.ocpdA);
+    }
   }
 
   return { utilityNodeId: UTILITY_NODE_ID, nodes, edges, sources, unresolved };

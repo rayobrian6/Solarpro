@@ -48,6 +48,14 @@ function fullySpecified(): ServiceTopology {
   for (const d of topology.devices) d.sccrA = 22_000;
   for (const p of topology.panels) p.sccrA = 22_000;
   for (const d of topology.domains) d.backedUpDemandA = 100;
+  // 🚨 "EVERYTHING ESTABLISHED" ALSO INCLUDES THE ACTUAL PART AND THE UTILITY'S RULING. A calculated
+  // minimum rating with no catalogue part behind it is an open selection, and a proven isolation
+  // traversal is not a utility approval — so a job that has neither is not fully specified, which is
+  // exactly what this suite went red to say when those two checks were added.
+  for (const d of topology.devices) d.productId = 'eaton-dg224urk';
+  topology.interconnection.isolationArrangementAccepted = true;
+  topology.interconnection.isolationArrangementBasis =
+    'ComEd interconnection application approved for the arrangement as drawn.';
   return topology;
 }
 

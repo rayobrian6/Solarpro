@@ -25,6 +25,7 @@ import type { ServiceTopology, DeviceRole, ServicePhase } from '@/lib/electrical
 import {
   DISTRIBUTION_PRESETS, SERVICE_SIZE_CHOICES, DISCONNECT_ROLES, buildServiceFromPreset,
   DER_ARRANGEMENT_CHOICES, applyDerArrangement,
+  ISOLATION_ARRANGEMENTS, applyIsolationArrangement, describeArrangementFor,
 } from '@/lib/electrical/topologyPresets';
 import {
   addBackupDomain, removeBackupDomain, setDomainEquipment, updatePanel, updateDomain,
@@ -45,19 +46,30 @@ const ghost = 'rounded border border-slate-600 px-3 py-1.5 text-xs text-slate-30
 export interface ServiceTopologyWizardProps {
   /** Known constraints from the project authority, applied before the operator can choose wrongly. */
   meterCollarPermitted?: boolean | null;
+  /**
+   * An EXISTING topology to walk back through, rather than a new one to create.
+   *
+   * 🚨 RAY SAVED A TOPOLOGY AND HAD NO WAY BACK IN. Ray: "The wizard creates the topology. The
+   * wizard must not be the only way to edit it" — and its converse, which is what this prop is:
+   * having created one, the guided flow must still be a way to change it. It opens ON the passed
+   * graph, so every step edits the same object the diagram edits. There is no second draft model.
+   */
+  initial?: ServiceTopology | null;
   onBuilt: (topology: ServiceTopology) => void;
   onCancel?: () => void;
 }
 
 export function ServiceTopologyWizard({
-  meterCollarPermitted = null, onBuilt, onCancel,
+  meterCollarPermitted = null, initial = null, onBuilt, onCancel,
 }: ServiceTopologyWizardProps) {
-  const [step, setStep] = useState(0);
-  const [serviceAmps, setServiceAmps] = useState(400);
-  const [phase, setPhase] = useState<ServicePhase>('split-240');
+  // Re-entering an existing design opens at BACKUP: the service and its distribution already exist,
+  // and re-running the preset over them would rebuild branches that have equipment on them.
+  const [step, setStep] = useState(initial ? 2 : 0);
+  const [serviceAmps, setServiceAmps] = useState(initial?.service.ratedAmps ?? 400);
+  const [phase, setPhase] = useState<ServicePhase>(initial?.service.phase ?? 'split-240');
   const [distribution, setDistribution] = useState('two-main-panels');
   const [customBranches, setCustomBranches] = useState(2);
-  const [draft, setDraft] = useState<ServiceTopology | null>(null);
+  const [draft, setDraft] = useState<ServiceTopology | null>(initial);
   const [arrangementNotes, setArrangementNotes] = useState<string[]>([]);
   const [gatewayId, setGatewayId] = useState(() => GATEWAYS()[0]?.id ?? '');
   const [notes, setNotes] = useState<string[]>([]);
@@ -130,9 +142,14 @@ export function ServiceTopologyWizard({
   return (
     <div data-testid="service-topology-wizard"
          className="rounded-xl border border-sky-500/30 bg-slate-900/70 p-4">
-      <div className="text-sm font-black text-slate-100">Build the service</div>
+      <div className="text-sm font-black text-slate-100">
+        {initial ? 'Guided setup — editing this service' : 'Build the service'}
+      </div>
       <div className="mt-1 text-xs text-slate-400">
-        Six questions. SolarPro turns the answers into the service graph every other surface reads.
+        {initial
+          ? 'Walk back through the six questions. Every answer edits the topology you already have.'
+          : 'Six questions. SolarPro turns the answers into the service graph every other surface '
+            + 'reads.'}
       </div>
       <div className="mt-3">{stepRail}</div>
 
@@ -340,8 +357,12 @@ export function ServiceTopologyWizard({
                 Choosing one BUILDS the nodes. It claims nothing about whether the arrangement is
                 permitted — that is the manufacturer's and the jurisdiction's answer, and both stay
                 exactly as unresolved as they were. */}
+            {/* 🚨 ASKED IN THE INSTALLER'S WORDS. Ray: "Installer-facing language should be...
+                Two 200 A systems... Avoid leading with terms like DER, graph node, aggregation
+                topology, domain semantics." The node it builds is still the generic DER aggregation
+                panel the engineering and the sheet speak about — one model, two vocabularies. */}
             <div className="text-xs font-bold text-slate-200">
-              How do these DER systems interconnect?
+              How do these systems connect to the service?
             </div>
             {DER_ARRANGEMENT_CHOICES.map(c => (
               <label key={c.id} data-testid={`wizard-arrangement-${c.id}`}
@@ -357,6 +378,11 @@ export function ServiceTopologyWizard({
                        }} />
                 <span>
                   <span className="block text-xs font-bold text-slate-100">{c.label}</span>
+                  {/* The sizes actually in this graph — "Two 200 A systems, independent" — composed
+                      from the branches so it can never disagree with them. */}
+                  <span className="block text-[11px] text-slate-300">
+                    {describeArrangementFor(draft, c.id)}
+                  </span>
                   <span className="block text-[11px] text-slate-400">{c.describe}</span>
                   <span className="block text-[11px] text-slate-500">{c.builds}</span>
                 </span>
@@ -460,7 +486,7 @@ export function ServiceTopologyWizard({
                      onChange={e => setDraft(setInterconnection(draft, {
                        externalDerIsolationRequired: e.target.checked,
                      }))} />
-              <span>This utility requires an external DER isolation device</span>
+              <span>This utility requires an external, utility-accessible safety switch</span>
             </label>
           </div>
         ) : null}
@@ -468,7 +494,82 @@ export function ServiceTopologyWizard({
         {/* ── 6. DISCONNECTS ───────────────────────────────────────────────── */}
         {step === 5 && draft ? (
           <div className="space-y-2">
+            {/* ── THE UTILITY'S SAFETY SWITCH, AND HOW MANY OF THEM ───────────
+                🚨 ONE PER SYSTEM IS A CHOICE, NOT A CONSEQUENCE OF THE SERVICE SIZE. Ray: "Do not
+                invent a common 400 A knife-blade switch or common DER combiner merely because the
+                service is 400 A." Per-path builds one switch IN LINE in each path, rated for that
+                path — 200 A devices on a 400 A service. */}
             <div className="text-xs font-bold text-slate-200">
+              Where does the utility&apos;s safety switch go?
+            </div>
+            {ISOLATION_ARRANGEMENTS.map(choice => {
+              const isolators = draft.devices.filter(d => d.roles.includes('der-isolation-disconnect'));
+              const selected = choice.id === 'one-per-path'
+                ? isolators.length > 1 && isolators.every(d => !!d.inlineOnNodeId)
+                : isolators.length === 1 && !isolators[0].inlineOnNodeId;
+              return (
+                <label key={choice.id} data-testid={`wizard-isolation-${choice.id}`}
+                       className={`flex cursor-pointer items-start gap-2 rounded-lg border p-2 ${
+                         selected ? 'border-sky-400 bg-sky-500/10' : 'border-slate-700 hover:border-slate-500'}`}>
+                  <input type="radio" name="isolationArrangement" className="mt-1" checked={selected}
+                         onChange={() => {
+                           const r = applyIsolationArrangement(draft, choice.id);
+                           setDraft(r.topology);
+                           setNotes(prev => [...new Set([...prev, ...r.unresolved])]);
+                         }} />
+                  <span>
+                    <span className="block text-xs font-bold text-slate-100">{choice.label}</span>
+                    <span className="block text-[11px] text-slate-400">{choice.describe}</span>
+                    <span className="block text-[11px] text-slate-500">{choice.builds}</span>
+                  </span>
+                </label>
+              );
+            })}
+
+            {/* 🚨 WHAT IS BUILT, AND — SEPARATELY — WHAT IS NOT APPROVED. Ray: "Show: 2 disconnects
+                — both systems independently isolated, and SEPARATELY: Utility/AHJ acceptance: needs
+                verification. Do not claim approval that SolarPro does not have." */}
+            {(() => {
+              const isolators = draft.devices.filter(d => d.roles.includes('der-isolation-disconnect'));
+              if (isolators.length === 0) return null;
+              const perPath = isolators.length > 1 && isolators.every(d => !!d.inlineOnNodeId);
+              return (
+                <div data-testid="wizard-isolation-summary"
+                     className="rounded-lg border border-slate-700 p-2">
+                  <div className="text-xs font-bold text-slate-100">
+                    {isolators.length} disconnect{isolators.length === 1 ? '' : 's'} —{' '}
+                    {perPath ? 'both systems independently isolated'
+                      : 'one device isolating the whole service'}
+                  </div>
+                  <div className="mt-0.5 text-[11px] text-slate-400">
+                    {isolators.map(d => `${d.label} (${d.ratedAmps ?? '—'} A)`).join(' · ')}
+                  </div>
+                  <label className="mt-2 block text-[11px] text-slate-400">
+                    Utility / AHJ acceptance
+                    <select data-testid="wizard-isolation-accepted" className={`mt-1 block ${box}`}
+                            value={draft.interconnection.isolationArrangementAccepted === true ? 'yes'
+                              : draft.interconnection.isolationArrangementAccepted === false ? 'no'
+                                : 'unknown'}
+                            onChange={e => setDraft(setInterconnection(draft, {
+                              isolationArrangementAccepted: e.target.value === 'yes' ? true
+                                : e.target.value === 'no' ? false : null,
+                            }))}>
+                      <option value="unknown">Needs verification</option>
+                      <option value="yes">Accepted as drawn</option>
+                      <option value="no">Not accepted</option>
+                    </select>
+                  </label>
+                  {draft.interconnection.isolationArrangementAccepted === true ? null : (
+                    <div data-testid="wizard-isolation-unverified"
+                         className="mt-1 text-[11px] font-bold text-amber-300">
+                      Utility / AHJ acceptance: needs verification
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+            <div className="pt-2 text-xs font-bold text-slate-200">
               Disconnecting means — four separate roles
             </div>
             {DISCONNECT_ROLES.map(spec => {
@@ -523,7 +624,7 @@ export function ServiceTopologyWizard({
         ) : (
           <button type="button" className={primary} data-testid="wizard-finish"
                   disabled={!draft} onClick={() => draft && onBuilt(draft)}>
-            Create this service
+            {initial ? 'Apply these changes' : 'Create this service'}
           </button>
         )}
         {onCancel ? (

@@ -150,6 +150,52 @@ describe('🚨 the DER side survives the save too', () => {
   });
 });
 
+describe('🚨 the arrangement Ray intends to install survives the save', () => {
+  it('two per-path switches come back IN their paths, and coverage does not change', async () => {
+    const { writeServiceTopology, readServiceTopology } = await import('@/lib/db/serviceTopology');
+    const { buildRaysIntendedJob } = await import('@/lib/electrical/fixtures/tesla400aTwoGateway');
+    const { derIsolationCoverage } = await import('@/lib/electrical/serviceTopology');
+    const before = buildRaysIntendedJob({ availableFaultCurrentA: 10_000, gatewaySccrA: 10_000 })
+      .topology;
+
+    expect(await writeServiceTopology(PROJECT, USER_ID, before)).toBe(true);
+    const after = (await readServiceTopology(PROJECT, USER_ID))!.topology;
+
+    const iso = after.devices.filter(d => d.roles.includes('der-isolation-disconnect'));
+    expect(iso).toHaveLength(2);
+    expect(iso.map(d => d.ratedAmps)).toEqual([200, 200]);
+    // 🚨 THE LOAD SIDE. Without it each switch reloads BESIDE its conductor instead of IN it, and
+    // both Powerwalls keep an untouched path to the utility across the save — a coverage FAIL
+    // laundered into a PASS by nothing more than reopening the project.
+    expect(iso.every(d => !!d.inlineOnNodeId),
+      'a per-path switch reloaded with no load side').toBe(true);
+    expect(new Set(iso.map(d => d.inlineOnNodeId)).size).toBe(2);
+    expect(derIsolationCoverage(after).conclusion)
+      .toBe(derIsolationCoverage(before).conclusion);
+  });
+
+  it('the existing assembly reloads UNVERIFIED, and the optional load stays absent', async () => {
+    const { writeServiceTopology, readServiceTopology } = await import('@/lib/db/serviceTopology');
+    const { buildRaysIntendedJob } = await import('@/lib/electrical/fixtures/tesla400aTwoGateway');
+    const { resolveDemands } = await import('@/lib/electrical/serviceTopology');
+    const before = buildRaysIntendedJob({
+      existingServiceEquipment: { manufacturer: 'Eaton', catalogNumber: 'CH42B400' },
+    }).topology;
+    await writeServiceTopology(PROJECT, USER_ID, before);
+    const after = (await readServiceTopology(PROJECT, USER_ID))!.topology;
+
+    expect(after.service.existingEquipment?.manufacturer).toBe('Eaton');
+    expect(after.service.existingEquipment?.catalogNumber).toBe('CH42B400');
+    // 🚨 NOT VERIFIED, because nobody verified it. Reloading a half-read assembly as verified is
+    // how "CONFIGURATION TO VERIFY" disappears without anybody going to site.
+    expect(after.service.existingEquipment?.verified).toBe(false);
+    expect(after.service.existingEquipment?.sccrA ?? null).toBeNull();
+    // And an absent optional calculation is still absent — not defaulted into existence.
+    expect(after.loads ?? null).toBeNull();
+    expect(resolveDemands(after).source).toBe('none');
+  });
+});
+
 describe('🚨 the service graph survives a save and a reload', () => {
   it('round-trips through a real PostgreSQL column with every part intact', async () => {
     const { writeServiceTopology, readServiceTopology } = await import('@/lib/db/serviceTopology');

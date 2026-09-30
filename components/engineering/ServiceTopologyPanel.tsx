@@ -19,7 +19,7 @@
 import React, { useMemo } from 'react';
 import { StatusBadge } from './StatusBadge';
 import {
-  evaluateServiceTopology, summariseStorage,
+  evaluateServiceTopology, summariseStorage, resolveDemands,
   type ServiceTopology, type TopologyCheck,
 } from '@/lib/electrical/serviceTopology';
 import { equipmentQuantities } from '@/lib/electrical/topologyEquipment';
@@ -73,6 +73,9 @@ export function ServiceTopologyPanel({ topology, onChange }: ServiceTopologyPane
     () => (topology ? evaluateServiceTopology(topology) : null), [topology]);
   const storage = useMemo(() => (topology ? summariseStorage(topology) : null), [topology]);
   const quantities = useMemo(() => (topology ? equipmentQuantities(topology) : {}), [topology]);
+  const demands = useMemo(
+    () => (topology ? resolveDemands(topology)
+      : { branchA: {} as Record<string, number | null> }), [topology]);
 
   if (!topology || !evaluation || !storage) {
     return (
@@ -165,7 +168,7 @@ export function ServiceTopologyPanel({ topology, onChange }: ServiceTopologyPane
                   />
                   <span className="text-xs text-slate-400">A</span>
                   <span className="text-xs text-slate-400">
-                    demand {A(b.calculatedDemandA)}
+                    demand {A(demands.branchA[b.id] ?? null)}
                   </span>
                   <StatusBadge size="sm" status={foldConclusions(checks)} />
                 </div>

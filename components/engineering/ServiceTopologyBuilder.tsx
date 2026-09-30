@@ -69,6 +69,28 @@ export function ServiceTopologyBuilder({ projectId, fetchImpl }: ServiceTopology
   const [showProof, setShowProof] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
+  // ── THE LIFECYCLE RAY COULD NOT COMPLETE ──────────────────────────────────
+  //
+  // 🚨 "Ray saved a topology and then had no obvious way to edit it. Fix this. Required lifecycle:
+  // View topology → Edit topology → change equipment/service/interconnection → Save changes → view."
+  //
+  // A saved topology used to land straight in the editing surface with no mode at all: no Edit
+  // button to press, no Save changes to finish with, and nothing to discard if you had wandered
+  // into the wrong number. So there are two modes, and — because Ray also asked that "the visual
+  // diagram itself should remain editable by clicking" — clicking any node in VIEW mode is what
+  // enters EDIT mode on that node. The wizard creates; it is never the only way to edit.
+  const [mode, setMode] = useState<'view' | 'edit'>('view');
+  /** The topology as it was when editing began, so Discard is exact rather than a reload. */
+  const [beforeEdit, setBeforeEdit] = useState<ServiceTopology | null>(null);
+  /** Re-entering the guided flow on an EXISTING topology, rather than only on an empty project. */
+  const [guided, setGuided] = useState(false);
+
+  const beginEdit = useCallback((nodeId?: string | null, field?: string | null) => {
+    setBeforeEdit(prev => prev ?? topology);
+    setMode('edit');
+    if (nodeId !== undefined) { setSelectedId(nodeId); setFocusField(field ?? null); }
+  }, [topology]);
+
   // Advanced-strip drafts (the original primitives, preserved).
   const [serviceAmps, setServiceAmps] = useState(400);
   const [branchAmps, setBranchAmps] = useState(200);
@@ -110,10 +132,23 @@ export function ServiceTopologyBuilder({ projectId, fetchImpl }: ServiceTopology
       });
       const data = await res.json().catch(() => null);
       setMessage(data?.success ? 'Service topology saved.' : (data?.error ?? 'Save failed.'));
+      // 🚨 BACK TO VIEW ONLY ON A REAL SAVE. Returning to view after a failed PUT would show the
+      // operator their unsaved edits as though they were the saved design.
+      if (data?.success) { setMode('view'); setBeforeEdit(null); setSelectedId(null); }
     } catch (e) {
       setMessage(`Save failed: ${(e as Error).message}`);
     } finally { setSaving(false); }
   }, [projectId, topology, doFetch]);
+
+  const discard = useCallback(() => {
+    // A snapshot exists when editing something that was already saved. A topology built this
+    // session has none, so the only honest "before" is what the store actually holds — which is what
+    // a reload fetches.
+    if (beforeEdit) setTopology(beforeEdit); else void load();
+    setBeforeEdit(null); setMode('view'); setSelectedId(null); setFocusField(null);
+    setUnresolved([]); setGuided(false);
+    setMessage('Changes discarded.');
+  }, [beforeEdit, load]);
 
   const overview = useMemo(
     () => (topology ? buildServiceOverview(topology) : null), [topology]);
@@ -133,7 +168,12 @@ export function ServiceTopologyBuilder({ projectId, fetchImpl }: ServiceTopology
           {message ? <span data-testid="topology-message" className="text-xs text-amber-300">{message}</span> : null}
         </div>
 
-        <ServiceTopologyWizard onBuilt={t => { setTopology(t); setSelectedId('service'); }} />
+        {/* A topology that has just been built has not been SAVED, so the screen it lands on is the
+            editing one — with Save changes on it. Landing in view mode would show unsaved work as
+            though it were the saved design. */}
+        <ServiceTopologyWizard onBuilt={t => {
+          setTopology(t); setSelectedId('service'); setMode('edit'); setBeforeEdit(null);
+        }} />
 
         {/* Advanced stays reachable even from empty — Ray: "Preserve access to detailed graph
             editing for unusual systems. Do not make Advanced the default workflow." */}
@@ -152,7 +192,7 @@ export function ServiceTopologyBuilder({ projectId, fetchImpl }: ServiceTopology
             <span className="text-xs text-slate-400">A</span>
             <button type="button" className={btn} data-testid="create-service"
                     onClick={() => { setTopology(createServiceTopology({ ratedAmps: serviceAmps }));
-                                     setSelectedId('service'); }}>
+                                     setSelectedId('service'); setMode('edit'); setBeforeEdit(null); }}>
               Create bare service
             </button>
             <span className="text-xs text-slate-500">
@@ -170,51 +210,88 @@ export function ServiceTopologyBuilder({ projectId, fetchImpl }: ServiceTopology
   return (
     <div className="space-y-4" data-testid="service-topology-builder">
       {/* ── 1. SUMMARY BAR — "did SolarPro understand the system?" ─────────── */}
+      {/* 🚨 THE SYSTEM AS IT IS DESCRIBED ON SITE, AND THE COUNTS UNDERNEATH.
+          Ray read the first bar — "2 × service branch · 2 panels · 2 backup domains · 2 gateways" —
+          and could not find his own installation in it. A branch, a panel and a backup domain are
+          three names for one 200 A system to the person installing it, so the bar leads with that.
+          Ray's target, near verbatim: 400 A service / 2 × 200 A systems / 2 Gateway 3 / 2 Powerwall
+          3 / 2 Expansion / 54.0 kWh / 96 A AC / 2 external isolation switches. */}
       <div data-testid="topology-summary"
            className="rounded-xl border border-slate-700 bg-slate-900/70 p-4">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-          <span className="text-lg font-black text-slate-100">{summary.serviceAmps} A service</span>
-          <span className="text-sm text-slate-300">
-            {summary.branchCount} × service branch
+          <span className="text-lg font-black text-slate-100">
+            {summary.serviceAmps} A service
+            {summary.serviceEquipmentIsExisting
+              ? <span className="ml-1 text-xs font-bold text-amber-300">(existing)</span> : null}
           </span>
-          <span className="text-sm text-slate-300">
-            {summary.panelCount} panel{summary.panelCount === 1 ? '' : 's'}
-          </span>
-          <span className="text-sm text-slate-300">
-            {summary.domainCount} backup domain{summary.domainCount === 1 ? '' : 's'}
-          </span>
-          <span className="text-sm text-slate-300">{summary.gatewayCount} gateway
-            {summary.gatewayCount === 1 ? '' : 's'}</span>
-          <span className="text-sm text-slate-300">
-            {summary.invertingUnitCount} battery unit{summary.invertingUnitCount === 1 ? '' : 's'}
-          </span>
-          <span className="text-sm text-sky-300">
-            {summary.expansionUnitCount} expansion{summary.expansionUnitCount === 1 ? '' : 's'}
-          </span>
+          {summary.systemsLabel ? (
+            <span data-testid="topology-systems" className="text-sm font-bold text-slate-100">
+              {summary.systemsLabel}
+            </span>
+          ) : null}
+          {summary.gatewayCount > 0 ? (
+            <span className="text-sm text-slate-300">
+              {summary.gatewayCount} {summary.gatewayModelLabel ?? 'gateway'}
+            </span>
+          ) : null}
+          {summary.invertingUnitCount > 0 ? (
+            <span className="text-sm text-slate-300">
+              {summary.invertingUnitCount} {summary.batteryModelLabel ?? 'battery unit'}
+            </span>
+          ) : null}
+          {summary.expansionUnitCount > 0 ? (
+            <span className="text-sm text-sky-300">
+              {summary.expansionUnitCount} Expansion
+            </span>
+          ) : null}
           <span className="text-sm font-bold text-slate-100">
             {summary.usableKwh === null ? '— kWh' : `${summary.usableKwh.toFixed(1)} kWh`}
           </span>
           <span className="text-sm font-bold text-slate-100">
-            {summary.continuousOutputA === null ? '— A' : `${summary.continuousOutputA} A`} AC storage output
+            {summary.continuousOutputA === null ? '— A' : `${summary.continuousOutputA} A`} AC
           </span>
+          {summary.isolationSwitchCount > 0 ? (
+            <span data-testid="topology-isolation-switches" className="text-sm text-slate-300">
+              {summary.isolationSwitchCount} external isolation switch
+              {summary.isolationSwitchCount === 1 ? '' : 'es'}
+            </span>
+          ) : null}
           {summary.aggregationPanelCount > 0 ? (
             <span className="text-sm text-emerald-300">
-              {summary.aggregationPanelCount} DER aggregation panel
+              {summary.aggregationPanelCount} combined generation panel
               {summary.aggregationPanelCount === 1 ? '' : 's'}
             </span>
           ) : null}
           <span data-testid="topology-arrangement" className={`text-sm ${
             summary.derArrangementLabel ? 'text-slate-300' : 'text-amber-300'}`}>
-            {summary.derArrangementLabel ?? 'DER interconnection not chosen'}
+            {summary.derArrangementLabel ?? 'Connection arrangement not chosen'}
           </span>
           <span className="ml-auto flex items-center gap-2">
             <StatusBadge status={overview.site.conclusion} />
+            {/* 🚨 NOT "8 INPUTS REQUIRED". Ray: "Do not say `8 inputs required` when several are
+                calculations or optional." Two sentences, because they mean two different things and
+                only one of them is waiting on him. */}
             <span data-testid="topology-needs-count" className="text-xs text-slate-300">
-              {needs.length === 0
-                ? conclusionWord(overview.site.conclusion)
-                : `Engineering: ${needs.length} input${needs.length === 1 ? '' : 's'} required`}
+              {summary.requiredCount === 0
+                ? 'Topology complete'
+                : `${summary.requiredCount} required item${
+                    summary.requiredCount === 1 ? '' : 's'} unresolved`}
+              {summary.optionalCount > 0
+                ? ` · ${summary.optionalCount} optional calculation${
+                    summary.optionalCount === 1 ? '' : 's'} not provided`
+                : ''}
             </span>
           </span>
+        </div>
+
+        {/* The engineering counts, kept — they are what a plan reviewer reads. */}
+        <div data-testid="topology-engineering-counts" className="mt-1 text-[11px] text-slate-500">
+          {summary.phaseLabel} · {summary.branchCount} service branch
+          {summary.branchCount === 1 ? '' : 'es'} · {summary.panelCount} panelboard
+          {summary.panelCount === 1 ? '' : 's'} · {summary.domainCount} backup domain
+          {summary.domainCount === 1 ? '' : 's'}
+          {summary.poiCount > 0 ? ` · ${summary.poiCount} point${
+            summary.poiCount === 1 ? '' : 's'} of interconnection` : ''}
         </div>
 
         {/* 🚨 THE 400 A SPLIT, MADE OBVIOUS. */}
@@ -243,30 +320,74 @@ export function ServiceTopologyBuilder({ projectId, fetchImpl }: ServiceTopology
           </div>
         ) : null}
 
+        {/* ── VIEW → EDIT → SAVE CHANGES → VIEW ───────────────────────────── */}
         <div className="mt-3 flex flex-wrap items-center gap-2">
-          <button type="button" className={btn} data-testid="topology-reload"
-                  onClick={() => void load()} disabled={!projectId}>Reload</button>
-          <button type="button"
-                  className="rounded bg-sky-600 px-3 py-1 text-xs font-bold text-white hover:bg-sky-500 disabled:opacity-40"
-                  data-testid="topology-save"
-                  onClick={() => void save()} disabled={!projectId || saving}>
-            {saving ? 'Saving…' : 'Save'}
-          </button>
+          {mode === 'view' ? (
+            <>
+              <button type="button"
+                      className="rounded bg-sky-600 px-3 py-1 text-xs font-bold text-white hover:bg-sky-500"
+                      data-testid="topology-edit"
+                      onClick={() => beginEdit('service')}>
+                Edit topology
+              </button>
+              <button type="button" className={btn} data-testid="topology-reload"
+                      onClick={() => void load()} disabled={!projectId}>Reload</button>
+              <span className="text-[11px] text-slate-500">
+                Or click any box in the diagram to edit it.
+              </span>
+            </>
+          ) : (
+            <>
+              <button type="button"
+                      className="rounded bg-sky-600 px-3 py-1 text-xs font-bold text-white hover:bg-sky-500 disabled:opacity-40"
+                      data-testid="topology-save"
+                      onClick={() => void save()} disabled={!projectId || saving}>
+                {saving ? 'Saving…' : 'Save changes'}
+              </button>
+              <button type="button" className={btn} data-testid="topology-discard"
+                      onClick={discard} disabled={saving}>
+                Discard changes
+              </button>
+              {/* 🚨 THE WIZARD IS NOT THE ONLY WAY TO EDIT — AND IT IS STILL A WAY TO EDIT.
+                  Ray: "The wizard creates the topology. The wizard must not be the only way to edit
+                  it." It re-opens ON the current graph, so it changes the same object the diagram
+                  does rather than starting a second design. */}
+              <button type="button" className={btn} data-testid="topology-guided"
+                      onClick={() => setGuided(g => !g)}>
+                {guided ? 'Close guided setup' : 'Guided setup'}
+              </button>
+            </>
+          )}
           {loading ? <span className="text-xs text-slate-400">loading…</span> : null}
           {message ? <span data-testid="topology-message" className="text-xs text-amber-300">{message}</span> : null}
         </div>
       </div>
 
+      {mode === 'edit' && guided ? (
+        <ServiceTopologyWizard
+          initial={topology}
+          meterCollarPermitted={topology.interconnection.meterCollarPermitted}
+          onBuilt={t => { setTopology(t); setGuided(false); }}
+          onCancel={() => setGuided(false)}
+        />
+      ) : null}
+
       {/* ── 2. THE ELECTRICAL SYSTEM ───────────────────────────────────────── */}
       <div className="rounded-xl border border-slate-700 bg-slate-900/40 p-4">
         <ServiceTopologyMap
           topology={topology} overview={overview}
-          selectedId={selectedId} onSelect={id => { setSelectedId(id); setFocusField(null); }}
-          onAddBranch={amps => setTopology(addBranchWithPanel(topology, amps).topology)}
+          selectedId={mode === 'edit' ? selectedId : null}
+          // 🚨 CLICKING A BOX IS THE WAY IN. Ray: "The visual diagram itself should remain editable
+          // by clicking: service / branch / panel / switch / Gateway / Powerwall / Expansion."
+          onSelect={id => beginEdit(id)}
+          onAddBranch={amps => {
+            beginEdit();
+            setTopology(addBranchWithPanel(topology, amps).topology);
+          }}
         />
       </div>
 
-      {selectedId ? (
+      {mode === 'edit' && selectedId ? (
         <ServiceNodeInspector
           topology={topology} selectedId={selectedId} focusField={focusField}
           onChange={setTopology} onUnresolved={setUnresolved}
@@ -289,7 +410,16 @@ export function ServiceTopologyBuilder({ projectId, fetchImpl }: ServiceTopology
         <div data-testid="topology-needs-input"
              className="rounded-xl border border-amber-500/40 bg-amber-500/5 p-4">
           <div className="text-sm font-black text-amber-300">
-            NEEDS INPUT — {needs.length} item{needs.length === 1 ? '' : 's'} required to finish engineering
+            {summary.requiredCount === 0
+              ? 'TOPOLOGY COMPLETE'
+              : `NEEDS INPUT — ${summary.requiredCount} required item${
+                  summary.requiredCount === 1 ? '' : 's'} unresolved`}
+            {summary.optionalCount > 0 ? (
+              <span className="font-normal text-amber-200/70">
+                {' '}· {summary.optionalCount} optional calculation
+                {summary.optionalCount === 1 ? '' : 's'} not provided
+              </span>
+            ) : null}
           </div>
           <div className="mt-3 space-y-3">
             {groupRequirements(needs).map(group => (
@@ -300,17 +430,29 @@ export function ServiceTopologyBuilder({ projectId, fetchImpl }: ServiceTopology
                   </span>
                   <span className="text-[10px] text-amber-200/60">{group.spec.action}</span>
                 </div>
+                {/* 🚨 THE REASON IS PRINTED ONCE PER REASON, NOT ONCE PER ITEM.
+                    Six facts about the existing service assembly all come from one check, so the
+                    screen printed the same three-line paragraph six times running — a wall of
+                    repeated text, which is the shape Ray rejected in the first place. Consecutive
+                    items that share a reason show it under the last of them. */}
                 <ul className="mt-1 space-y-1">
-                  {group.items.map(n => (
-                    <li key={n.key}>
-                      <button type="button" data-testid={`need-${n.key}`}
-                              className="w-full rounded px-2 py-1 text-left text-xs text-amber-100 hover:bg-amber-500/10"
-                              onClick={() => { setSelectedId(n.focus.nodeId); setFocusField(n.focus.field ?? null); }}>
-                        <span className="font-bold">{n.label}</span>
-                        <span className="block text-[11px] text-amber-200/70">{n.because}</span>
-                      </button>
-                    </li>
-                  ))}
+                  {group.items.map((n, i) => {
+                    const sameNext = group.items[i + 1]?.because === n.because;
+                    return (
+                      <li key={n.key}>
+                        {/* Every unresolved item has a useful action: it opens the editor on the
+                            exact field that answers it. */}
+                        <button type="button" data-testid={`need-${n.key}`}
+                                className="w-full rounded px-2 py-0.5 text-left text-xs text-amber-100 hover:bg-amber-500/10"
+                                onClick={() => beginEdit(n.focus.nodeId, n.focus.field ?? null)}>
+                          <span className="font-bold">{n.label}</span>
+                          {sameNext ? null : (
+                            <span className="block text-[11px] text-amber-200/70">{n.because}</span>
+                          )}
+                        </button>
+                      </li>
+                    );
+                  })}
                 </ul>
               </div>
             ))}
@@ -332,7 +474,10 @@ export function ServiceTopologyBuilder({ projectId, fetchImpl }: ServiceTopology
         </div>
       </details>
 
-      {/* ── 5. ADVANCED — the original primitives, preserved, behind the model ─ */}
+      {/* ── 5. ADVANCED — the original primitives, preserved, behind the model ─
+          Only while editing: it mutates the graph, and a control that changes a design does not
+          belong on a screen whose job is to show what was saved. */}
+      {mode === 'edit' ? (
       <details className="rounded-xl border border-slate-800 bg-slate-900/40 p-3"
                open={showAdvanced}
                onToggle={e => setShowAdvanced((e.currentTarget as HTMLDetailsElement).open)}>
@@ -464,11 +609,12 @@ export function ServiceTopologyBuilder({ projectId, fetchImpl }: ServiceTopology
                      onChange={e => setTopology(setInterconnection(topology, {
                        externalDerIsolationRequired: e.target.checked,
                      }))} />
-              {' '}Utility requires an external DER isolation device
+              {' '}Utility requires an external, utility-accessible safety switch
             </label>
           </div>
         </div>
       </details>
+      ) : null}
     </div>
   );
 }

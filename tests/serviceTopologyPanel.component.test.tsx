@@ -111,7 +111,9 @@ describe('🚨 NOT EVALUATED names what would settle it', () => {
     render(<ServiceTopologyPanel topology={rayJob({ branchDemandA: [null, null] })} />);
     const b = screen.getByTestId('branch-branch-a');
     expect(within(b).getAllByText(/NOT EVAL/).length).toBeGreaterThan(0);
-    expect(within(b).getByText(/REQUIRES: calculatedDemandA/)).toBeTruthy();
+    // 🚨 ONE TOKEN FOR THE WHOLE LOAD QUESTION. It used to be `calculatedDemandA` per branch plus
+    // `calculatedServiceDemandA` plus `backedUpDemandA` per domain — five requests for one house.
+    expect(within(b).getByText(/REQUIRES: loads.model/)).toBeTruthy();
   });
 
   it('the multi-gateway manufacturer document is named on screen', () => {
@@ -139,6 +141,11 @@ describe('🚨 NOT EVALUATED names what would settle it', () => {
     for (const d of t.domains) d.backedUpDemandA = 100;
     for (const dev of t.devices) dev.sccrA = 22_000;
     for (const p of t.panels) { p.sccrA = 22_000; p.busbarRatingA = 225; p.mainBreakerA = 150; }
+    // And the part actually bought, and the utility's ruling on the isolation arrangement as
+    // drawn. Same forgetting again, one level further out: a calculated minimum rating is not a
+    // purchase and a proven traversal is not an approval.
+    for (const dev of t.devices) dev.productId = 'eaton-dg224urk';
+    t.interconnection.isolationArrangementAccepted = true;
     render(<ServiceTopologyPanel topology={t} />);
     expect(screen.queryByTestId('topology-required-inputs')).toBeNull();
   });

@@ -21,6 +21,7 @@ import type {
   ServiceTopology, ServiceBranch, PanelBoard, BackupDomain, StorageUnit,
   GatewayInstance, ProtectiveDevice, DeviceRole, ServicePhase,
   GenerationUnit, DerAggregationPanel, DerTapPoint, PointOfInterconnection, PoiRelationship,
+  ExistingServiceEquipment, LoadModel, LoadCalculationMethod,
 } from '@/lib/electrical/serviceTopology';
 import { sizeAggregationPanel } from '@/lib/electrical/serviceTopology';
 import { nextStandardOcpd } from '@/lib/electrical/stdSizes';
@@ -104,6 +105,10 @@ export function addProtectiveDevice(
   opts: {
     label: string; roles: DeviceRole[]; ratedAmps?: number | null;
     lockableOpen?: boolean | null; visibleOpen?: boolean | null; locationNote?: string | null;
+    /** Put it in line ahead of this node, so opening it interrupts that node's supply. */
+    inlineOnNodeId?: string | null;
+    /** The node toward the utility, when it is not the default service chain. */
+    feedsNodeId?: string | null;
   },
 ): { topology: ServiceTopology; device: ProtectiveDevice } {
   const id = nextId(t.devices, 'device');
@@ -114,6 +119,8 @@ export function addProtectiveDevice(
     lockableOpen: opts.lockableOpen ?? null,
     visibleOpen: opts.visibleOpen ?? null,
     locationNote: opts.locationNote ?? null,
+    ...(opts.inlineOnNodeId ? { inlineOnNodeId: opts.inlineOnNodeId } : {}),
+    ...(opts.feedsNodeId ? { feedsNodeId: opts.feedsNodeId } : {}),
   };
   return { topology: { ...t, devices: [...t.devices, device] }, device };
 }
@@ -563,6 +570,88 @@ export function placeDevice(
   t: ServiceTopology, deviceId: string, feedsNodeId: string | null,
 ): ServiceTopology {
   return { ...t, devices: t.devices.map(d => d.id === deviceId ? { ...d, feedsNodeId } : d) };
+}
+
+/**
+ * Put a device IN LINE ahead of a node, so opening it actually interrupts that node's supply.
+ *
+ * 🚨 THE DIFFERENCE BETWEEN A SWITCH IN THE PATH AND A SWITCH BESIDE IT. `placeDevice` names what a
+ * device feeds; this names what it interrupts, and the connection graph re-routes the existing
+ * conductor through it. Ray's two knife switches, one per 200 A path, are exactly this and cannot
+ * be expressed by the other one.
+ */
+export function placeDeviceInline(
+  t: ServiceTopology, deviceId: string, inlineOnNodeId: string | null,
+): ServiceTopology {
+  return {
+    ...t,
+    devices: t.devices.map(d => (d.id === deviceId ? { ...d, inlineOnNodeId } : d)),
+  };
+}
+
+/** Record the catalogue part selected to meet a device's engineered requirement. */
+export function selectDeviceProduct(
+  t: ServiceTopology, deviceId: string, productId: string | null,
+): ServiceTopology {
+  return { ...t, devices: t.devices.map(d => (d.id === deviceId ? { ...d, productId } : d)) };
+}
+
+/**
+ * Declare the service equipment as EXISTING, and patch what has been read off it.
+ *
+ * Passing `null` says the service equipment is new, which is what removes the field-verification
+ * item — not filling the fields in with guesses.
+ */
+export function setExistingServiceEquipment(
+  t: ServiceTopology,
+  patch: Partial<ExistingServiceEquipment> | null,
+): ServiceTopology {
+  if (patch === null) {
+    return { ...t, service: { ...t.service, existingEquipment: null } };
+  }
+  const current: ExistingServiceEquipment = t.service.existingEquipment ?? {
+    manufacturer: null, catalogNumber: null, mainArrangement: null,
+    feederArrangement: null, sccrA: null, verified: false,
+  };
+  return { ...t, service: { ...t.service, existingEquipment: { ...current, ...patch } } };
+}
+
+/**
+ * Attach (or clear) the optional dwelling load calculation.
+ *
+ * 🚨 CLEARING IT IS A LEGITIMATE STATE, NOT A REGRESSION. Ray's product decision: a design is
+ * completable without a load inventory, so removing the model must leave a topology that still
+ * draws, bills and permits — with the load checks reporting NOT_EVALUATED once.
+ */
+export function setLoadModel(t: ServiceTopology, loads: LoadModel | null): ServiceTopology {
+  return { ...t, loads };
+}
+
+/** Record calculated demand for one panelboard inside the load model, creating it if needed. */
+export function setPanelLoad(
+  t: ServiceTopology, panelId: string, calculatedDemandA: number | null,
+  opts: { method?: LoadCalculationMethod; basis?: string } = {},
+): ServiceTopology {
+  const current = t.loads ?? {
+    method: opts.method ?? 'optional-220-82',
+    basis: opts.basis ?? '',
+    byPanel: [],
+    otherDemandA: null,
+  };
+  const byPanel = calculatedDemandA === null
+    ? current.byPanel.filter(l => l.panelId !== panelId)
+    : current.byPanel.some(l => l.panelId === panelId)
+      ? current.byPanel.map(l => (l.panelId === panelId ? { ...l, calculatedDemandA } : l))
+      : [...current.byPanel, { panelId, calculatedDemandA }];
+  return {
+    ...t,
+    loads: {
+      ...current,
+      ...(opts.method ? { method: opts.method } : {}),
+      ...(opts.basis !== undefined ? { basis: opts.basis } : {}),
+      byPanel,
+    },
+  };
 }
 
 export interface AggregationRecommendation {

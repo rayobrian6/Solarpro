@@ -20,7 +20,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import {
-  evaluateServiceTopology,
+  evaluateServiceTopology, OPTIONAL_REQUIREMENT_TOKENS,
   type ServiceTopology, type TopologyEvaluation, type TopologyCheck,
 } from '@/lib/electrical/serviceTopology';
 import { foldConclusions, type EngineeringConclusion } from '@/lib/engineering/engineeringStatus';
@@ -52,7 +52,16 @@ export type RequirementOwner =
   | 'jurisdiction-authority'
   | 'manufacturer-authority'
   | 'design-decision'
-  | 'field-verification';
+  | 'field-verification'
+  /**
+   * 🚨 A CALCULATION NOBODY IS OBLIGED TO RUN.
+   *
+   * Ray's firm product decision: "Ray is not going to verify every load in every house just to
+   * create a valid design... they are optional... Do not say `8 inputs required` when several are
+   * calculations or optional." So this owner exists to be COUNTED SEPARATELY — the engineering
+   * conclusion behind it is still NOT_EVALUATED and still not a pass.
+   */
+  | 'optional-calculation';
 
 export interface RequirementOwnerSpec {
   owner: RequirementOwner;
@@ -91,6 +100,12 @@ export const REQUIREMENT_OWNERS: ReadonlyArray<RequirementOwnerSpec> = [
     owner: 'manufacturer-authority',
     heading: 'Manufacturer authority',
     action: 'Governed by a document SolarPro does not hold.',
+  },
+  // Last on purpose: it is the only category nothing is waiting on.
+  {
+    owner: 'optional-calculation',
+    heading: 'Optional — not provided',
+    action: 'Not required to finish this design. Run it if the project or the reviewer wants it.',
   },
 ];
 
@@ -138,6 +153,32 @@ export interface ServiceSummary {
   serviceAmps: number;
   voltage: number;
   phaseLabel: string;
+  /**
+   * 🚨 "TWO 200 A SYSTEMS", WHICH IS HOW THE JOB IS DESCRIBED ON SITE.
+   *
+   * Ray read the first summary bar — "2 × service branch · 2 panels · 2 backup domains · 2 gateways"
+   * — and could not see his own installation in it. A branch, a panel and a backup domain are three
+   * names for one 200 A system as far as the person installing it is concerned, so the bar says that
+   * first and keeps the three counts for the engineering view underneath.
+   *
+   * null when the paths are not all the same size; the count is still exact.
+   */
+  systemCount: number;
+  systemAmps: number | null;
+  /** "Two 200 A systems", or null when there are none yet. */
+  systemsLabel: string | null;
+  /** The gateway model, once, when every domain uses the same one — "Gateway 3". */
+  gatewayModelLabel: string | null;
+  /** The inverting battery model, once, when they all match — "Powerwall 3". */
+  batteryModelLabel: string | null;
+  /** How many utility isolation switches the design has. Ray's job: 2. */
+  isolationSwitchCount: number;
+  /** Is the service equipment already on the wall? Changes what SolarPro may add and price. */
+  serviceEquipmentIsExisting: boolean;
+  /** Items somebody actually has to resolve. Excludes the optional calculations. */
+  requiredCount: number;
+  /** Optional calculations nobody is obliged to run. Counted apart, never added to the above. */
+  optionalCount: number;
   branchCount: number;
   panelCount: number;
   domainCount: number;
@@ -186,9 +227,13 @@ export function conclusionWord(c: EngineeringConclusion): 'Ready' | 'Needs input
   return c === 'PASS' ? 'Ready' : c === 'FAIL' ? 'Fails' : 'Needs input';
 }
 
+// 🚨 THE WORDS ON THE SCREEN ARE THE INSTALLER'S. Ray: "Avoid leading with terms like DER, graph
+// node, aggregation topology, domain semantics. Those may remain in Advanced/engineering internals."
+// The summary bar read "Independent branch interconnection"; the node it describes is still the
+// generic one the engineering and the sheet speak about.
 const DER_ARRANGEMENT_LABEL: Record<string, string> = {
-  'independent-branch': 'Independent branch interconnection',
-  'common-aggregation': 'Common DER aggregation',
+  'independent-branch': 'Independent systems',
+  'common-aggregation': 'One combined generation panel',
   'custom': 'Custom engineered topology',
 };
 
@@ -205,7 +250,7 @@ const PHASE_LABEL: Record<string, string> = {
  * `manufacturer-document:<title>`) are resolved against the topology so the line names the actual
  * device rather than an internal id.
  */
-function labelForToken(token: string, t: ServiceTopology): string {
+export function labelForToken(token: string, t: ServiceTopology): string {
   if (token.startsWith('sccr:')) {
     const id = token.slice(5);
     const dev = t.devices.find(d => d.id === id);
@@ -219,7 +264,12 @@ function labelForToken(token: string, t: ServiceTopology): string {
     return `Interrupting rating (SCCR) for ${name}`;
   }
   if (token.startsWith('manufacturer-limit:')) {
-    return `Manufacturer busbar limit for ${token.slice('manufacturer-limit:'.length)}`;
+    // 🚨 THE NAME ON THE BOX, NOT THE CATALOGUE KEY. It read "Manufacturer busbar limit for
+    // tesla-backup-gateway-3" on an installer's screen — the same defect as "backs msp-1", one
+    // layer along. The gateways in the graph carry their own labels; use them.
+    const id = token.slice('manufacturer-limit:'.length);
+    const gw = t.domains.find(d => d.gateway.productId === id)?.gateway.label;
+    return `Manufacturer busbar limit for ${gw ?? id}`;
   }
   if (token.startsWith('manufacturer-document:')) {
     const title = token.slice('manufacturer-document:'.length);
@@ -235,9 +285,25 @@ function labelForToken(token: string, t: ServiceTopology): string {
   }
   const FIXED: Record<string, string> = {
     'service.availableFaultCurrentA': 'Available fault current at the service',
+    // 🚨 ONE ENTRY FOR THE WHOLE LOAD QUESTION. It used to be five: the service demand, each
+    // branch's demand and each domain's backed-up demand, all of which one load model derives.
+    'loads.model': 'Full load analysis (dwelling load calculation)',
     'calculatedServiceDemandA': 'Calculated service demand',
     'calculatedDemandA': 'Branch load calculation',
     'ocpdAmps': 'Branch OCPD rating',
+    // ── The service assembly that is already on the wall ───────────────────
+    'service.existingEquipment.catalogNumber': 'Existing service equipment — model / catalog number',
+    'service.existingEquipment.mainArrangement':
+      'Existing service equipment — internal main / disconnect arrangement',
+    'service.existingEquipment.feederArrangement':
+      'Existing service equipment — outgoing feeder arrangement',
+    'service.existingEquipment.sccrA': 'Existing service equipment — AIC / SCCR from its nameplate',
+    'service.existingEquipment.verified':
+      'Existing service equipment — confirmation that it was read on site, not assumed',
+    // ── Devices: what they interrupt, and which part was bought ────────────
+    'device.inlineOnNodeId': 'Which path the safety switch is in line with',
+    'device.ratedAmps': 'Safety switch rating',
+    'device.productId': 'The actual switch / disconnect selected to meet the requirement',
     'panel.busbarRatingA': 'Panel busbar rating',
     'panel.mainBreakerA': 'Panel main breaker',
     'gateway.continuousRatingA': 'Gateway continuous rating',
@@ -251,6 +317,8 @@ function labelForToken(token: string, t: ServiceTopology): string {
     'interconnection.meterCollarPermitted': 'Whether the utility permits a meter-collar interconnection',
     'interconnection.externalDerIsolationRequired': 'Whether this utility requires an external DER isolation device',
     'interconnection.isolationArrangement': 'An acceptable utility DER isolation arrangement',
+    'interconnection.isolationArrangementAccepted':
+      'Utility / AHJ acceptance of the safety-switch arrangement as drawn',
     'device.lockableOpen': 'Isolation device: lockable open',
     'device.visibleOpen': 'Isolation device: visible open',
     // ── The DER side ──────────────────────────────────────────────────────
@@ -281,11 +349,19 @@ function labelForToken(token: string, t: ServiceTopology): string {
  * different thing to do about it.
  */
 function ownerForToken(token: string): RequirementOwner {
+  // 🚨 THE OPTIONAL TOKENS, FROM THE CANONICAL LIST — checked first so nothing else can claim one.
+  // The same set decides what the permit readiness treats as non-blocking; a second copy here
+  // would be a second answer to "is this holding the job up".
+  if (OPTIONAL_REQUIREMENT_TOKENS.has(token)) return 'optional-calculation';
   if (token.startsWith('manufacturer-document:') || token.startsWith('manufacturer-limit:')
       || token.startsWith('sccr:') || token === 'gateway.continuousRatingA') {
     return 'manufacturer-authority';
   }
   if (token === 'service.availableFaultCurrentA') return 'utility-must-provide';
+  // Facts about an assembly already on the wall: somebody goes and reads them.
+  if (token.startsWith('service.existingEquipment.')) return 'field-verification';
+  // Choosing the actual part, and choosing which path a switch sits in, are both the designer's.
+  if (token === 'device.productId' || token === 'device.inlineOnNodeId') return 'design-decision';
   if (token.startsWith('interconnection.')) {
     return token === 'interconnection.derArrangement' ? 'design-decision' : 'jurisdiction-authority';
   }
@@ -328,6 +404,19 @@ function focusFor(check: TopologyCheck, token: string, t: ServiceTopology): Over
   }
   if (token === 'calculatedServiceDemandA') {
     return { kind: 'service', nodeId: 'service', field: 'calculatedServiceDemandA' };
+  }
+  // 🚨 THE LOAD MODEL IS ONE PLACE, WHATEVER SCOPE ASKED FOR IT. A branch's demand check is scoped
+  // to that branch, but the answer is not typed into the branch — it is the one load calculation on
+  // the service. Routed by scope it would send the operator to Branch B to answer a question about
+  // the whole house.
+  if (token === 'loads.model') {
+    return { kind: 'service', nodeId: 'service', field: 'loads' };
+  }
+  if (token.startsWith('service.existingEquipment.')) {
+    return {
+      kind: 'service', nodeId: 'service',
+      field: `existingEquipment.${token.slice('service.existingEquipment.'.length)}`,
+    };
   }
   if (check.scope.startsWith('branch:')) {
     return { kind: 'branch', nodeId: check.scope.slice('branch:'.length), field: token };
@@ -403,16 +492,29 @@ function focusFor(check: TopologyCheck, token: string, t: ServiceTopology): Over
   return { kind: 'service', nodeId: 'service', field: token };
 }
 
-/** The first thing this level needs, in one line. FAIL outranks a missing input. */
+/**
+ * The first thing this level needs, in one line. FAIL outranks a missing input.
+ *
+ * 🚨 AND AN OPTIONAL CALCULATION IS THE LAST THING IT SAYS, NOT THE FIRST. Both of Ray's branch
+ * cards led with "Full load analysis (dwelling load calculation) required" — the one item nobody is
+ * obliged to supply, presented as what was holding that 200 A path up, on the screen where he reads
+ * whether the system is understood. It is still said, and it is said as optional.
+ */
 function headlineFor(checks: TopologyCheck[], t: ServiceTopology): string | null {
   const failed = checks.find(c => c.conclusion === 'FAIL');
   if (failed) return failed.detail;
+  let optional: string | null = null;
   for (const c of checks) {
     if (c.conclusion !== 'NOT_EVALUATED') continue;
     const first = (c.requires ?? [])[0];
-    if (first) return `${labelForToken(first, t)} required`;
+    if (!first) continue;
+    if (OPTIONAL_REQUIREMENT_TOKENS.has(first)) {
+      optional ??= `${labelForToken(first, t)} — optional, not provided`;
+      continue;
+    }
+    return `${labelForToken(first, t)} required`;
   }
-  return null;
+  return optional;
 }
 
 export function buildServiceOverview(
@@ -504,11 +606,43 @@ export function buildServiceOverview(
     }
   }
 
+  // ── THE SYSTEM, AS THE INSTALLER COUNTS IT ────────────────────────────────
+  const COUNT_WORD = ['no', 'One', 'Two', 'Three', 'Four', 'Five', 'Six'];
+  const branchSizes = [...new Set(topology.branches.map(b => b.ratedAmps))];
+  const systemCount = topology.branches.length;
+  const systemAmps = branchSizes.length === 1 ? branchSizes[0] : null;
+  const systemsLabel = systemCount === 0 ? null
+    : `${COUNT_WORD[systemCount] ?? systemCount} ${systemAmps === null ? '' : `${systemAmps} A `}`
+      + `system${systemCount === 1 ? '' : 's'}`;
+
+  // The model name, once, and only when they genuinely all match — two different gateways must not
+  // be summarised as one.
+  const oneOf = (values: string[]): string | null => {
+    const distinct = [...new Set(values.filter(Boolean))];
+    return distinct.length === 1 ? distinct[0] : null;
+  };
+  // The label the GRAPH carries, not a re-derived product name: one authority for what the box is
+  // called, and the summary bar cannot disagree with the diagram or the schedule.
+  const gatewayModelLabel = oneOf(topology.domains.map(d => d.gateway.label));
+  const batteryModelLabel = oneOf(topology.storage
+    .filter(u => u.role === 'inverter-unit')
+    .map(u => u.label ?? u.productId));
+
   return {
     summary: {
       serviceAmps: rated,
       voltage: topology.service.voltage,
       phaseLabel: PHASE_LABEL[topology.service.phase] ?? topology.service.phase,
+      systemCount,
+      systemAmps,
+      systemsLabel,
+      gatewayModelLabel,
+      batteryModelLabel,
+      isolationSwitchCount: topology.devices
+        .filter(d => d.roles.includes('der-isolation-disconnect')).length,
+      serviceEquipmentIsExisting: !!topology.service.existingEquipment,
+      requiredCount: requiredInputs.filter(i => i.owner !== 'optional-calculation').length,
+      optionalCount: requiredInputs.filter(i => i.owner === 'optional-calculation').length,
       branchCount: topology.branches.length,
       panelCount: topology.panels.length,
       domainCount: topology.domains.length,

@@ -30,6 +30,7 @@
 
 import React from 'react';
 import type { ServiceTopology } from '@/lib/electrical/serviceTopology';
+import { resolveDemands } from '@/lib/electrical/serviceTopology';
 import type { ServiceOverview } from '@/lib/electrical/topologyOverview';
 import { conclusionWord } from '@/lib/electrical/topologyOverview';
 import type { EngineeringConclusion } from '@/lib/engineering/engineeringStatus';
@@ -92,6 +93,8 @@ export interface ServiceTopologyMapProps {
 export function ServiceTopologyMap({
   topology, overview, selectedId, onSelect, onAddBranch,
 }: ServiceTopologyMapProps) {
+  // One reader for load, shared with the inspector and the engineering.
+  const demands = resolveDemands(topology);
   const sel = (id: string) =>
     `w-full rounded-lg border px-3 py-2 text-left transition ${
       selectedId === id
@@ -175,7 +178,11 @@ export function ServiceTopologyMap({
                 <div className="text-sm font-black text-slate-100">{b.label}</div>
                 <div className="text-sm font-bold text-slate-200">{b.ratedAmps} A</div>
                 <div className="text-[11px] text-slate-400">
-                  OCPD {A(b.ocpdAmps)} · demand {A(b.calculatedDemandA)}
+                  {/* 🚨 THE DERIVED FIGURE, NOT THE SCALAR. With the load model behind it the
+                      branch's own `calculatedDemandA` is no longer written, so reading it here
+                      printed "demand —" on a card whose inspector showed 118.0 A: two answers to
+                      one number, on adjacent surfaces. */}
+                  OCPD {A(b.ocpdAmps)} · demand {A(demands.branchA[b.id] ?? null)}
                 </div>
                 <StatusLine status={bStatus} />
               </button>
@@ -205,7 +212,11 @@ export function ServiceTopologyMap({
                   <button type="button" data-testid={`node-${domain.id}`} className={sel(domain.id)}
                           onClick={() => onSelect(domain.id)}>
                     <div className="text-[10px] font-bold uppercase tracking-widest text-slate-500">
-                      Backup domain
+                      {/* 🚨 NOT "BACKUP DOMAIN". Ray: avoid leading with domain semantics — it is
+                          the system that is backed up, as far as the person installing it is
+                          concerned. `BackupDomain` is still what the model and the engineering
+                          call it. */}
+                      Backed-up system
                     </div>
                     <div className="text-sm font-black text-slate-100">{domain.label}</div>
 
@@ -330,7 +341,7 @@ export function ServiceTopologyMap({
       {(topology.aggregationPanels ?? []).length > 0 || (topology.pointsOfInterconnection ?? []).length > 0 ? (
         <div className="mt-5" data-testid="der-interconnection-group">
           <div className="text-[10px] font-bold uppercase tracking-widest text-slate-500">
-            DER interconnection
+            Connection to the service
             {overview.summary.derArrangementLabel
               ? <span className="ml-2 normal-case tracking-normal text-slate-400">
                   {overview.summary.derArrangementLabel}

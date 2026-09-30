@@ -43,10 +43,14 @@ describe('🚨 the equipment schedule is one row per physical instance', () => {
     expect(gws[0].rating).toBe(gws[1].rating);
     expect(new Set(gws.map(r => r.tag)).size).toBe(2);
     expect(gws.map(r => r.domain)).toEqual(['Domain A', 'Domain B']);
-    expect(gws[0].notes).toContain('branch-a');
-    expect(gws[1].notes).toContain('branch-b');
-    expect(gws[0].notes).toContain('msp-1');
-    expect(gws[1].notes).toContain('msp-2');
+    // 🚨 THE NAME ON THE ENCLOSURE, NOT THE KEY IN THE DATABASE. This assertion used to require
+    // 'branch-a' and 'msp-1' — it was PINNING the defect: an inspector reading the schedule was
+    // being handed internal ids, exactly as the diagram once printed `TO DEVICE-1`.
+    expect(gws[0].notes).toContain('Branch A');
+    expect(gws[1].notes).toContain('Branch B');
+    expect(gws[0].notes).toContain('MSP #1');
+    expect(gws[1].notes).toContain('MSP #2');
+    expect(gws[0].notes).not.toMatch(/\b(branch-a|msp-1)\b/);
   });
 
   it('🚨 an Expansion is battery expansion equipment — never an inverter or an AC source', () => {
@@ -123,10 +127,19 @@ describe('🚨 a drawable topology is not necessarily a releasable one', () => {
     for (const d of t.domains) d.backedUpDemandA = 100;
     for (const dev of t.devices) dev.sccrA = 22_000;
     for (const p of t.panels) { p.sccrA = 22_000; p.busbarRatingA = 225; p.mainBreakerA = 150; }
+    // "Fully resolved" now also means the actual part was chosen and the utility ruled on the
+    // isolation arrangement as drawn. A calculated minimum rating is not a purchase and a proven
+    // traversal is not an approval, so a job with neither is not resolved.
+    for (const dev of t.devices) dev.productId = 'eaton-dg224urk';
+    t.interconnection.isolationArrangementAccepted = true;
     const r = serviceTopologyReleaseReadiness(t);
     expect(r.releaseReady).toBe(true);
     expect(r.requirements).toEqual([]);
     expect(r.failures).toEqual([]);
+    // This fixture records its demand on the branches and domains directly, so there is no optional
+    // calculation outstanding either. (`raysRealFourHundredAmpJob` covers the case where there is
+    // one and it does NOT hold the sheet up — Ray's product decision.)
+    expect(r.optional).toEqual([]);
   });
 
   it('a FAILURE is not the same as an unknown, and neither is release-ready', () => {

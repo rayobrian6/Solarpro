@@ -16,6 +16,7 @@ import {
   createServiceTopology, addServiceBranch, addPanel, updateBranch,
   addAggregationPanel, updateAggregationPanel, addPointOfInterconnection, setDerArrangement,
   placeDevice, recommendAggregationRatings, updatePointOfInterconnection,
+  addProtectiveDevice, removeProtectiveDevice,
   type AggregationRecommendation,
 } from '@/lib/electrical/topologyAuthoring';
 import { derSources } from '@/lib/electrical/derSources';
@@ -173,28 +174,176 @@ export interface DerArrangementChoice {
   builds: string;
 }
 
+/**
+ * 🚨 THE QUESTION IN THE WORDS OF THE PERSON ANSWERING IT.
+ *
+ * Ray, after live-testing: "Installer-facing language should be: 400 A service / Two 200 A systems /
+ * MSP #1 / MSP #2 / Gateway #1 / Gateway #2 / Powerwall + Expansion / Safety switch. Avoid leading
+ * with terms like DER, graph node, aggregation topology, domain semantics. Those may remain in
+ * Advanced/engineering internals."
+ *
+ * So the choice reads "Two independent 200 A systems" — composed from the branches actually in the
+ * graph, not from a hard-coded 200 — while the node it builds is still the generic
+ * `DER_AGGREGATION_PANEL` the engineering, the schedule and the sheet already speak about. One
+ * vocabulary for the installer, one for the drawing, one model underneath.
+ */
 export const DER_ARRANGEMENT_CHOICES: ReadonlyArray<DerArrangementChoice> = [
   {
     id: 'independent-branch',
-    label: 'Independent branch interconnection',
-    describe: 'Each backup domain connects through its own governed service branch arrangement.',
-    builds: 'One point of interconnection per backup domain, at that domain\'s own equipment.',
+    label: 'Independent systems',
+    describe: 'Each path keeps its own gateway, its own panel and its own connection to the '
+      + 'service. Nothing is combined downstream.',
+    builds: 'One point of connection per system, at that system\'s own equipment.',
   },
   {
     id: 'common-aggregation',
-    label: 'Common DER aggregation',
-    describe: 'The DER branches aggregate in an AC generation panel before the common service '
-      + 'point of interconnection.',
-    builds: 'One DER aggregation panel taking every source, one shared point of interconnection, '
-      + 'and the utility isolation device placed on the aggregated feeder.',
+    label: 'One combined generation panel',
+    describe: 'Both systems\' outputs land in one shared generation panel, which then makes a '
+      + 'single connection to the service.',
+    builds: 'A generation panel taking every source, one shared point of connection, and the '
+      + 'utility isolation switch on the combined feeder.',
   },
   {
     id: 'custom',
     label: 'Custom engineered topology',
-    describe: 'Something neither preset describes — build it node by node in Advanced.',
-    builds: 'Nothing. The arrangement is recorded and the nodes are yours to add.',
+    describe: 'Something neither option describes — build it piece by piece in Advanced.',
+    builds: 'Nothing. The arrangement is recorded and the equipment is yours to add.',
   },
 ];
+
+/**
+ * The same choice, described with the sizes actually in this graph.
+ *
+ * "Two independent 200 A systems" is the sentence Ray wants to read; it is composed here so it can
+ * never disagree with the branches, and so a 600 A / 3 × 200 A service reads correctly too.
+ */
+export function describeArrangementFor(
+  t: ServiceTopology, id: DerArrangement,
+): string {
+  const COUNT = ['no', 'One', 'Two', 'Three', 'Four', 'Five', 'Six'];
+  const n = t.branches.length;
+  const sizes = [...new Set(t.branches.map(b => b.ratedAmps))];
+  const word = COUNT[n] ?? String(n);
+  const sized = sizes.length === 1 ? `${word} ${sizes[0]} A` : `${word}`;
+  if (id === 'independent-branch') {
+    return n === 0
+      ? 'Independent systems — one connection each.'
+      : `${sized} system${n === 1 ? '' : 's'}, independent — each with its own gateway, panel and `
+        + 'point of connection.';
+  }
+  if (id === 'common-aggregation') {
+    return n === 0
+      ? 'One combined generation panel ahead of a single point of connection.'
+      : `${sized} system${n === 1 ? '' : 's'} combined in one generation panel, then a single `
+        + `connection to the ${t.service.ratedAmps} A service.`;
+  }
+  return 'Built piece by piece in Advanced.';
+}
+
+/**
+ * How the utility's DER isolation is arranged — one switch for the whole service, or one per path.
+ *
+ * 🚨 NEITHER IS SELECTED FOR THE OPERATOR AND NEITHER IS CLAIMED TO BE ACCEPTABLE. Ray's intended
+ * design on the real job is two independent knife switches, one per 200 A path, and his own note is
+ * that "Utility/AHJ acceptance of the two-switch arrangement remains something to verify." So this
+ * builds what the designer chooses and the jurisdiction ruling stays exactly as unresolved as it was.
+ */
+export interface IsolationArrangementChoice {
+  id: 'one-per-path' | 'common-service';
+  label: string;
+  describe: string;
+  builds: string;
+}
+
+export const ISOLATION_ARRANGEMENTS: ReadonlyArray<IsolationArrangementChoice> = [
+  {
+    id: 'one-per-path',
+    label: 'One safety switch per system',
+    describe: 'A separate lockable, visible-open switch in each path, ahead of that path\'s '
+      + 'gateway. Each system is isolated on its own.',
+    builds: 'One isolation switch per path, in line with the feeder, rated for that path.',
+  },
+  {
+    id: 'common-service',
+    label: 'One safety switch for the whole service',
+    describe: 'A single switch on the service conductors, isolating everything on site at once.',
+    builds: 'One isolation switch on the service chain, rated for the service.',
+  },
+];
+
+export interface ApplyIsolationResult {
+  topology: ServiceTopology;
+  created: string[];
+  /** What acceptance still has to be established, said out loud rather than assumed. */
+  unresolved: string[];
+}
+
+/**
+ * Build the chosen isolation arrangement, replacing whatever isolation devices exist.
+ *
+ * 🚨 IN LINE, NOT BESIDE. Each per-path switch names the node it interrupts, so the connection
+ * graph re-routes that path's conductor through it and DER ISOLATION COVERAGE can actually answer
+ * the question. A switch that merely pointed at the branch would leave the original conductor in
+ * place and coverage would report — correctly — that opening it disconnects nothing.
+ */
+export function applyIsolationArrangement(
+  t: ServiceTopology, id: IsolationArrangementChoice['id'],
+): ApplyIsolationResult {
+  const created: string[] = [];
+  let next = t;
+  // Replace the existing isolation devices: two arrangements both present would be two answers.
+  for (const d of t.devices.filter(x => x.roles.includes('der-isolation-disconnect'))) {
+    next = removeProtectiveDevice(next, d.id);
+  }
+
+  if (id === 'common-service') {
+    const r = addProtectiveDevice(next, {
+      label: `${next.service.ratedAmps} A utility isolation switch`,
+      roles: ['der-isolation-disconnect'],
+      ratedAmps: next.service.ratedAmps,
+      lockableOpen: true, visibleOpen: true,
+      locationNote: 'On the service conductors, accessible to the utility.',
+    });
+    next = r.topology;
+    created.push(`${r.device.label} on the service conductors`);
+    return {
+      topology: next, created,
+      unresolved: ['Utility / AHJ acceptance of a single common isolation switch is not established.'],
+    };
+  }
+
+  // One per path. The path is the branch; the node it interrupts is that branch's gateway where the
+  // branch has one, and the branch's panel where it does not.
+  for (const b of next.branches) {
+    const domain = next.domains.find(d => d.branchId === b.id);
+    const inlineOn = domain?.gateway.id
+      ?? (b.panelIds ?? [])[0]
+      ?? null;
+    const r = addProtectiveDevice(next, {
+      label: `${b.ratedAmps} A utility isolation switch — ${b.label}`,
+      roles: ['der-isolation-disconnect'],
+      ratedAmps: b.ratedAmps,
+      lockableOpen: true, visibleOpen: true,
+      locationNote: `In line in ${b.label}, ahead of `
+        + `${domain ? domain.gateway.label : 'the panelboard it feeds'}.`,
+      ...(inlineOn ? { inlineOnNodeId: inlineOn, feedsNodeId: b.id } : {}),
+    });
+    next = r.topology;
+    created.push(inlineOn
+      ? `${r.device.label}, in line ahead of `
+        + `${domain ? domain.gateway.label : 'its panelboard'}`
+      // No node to interrupt: the device exists and says so rather than claiming a placement.
+      : `${r.device.label} — nothing established for it to be in line with yet`);
+  }
+
+  return {
+    topology: next, created,
+    unresolved: [
+      `Utility / AHJ acceptance of ${next.branches.length} independent isolation switches (one per `
+      + 'path) rather than a single common device is not established.',
+    ],
+  };
+}
 
 export interface ApplyArrangementResult {
   topology: ServiceTopology;

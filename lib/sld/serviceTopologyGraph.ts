@@ -39,6 +39,7 @@
 import type { SLDNode, SLDEdge, RunSegment } from '@/lib/topology-engine';
 import {
   evaluateServiceTopology, sizeAggregationPanel, governingArticleFor, sourcesForAggregationInput,
+  topologyNodeLabel,
   type ServiceTopology, type TopologyEvaluation,
 } from '@/lib/electrical/serviceTopology';
 import { notEvaluatedLabel } from '@/lib/engineering/engineeringStatus';
@@ -135,7 +136,12 @@ export function buildServiceTopologyGraph(
   // Drawn where the topology has one. Its ABSENCE when the utility requires it is an engineering
   // FAIL, reported by the evaluation — the drawing does not invent a device to make itself tidy.
   let upstreamId = meter.id;
-  const isolators = topology.devices.filter(d => d.roles.includes('der-isolation-disconnect'));
+  // 🚨 A DEVICE THAT IS IN ONE 200 A PATH IS NOT ON THE SHARED SERVICE CHAIN. Drawn here, Ray's two
+  // knife switches would appear in series on the service conductors — a sheet showing every source
+  // isolated by either switch, which is the opposite of what per-path isolation is. They are drawn
+  // inside their own branch path below.
+  const isolators = topology.devices.filter(d => d.roles.includes('der-isolation-disconnect')
+    && !d.inlineOnNodeId);
   for (const d of isolators) {
     const n = add({
       id: d.id, type: 'DER_ISOLATION_DISCONNECT',
@@ -282,7 +288,7 @@ export function buildServiceTopologyGraph(
     }), agg.feedsNodeId);
   }
   for (const d of topology.devices) {
-    if (!d.feedsNodeId) continue;
+    if (!d.feedsNodeId || d.inlineOnNodeId) continue;
     if (!nodes.some(n => n.id === d.id)) {
       add({
         id: d.id, type: d.roles.includes('der-isolation-disconnect')
@@ -353,7 +359,40 @@ export function buildServiceTopologyGraph(
             + 'main breaker fitted)', requires: [`sccr:${gw.id}`] }]
         : undefined,
     });
-    link(distribution.id, feeder, gwNode.id);
+    // ── A DISCONNECT IN THIS PATH GOES IN THIS PATH ─────────────────────────
+    //
+    // 🚨 THE FEEDER RUNS THROUGH IT: distribution → feeder → switch → run → gateway. Drawn on the
+    // shared chain instead, the sheet would show a device that does not interrupt this 200 A path —
+    // the same lie the MODEL used to tell when a device could only point at its upstream.
+    const inline = topology.devices.filter(d => d.inlineOnNodeId === gw.id
+      || d.inlineOnNodeId === branch.id);
+    let feedTo = gwNode.id;
+    for (const d of inline) {
+      const n = add({
+        id: d.id,
+        type: d.roles.includes('der-isolation-disconnect')
+          ? 'DER_ISOLATION_DISCONNECT' : 'SERVICE_DISCONNECT',
+        label: d.label,
+        ratedCurrent: amps(d.ratedAmps),
+        ocpdRating: d.sccrA === null ? 'SCCR NOT EVALUATED' : `${d.sccrA} A SCCR`,
+        necReference: d.locationNote ?? undefined,
+        domainId: domain.id,
+        unresolvedCallouts: d.sccrA === null
+          ? [{ field: 'sccr', label: 'NOT EVALUATED — INTERRUPTING RATING REQUIRED',
+               requires: [`sccr:${d.id}`] }]
+          : undefined,
+      });
+      link(n.id, add({
+        id: `run-inline-${d.id}`, type: 'RUN_SEGMENT',
+        label: `${d.label} to ${topologyNodeLabel(topology, feedTo)}`,
+        runSegment: run('BRANCH_FEEDER_RUN', `${d.label} to ${topologyNodeLabel(topology, feedTo)}`,
+          { ocpdAmps: d.ratedAmps ?? branch.ratedAmps }),
+        domainId: domain.id,
+      }), feedTo);
+      domainNodeIds.push(n.id);
+      feedTo = n.id;
+    }
+    link(distribution.id, feeder, feedTo);
     domainNodeIds.push(feeder.id, gwNode.id);
 
     // METERING / CT — its arrangement may be manufacturer-governed on a multi-gateway site.
