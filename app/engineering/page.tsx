@@ -29,6 +29,9 @@ import PlanGate from '@/components/ui/PlanGate';
 import CombinerSelector from '@/components/engineering/CombinerSelector';
 import { ServiceTopologyBuilder } from '@/components/engineering/ServiceTopologyBuilder';
 import type { ServiceTopology as ServiceTopologyForPage } from '@/lib/electrical/serviceTopology';
+// The repo's existing representation of "no inverter has been selected" — honoured by the SLD
+// renderer, the permit SLD adapter and the permit helpers. Reused rather than re-invented.
+import { INVERTER_UNSELECTED } from '@/lib/permit/utils/helpers';
 import { useSubscription } from '@/hooks/useSubscription';
 import {
   Zap, Download, Printer, Plus, Trash2, Settings,
@@ -1502,14 +1505,10 @@ function EngineeringPageInner() {
           const azimuth: number = seed.azimuth ?? 180;
 
           // Resolve inverterId
-          let inverterId: string;
-          if (engCfg?.inverterId) {
-            inverterId = engCfg.inverterId;
-          } else if (invType === 'micro') {
-            inverterId = MICROINVERTERS[0]?.id ?? 'enphase-iq8plus';
-          } else {
-            inverterId = STRING_INVERTERS[0]?.id ?? 'se-7600h';
-          }
+          // 🚨 AND NO SUBSTITUTION HERE EITHER. A seed with no inverter id is a project nobody
+          // has equipped, not a project that chose the first row of the catalogue. Picking one
+          // here is how `engineering_seed`'s Enphase defaults became an installed design.
+          const inverterId: string = engCfg?.inverterId || '';
 
           // Resolve panelId: use engCfg.panelId if present, else find best match by wattage
           let panelId: string;
@@ -1705,7 +1704,12 @@ function EngineeringPageInner() {
             }));
             patches.inverters = [_buildInvCfg({
               existingId: 'inv-auto-0',
-              inverterId: p.selectedInverter?.id || (MICROINVERTERS[0]?.id ?? 'enphase-iq8plus'),
+              // 🚨 NO SUBSTITUTION. "No standalone inverter" is legitimate electrical state — a
+              // DC-coupled battery system has none — and this line manufactured an Enphase IQ8 for
+              // every project that had not picked one, which is precisely the job where it is
+              // wrong. The empty id carries through as INVERTER_UNSELECTED, which the renderer,
+              // the SLD adapter and the permit helpers already understand.
+              inverterId: p.selectedInverter?.id || '',
               type:       invType,
               strings,
             })];
@@ -3187,8 +3191,13 @@ function EngineeringPageInner() {
       panelMaxSeriesFuse: panelData?.maxSeriesFuseRating ?? 20,
       panelModel: panelData?.model ?? 'Solar Panel',
       panelManufacturer: panelData?.manufacturer ?? '',
-      inverterManufacturer: invData?.manufacturer ?? (topology === 'micro' ? 'Enphase' : 'SolarEdge'),
-      inverterModel: invData?.model ?? (topology === 'micro' ? 'IQ8+' : 'SE7600H'),
+      // 🚨 AN INVENTED NAME BECOMES AN ARCHITECTURE. These read 'Enphase'/'IQ8+' whenever the id
+      // failed to resolve, and `lib/permit/utils/helpers.ts` then treats the STRING as proof the
+      // design is microinverter — `lib/permit/snapshot/resolution/equipmentSelection.ts` states
+      // that inference is prohibited. The marker the renderer and the adapter already honour says
+      // the honest thing instead.
+      inverterManufacturer: invData?.manufacturer ?? '',
+      inverterModel: invData?.model ?? INVERTER_UNSELECTED,
       inverterAcKw: invData?.acOutputKw ?? (invData?.acOutputW ? invData.acOutputW / 1000 : topology === 'micro' ? 0.290 : 7.6), // v58.4: fallback 0.295->0.290 (IQ8+ datasheet max continuous = 290VA)
       // C7 fix: physical inverter count so multi-inverter AC current / OCPD / schedule qty are sized for ALL units, not just the primary.
       inverterCount: topology === 'micro' ? 1 : Math.max(1, fleet.length),
