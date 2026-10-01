@@ -20,7 +20,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import {
-  evaluateServiceTopology, OPTIONAL_REQUIREMENT_TOKENS, solarCouplingLabel,
+  evaluateServiceTopology, OPTIONAL_REQUIREMENT_TOKENS, solarCouplingLabel, serviceRatingLabel,
   type ServiceTopology, type TopologyEvaluation, type TopologyCheck,
 } from '@/lib/electrical/serviceTopology';
 import { foldConclusions, type EngineeringConclusion } from '@/lib/engineering/engineeringStatus';
@@ -133,7 +133,8 @@ export interface LevelStatus {
 }
 
 export interface ServiceAllocation {
-  ratedAmps: number;
+  /** null ⇒ no service rating established; there is nothing to allocate against. */
+  ratedAmps: number | null;
   /** The sum of the branch ratings actually in the graph. */
   allocatedAmps: number;
   /** rated − allocated, floored at 0. */
@@ -150,7 +151,10 @@ export interface ServiceAllocation {
 }
 
 export interface ServiceSummary {
-  serviceAmps: number;
+  /** null ⇒ not established. Surfaces print `serviceAmpsLabel`, never this with " A" after it. */
+  serviceAmps: number | null;
+  /** "400 A", or "NOT ESTABLISHED". The one string every surface shows. */
+  serviceAmpsLabel: string;
   voltage: number;
   phaseLabel: string;
   /**
@@ -557,19 +561,23 @@ export function buildServiceOverview(
   const storage = evalResult.storageSummary;
 
   const allocatedAmps = topology.branches.reduce((n, b) => n + (b.ratedAmps || 0), 0);
-  const rated = topology.service.ratedAmps;
-  const unallocated = Math.max(0, rated - allocatedAmps);
+  // 🚨 NULL IS NOT ZERO HERE EITHER. With no service rating there is nothing to allocate AGAINST,
+  // so the screen must not report "0 A unallocated" (which reads as fully allocated) or suggest
+  // adding a branch to fill a gap it cannot measure.
+  const rated = typeof topology.service.ratedAmps === 'number' ? topology.service.ratedAmps : null;
+  const unallocated = rated === null ? 0 : Math.max(0, rated - allocatedAmps);
 
   // 🚨 THE 400 A SPLIT, MADE OBVIOUS. Ray: "the service says 400 A while only 1 branch totalling
   // 200 A exists. That is technically truthful but visually confusing." When the remainder is a
   // whole multiple of the branches already drawn, the screen can offer the exact action.
   const firstBranch = topology.branches[0]?.ratedAmps ?? 0;
-  const canSuggest = unallocated > 0 && firstBranch > 0 && unallocated % firstBranch === 0;
+  const canSuggest = rated !== null && unallocated > 0 && firstBranch > 0
+    && unallocated % firstBranch === 0;
   const allocation: ServiceAllocation = {
     ratedAmps: rated,
     allocatedAmps,
     unallocatedAmps: unallocated,
-    overAllocatedAmps: Math.max(0, allocatedAmps - rated),
+    overAllocatedAmps: rated === null ? 0 : Math.max(0, allocatedAmps - rated),
     suggestedBranchAmps: canSuggest ? firstBranch : null,
     suggestedBranchCount: canSuggest ? unallocated / firstBranch : 0,
   };
@@ -663,6 +671,7 @@ export function buildServiceOverview(
   return {
     summary: {
       serviceAmps: rated,
+      serviceAmpsLabel: serviceRatingLabel(topology),
       voltage: topology.service.voltage,
       phaseLabel: PHASE_LABEL[topology.service.phase] ?? topology.service.phase,
       systemCount,

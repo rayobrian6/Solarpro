@@ -112,8 +112,14 @@ export function ServiceTopologyPanel({ topology, onChange }: ServiceTopologyPane
             Aggregate service
             <input
               data-testid="service-rated-amps"
-              type="number" readOnly={ro} value={topology.service.ratedAmps}
-              onChange={e => edit(t => { t.service.ratedAmps = Number(e.target.value); })}
+              type="number" readOnly={ro} value={topology.service.ratedAmps ?? ''}
+              placeholder="REQUIRED"
+              onChange={e => edit(t => {
+                // 🚨 AN EMPTY BOX IS "NOT ESTABLISHED", NOT ZERO. `Number('')` is 0, and a 0 A
+                // service would have read as a real, absurd rating rather than an open question.
+                const v = e.target.value.trim();
+                t.service.ratedAmps = v === '' ? null : Number(v);
+              })}
               className="mt-1 w-full rounded bg-slate-800 px-2 py-1 text-slate-100"
             />
           </label>

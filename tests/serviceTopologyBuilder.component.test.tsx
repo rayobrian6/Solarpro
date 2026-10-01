@@ -605,7 +605,9 @@ describe('🚨 the sheet drawn from what was built', () => {
     expect(g.validationErrors).toEqual([]);
 
     const svg = renderServiceTopologySvg(g);
-    expect(svg).toContain('400 A service distribution');
+    // The label is composed by `serviceRatingLabel` now, so an unrated service reads
+    // "NOT ESTABLISHED distribution" instead of printing `null A`.
+    expect(svg).toContain('400 A distribution');
     expect(svg).toContain('200 A service path 1 feeder');
     expect(svg).toContain('200 A service path 2 feeder');
     expect(svg).toContain('MSP #1');

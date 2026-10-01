@@ -305,13 +305,33 @@ describe('🚨 the service graph survives a save and a reload', () => {
     expect(await readServiceTopology(PROJECT, USER_ID)).toBeNull();
   });
 
-  it('a corrupt stored value is refused rather than half-parsed', async () => {
+  it('an UNREADABLE stored value is refused rather than half-parsed', async () => {
     const { readServiceTopology } = await import('@/lib/db/serviceTopology');
     await db.query(
       `ALTER TABLE projects ADD COLUMN IF NOT EXISTS service_topology JSONB`);
-    for (const bad of ['{}', '{"topology":{}}', '{"topology":{"service":{}}}', '[]', '"nope"']) {
+    // No topology object at all: there is nothing to read, and null is the only honest answer.
+    for (const bad of ['{}', '[]', '"nope"']) {
       await db.query(`UPDATE projects SET service_topology = $1::jsonb WHERE id = $2`, [bad, PROJECT]);
       expect(await readServiceTopology(PROJECT, USER_ID), `'${bad}' was accepted`).toBeNull();
+    }
+  });
+
+  it('🚨 an EMPTY graph is empty, not absent — this assertion used to pin the kill-switch', async () => {
+    // This test previously required `{"topology":{}}` and `{"topology":{"service":{}}}` to come
+    // back NULL, and the only thing that refused them was `if (ratedAmps === null) return null` —
+    // the line that also discarded Ray's fully-built 400 A graph the moment its service rating went
+    // missing. "Refused rather than half-parsed" was the right instinct applied to the wrong
+    // boundary: the boundary is UNREADABLE vs READABLE, not COMPLETE vs INCOMPLETE.
+    const { readServiceTopology } = await import('@/lib/db/serviceTopology');
+    for (const sparse of ['{"topology":{}}', '{"topology":{"service":{}}}']) {
+      await db.query(`UPDATE projects SET service_topology = $1::jsonb WHERE id = $2`,
+        [sparse, PROJECT]);
+      const back = await readServiceTopology(PROJECT, USER_ID);
+      expect(back, `'${sparse}' was discarded`).toBeTruthy();
+      expect(back!.topology.service.ratedAmps).toBeNull();
+      expect(back!.topology.branches).toEqual([]);
+      expect(back!.topology.panels).toEqual([]);
+      expect(back!.topology.domains).toEqual([]);
     }
   });
 });

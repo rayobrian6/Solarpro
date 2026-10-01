@@ -44,6 +44,7 @@ import {
   evaluateServiceTopology, sizeAggregationPanel, isOptionalCheck,
   governingArticleFor as poiArticle,
   storageUnitLabel as storageUnitLabelSld,
+  serviceRatingLabel as serviceRatingLabelSld,
   sourcesForAggregationInput as sourcesForAggregationInputSld,
   type ServiceTopology as ServiceTopologyForSld,
   type TopologyEvaluation as TopologyEvaluationForSld,
@@ -2887,7 +2888,8 @@ function nodeLabel(t: ServiceTopologyForSld, nodeId: string): string {
     ?? t.domains.find(d => d.gateway.id === nodeId)?.gateway.label
     ?? (t.aggregationPanels ?? []).find(a => a.id === nodeId)?.label
     ?? (t.pointsOfInterconnection ?? []).find(x => x.id === nodeId)?.label
-    ?? (nodeId === 'service-distribution' ? `${t.service.ratedAmps} A service distribution` : nodeId);
+    ?? (nodeId === 'service-distribution'
+      ? `${serviceRatingLabelSld(t, 'Service')} distribution` : nodeId);
 }
 
 /**
@@ -2942,12 +2944,12 @@ function overlayServiceTopologyRows(
   };
 
   replace('Main Panel Rating', [
-    ['Service Rating', `${t.service.ratedAmps} A`],
+    ['Service Rating', serviceRatingLabelSld(t)],
     ...t.branches.map(b => [`${b.label}`, `${b.ratedAmps} A`] as [string, string]),
     ...t.panels.map(p => [`${p.label}`, `${A(p.busbarRatingA)} bus / ${A(p.mainBreakerA)} main`] as [string, string]),
   ]);
   replace('Main Panel', [
-    ['Service Rating', `${t.service.ratedAmps} A`],
+    ['Service Rating', serviceRatingLabelSld(t)],
     ...t.panels.map(p => [`${p.label}`, `${A(p.busbarRatingA)} bus / ${A(p.mainBreakerA)} main`] as [string, string]),
     ...t.domains.map(d => [`${d.label} Gateway`, d.gateway.label] as [string, string]),
   ]);
@@ -3510,7 +3512,7 @@ export function renderTopologyServiceSection(opts: {
   // that shows it as new service distribution tells an inspector SolarPro is replacing it.
   const ex = t.service.existingEquipment ?? null;
   const distLines: Line[] = [
-    { t: `${ex ? 'EXISTING ' : ''}${t.service.ratedAmps} A SERVICE `
+    { t: `${ex ? 'EXISTING ' : ''}${serviceRatingLabelSld(t)} SERVICE `
         + `${ex ? 'EQUIPMENT' : 'DISTRIBUTION'}`, sz: F.hdr, bold: true },
     { t: `${t.service.voltage} V ${t.service.phase === 'split-240' ? '1Ø 3W' : t.service.phase}`, sz: F.sub },
     { t: `${t.branches.length} SERVICE BRANCH${t.branches.length === 1 ? '' : 'ES'}`, sz: F.tiny },
@@ -6184,7 +6186,7 @@ function titleBlockSvg(input: SLDProfessionalInput, dcKw: number): string {
           ['MODEL', 'INTEGRATED — SEE EQUIPMENT SCHEDULE']] as [string, string][])
       : ([['INVERTER',esc(input.inverterManufacturer)],
           ['MODEL',esc(input.inverterModel)]] as [string, string][])),
-    ['SERVICE', _tbTopo ? `${_tbTopo.service.ratedAmps}A` : `${input.mainPanelAmps}A`],
+    ['SERVICE', _tbTopo ? serviceRatingLabelSld(_tbTopo) : `${input.mainPanelAmps}A`],
     ['UTILITY',esc(input.utilityName)],
     ['INTERCONN.',esc(input.interconnection)],
   ];
@@ -8003,7 +8005,7 @@ function renderSLDMultiLane(input: SLDProfessionalInput, lanes: SLDSourceBranch[
     }
     const lines = [
       `NOTE: THIS SHEET DRAWS ${drawn ? drawn.label.toUpperCase() : 'THE SERVICE PANEL'} AND THE `
-      + `PV SOURCES. THE ${t.service.ratedAmps} A SERVICE TOPOLOGY IS DRAWN IN FULL ON THE `
+      + `PV SOURCES. THE ${serviceRatingLabelSld(t)} SERVICE TOPOLOGY IS DRAWN IN FULL ON THE `
       + 'STORAGE SINGLE-LINE AND LISTED IN THE SERVICE EQUIPMENT SCHEDULE.',
       ...(missing.length ? [`NOT SHOWN HERE: ${missing.join('; ')}.`] : []),
     ];

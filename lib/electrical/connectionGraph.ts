@@ -28,7 +28,7 @@
 import type {
   ServiceTopology, DerSource, PointOfInterconnection, ProtectiveDevice,
 } from '@/lib/electrical/serviceTopology';
-import { derSources } from '@/lib/electrical/serviceTopology';
+import { derSources, serviceRatingLabel } from '@/lib/electrical/serviceTopology';
 
 export const UTILITY_NODE_ID = 'utility';
 
@@ -109,7 +109,7 @@ export function buildConnectionGraph(t: ServiceTopology): ConnectionGraph {
 
   // ── THE SERVICE CHAIN ─────────────────────────────────────────────────────
   const DIST = 'service-distribution';
-  node({ id: DIST, label: `${t.service.ratedAmps} A service distribution`, kind: 'service-distribution' });
+  node({ id: DIST, label: `${serviceRatingLabel(t, 'Service')} distribution`, kind: 'service-distribution' });
   let upstream = DIST;
   for (const d of defaultChain(t)) {
     node({ id: d.id, label: d.label, kind: 'device' });

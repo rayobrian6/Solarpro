@@ -685,6 +685,53 @@ describe('save, reopen, edit — the lifecycle Ray could not complete', () => {
     }
   });
 
+  it('🚨 A MISSING SERVICE RATING PRESERVES THE GRAPH — it used to delete it', () => {
+    // Ray: "Missing one fact should produce SERVICE RATING REQUIRED — TOPOLOGY PARTIALLY
+    // EVALUATED. It should never mean 'pretend the graph doesn't exist.'"
+    //
+    // `parseServiceTopology` used to open with `if (ratedAmps === null) return null`, so a stored
+    // graph with no service rating came back as NO GRAPH AT ALL — every branch, panel, gateway,
+    // battery, generation panel and switch discarded on read, silently, and the project fell back
+    // to the legacy scalars looking exactly as if nobody had ever built one.
+    const stored = JSON.parse(JSON.stringify(serialiseServiceTopology(buildRaysIntendedJob().topology)));
+    delete stored.topology.service.ratedAmps;
+    const back = parseServiceTopology(stored)?.topology;
+
+    expect(back, 'the graph was discarded for want of one number').toBeTruthy();
+    expect(back!.service.ratedAmps).toBeNull();
+    // Everything the operator built is still there.
+    expect(back!.branches).toHaveLength(2);
+    expect(back!.panels).toHaveLength(2);
+    expect(back!.domains).toHaveLength(2);
+    expect(back!.storage.filter(u => u.role === 'inverter-unit')).toHaveLength(4);
+    expect(back!.aggregationPanels).toHaveLength(2);
+    expect(back!.devices.filter(d => d.inlineOnNodeId)).toHaveLength(2);
+    expect(back!.solarCoupling).toBe('dc-coupled-storage');
+
+    // 🚨 AND THE ENGINEERING IS PARTIAL, NOT ABSENT. The one fact is named; everything that does
+    // not depend on it still reaches a conclusion.
+    const ev = evaluateServiceTopology(back!);
+    const rating = ev.checks.find(c => c.id === 'service.rating')!;
+    expect(rating.conclusion).toBe('NOT_EVALUATED');
+    expect(rating.requires).toEqual(['service.ratedAmps']);
+    expect(ev.checks.find(c => c.id === 'service.branch-sum')).toBeUndefined();
+    // DER isolation coverage is a traversal — it does not need the service rating at all.
+    expect(ev.checks.find(c => c.id === 'interconnection.der-isolation-coverage')?.conclusion)
+      .toBe('PASS');
+    // Nor do the generation panels' own busbars.
+    for (const c of ev.checks.filter(c => c.id === 'aggregation.busbar')) {
+      expect(c.conclusion).toBe('PASS');
+    }
+    // 🚨 AND NOTHING PRINTS `null A`. The repo compiles with strict:false, so the compiler flagged
+    // none of the 38 places that interpolate this number.
+    const svg = sheetOf(back!);
+    expect(svg).not.toMatch(/null\s*A/);
+    expect(svg).toContain('NOT ESTABLISHED');
+    for (const r of serviceTopologyScheduleRows(back!)) {
+      expect(r.rating ?? '').not.toContain('null');
+    }
+  });
+
   it('🚨 RED PROOF — dropping the panel\'s system ownership launders two systems into one site', () => {
     // The same law as `feedsNodeId`: save/reload may never improve a conclusion by forgetting
     // topology. Here the forgetting is subtler — the panels survive, their OWNERS do not — and the

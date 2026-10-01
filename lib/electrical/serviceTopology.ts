@@ -112,8 +112,22 @@ export interface ExistingServiceEquipment {
 }
 
 export interface UtilityService {
-  /** Aggregate service rating. 400 on this job. */
-  ratedAmps: number;
+  /**
+   * Aggregate service rating. 400 on this job.
+   *
+   * 🚨 NULLABLE, AND THAT IS THE WHOLE POINT. It used to be `number`, and `parseServiceTopology`
+   * enforced it by returning **null for the entire stored graph** when the rating was absent — so
+   * one missing fact silently deleted every branch, panel, gateway, battery and switch the
+   * operator had built, and the project dropped back to the legacy scalars with no signal that
+   * anything had been dropped. Ray: "Missing one fact should produce SERVICE RATING REQUIRED —
+   * TOPOLOGY PARTIALLY EVALUATED. It should never mean 'pretend the graph doesn't exist.'"
+   *
+   * So an absent rating is now an ordinary unresolved input: `service.rating` reports
+   * NOT_EVALUATED, everything that depends on the rating reports NOT_EVALUATED naming it, and
+   * everything that does not — the connection graph, DER isolation coverage, the busbar checks,
+   * the equipment inventory — still evaluates.
+   */
+  ratedAmps: number | null;
   voltage: number;
   phase: ServicePhase;
   /**
@@ -1159,6 +1173,20 @@ export function sizeAggregationPanel(
  * DERIVED FROM ORDER, not stored: numbering by position in `storage` costs no field, survives the
  * round trip because the order does, and cannot drift from the order the BOM and the drawing walk.
  */
+/**
+ * The service rating as a surface prints it.
+ *
+ * 🚨 ONE PLACE TO SAY "NOT ESTABLISHED", because the rating became nullable and this repository
+ * compiles with `strict: false` — so TypeScript flags NONE of the 38 places that interpolate it.
+ * Every one of them would have printed `null A` on a sheet, a schedule or a screen, and the
+ * compiler would have said nothing. The fix is a function, not vigilance.
+ */
+export function serviceRatingLabel(
+  t: ServiceTopology, absent = 'NOT ESTABLISHED',
+): string {
+  return num(t.service.ratedAmps) ? `${t.service.ratedAmps} A` : absent;
+}
+
 export function storageUnitLabel(t: ServiceTopology, u: StorageUnit): string {
   const base = u.label ?? u.productId;
   const same = t.storage.filter(x => x.productId === u.productId && x.role === u.role);
@@ -1178,7 +1206,7 @@ export function topologyNodeLabel(t: ServiceTopology, nodeId: string): string {
     ?? (t.aggregationPanels ?? []).find(a => a.id === nodeId)?.label
     ?? (t.pointsOfInterconnection ?? []).find(x => x.id === nodeId)?.label
     ?? (nodeId === 'service-distribution'
-      ? `the ${t.service.ratedAmps} A service distribution`
+      ? `the ${serviceRatingLabel(t, 'service')} service distribution`
       : nodeId);
 }
 
@@ -1264,15 +1292,33 @@ export function evaluateServiceTopology(topology: ServiceTopology): TopologyEval
 
   // ── SERVICE ───────────────────────────────────────────────────────────────
 
+  // 🚨 THE RATING IS AN ORDINARY UNRESOLVED INPUT, NOT A CONDITION OF EXISTING.
+  //
+  // Ray: "Missing one fact should produce SERVICE RATING REQUIRED — TOPOLOGY PARTIALLY EVALUATED.
+  // It should never mean 'pretend the graph doesn't exist.'" Everything below that does not depend
+  // on the rating still evaluates — the connection graph, DER isolation coverage, the panel busbar
+  // checks, the equipment inventory — and everything that does names this one token.
+  const serviceRated = num(topology.service.ratedAmps);
   const branchSum = topology.branches.reduce((n, b) => n + b.ratedAmps, 0);
-  checks.push(branchSum <= topology.service.ratedAmps
-    ? pass('service.branch-sum', 'site', 'Service branches fit the service',
-        `${topology.branches.length} branches totalling ${branchSum} A on a `
-        + `${topology.service.ratedAmps} A service.`)
-    : fail('service.branch-sum', 'site', 'Service branches fit the service',
-        `${topology.branches.length} branches total ${branchSum} A, which exceeds the `
-        + `${topology.service.ratedAmps} A service rating. A 400 A service does not make two 200 A `
-        + 'panels automatically valid — the split has to be engineered, not assumed.'));
+  if (!serviceRated) {
+    const fitNote = topology.branches.length > 0
+      ? ` — including whether the ${topology.branches.length} branch(es) totalling `
+        + `${branchSum} A fit it`
+      : '';
+    checks.push(unknown('service.rating', 'site', 'Service rating',
+      'The aggregate service rating has not been established, so nothing that depends on it can '
+      + `be evaluated${fitNote}. Everything that does not depend on it is evaluated below.`,
+      ['service.ratedAmps']));
+  } else {
+    checks.push(branchSum <= (topology.service.ratedAmps as number)
+      ? pass('service.branch-sum', 'site', 'Service branches fit the service',
+          `${topology.branches.length} branches totalling ${branchSum} A on a `
+          + `${topology.service.ratedAmps} A service.`)
+      : fail('service.branch-sum', 'site', 'Service branches fit the service',
+          `${topology.branches.length} branches total ${branchSum} A, which exceeds the `
+          + `${topology.service.ratedAmps} A service rating. A 400 A service does not make two 200 A `
+          + 'panels automatically valid — the split has to be engineered, not assumed.'));
+  }
 
   // ── THE EXISTING SERVICE EQUIPMENT ────────────────────────────────────────
   //
@@ -1292,26 +1338,33 @@ export function evaluateServiceTopology(topology: ServiceTopology): TopologyEval
           `${name || 'The existing service assembly'} is field verified: `
           + `${existing.mainArrangement}; ${existing.feederArrangement}; ${existing.sccrA} A AIC.`)
       : unknown('service.existing-equipment', 'site', 'Existing service equipment',
-          `EXISTING ${topology.service.ratedAmps} A SERVICE EQUIPMENT — CONFIGURATION TO VERIFY. `
+          `EXISTING ${serviceRatingLabel(topology)} SERVICE EQUIPMENT — CONFIGURATION TO VERIFY. `
           + `${name || 'The assembly'} is already installed, so its internal arrangement and `
           + 'interrupting rating are facts to be read off it rather than chosen. SolarPro does not '
           + 'replace it and does not assume its internals.',
           missing));
   }
 
+  // 🚨 THE DEMAND CHECK NEEDS BOTH NUMBERS. A calculated demand with no service rating to compare
+  // it against is not a pass and not a failure — it names the rating, and the load model it already
+  // has stops being the thing it is waiting on.
   const svcDemand = demands.serviceA;
-  checks.push(num(svcDemand)
-    ? (svcDemand <= topology.service.ratedAmps
+  checks.push(!num(svcDemand)
+    ? unknown('service.demand', 'site', 'Aggregate service demand',
+        'No load calculation has been provided, so the service rating has not been shown to be '
+        + 'adequate for the dwelling load. Nothing else in this design depends on it.',
+        ['loads.model'], 'NEC 220')
+    : !serviceRated
+      ? unknown('service.demand', 'site', 'Aggregate service demand',
+          `${svcDemand.toFixed(1)} A of calculated demand, and no service rating to compare it `
+          + 'against.', ['service.ratedAmps'], 'NEC 220')
+      : svcDemand <= (topology.service.ratedAmps as number)
         ? pass('service.demand', 'site', 'Aggregate service demand',
             `${svcDemand.toFixed(1)} A calculated demand against a `
             + `${topology.service.ratedAmps} A service.`, 'NEC 220')
         : fail('service.demand', 'site', 'Aggregate service demand',
             `${svcDemand.toFixed(1)} A calculated demand exceeds the `
-            + `${topology.service.ratedAmps} A service.`, 'NEC 220'))
-    : unknown('service.demand', 'site', 'Aggregate service demand',
-        'No load calculation has been provided, so the service rating has not been shown to be '
-        + 'adequate for the dwelling load. Nothing else in this design depends on it.',
-        ['loads.model'], 'NEC 220'));
+            + `${topology.service.ratedAmps} A service.`, 'NEC 220'));
 
   // ── THE LOAD CALCULATION — OPTIONAL, AND ASKED FOR ONCE ───────────────────
   //

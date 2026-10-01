@@ -30,7 +30,7 @@
 
 import React from 'react';
 import type { ServiceTopology } from '@/lib/electrical/serviceTopology';
-import { resolveDemands } from '@/lib/electrical/serviceTopology';
+import { resolveDemands, serviceRatingLabel } from '@/lib/electrical/serviceTopology';
 import type { ServiceOverview } from '@/lib/electrical/topologyOverview';
 import { conclusionWord } from '@/lib/electrical/topologyOverview';
 import type { EngineeringConclusion } from '@/lib/engineering/engineeringStatus';
@@ -129,7 +129,7 @@ export function ServiceTopologyMap({
                 onClick={() => onSelect('service')}>
           <div className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Service</div>
           <div className="text-lg font-black text-slate-100">
-            {topology.service.ratedAmps} A
+            {serviceRatingLabel(topology)}
           </div>
           <div className="text-xs text-slate-400">{overview.summary.phaseLabel}</div>
           <StatusLine status={overview.site} />

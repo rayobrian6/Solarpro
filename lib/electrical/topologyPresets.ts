@@ -20,6 +20,7 @@ import {
   type AggregationRecommendation,
 } from '@/lib/electrical/topologyAuthoring';
 import { derSources } from '@/lib/electrical/derSources';
+import { serviceRatingLabel } from '@/lib/electrical/serviceTopology';
 import type {
   ServiceTopology, ServicePhase, DerArrangement, PoiRelationship, SolarCoupling,
 } from '@/lib/electrical/serviceTopology';
@@ -235,7 +236,7 @@ export function describeArrangementFor(
     return n === 0
       ? 'One combined generation panel ahead of a single point of connection.'
       : `${sized} system${n === 1 ? '' : 's'} combined in one generation panel, then a single `
-        + `connection to the ${t.service.ratedAmps} A service.`;
+        + `connection to the ${serviceRatingLabel(t, 'unrated')} service.`;
   }
   return 'Built piece by piece in Advanced.';
 }
@@ -298,8 +299,10 @@ export function applyIsolationArrangement(
 
   if (id === 'common-service') {
     const r = addProtectiveDevice(next, {
-      label: `${next.service.ratedAmps} A utility isolation switch`,
+      label: `${serviceRatingLabel(next, 'Unrated')} utility isolation switch`,
       roles: ['der-isolation-disconnect'],
+      // null ⇒ the switch's required rating is unestablished, which `device.inline-rating`
+      // reports rather than inventing one from a service nobody has rated.
       ratedAmps: next.service.ratedAmps,
       lockableOpen: true, visibleOpen: true,
       locationNote: 'On the service conductors, accessible to the utility.',

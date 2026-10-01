@@ -39,7 +39,7 @@
 import type { SLDNode, SLDEdge, RunSegment } from '@/lib/topology-engine';
 import {
   evaluateServiceTopology, sizeAggregationPanel, governingArticleFor, sourcesForAggregationInput,
-  topologyNodeLabel, storageUnitLabel,
+  topologyNodeLabel, storageUnitLabel, serviceRatingLabel,
   type ServiceTopology, type TopologyEvaluation,
 } from '@/lib/electrical/serviceTopology';
 import { notEvaluatedLabel } from '@/lib/engineering/engineeringStatus';
@@ -119,16 +119,17 @@ export function buildServiceTopologyGraph(
   // ── UTILITY → METER ───────────────────────────────────────────────────────
   const utility = add({
     id: 'utility', type: 'UTILITY_GRID',
-    label: `Utility service — ${topology.service.ratedAmps} A, ${topology.service.voltage} V `
+    label: `Utility service — ${serviceRatingLabel(topology)}, ${topology.service.voltage} V `
       + `${topology.service.phase === 'split-240' ? 'split phase' : topology.service.phase}`,
-    ratedCurrent: `${topology.service.ratedAmps} A`,
+    ratedCurrent: serviceRatingLabel(topology),
     ratedVoltage: `${topology.service.voltage} V`,
   });
   const meter = add({ id: 'utility-meter', type: 'UTILITY_METER', label: 'Revenue meter' });
   link(utility.id, add({
     id: 'run-utility-meter', type: 'RUN_SEGMENT', label: 'Service entrance conductors',
     runSegment: run('SERVICE_ENTRANCE_RUN', 'Service entrance conductors',
-      { ocpdAmps: topology.service.ratedAmps }),
+      // 0 ⇒ the run carries no stated OCPD, which is what an unestablished rating means.
+      { ocpdAmps: topology.service.ratedAmps ?? 0 }),
   }), meter.id);
 
   // ── UTILITY DER ISOLATION, WHERE ONE IS REQUIRED ──────────────────────────
@@ -204,14 +205,15 @@ export function buildServiceTopologyGraph(
   // ── THE SERVICE SPLIT ─────────────────────────────────────────────────────
   const distribution = add({
     id: 'service-distribution', type: 'SERVICE_DISTRIBUTION',
-    label: `${topology.service.ratedAmps} A service distribution`,
-    ratedCurrent: `${topology.service.ratedAmps} A`,
+    label: `${serviceRatingLabel(topology, 'Service')} distribution`,
+    ratedCurrent: serviceRatingLabel(topology),
     qty: topology.branches.length,
   });
   link(upstreamId, add({
     id: 'run-distribution', type: 'RUN_SEGMENT', label: 'To service distribution',
     runSegment: run('SERVICE_DISTRIBUTION_RUN', 'To service distribution',
-      { ocpdAmps: topology.service.ratedAmps }),
+      // 0 ⇒ the run carries no stated OCPD, which is what an unestablished rating means.
+      { ocpdAmps: topology.service.ratedAmps ?? 0 }),
   }), distribution.id);
 
   // ── THE DER SIDE: AGGREGATION AND THE POINT OF INTERCONNECTION ────────────

@@ -419,8 +419,11 @@ export function parseServiceTopology(raw: unknown): StoredServiceTopology | null
   if (!t) return null;
 
   const service = isObj(t.service) ? t.service : null;
+  // 🚨 THE KILL-SWITCH IS GONE. This used to be `if (ratedAmps === null) return null;` — one
+  // absent number discarded the ENTIRE stored graph on read: every branch, panel, gateway,
+  // battery, generation panel and switch, silently, indistinguishable from never having built one.
+  // A partial project is a partial project; it is not an absent project.
   const ratedAmps = numOrNull(service?.ratedAmps);
-  if (ratedAmps === null) return null;
 
   const branches = (Array.isArray(t.branches) ? t.branches : [])
     .map(parseBranch).filter((x): x is ServiceBranch => x !== null);

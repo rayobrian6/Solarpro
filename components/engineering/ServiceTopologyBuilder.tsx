@@ -36,6 +36,7 @@ import { ServiceNodeInspector } from './ServiceNodeInspector';
 import { ServiceTopologyWizard } from './ServiceTopologyWizard';
 import { StatusBadge } from './StatusBadge';
 import type { ServiceTopology } from '@/lib/electrical/serviceTopology';
+import { serviceRatingLabel } from '@/lib/electrical/serviceTopology';
 import {
   buildServiceOverview, conclusionWord, groupRequirements,
 } from '@/lib/electrical/topologyOverview';
@@ -236,7 +237,7 @@ export function ServiceTopologyBuilder({
            className="rounded-xl border border-slate-700 bg-slate-900/70 p-4">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
           <span className="text-lg font-black text-slate-100">
-            {summary.serviceAmps} A service
+            {summary.serviceAmpsLabel} service
             {summary.serviceEquipmentIsExisting
               ? <span className="ml-1 text-xs font-bold text-amber-300">(existing)</span> : null}
           </span>
@@ -595,7 +596,7 @@ export function ServiceTopologyBuilder({
             <span className="w-32 text-xs text-slate-400">Disconnects</span>
             <button type="button" className={btn} data-testid="add-service-disconnect"
                     onClick={() => setTopology(addProtectiveDevice(topology, {
-                      label: `${topology.service.ratedAmps} A service disconnect`,
+                      label: `${serviceRatingLabel(topology, 'Service')} disconnect`,
                       roles: ['service-disconnect'],
                       ratedAmps: topology.service.ratedAmps,
                       lockableOpen: true,

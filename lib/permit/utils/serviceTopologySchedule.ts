@@ -29,7 +29,7 @@
 import type { ServiceTopology } from '@/lib/electrical/serviceTopology';
 import {
   evaluateServiceTopology, sizeAggregationPanel, governingArticleFor, topologyNodeLabel,
-  isOptionalCheck,
+  isOptionalCheck, serviceRatingLabel,
 } from '@/lib/electrical/serviceTopology';
 import {
   equipmentInstancesFromTopology, equipmentQuantities, type EquipmentInstanceKind,
@@ -109,7 +109,7 @@ export function serviceTopologyScheduleRows(t: ServiceTopology | null | undefine
     deviceType: 'service',
     manufacturer: '', model: '',
     domain: '',
-    rating: `${t.service.ratedAmps} A, ${t.service.voltage} V `
+    rating: `${serviceRatingLabel(t, 'NOT EVALUATED')}, ${t.service.voltage} V `
       + `${t.service.phase === 'split-240' ? 'split phase' : t.service.phase}`,
     ocpd: '—',
     notes: t.service.availableFaultCurrentA === null
