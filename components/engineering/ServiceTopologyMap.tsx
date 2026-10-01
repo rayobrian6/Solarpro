@@ -266,6 +266,35 @@ export function ServiceTopologyMap({
                     <StatusLine status={overview.domains[domain.id]
                       ?? { conclusion: 'NOT_EVALUATED', headline: null }} />
                   </button>
+
+                  {/* ── THIS SYSTEM'S OWN GENERATION / COMBINER PANEL ────────
+                      🚨 INSIDE THE SYSTEM, NOT IN A SHARED GROUP BELOW. Ray's job has one per
+                      system, each taking only its own batteries and feeding only its own gateway;
+                      drawn in the shared "connection to the service" group they would read as a
+                      combined panel, which is the arrangement he explicitly does not have. */}
+                  {(topology.aggregationPanels ?? [])
+                    .filter(agg => agg.domainId === domain.id)
+                    .map(agg => (
+                      <React.Fragment key={agg.id}>
+                        <Drop />
+                        <button type="button" data-testid={`node-${agg.id}`}
+                                className={`${sel(agg.id)} w-full`} onClick={() => onSelect(agg.id)}>
+                          <div className="text-[10px] font-bold uppercase tracking-widest text-slate-500">
+                            Generation panel
+                          </div>
+                          <div className="text-sm font-black text-slate-100">{agg.label}</div>
+                          <div className="text-[11px] text-slate-300">
+                            {A(agg.busbarRatingA)} bus · {agg.inputs.length} breaker
+                            {agg.inputs.length === 1 ? '' : 's'} · {A(agg.outputOcpdA)} out
+                          </div>
+                          <div className="text-[11px] text-slate-500">
+                            Feeds {nodeName(topology, agg.feedsNodeId ?? '')}
+                          </div>
+                          <StatusLine status={overview.aggregationPanels?.[agg.id]
+                            ?? { conclusion: 'NOT_EVALUATED', headline: null }} />
+                        </button>
+                      </React.Fragment>
+                    ))}
                 </>
               ) : (
                 <>
@@ -338,7 +367,8 @@ export function ServiceTopologyMap({
           Ray: "Ray should be able to see Gateway / PW domain A and Gateway / PW domain B
           converging where they actually converge. Then visibly show: DER aggregation panel →
           external DER disconnect → 400 A service point of interconnection." */}
-      {(topology.aggregationPanels ?? []).length > 0 || (topology.pointsOfInterconnection ?? []).length > 0 ? (
+      {(topology.aggregationPanels ?? []).some(a => !a.domainId)
+        || (topology.pointsOfInterconnection ?? []).length > 0 ? (
         <div className="mt-5" data-testid="der-interconnection-group">
           <div className="text-[10px] font-bold uppercase tracking-widest text-slate-500">
             Connection to the service
@@ -351,7 +381,9 @@ export function ServiceTopologyMap({
                 </span>}
           </div>
           <div className="mt-2 flex flex-wrap items-stretch gap-3">
-            {(topology.aggregationPanels ?? []).map(agg => {
+            {/* Only the SITE-WIDE kind here. A panel that belongs to one system was already
+                drawn inside that system's column above. */}
+            {(topology.aggregationPanels ?? []).filter(a => !a.domainId).map(agg => {
               const sourceCount = agg.inputs.length;
               return (
                 <button key={agg.id} type="button" data-testid={`node-${agg.id}`}

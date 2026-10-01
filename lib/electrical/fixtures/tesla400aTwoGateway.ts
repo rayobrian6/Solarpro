@@ -2,10 +2,16 @@
 // RAY'S ACTUAL UPCOMING JOB, AS A FIXTURE.
 //
 //   120/240 V split phase · 400 A aggregate service · two 200 A MSPs
-//   two Tesla Backup Gateway 3 · two Powerwall 3 · two Powerwall 3 Expansion
-//   one Powerwall + one Expansion per 200 A backup domain
+//   two Tesla Backup Gateway 3 · FOUR Powerwall 3 · ZERO Expansions
+//   two Powerwalls per 200 A system, each pair in its own generation / combiner panel
+//   PV DC coupled to the Powerwalls' own inputs — no PV inverter on the job
 //   NO meter-collar / Backup Switch interconnection permitted
 //   Chicago / ComEd
+//
+// 🚨 THE HARDWARE CHANGED ON 2026-10-01 AND THE DEFAULTS DID NOT. `buildTesla400ATwoGateway` is a
+// parameterised builder — one Powerwall and one Expansion per system is still a real arrangement and
+// is still what most of the model tests exercise. `buildRaysIntendedJob` at the bottom is THE JOB,
+// and that is what moved to four full Powerwalls.
 //
 // This is not an illustration. It is the shape the product has to save, reload, engineer, draw,
 // bill and permit without collapsing to one MSP or one gateway, and it is what
@@ -24,8 +30,9 @@ import {
 import type {
   ServiceTopology, ProtectiveDevice, ServiceBranch, PanelBoard, BackupDomain, StorageUnit,
   DerArrangement, DerAggregationPanel, PointOfInterconnection,
-  ExistingServiceEquipment, LoadModel,
+  ExistingServiceEquipment, LoadModel, SolarCoupling,
 } from '@/lib/electrical/serviceTopology';
+import { applyPerSystemGenerationPanels } from '@/lib/electrical/topologyPresets';
 
 export interface Tesla400AOptions {
   /** Established available fault current at the service. Null on a job nobody has measured. */
@@ -91,22 +98,47 @@ export interface Tesla400AOptions {
   existingServiceEquipment?: Partial<ExistingServiceEquipment>;
   /** The optional dwelling load calculation. Absent on the real job, by product decision. */
   loads?: LoadModel | null;
+  /**
+   * Inverter-bearing Powerwall 3 units in each system. Two on the current job.
+   *
+   * 🚨 FOUR CABINETS IS FOUR INVERTERS HERE, AND THAT IS THE POINT. Ray: "customer specifically
+   * wants the increased inverter/discharge capacity from four full PW3s... 4 inverter-bearing
+   * Powerwalls." Which is the exact opposite of the Expansion case, where four cabinets are two
+   * inverters — the same count field cannot express both, so there are two.
+   */
+  powerwallsPerSystem?: number;
+  /** DC expansion units per system. ZERO on the current job. */
+  expansionsPerSystem?: number;
+  /**
+   * The output configuration each Powerwall is commissioned at.
+   *
+   * Ray: "approximately 46 kW aggregate PW3 output at the 11.5 kW configuration" — 4 × 11.5 kW,
+   * which is the top row of Tesla's table and therefore 48 A and a 60 A device each.
+   */
+  outputConfigKw?: number | null;
+  /**
+   * Build one generation / combiner panel per system, which is what the current job has: each
+   * pair of Powerwalls lands in its own panel before feeding its own Gateway.
+   */
+  generationPanelPerSystem?: boolean;
+  /** How the PV is coupled. Absent ⇒ nobody recorded it, which is its own unresolved item. */
+  solarCoupling?: SolarCoupling | null;
 }
 
-const DOMAIN_INTENTS: TeslaDomainIntent[] = [
-  {
-    id: 'domain-a', label: 'Domain A',
+function domainIntents(opts: {
+  powerwalls: number; expansions: number; outputConfigKw: number | null;
+}): TeslaDomainIntent[] {
+  const mk = (id: string, label: string): TeslaDomainIntent => ({
+    id, label,
     gatewayProductId: 'tesla-backup-gateway-3',
-    storageProductIds: ['tesla-powerwall-3'],
-    expansionProductIds: ['tesla-powerwall-3-expansion'],
-  },
-  {
-    id: 'domain-b', label: 'Domain B',
-    gatewayProductId: 'tesla-backup-gateway-3',
-    storageProductIds: ['tesla-powerwall-3'],
-    expansionProductIds: ['tesla-powerwall-3-expansion'],
-  },
-];
+    storageProductIds: Array.from({ length: opts.powerwalls }, () => 'tesla-powerwall-3'),
+    expansionProductIds: Array.from(
+      { length: opts.expansions }, () => 'tesla-powerwall-3-expansion'),
+    outputConfigKw: opts.outputConfigKw,
+  });
+  // Installer language, from the authoring default: "System 1", not "Domain A".
+  return [mk('domain-a', 'System 1'), mk('domain-b', 'System 2')];
+}
 
 export interface Tesla400ABuild {
   topology: ServiceTopology;
@@ -132,8 +164,16 @@ export function buildTesla400ATwoGateway(opts: Tesla400AOptions = {}): Tesla400A
     isolationArrangement = 'common-service',
     existingServiceEquipment,
     loads = null,
+    powerwallsPerSystem = 1,
+    expansionsPerSystem = 1,
+    outputConfigKw = null,
+    generationPanelPerSystem = false,
+    solarCoupling = null,
   } = opts;
 
+  const DOMAIN_INTENTS = domainIntents({
+    powerwalls: powerwallsPerSystem, expansions: expansionsPerSystem, outputConfigKw,
+  });
   const intents = collapseToSingleGateway ? [DOMAIN_INTENTS[0]] : DOMAIN_INTENTS;
   const builds = intents.map(i => buildTeslaDomain({ ...i, sccrA: gatewaySccrA }));
   const unresolved = builds.flatMap(b => b.unresolved);
@@ -165,10 +205,10 @@ export function buildTesla400ATwoGateway(opts: Tesla400AOptions = {}): Tesla400A
 
   // ── BRANCHES ──────────────────────────────────────────────────────────────
   const branches: ServiceBranch[] = collapseToSingleGateway
-    ? [{ id: 'branch-a', label: 'Branch A', ratedAmps: 400, ocpdAmps: 400, calculatedDemandA: branchDemandA[0] ?? null }]
+    ? [{ id: 'branch-a', label: '400 A service path 1', ratedAmps: 400, ocpdAmps: 400, calculatedDemandA: branchDemandA[0] ?? null }]
     : [
-        { id: 'branch-a', label: 'Branch A', ratedAmps: 200, ocpdAmps: 200, calculatedDemandA: branchDemandA[0] ?? null },
-        { id: 'branch-b', label: 'Branch B', ratedAmps: 200, ocpdAmps: 200, calculatedDemandA: branchDemandA[1] ?? null },
+        { id: 'branch-a', label: '200 A service path 1', ratedAmps: 200, ocpdAmps: 200, calculatedDemandA: branchDemandA[0] ?? null },
+        { id: 'branch-b', label: '200 A service path 2', ratedAmps: 200, ocpdAmps: 200, calculatedDemandA: branchDemandA[1] ?? null },
       ];
 
   // ── PANELS ────────────────────────────────────────────────────────────────
@@ -208,7 +248,8 @@ export function buildTesla400ATwoGateway(opts: Tesla400AOptions = {}): Tesla400A
       const domain = domains.find(d => d.branchId === b.id);
       devices.push({
         id: `knife-${String.fromCharCode(97 + i)}`,
-        label: `${b.ratedAmps} A utility isolation switch — ${b.label}`,
+        // The path's name already carries its rating, so the switch does not repeat it.
+        label: `Utility isolation switch — ${b.label}`,
         roles: ['der-isolation-disconnect'],
         ratedAmps: b.ratedAmps, sccrA: null,
         lockableOpen: true, visibleOpen: true,
@@ -318,6 +359,7 @@ export function buildTesla400ATwoGateway(opts: Tesla400AOptions = {}): Tesla400A
     pointsOfInterconnection,
     calculatedServiceDemandA,
     loads,
+    solarCoupling,
     interconnection: {
       utilityId: 'comed',
       // Undefined ⇒ nobody has chosen, which is the honest state of this job today.
@@ -335,6 +377,15 @@ export function buildTesla400ATwoGateway(opts: Tesla400AOptions = {}): Tesla400A
     },
   };
 
+  // ── ONE GENERATION / COMBINER PANEL PER SYSTEM ────────────────────────────
+  //
+  // Applied through the same preset the wizard calls, so the fixture cannot build a panel the UI
+  // cannot. It replaces the domains' storage connection with the panel it actually lands in.
+  if (generationPanelPerSystem) {
+    const built = applyPerSystemGenerationPanels(topology);
+    return { topology: built.topology, unresolved };
+  }
+
   return { topology, unresolved };
 }
 
@@ -345,8 +396,9 @@ export function buildTesla400ATwoGateway(opts: Tesla400AOptions = {}): Tesla400A
  *   existing Eaton 400 A meter/service assembly, internals NOT yet verified
  *   two 200 A systems, independent, nothing recombined downstream
  *   one knife switch IN LINE in each path, ahead of that path's Gateway
- *   Gateway 3 + Powerwall 3 + one Expansion per system
- *   no meter collar, no common combiner, no house-load inventory
+ *   Gateway 3 + TWO Powerwall 3 + one generation/combiner panel per system
+ *   PV DC coupled to the Powerwalls — no microinverters, no PV inverter, no PV AC combiner
+ *   no meter collar, no common 400 A combiner, no house-load inventory
  *
  * Ray: "Do not invent a common 400 A knife-blade switch or common DER combiner merely because the
  * service is 400 A." Nothing here does, and nothing here claims the two-switch arrangement is
@@ -361,6 +413,21 @@ export function buildRaysIntendedJob(
   overrides: Tesla400AOptions = {},
 ): Tesla400ABuild {
   return buildTesla400ATwoGateway({
+    // 🚨 THE HARDWARE CHANGED, SO THIS DID. Ray, 2026-10-01: "The hardware/design has changed...
+    // 4 full Tesla Powerwall 3, 0 Powerwall Expansions, 2 full PW3 per Gateway... customer
+    // specifically wants the increased inverter/discharge capacity from four full PW3s."
+    //
+    // Four inverter-bearing units: 4 × 13.5 kWh = 54.0 kWh and 4 × 48 A = 192 A of AC source,
+    // against two Expansions' 27.0 kWh and 96 A on the previous arrangement. The energy figure
+    // barely moves and the CURRENT doubles, which is exactly the distinction the Expansion work
+    // existed to protect — and the reason this is a different number of options, not a bigger one.
+    powerwallsPerSystem: 2,
+    expansionsPerSystem: 0,
+    outputConfigKw: 11.5,
+    // Each pair lands in its own panel before its own Gateway. Two panels, never one.
+    generationPanelPerSystem: true,
+    // The strings terminate on the Powerwalls' own DC inputs; there is no PV inverter on this job.
+    solarCoupling: 'dc-coupled-storage',
     derArrangement: 'independent-branch',
     // 🚨 THE POWERWALL LANDS IN ITS GATEWAY, which is what Ray's own diagram shows —
     //

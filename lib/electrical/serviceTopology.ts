@@ -244,6 +244,20 @@ export interface GatewayInstance {
   /** The main breaker actually selected in it — this is what sets the supported SCCR. */
   mainBreakerA: number | null;
   sccrA: number | null;
+  /**
+   * The controller's OWN internal panelboard, resolved from its catalogue row.
+   *
+   * 🚨 A THIRD BUS, AND IT IS NOT THE MSP'S AND NOT THE SERVICE'S. Load and generation breakers
+   * land in it, so "will this generation feeder fit" is a question about THIS busbar and THIS
+   * maximum branch device. Absent ⇒ the product has no internal panelboard, or the catalogue has
+   * not been given one — and the landing check says so rather than borrowing another panel's bus.
+   */
+  internalPanelboard?: {
+    busbarRatingA: number;
+    spaces: number;
+    maxBranchBreakerA: number;
+    basis: string;
+  } | null;
 }
 
 export interface PanelBoard {
@@ -270,6 +284,24 @@ export interface PanelBoard {
  */
 export type StorageRole = 'inverter-unit' | 'energy-expansion';
 
+/**
+ * What a unit's integrated solar inverter will accept on its DC inputs.
+ *
+ * 🚨 RESOLVED ONTO THE INSTANCE FROM THE CATALOGUE, like `GatewayInstance.continuousRatingA` and
+ * for the same reason: this file holds no catalogue lookup, and a check that needs a manufacturer
+ * limit reads it off the unit that was built from the manufacturer's row. `basis` travels with the
+ * numbers so a plan reviewer sees which document they came from.
+ */
+export interface PvInputLimits {
+  maxStcKw: number;
+  mppts: number;
+  mpptVdc: readonly [number, number];
+  inputVdc: readonly [number, number];
+  maxImpPerMpptA: number;
+  maxIscPerMpptA: number;
+  basis: string;
+}
+
 export interface StorageUnit {
   id: string;
   productId: string;
@@ -289,6 +321,30 @@ export interface StorageUnit {
   usableKwh: number | null;
   /** For an expansion: the inverter unit it is harnessed to. */
   attachedToUnitId?: string | null;
+  /**
+   * 🚨 WHICH OUTPUT SETTING THIS UNIT IS COMMISSIONED AT.
+   *
+   * A Powerwall 3 is configurable — 5.8 / 7.6 / 10 / 11.5 kW — and its continuous current AND its
+   * required OCPD both move with the setting. Ray's job wants "the increased inverter/discharge
+   * capacity", i.e. the 11.5 kW configuration, and that is a recorded decision about this unit, not
+   * a property of the product.
+   *
+   * Absent ⇒ the catalogue's top row, which is what the unit ships able to do and what the scalars
+   * on the product row state. `continuousOutputA` / `ocpdA` beside it are the RESOLVED numbers for
+   * whichever row applies — read those, never this.
+   */
+  outputConfigKw?: number | null;
+  /**
+   * PV STC capacity landed on THIS unit's own DC inputs, for a DC-coupled design.
+   *
+   * 🚨 IT COMES FROM THE DESIGN, NOT FROM A DIVISION. Ray: "Actual string counts must continue to
+   * come from the design. Do not invent final string distribution simply to make the diagram
+   * symmetrical." So null is the honest state until the string engine has assigned strings to
+   * inputs, and the check names that rather than splitting the array four ways.
+   */
+  pvDcStcKw?: number | null;
+  /** What this unit's integrated inverter accepts on DC, from its catalogue row. */
+  pvInputLimits?: PvInputLimits | null;
 }
 
 /**
@@ -428,6 +484,28 @@ export interface DerAggregationPanel {
   id: string;
   label: string;
   /**
+   * 🚨 WHICH SYSTEM THIS PANEL BELONGS TO.
+   *
+   * Ray, on the real job: "These are two separate combiner/generation panels. Do not create one
+   * common generation panel shared by both Gateways." Each Tesla system has its own, each takes
+   * only its own two Powerwalls, and each feeds only its own Gateway — so the panel has to KNOW
+   * which system it is in. Without it the BOM shows two identical rows with nothing to tell them
+   * apart, the equipment schedule cannot keep Domain A and Domain B identifiable, and the drawing
+   * has no basis for putting one on the left and one on the right.
+   *
+   * `null` ⇒ a site-wide panel that belongs to no single system, which is what the common
+   * aggregation arrangement builds. Absent on graphs written before this field existed.
+   */
+  domainId?: string | null;
+  /**
+   * The catalogue part actually selected for it.
+   *
+   * 🚨 A CALCULATED MINIMUM IS NOT A PURCHASABLE DEVICE. The sizing says "at least 125 A"; this
+   * says which panelboard was bought. Absent ⇒ `aggregation.selection` reports NOT EVALUATED —
+   * EQUIPMENT SELECTION REQUIRED, and the BOM has nothing to order.
+   */
+  productId?: string | null;
+  /**
    * 🚨 DOES THIS PANEL ALSO CARRY PREMISES LOAD?
    *
    * Ray: "If the panel also carries service/load current rather than DER-only current, its
@@ -519,6 +597,79 @@ export type DerArrangement =
   | 'common-aggregation'
   /** Advanced: the operator has built something the two presets do not describe. */
   | 'custom';
+
+/**
+ * 🚨 HOW THE PV IS COUPLED — ONE PROJECT-LEVEL ANSWER, AND IT OUTRANKS EVERY INFERENCE.
+ *
+ * Ray, from the live browser: "Service Topology says Tesla. Main electrical system still says
+ * MICROINVERTER. SLD still draws Enphase equipment. That is unacceptable. SolarPro needs one
+ * explicit project-level solar coupling architecture."
+ *
+ * The contradiction was not a rendering bug. Nothing in the product RECORDED how the PV is
+ * coupled, so two consumers each inferred it: the service topology inferred Tesla from the
+ * equipment in its domains, and the drawing inferred microinverters from the equipment picker's
+ * default. Both inferences were locally reasonable. The project had no answer for them to agree
+ * with, so this type is that answer.
+ *
+ *   'dc-coupled-storage'   — the strings terminate on the storage units' own DC inputs. There is no
+ *       separate PV inverter at all: no microinverters, no micro branch circuits, no PV combiner,
+ *       no standalone solar inverter, and no PV AC disconnect from the AC-coupled path, because
+ *       none of that equipment exists on the job.
+ *   'ac-coupled-inverter'  — the PV has its own inverter(s) and lands on AC. Legitimate alongside
+ *       storage and NOT to be ruled out just because a battery is present: Ray's own instruction is
+ *       "Do not assume Tesla storage always eliminates Enphase."
+ *   'storage-only'         — there is no PV in this project.
+ *
+ * `null`/absent ⇒ nobody has recorded it, which is a DESIGN DECISION the engineering reports as
+ * unresolved. It is NOT a licence for a consumer to go back to guessing.
+ */
+export type SolarCoupling =
+  | 'dc-coupled-storage'
+  | 'ac-coupled-inverter'
+  | 'storage-only';
+
+/**
+ * What a coupling architecture is called in front of an installer.
+ *
+ * 🚨 THE PRODUCT NAME IS COMPOSED, NOT BAKED IN. Ray writes the architecture as
+ * `DC_COUPLED_POWERWALL_3`, and on his job that is exactly what it is — but the member is
+ * `dc-coupled-storage` because this file is the GENERIC graph and may name no manufacturer. The
+ * topology already knows which units are installed, so passing it produces "PV DC coupled to Tesla
+ * Powerwall 3" from the instances; without one it reads "PV DC coupled to the batteries", which is
+ * the same architecture stated without a product nobody has chosen yet.
+ */
+export function solarCouplingLabel(
+  c: SolarCoupling | null | undefined, t?: ServiceTopology,
+): string {
+  switch (c) {
+    case 'dc-coupled-storage': {
+      const models = [...new Set((t?.storage ?? [])
+        .filter(u => u.role === 'inverter-unit')
+        .map(u => u.label ?? u.productId))];
+      return `PV DC coupled to ${models.length === 1 ? models[0] : 'the batteries'}`;
+    }
+    case 'ac-coupled-inverter': return 'PV on its own AC inverter';
+    case 'storage-only': return 'No PV — storage only';
+    default: return 'Not selected';
+  }
+}
+
+/**
+ * The equipment classes that may NOT exist on a design with this coupling.
+ *
+ * 🚨 ONE LIST, READ BY THE DRAWING, THE SIDEBAR AND THE CHECK. Written separately they diverge,
+ * and the sheet starts dropping a device the engineering still counts.
+ */
+export function prohibitedPvEquipmentFor(c: SolarCoupling | null | undefined): string[] {
+  if (c !== 'dc-coupled-storage') return [];
+  return [
+    'microinverters',
+    'microinverter branch circuits',
+    'PV AC combiner panel',
+    'standalone PV / solar inverter',
+    'PV AC disconnect from the AC-coupled interconnection path',
+  ];
+}
 
 /**
  * Where the neutral-to-ground bond is, and therefore what everything downstream must be.
@@ -627,6 +778,11 @@ export interface ServiceTopology {
    * own amperage.
    */
   loads?: LoadModel | null;
+  /**
+   * 🚨 HOW THE PV IS COUPLED — the one project-level answer, and the authority every other surface
+   * defers to. Absent ⇒ nobody recorded it; see `SolarCoupling`.
+   */
+  solarCoupling?: SolarCoupling | null;
   /** Jurisdictional facts that change what is legal, supplied by the AHJ/utility layer. */
   interconnection: InterconnectionContext;
 }
@@ -992,13 +1148,32 @@ export function sizeAggregationPanel(
  * on a screen, one layer along. Exported so the schedule, the sheet and the screen resolve ids the
  * same way instead of each growing its own lookup.
  */
+/**
+ * What to call ONE storage unit when there are four of them that say the same thing.
+ *
+ * 🚨 "TESLA POWERWALL 3" FOUR TIMES IS NOT FOUR NAMES. Four full Powerwalls produce four PV-input
+ * checks, four schedule rows and four boxes on a drawing, and every one of them printed the model
+ * name alone. Ray's own sketch of the job numbers them — PW3 #1 … #4 — so the position is part of
+ * the name.
+ *
+ * DERIVED FROM ORDER, not stored: numbering by position in `storage` costs no field, survives the
+ * round trip because the order does, and cannot drift from the order the BOM and the drawing walk.
+ */
+export function storageUnitLabel(t: ServiceTopology, u: StorageUnit): string {
+  const base = u.label ?? u.productId;
+  const same = t.storage.filter(x => x.productId === u.productId && x.role === u.role);
+  if (same.length <= 1) return base;
+  return `${base} #${same.findIndex(x => x.id === u.id) + 1}`;
+}
+
 export function topologyNodeLabel(t: ServiceTopology, nodeId: string): string {
+  const unit = t.storage.find(u => u.id === nodeId);
+  if (unit) return storageUnitLabel(t, unit);
   return t.devices.find(d => d.id === nodeId)?.label
     ?? t.panels.find(p => p.id === nodeId)?.label
     ?? t.branches.find(b => b.id === nodeId)?.label
     ?? t.domains.find(d => d.gateway.id === nodeId)?.gateway.label
     ?? t.domains.find(d => d.id === nodeId)?.label
-    ?? t.storage.find(u => u.id === nodeId)?.label
     ?? (t.generation ?? []).find(g => g.id === nodeId)?.label
     ?? (t.aggregationPanels ?? []).find(a => a.id === nodeId)?.label
     ?? (t.pointsOfInterconnection ?? []).find(x => x.id === nodeId)?.label
@@ -1729,6 +1904,115 @@ export function evaluateServiceTopology(topology: ServiceTopology): TopologyEval
       checks.push(unknown('aggregation.sccr', scope, `${panel.label} interrupting rating`,
         `${panel.label} states no interrupting rating.`, [`sccr:${panel.id}`],
         'NEC 110.9 / 110.24'));
+    }
+
+    // WHAT IT LANDS IN. A generation panel whose output goes into a manufacturer's listed
+    // controller is governed by that listing, not by an NEC busbar rule SolarPro could apply —
+    // the same reason a Powerwall landing in its Gateway is NOT_EVALUATED rather than passed.
+    const landsInGateway = topology.domains.find(d => d.gateway.id === panel.feedsNodeId);
+    if (landsInGateway) {
+      const ip = landsInGateway.gateway.internalPanelboard ?? null;
+      const feeder = num(panel.outputOcpdA) ? (panel.outputOcpdA as number) : null;
+      // 🚨 WHAT THE MANUFACTURER PUBLISHES IS CHECKED. WHAT IT DOES NOT PUBLISH IS NOT GUESSED.
+      //
+      // A gateway's internal panelboard has a stated busbar and a stated largest branch device, and
+      // a generation breaker bigger than that maximum is a FAIL anybody can see. How much
+      // generation that bus may carry in total is a different question, and the manufacturer's own
+      // installation documentation answers it with "comply with the NEC" — which, for a listed
+      // power-control assembly, depends on a configured limit SolarPro does not hold. So one half
+      // is decided here and the other half is named, rather than both being waved through.
+      if (!ip) {
+        checks.push(unknown('aggregation.landing', scope, `${panel.label} landing`,
+          `${panel.label} lands in ${landsInGateway.gateway.label} and no internal panelboard is `
+          + 'recorded for that controller, so there is nothing to size the landing against.',
+          [`manufacturer-document:internal-panelboard:${landsInGateway.gateway.productId}`],
+          'Manufacturer listing / NEC 110.3(B)'));
+      } else if (feeder !== null && feeder > ip.maxBranchBreakerA) {
+        checks.push(fail('aggregation.landing', scope, `${panel.label} landing`,
+          `${panel.label} needs a ${feeder} A breaker in ${landsInGateway.gateway.label}, whose `
+          + `internal panelboard accepts branch devices up to ${ip.maxBranchBreakerA} A on a `
+          + `${ip.busbarRatingA} A bus.`, ip.basis));
+      } else {
+        checks.push(unknown('aggregation.landing', scope, `${panel.label} landing`,
+          `${panel.label}'s ${feeder === null ? 'output' : `${feeder} A`} feeder lands in `
+          + `${landsInGateway.gateway.label}, whose internal panelboard is ${ip.busbarRatingA} A `
+          + `with ${ip.spaces} spaces and branch devices to ${ip.maxBranchBreakerA} A — so the `
+          + 'device itself is within what the manufacturer permits. How much generation that bus '
+          + 'may carry in total is set by the assembly\'s listing and its configured limit, which '
+          + 'is not published here and is not something SolarPro will assume.',
+          ['manufacturer-document:gateway-generation-input'],
+          `${ip.basis} / NEC 110.3(B)`));
+      }
+    }
+
+    // 🚨 THE REQUIREMENT IS NOT THE PART. Same law as `device.selection`, one node along.
+    if (!panel.productId) {
+      checks.push(unknown('aggregation.selection', scope, `${panel.label} equipment selection`,
+        `The requirement is established (${num(sizing.standardOcpdA)
+          ? `${sizing.standardOcpdA} A output OCPD` : 'output OCPD not yet established'}`
+        + `${num(panel.busbarRatingA) ? `, ${panel.busbarRatingA} A busbar` : ''}`
+        + `, ${panel.inputs.length} branch position(s)) and no catalogue panelboard has been `
+        + 'selected to meet it. Nothing is ordered and nothing is drawn as a specific enclosure '
+        + 'until one is chosen.', ['aggregation.productId']));
+    }
+  }
+
+  // ── HOW THE PV IS COUPLED, AND WHETHER THE DESIGN AGREES WITH ITSELF ──────
+  //
+  // 🚨 THE CONTRADICTION RAY FOUND IN THE BROWSER, MADE INTO A CHECK. Service topology said Tesla
+  // while the main electrical system said MICROINVERTER and the SLD drew Enphase. Nothing was
+  // wrong with either consumer in isolation — the project had no recorded answer, so each inferred
+  // one. This check is what makes the absence visible instead of letting it be filled twice.
+  {
+    const coupling = topology.solarCoupling ?? null;
+    const inverterUnitsAll = topology.storage.filter(u => u.role === 'inverter-unit');
+    if (!coupling) {
+      checks.push(unknown('pv.coupling', 'site', 'Solar coupling architecture',
+        'How the PV is coupled has not been recorded for this project. Until it is, every surface '
+        + 'that needs to know — the drawing, the equipment list, the engineering sidebar — has to '
+        + 'infer it, and they do not all infer the same thing.',
+        ['interconnection.solarCoupling']));
+    } else {
+      checks.push(pass('pv.coupling', 'site', 'Solar coupling architecture',
+        coupling === 'dc-coupled-storage'
+          ? `The PV strings terminate on the ${solarCouplingLabel(coupling, topology)
+              .replace('PV DC coupled to ', '')} units' own DC inputs. There is no separate PV `
+            + 'inverter, no microinverter branch circuit, no PV combiner and no PV AC disconnect '
+            + 'on this design, because none of that equipment is installed.'
+          : coupling === 'ac-coupled-inverter'
+            ? 'The PV has its own inverter(s) and interconnects on the AC side.'
+            : 'There is no PV on this project; the design is storage only.'));
+    }
+
+    // Each unit's own DC input, against the limit the manufacturer publishes for it.
+    if (coupling === 'dc-coupled-storage') {
+      for (const u of inverterUnitsAll) {
+        const limits = u.pvInputLimits ?? null;
+        const label = storageUnitLabel(topology, u);
+        if (!limits) {
+          checks.push(unknown('pv.dc-input', `storage:${u.id}`, `${label} PV input`,
+            `This design is DC coupled, and no PV input limits are recorded for ${label}. A unit `
+            + 'with no published PV input cannot be shown accepting strings.',
+            [`manufacturer-document:pv-input:${u.productId}`]));
+          continue;
+        }
+        if (!num(u.pvDcStcKw)) {
+          checks.push(unknown('pv.dc-input', `storage:${u.id}`, `${label} PV input`,
+            `${label} accepts up to ${limits.maxStcKw} kW STC across ${limits.mppts} MPPTs `
+            + `(${limits.mpptVdc[0]}–${limits.mpptVdc[1]} V DC, ${limits.maxImpPerMpptA} A Imp / `
+            + `${limits.maxIscPerMpptA} A Isc per MPPT). No PV has been assigned to it yet. The `
+            + 'string layout decides that, and splitting the array evenly across the units to fill '
+            + 'this in would be an invented distribution.', ['pv.stringAssignment']));
+        } else {
+          checks.push((u.pvDcStcKw as number) <= limits.maxStcKw
+            ? pass('pv.dc-input', `storage:${u.id}`, `${label} PV input`,
+                `${u.pvDcStcKw} kW STC assigned against the ${limits.maxStcKw} kW this unit `
+                + 'accepts.', limits.basis)
+            : fail('pv.dc-input', `storage:${u.id}`, `${label} PV input`,
+                `${u.pvDcStcKw} kW STC is assigned to a unit that accepts `
+                + `${limits.maxStcKw} kW.`, limits.basis));
+        }
+      }
     }
   }
 

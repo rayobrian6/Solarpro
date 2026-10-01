@@ -16,12 +16,12 @@ import {
   createServiceTopology, addServiceBranch, addPanel, updateBranch,
   addAggregationPanel, updateAggregationPanel, addPointOfInterconnection, setDerArrangement,
   placeDevice, recommendAggregationRatings, updatePointOfInterconnection,
-  addProtectiveDevice, removeProtectiveDevice,
+  addProtectiveDevice, removeProtectiveDevice, removeAggregationPanel,
   type AggregationRecommendation,
 } from '@/lib/electrical/topologyAuthoring';
 import { derSources } from '@/lib/electrical/derSources';
 import type {
-  ServiceTopology, ServicePhase, DerArrangement, PoiRelationship,
+  ServiceTopology, ServicePhase, DerArrangement, PoiRelationship, SolarCoupling,
 } from '@/lib/electrical/serviceTopology';
 
 /** The sizes the picker offers. `null` is "Custom" — the operator types the rating. */
@@ -320,7 +320,7 @@ export function applyIsolationArrangement(
       ?? (b.panelIds ?? [])[0]
       ?? null;
     const r = addProtectiveDevice(next, {
-      label: `${b.ratedAmps} A utility isolation switch — ${b.label}`,
+      label: `Utility isolation switch — ${b.label}`,
       roles: ['der-isolation-disconnect'],
       ratedAmps: b.ratedAmps,
       lockableOpen: true, visibleOpen: true,
@@ -454,6 +454,168 @@ export function applyDerArrangement(
   }
 
   return { topology: next, created, recommendation };
+}
+
+/**
+ * How the new solar connects, in the words Ray's own flow uses.
+ *
+ * 🚨 THE LABEL NAMES THE ACTUAL BATTERY, THE MEMBER DOES NOT. `dc-coupled-storage` is the generic
+ * architecture; "DC directly to Tesla Powerwall 3" is what the installer picking it reads, composed
+ * from the units in the graph. One model, two vocabularies — the same split the DER arrangement
+ * choices already use.
+ */
+export interface SolarCouplingChoice {
+  id: SolarCoupling;
+  labelFor: (t: ServiceTopology) => string;
+  describe: string;
+}
+
+export const SOLAR_COUPLING_CHOICES: ReadonlyArray<SolarCouplingChoice> = [
+  {
+    id: 'dc-coupled-storage',
+    labelFor: t => {
+      const models = [...new Set(t.storage.filter(u => u.role === 'inverter-unit')
+        .map(u => u.label ?? u.productId))];
+      return `DC directly to ${models.length === 1 ? models[0] : 'the batteries'}`;
+    },
+    describe: 'The strings land on the batteries\' own DC inputs. No microinverters, no separate '
+      + 'solar inverter, no PV combiner and no PV AC disconnect — none of that equipment is '
+      + 'installed.',
+  },
+  {
+    id: 'ac-coupled-inverter',
+    labelFor: () => 'Existing or new AC solar inverter',
+    describe: 'The PV has its own inverter and connects on the AC side. A perfectly ordinary '
+      + 'arrangement alongside a battery, and not ruled out by one being present.',
+  },
+  {
+    id: 'storage-only',
+    labelFor: () => 'No solar on this project',
+    describe: 'Storage only. Nothing on the sheet shows PV.',
+  },
+];
+
+export interface GenerationPanelResult {
+  topology: ServiceTopology;
+  created: string[];
+  /** One recommendation per panel built, so the operator sees the arithmetic. */
+  recommendations: AggregationRecommendation[];
+}
+
+/**
+ * ONE GENERATION / COMBINER PANEL PER SYSTEM — a physical panelboard, not a note.
+ *
+ * Ray's real job: "Each pair of Powerwall 3 units must first land in a generation / combiner panel
+ * before feeding its Gateway... These are two separate combiner/generation panels. Do not create
+ * one common generation panel shared by both Gateways."
+ *
+ * 🚨 SO IT IS BUILT PER DOMAIN AND IT CARRIES ITS DOMAIN'S ID. Each panel takes only that system's
+ * inverter units, each feeds only that system's gateway, and `domainId` is what keeps Domain A and
+ * Domain B apart on a BOM where both rows say the same model. The one shared panel remains
+ * buildable — it is `applyDerArrangement('common-aggregation')` — and nothing here reaches for it
+ * because two Gateways exist.
+ *
+ * 🚨 AND IT IS SIZED FROM ITS OWN TWO POWERWALLS. Ray: "Do not hard-code a combiner size merely
+ * because two 60 A breakers exist." Two 48 A units give 96 A, 125% of that is 120 A, and the next
+ * standard device is 125 A — which is the number `recommendAggregationRatings` returns from the
+ * instances. Change the configuration to 10 kW and it moves on its own.
+ */
+export function applyPerSystemGenerationPanels(t: ServiceTopology): GenerationPanelResult {
+  const created: string[] = [];
+  const recommendations: AggregationRecommendation[] = [];
+  let next = t;
+
+  // Replace any per-system panels already built, so re-running the step does not accumulate them.
+  // A site-wide panel (no domainId) belongs to the other arrangement and is left alone.
+  for (const existing of (t.aggregationPanels ?? []).filter(p => p.domainId)) {
+    next = removeAggregationPanel(next, existing.id);
+  }
+
+  for (const d of next.domains) {
+    const units = d.storageUnitIds
+      .map(id => next.storage.find(u => u.id === id))
+      .filter((u): u is NonNullable<typeof u> => !!u && u.role === 'inverter-unit');
+    const added = addAggregationPanel(next, {
+      label: `Generation panel — ${d.label}`,
+      domainId: d.id,
+      // A DER-only generation panel: it serves no premises load, so the 120% allowance is not its
+      // governing rule and its busbar simply has to carry the aggregated output.
+      carriesPremisesLoad: false,
+      mainLugOnly: true,
+      inputs: units.map(u => ({ sourceId: u.id, tap: 'der-output' as const, ocpdA: u.ocpdA })),
+      // Into that system's own controller, and no further.
+      feedsNodeId: d.gateway.id,
+    });
+    next = added.topology;
+    created.push(`${added.panel.label} with ${units.length} branch breaker(s), feeding `
+      + `${d.gateway.label}`);
+
+    const rec = recommendAggregationRatings(next, added.panel.id);
+    recommendations.push(rec);
+    if (rec.outputOcpdA !== null) {
+      next = updateAggregationPanel(next, added.panel.id, {
+        busbarRatingA: rec.busbarRatingA,
+        outputOcpdA: rec.outputOcpdA,
+        outputConductorGauge: rec.outputConductorGauge,
+      });
+      created.push(`${rec.aggregateContinuousA} A aggregated → ${rec.outputOcpdA} A output OCPD, `
+        + `${rec.outputConductorGauge} feeder, ${rec.busbarRatingA} A busbar`);
+    }
+
+    // The storage no longer lands on the backed-up busbar or in the controller directly: it lands
+    // in this panel. Saying otherwise would leave the 120% check pointed at the wrong bus.
+    next = {
+      ...next,
+      domains: next.domains.map(x => x.id === d.id
+        ? { ...x, storageConnection: 'der-aggregation-panel' as const } : x),
+    };
+
+    // The point of interconnection for this system is the panel's output landing in the gateway.
+    // Listed equipment, so the governed relationship is the manufacturer's, not an NEC article.
+    const poi = next.pointsOfInterconnection.find(p => p.connectedToNodeId === d.gateway.id
+      || p.derNodeId === (d.storageUnitIds[0] ?? ''));
+    if (poi) {
+      next = updatePointOfInterconnection(next, poi.id, {
+        derNodeId: added.panel.id,
+        connectedToNodeId: d.gateway.id,
+        relationship: 'manufacturer-integrated',
+      });
+    } else {
+      const r = addPointOfInterconnection(next, {
+        label: `${d.label} point of interconnection`,
+        relationship: 'manufacturer-integrated',
+        derNodeId: added.panel.id,
+        connectedToNodeId: d.gateway.id,
+      });
+      next = r.topology;
+      created.push(`${r.poi.label} — the generation panel's output into ${d.gateway.label}`);
+    }
+  }
+
+  return { topology: next, created, recommendations };
+}
+
+/**
+ * Take the per-system generation panels back out.
+ *
+ * 🚨 AND PUT THE STORAGE BACK TO UNRESOLVED, NOT TO A LANDING NOBODY CHOSE. The panel was where
+ * the Powerwalls landed; with it gone, where they land is an open question again. Silently
+ * reverting them to the gateway or to the panel busbar would answer it on the operator's behalf —
+ * and one of those two answers FAILS 705.12(B) on this job.
+ */
+export function clearPerSystemGenerationPanels(t: ServiceTopology): ServiceTopology {
+  let next = t;
+  for (const p of (t.aggregationPanels ?? []).filter(x => x.domainId)) {
+    next = removeAggregationPanel(next, p.id);
+  }
+  return {
+    ...next,
+    domains: next.domains.map(d => d.storageConnection === 'der-aggregation-panel'
+      ? { ...d, storageConnection: 'unresolved' as const } : d),
+    pointsOfInterconnection: (next.pointsOfInterconnection ?? []).map(poi =>
+      poi.derNodeId === null && poi.relationship === 'manufacturer-integrated'
+        ? { ...poi, relationship: 'unresolved' as const } : poi),
+  };
 }
 
 /**

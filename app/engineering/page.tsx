@@ -28,6 +28,7 @@ import AppShell from '@/components/ui/AppShell';
 import PlanGate from '@/components/ui/PlanGate';
 import CombinerSelector from '@/components/engineering/CombinerSelector';
 import { ServiceTopologyBuilder } from '@/components/engineering/ServiceTopologyBuilder';
+import type { ServiceTopology as ServiceTopologyForPage } from '@/lib/electrical/serviceTopology';
 import { useSubscription } from '@/hooks/useSubscription';
 import {
   Zap, Download, Printer, Plus, Trash2, Settings,
@@ -1147,6 +1148,15 @@ function EngineeringPageInner() {
   const [projectAutoLoaded, setProjectAutoLoaded] = useState(false);
   const [autoLoadBanner, setAutoLoadBanner] = useState<string | null>(null);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
+  /**
+   * 🚨 THE SERVICE GRAPH, HELD ONCE FOR THE WHOLE PAGE.
+   *
+   * Handed up by `ServiceTopologyBuilder` as it loads and as it is edited, so the Engineering
+   * Intelligence sidebar reads the SAME object the Service Topology tab is showing. Before this,
+   * the page had no reference to the graph at all — which is how the badge came to read
+   * MICROINVERTER beside a Tesla topology on the next tab.
+   */
+  const [svcTopology, setSvcTopology] = useState<ServiceTopologyForPage | null>(null);
   // 🚨 THE PROJECT'S RECORDED COMBINER SELECTION — the installer's answer, read
   // from projects.selected_equipment. It is sent with every drawing/BOM payload
   // so downstream CONSUMES it instead of re-deriving a device from compatibility.
@@ -8990,14 +9000,36 @@ function EngineeringPageInner() {
 
   // Derived topology label for display — hybrid systems mix topologies per sub,
   // so a single 'STRING INVERTER'/'MICROINVERTER' label is wrong for them.
-  const topologyLabel = subSystemCounts.isHybrid ? 'HYBRID SYSTEM'
+  //
+  // 🚨 AND THE PROJECT'S RECORDED SOLAR COUPLING OUTRANKS THE EQUIPMENT PICKER. Ray, from the live
+  // browser: "Service Topology says Tesla. Main electrical system still says MICROINVERTER. SLD
+  // still draws Enphase equipment. That is unacceptable." The picker's default was reaching this
+  // badge on a project whose service graph says the strings terminate on battery DC inputs; the
+  // SLD renderer applies the same precedence, from the same field, so the two cannot disagree.
+  const _svcCouplingIsDc =
+    (svcTopology?.solarCoupling ?? null) === 'dc-coupled-storage';
+  const topologyLabel = _svcCouplingIsDc ? 'PV DC COUPLED TO STORAGE'
+    : subSystemCounts.isHybrid ? 'HYBRID SYSTEM'
     : config.inverters[0]?.type === 'micro' ? 'MICROINVERTER'
     : config.inverters[0]?.type === 'optimizer' ? 'STRING + OPTIMIZER'
     : 'STRING INVERTER';
-  const topologyColor = subSystemCounts.isHybrid ? 'text-amber-400 border-amber-500/40 bg-amber-500/10'
+  const topologyColor = _svcCouplingIsDc ? 'text-emerald-400 border-emerald-500/40 bg-emerald-500/10'
+    : subSystemCounts.isHybrid ? 'text-amber-400 border-amber-500/40 bg-amber-500/10'
     : config.inverters[0]?.type === 'micro' ? 'text-purple-400 border-purple-500/40 bg-purple-500/10'
     : config.inverters[0]?.type === 'optimizer' ? 'text-blue-400 border-blue-500/40 bg-blue-500/10'
     : 'text-amber-400 border-amber-500/40 bg-amber-500/10';
+  /** The one-line detail under the badge, when the graph is the authority for it. */
+  const _svcTopologyDetail = (() => {
+    if (!svcTopology || !_svcCouplingIsDc) return null;
+    const units = svcTopology.storage.filter(u => u.role === 'inverter-unit');
+    const models = [...new Set(units.map(u => u.label ?? u.productId))];
+    const kwh = units.reduce<number | null>(
+      (n, u) => (n === null || u.usableKwh === null ? null : n + u.usableKwh), 0);
+    return `${units.length} × ${models.length === 1 ? models[0] : 'battery inverter'}`
+      + ` · ${svcTopology.domains.length} system${svcTopology.domains.length === 1 ? '' : 's'}`
+      + ` · ${kwh === null ? '—' : kwh.toFixed(1)} kWh`
+      + ` · ${totalPanels} modules · ${totalKw} kW DC`;
+  })();
 
   // ── Permit Readiness — derived from live engineering state ────────────
   const _firstInvCfg  = config.inverters[0];
@@ -12453,7 +12485,8 @@ function EngineeringPageInner() {
              ══════════════════════════════════════════════════════════════ */}
           {activeTab === 'service' ? (
             <div data-testid="engineering-service-tab">
-              <ServiceTopologyBuilder projectId={currentProjectId ?? null} />
+              <ServiceTopologyBuilder projectId={currentProjectId ?? null}
+                                      onTopologyChange={setSvcTopology} />
             </div>
           ) : null}
 
@@ -18094,12 +18127,14 @@ function EngineeringPageInner() {
               <div className={`rounded-xl border px-3 py-2.5 ${topologyColor}`}>
                 <div className="text-xs font-black tracking-wide">{topologyLabel}</div>
                 <div className="text-xs opacity-70 mt-0.5">
-                  {subSystemCounts.isHybrid
+                  {/* The graph first, where it has an answer — a DC-coupled design has no
+                      microinverter count and no AC branch count to print. */}
+                  {_svcTopologyDetail ?? (subSystemCounts.isHybrid
                     ? `${subSystemCounts.present.length} sub-systems · ${subSystemCounts.present.map(k => `${k.charAt(0).toUpperCase()}${k.slice(1)} ${subSystemCounts[k]}`).join(' · ')} · ${systemPanelCount} modules`
                     : cs.isMicro
                       ? `${cs.microDeviceCount} microinverter${cs.microDeviceCount !== 1 ? 's' : ''} · ${cs.acBranchCount} AC branch${cs.acBranchCount !== 1 ? 'es' : ''} · ${totalPanels} modules · ${totalKw} kW DC`
                       : `${config.inverters.length} inverter${config.inverters.length !== 1 ? 's' : ''} · ${totalPanels} modules · ${totalKw} kW DC`
-                  }
+                  )}
                 </div>
                 {topologySwitching ? (
                   <div className="text-xs mt-1 animate-pulse">⚡ Propagating ecosystem…</div>

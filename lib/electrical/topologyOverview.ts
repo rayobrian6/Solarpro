@@ -20,7 +20,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import {
-  evaluateServiceTopology, OPTIONAL_REQUIREMENT_TOKENS,
+  evaluateServiceTopology, OPTIONAL_REQUIREMENT_TOKENS, solarCouplingLabel,
   type ServiceTopology, type TopologyEvaluation, type TopologyCheck,
 } from '@/lib/electrical/serviceTopology';
 import { foldConclusions, type EngineeringConclusion } from '@/lib/engineering/engineeringStatus';
@@ -191,6 +191,18 @@ export interface ServiceSummary {
   generationUnitCount: number;
   /** How the DER reaches the service, in words — or null when nobody has chosen. */
   derArrangementLabel: string | null;
+  /**
+   * How the PV is coupled, in words — "PV DC coupled to Powerwall 3", or "Not selected".
+   *
+   * 🚨 ONE LINE ON THE SUMMARY BAR SO THE CONTRADICTION CANNOT HIDE. Ray's acceptance list for the
+   * real job includes `PV architecture  DC_COUPLED_POWERWALL_3`, and the reason it does is that the
+   * screen was silently showing a Tesla topology above an Enphase drawing.
+   */
+  solarCouplingLabel: string;
+  /** Whether the project has recorded a coupling at all. */
+  solarCouplingSelected: boolean;
+  /** Generation / combiner panels that belong to one system. Ray's job: 2. */
+  perSystemGenerationPanelCount: number;
   invertingUnitCount: number;
   expansionUnitCount: number;
   /** Aggregate usable energy, or null when a unit does not state it. */
@@ -273,9 +285,18 @@ export function labelForToken(token: string, t: ServiceTopology): string {
   }
   if (token.startsWith('manufacturer-document:')) {
     const title = token.slice('manufacturer-document:'.length);
-    return title === 'multi-gateway-metering'
-      ? 'Manufacturer multi-gateway metering document'
-      : `Manufacturer document — ${title}`;
+    if (title === 'multi-gateway-metering') return 'Manufacturer multi-gateway metering document';
+    if (title === 'gateway-generation-input') {
+      // The gateway's own name, because this is a question about THAT box.
+      const gw = t.domains[0]?.gateway.label;
+      return `Manufacturer documentation for generation landing inside ${gw ?? 'the gateway'}`;
+    }
+    if (title.startsWith('pv-input:')) {
+      const id = title.slice('pv-input:'.length);
+      const unit = t.storage.find(u => u.productId === id);
+      return `Manufacturer PV input specification for ${unit?.label ?? id}`;
+    }
+    return `Manufacturer document — ${title}`;
   }
   if (token.startsWith('device.role:')) {
     return `A device carrying the ${token.slice('device.role:'.length)} role`;
@@ -336,6 +357,11 @@ export function labelForToken(token: string, t: ServiceTopology): string {
     'aggregation.outputOcpdA': 'Aggregation panel output OCPD',
     'aggregation.feedsNodeId': 'What the aggregation panel\'s output connects to',
     'aggregation.panel': 'The aggregation panel this refers to',
+    'aggregation.productId': 'The actual generation / combiner panel selected to meet the requirement',
+    // ── How the solar is coupled, and where its strings land ───────────────
+    'interconnection.solarCoupling': 'How the new solar connects — DC to the batteries, or its own '
+      + 'AC inverter',
+    'pv.stringAssignment': 'Which PV strings land on which battery\'s DC inputs',
   };
   return FIXED[token] ?? token;
 }
@@ -361,10 +387,16 @@ function ownerForToken(token: string): RequirementOwner {
   // Facts about an assembly already on the wall: somebody goes and reads them.
   if (token.startsWith('service.existingEquipment.')) return 'field-verification';
   // Choosing the actual part, and choosing which path a switch sits in, are both the designer's.
-  if (token === 'device.productId' || token === 'device.inlineOnNodeId') return 'design-decision';
+  if (token === 'device.productId' || token === 'device.inlineOnNodeId'
+      || token === 'aggregation.productId') return 'design-decision';
   if (token.startsWith('interconnection.')) {
-    return token === 'interconnection.derArrangement' ? 'design-decision' : 'jurisdiction-authority';
+    // How the PV is coupled is an architecture the designer picks, like the DER arrangement — not a
+    // ruling the jurisdiction hands down, which is what the fall-through would have called it.
+    return token === 'interconnection.derArrangement' || token === 'interconnection.solarCoupling'
+      ? 'design-decision' : 'jurisdiction-authority';
   }
+  // The string layout computes it, once there is an array to lay out. Nobody external owes it.
+  if (token === 'pv.stringAssignment') return 'solarpro-can-calculate';
   if (token === 'domain.storageConnection' || token.startsWith('poi.')
       || token === 'der.pointOfInterconnection' || token === 'aggregation.feedsNodeId'
       || token === 'aggregation.carriesPremisesLoad' || token.startsWith('aggregation.input-source:')
@@ -651,6 +683,9 @@ export function buildServiceOverview(
       poiCount: (topology.pointsOfInterconnection ?? []).length,
       generationUnitCount: (topology.generation ?? []).length,
       derArrangementLabel: DER_ARRANGEMENT_LABEL[topology.interconnection.derArrangement ?? ''] ?? null,
+      solarCouplingLabel: solarCouplingLabel(topology.solarCoupling, topology),
+      solarCouplingSelected: !!topology.solarCoupling,
+      perSystemGenerationPanelCount: (topology.aggregationPanels ?? []).filter(p => p.domainId).length,
       invertingUnitCount: storage.inverterUnitCount,
       expansionUnitCount: storage.expansionUnitCount,
       usableKwh: storage.totalUsableKwh,

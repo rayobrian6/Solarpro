@@ -43,6 +43,7 @@ import { combinerBasisIsDecided } from '@/lib/combinerSelection/service';
 import {
   evaluateServiceTopology, sizeAggregationPanel, isOptionalCheck,
   governingArticleFor as poiArticle,
+  storageUnitLabel as storageUnitLabelSld,
   sourcesForAggregationInput as sourcesForAggregationInputSld,
   type ServiceTopology as ServiceTopologyForSld,
   type TopologyEvaluation as TopologyEvaluationForSld,
@@ -2821,6 +2822,22 @@ export interface ServiceSectionResult {
   topY: number; bottomY: number; rightX: number;
   /** Ground drops this section owns, so the sheet's ground rail does not double them. */
   groundX: number[];
+  /**
+   * 🚨 WHERE THE PV STRINGS ACTUALLY LAND, ON A DC-COUPLED DESIGN.
+   *
+   * Ray's real job: "PV strings terminate at Powerwall 3 PV inputs... no Enphase microinverters, no
+   * Enphase combiner, no Enphase AC branches, no standalone Tesla Solar Inverter, no legacy solar
+   * AC disconnect." So the sheet's PV chain does not end at an AC disconnect that lands on the
+   * service — it ends HERE, on the batteries' own DC inputs, and the caller needs their anchors to
+   * draw the home runs. Empty on every other coupling, which is how the AC path stays untouched.
+   */
+  dcEntries: Array<{
+    /** Centre and bottom edge of the cabinet — the DC conductors enter its wiring compartment. */
+    cx: number; bottom: number;
+    label: string; mppts: number | null;
+  }>;
+  /** A clear vertical corridor just left of this section, for the DC trunk to drop in. */
+  dcBusX: number;
 }
 
 /**
@@ -2936,6 +2953,32 @@ function overlayServiceTopologyRows(
   ]);
   replace('Bus Rating', []);
   replace('Bus 120% Limit', []);
+
+  // ── THE PV, WHERE THE PROJECT HAS RECORDED HOW IT IS COUPLED ──────────────
+  //
+  // 🚨 THE SCHEDULE IS WHERE THE CONTRADICTION WAS WRITTEN DOWN. Ray, from the live browser:
+  // "Service Topology says Tesla. Main electrical system still says MICROINVERTER. SLD still draws
+  // Enphase equipment." The drawing above now has no microinverter on it; a schedule that still
+  // lists 30 microinverters, 4 branch circuits and an Enphase combiner beside it is the same
+  // disagreement, moved down the page.
+  if (t.solarCoupling === 'dc-coupled-storage') {
+    const limits = inverting.find(u => u.pvInputLimits)?.pvInputLimits ?? null;
+    replace('Microinverters', [['PV Coupling', 'DC — to Powerwall 3 PV inputs']]);
+    replace('Branch Circuits', []);
+    replace('Inverter Mfr.', []);
+    replace('Inverter Model', limits
+      ? [['PV DC Inputs', `${inverting.length} × ${limits.mppts} MPPT, `
+          + `${limits.mpptVdc[0]}–${limits.mpptVdc[1]} V`]]
+      : [['PV DC Inputs', 'NOT EVAL.']]);
+    replace('Inverter Output', [['ESS AC Output',
+      s.totalContinuousOutputA === null ? 'NOT EVAL.' : `${s.totalContinuousOutputA} A`]]);
+    replace('AC Combiner', []);
+    replace('Combiner', []);
+    replace('AC Disconnect', []);
+    replace('MPPT Channels', limits
+      ? [['MPPT Channels', `${inverting.length * limits.mppts} total`]] : []);
+    replace('Monitoring Gateway', []);
+  }
   const essOutputRow: [string, string] = ['ESS AC Output',
     s.totalContinuousOutputA === null ? 'NOT EVAL.'
       : `${s.totalContinuousOutputA} A (${s.inverterUnitCount} inverting unit${s.inverterUnitCount === 1 ? '' : 's'})`];
@@ -3007,9 +3050,55 @@ export function renderTopologyServiceSection(opts: {
 
   // ── BOX PRIMITIVE: text wraps and the box GROWS. Truncating would hide a requirement. ──
   type Line = { t: string; sz: number; bold?: boolean; fill?: string; italic?: boolean };
+
+  /**
+   * 🚨 A SCHEMATIC GLYPH, NOT ARTWORK — and not a rectangle that could be anything.
+   *
+   * Ray: "The current generic rectangles are not sufficient for a professional permit SLD... The
+   * Powerwall, Gateway and combiner must be visually distinguishable at a glance. Do not invent
+   * fake manufacturer artwork. A labeled electrical schematic symbol is acceptable and preferable
+   * to incorrect artwork."
+   *
+   * So each is the IEEE-style symbol for WHAT IT IS, drawn in the box's top-left corner: a transfer
+   * contact for a backup controller, a battery stack feeding an inverter for a Powerwall-class
+   * unit, a bus with branch breakers for a panelboard. No manufacturer marks, no logos, nothing
+   * that claims to be a picture of the product.
+   */
+  const deviceGlyph = (kind: 'controller' | 'battery-inverter' | 'panelboard',
+                       gx: number, gy: number, stroke: string): string => {
+    const s: string[] = [];
+    if (kind === 'controller') {
+      // A transfer contact: two fixed terminals and a blade between them.
+      s.push(`<circle cx="${gx + 2}" cy="${gy + 9}" r="1.4" fill="${stroke}"/>`);
+      s.push(`<circle cx="${gx + 16}" cy="${gy + 9}" r="1.4" fill="${stroke}"/>`);
+      s.push(ln(gx + 2, gy + 9, gx + 14, gy + 2, { sw: SW_MED, stroke }));
+      s.push(ln(gx - 4, gy + 9, gx + 2, gy + 9, { sw: SW_THIN, stroke }));
+      s.push(ln(gx + 16, gy + 9, gx + 22, gy + 9, { sw: SW_THIN, stroke }));
+    } else if (kind === 'battery-inverter') {
+      // A battery stack (long/short plates) into an inverter square with the DC/AC diagonal.
+      s.push(ln(gx, gy + 1, gx, gy + 13, { sw: SW_MED, stroke }));
+      s.push(ln(gx + 4, gy + 4, gx + 4, gy + 10, { sw: SW_THIN, stroke }));
+      s.push(ln(gx + 8, gy + 1, gx + 8, gy + 13, { sw: SW_MED, stroke }));
+      s.push(ln(gx + 12, gy + 4, gx + 12, gy + 10, { sw: SW_THIN, stroke }));
+      s.push(rect(gx + 16, gy + 1, 12, 12, { fill: 'none', stroke, sw: SW_THIN }));
+      s.push(ln(gx + 16, gy + 13, gx + 28, gy + 1, { sw: SW_THIN, stroke }));
+    } else {
+      // A panelboard: a vertical bus with branch breaker stubs off it.
+      s.push(ln(gx + 4, gy, gx + 4, gy + 14, { sw: SW_MED, stroke }));
+      for (const dy of [2, 7, 12]) {
+        s.push(ln(gx + 4, gy + dy, gx + 12, gy + dy, { sw: SW_THIN, stroke }));
+        s.push(ln(gx + 12, gy + dy, gx + 15, gy + dy - 2.5, { sw: SW_THIN, stroke }));
+      }
+    }
+    return s.join('');
+  };
+
   const drawBox = (
     id: string, cx: number, cyOrTop: number, w: number, lines: Line[],
-    o: { stroke?: string; fill?: string; dash?: string; anchor?: 'center' | 'top' } = {},
+    o: {
+      stroke?: string; fill?: string; dash?: string; anchor?: 'center' | 'top';
+      glyph?: 'controller' | 'battery-inverter' | 'panelboard';
+    } = {},
   ) => {
     const wrapped: Line[] = [];
     for (const l of lines) {
@@ -3022,6 +3111,8 @@ export function renderTopologyServiceSection(opts: {
     const cy = o.anchor === 'top' ? cyOrTop + h / 2 : cyOrTop;
     const x = cx - w / 2, y = cy - h / 2;
     p.push(rect(x, y, w, h, { fill: o.fill ?? WHT, stroke: o.stroke ?? BLK, sw: SW_MED, dash: o.dash }));
+    // In the top-left corner, inside the border: the text is centred, so the corner is clear.
+    if (o.glyph) p.push(deviceGlyph(o.glyph, x + 7, y + 5, o.stroke ?? BLK));
     let by = y + 8 + capUu(wrapped[0]?.sz ?? F.sub);
     for (const l of wrapped) {
       p.push(txt(cx, +by.toFixed(2), l.t,
@@ -3109,6 +3200,12 @@ export function renderTopologyServiceSection(opts: {
     }
   }
 
+  /** Generation panels drawn inside a system's own column, so the shared group skips them. */
+  const aggBoxesInRow = new Map<string, ReturnType<typeof drawBox>>();
+  /** Is the PV coupled on DC, into the batteries' own inputs? The project says, nobody infers. */
+  const dcCoupled = t.solarCoupling === 'dc-coupled-storage';
+  const dcEntries: ServiceSectionResult['dcEntries'] = [];
+
   let entryX = opts.startX, entryY = opts.busY, entryLabel = '';
   // 🚨 STARTS AT THE TOP OF THE BAND, NOT AT THE CHAIN. Seeded at `busY` this floor made a row of
   // boxes that all sat ABOVE the chain report a bottom of `busY`, so the sequential layout pushed
@@ -3156,7 +3253,8 @@ export function renderTopologyServiceSection(opts: {
       } else {
         gwLines.push({ t: `${gw.sccrA} A SCCR`, sz: F.tiny });
       }
-      gwBox = drawBox(`gateway-${gw.id}`, cxGw, y, W_GW, gwLines, { stroke: SEC_BLUE });
+      gwBox = drawBox(`gateway-${gw.id}`, cxGw, y, W_GW, gwLines,
+        { stroke: SEC_BLUE, glyph: 'controller' });
       highest = Math.min(highest, gwBox.top);
       lowest = Math.max(lowest, gwBox.bottom);
 
@@ -3165,7 +3263,15 @@ export function renderTopologyServiceSection(opts: {
       // GATEWAY → PANEL feeder
       if (panelBox) {
         p.push(ln(gwBox.left, y, panelBox.right, y, { sw: SW_MED }));
-        spanLabel(`feeder-${branch.id}`, panelBox.right, gwBox.left, y - 8, [feederLabel]);
+        // 🚨 WRAPPED TO THE GAP IT IS DRAWN IN, not assumed to fit it. Centred as one line, a feeder
+        // callout longer than the column gap overruns into the panelboard on one side and the
+        // gateway on the other — which is exactly what the audit reported the moment the paths were
+        // renamed from "Branch A" to what an electrician calls them.
+        // The 24 uu is clearance, not padding: wrapped to the bare gap the last word still touched
+        // the gateway's border in the render — the audit called it clear because a metric table is
+        // not a type-setter, which is why this gets LOOKED at as well as measured.
+        spanLabel(`feeder-${branch.id}`, panelBox.right, gwBox.left, y - 8,
+          wrapWords(feederLabel, Math.max(72, gwBox.left - panelBox.right - 24), F.seg));
         // 🚨 THE CALLOUT GOES BELOW THE CONDUCTOR, and it is REGISTERED. Drawn above it at the same
         // midpoint, its white disc sat on the callout text and hid the word "FEEDER" — and the
         // audit could not see it because a circle nobody put in the box list is not in the audit.
@@ -3215,21 +3321,142 @@ export function renderTopologyServiceSection(opts: {
       // source's own output, that source lands in the aggregation group below — drawing it back
       // under its gateway would show a connection that is not there and contradict the busbar
       // check that just moved with it.
-      const inverting = units.filter(u => u.role === 'inverter-unit' && !aggregated.has(u.id));
+      // 🚨 …UNLESS THE PANEL THAT TOOK IT BELONGS TO THIS SYSTEM.
+      //
+      // Ray's real job: "Each pair of Powerwall 3 units must first land in a generation / combiner
+      // panel before feeding its Gateway." That panel is INSIDE the system, so its Powerwalls are
+      // too. Sent to the shared DER group at the bottom instead — which is where every aggregated
+      // unit used to go — all four Powerwalls and both panels came off their systems and piled up
+      // under the rows, and the drawing stopped showing two independent systems at all.
+      const ownAgg = (t.aggregationPanels ?? []).filter(a => a.domainId === domain.id);
+      const ownAggIds = new Set(ownAgg.map(a => a.id));
+      const takenByOwnPanel = (id: string) => {
+        const a = aggregated.get(id);
+        return !!a && ownAggIds.has(a.id);
+      };
+      const inverting = units.filter(u => u.role === 'inverter-unit'
+        && (!aggregated.has(u.id) || takenByOwnPanel(u.id)));
       const expansions = units.filter(u => u.role === 'energy-expansion'
-        && !(u.attachedToUnitId && aggregated.has(u.attachedToUnitId)));
+        && !(u.attachedToUnitId && aggregated.has(u.attachedToUnitId)
+          && !takenByOwnPanel(u.attachedToUnitId)));
 
+      // ── THE SYSTEM'S OWN GENERATION / COMBINER PANEL ──────────────────────
+      //
+      // Between the gateway above it and the Powerwalls below it, which is the order the current
+      // actually travels: PW3 → branch OCPD → generation panel → feeder → Gateway.
+      for (const agg of ownAgg) {
+        const sizing = sizeAggregationPanel(t, agg);
+        const genLines: Line[] = [
+          { t: agg.label.toUpperCase(), sz: F.sub, bold: true },
+          { t: agg.busbarRatingA === null
+              ? 'NOT EVALUATED — BUSBAR RATING REQUIRED' : `${agg.busbarRatingA} A BUS`,
+            sz: F.tiny, ...(agg.busbarRatingA === null ? { fill: SEC_AMBER, bold: true } : {}) },
+          { t: agg.mainLugOnly ? 'MLO — NO MAIN OCPD' : `${amps(agg.mainBreakerA)} MAIN`, sz: F.tiny },
+          { t: `${agg.inputs.length} BRANCH OCPD`
+              + `${agg.inputs.every(x => x.ocpdA === agg.inputs[0]?.ocpdA) && agg.inputs[0]?.ocpdA
+                ? ` @ ${agg.inputs[0].ocpdA} A` : ''}`,
+            sz: F.tiny },
+          { t: agg.outputOcpdA === null
+              ? 'NOT EVALUATED — OUTPUT OCPD REQUIRED' : `${agg.outputOcpdA} A OUTPUT OCPD`,
+            sz: F.tiny, ...(agg.outputOcpdA === null ? { fill: SEC_AMBER, bold: true } : {}) },
+          // 🚨 WHY IT IS THIS SIZE AND NOT 400 A. Printed because it is the first thing a plan
+          // reviewer asks about a 125 A panel on a 400 A service.
+          ...(sizing.aggregateContinuousA !== null
+            ? [{ t: `${sizing.aggregateContinuousA} A AGGREGATED · ${sizing.standardOcpdA} A AT 125%`,
+                 sz: F.tiny } as Line] : []),
+          { t: agg.carriesPremisesLoad === false ? 'DER ONLY — NO PREMISES LOAD'
+              : agg.carriesPremisesLoad ? 'CARRIES PREMISES LOAD'
+                : 'NOT EVALUATED — DER-ONLY OR LOAD-CARRYING REQUIRED',
+            sz: F.tiny,
+            ...(agg.carriesPremisesLoad === null ? { fill: SEC_AMBER, bold: true } : {}) },
+          ...(agg.sccrA === null
+            ? [{ t: 'NOT EVALUATED — INTERRUPTING RATING REQUIRED',
+                 sz: F.tiny, fill: SEC_AMBER, bold: true } as Line] : []),
+          ...(agg.productId ? [] : [{ t: 'NOT EVALUATED — EQUIPMENT SELECTION REQUIRED',
+                                      sz: F.tiny, fill: SEC_AMBER, bold: true } as Line]),
+        ];
+        const gb = drawBox(`aggregation-${agg.id}`, cxGw, stackTop + 54, W_GW + 26, genLines,
+          { stroke: '#1B5E20', anchor: 'top', glyph: 'panelboard' });
+        aggBoxesInRow.set(agg.id, gb);
+        // The feeder up into the controller, with its own callout — and the landing inside listed
+        // equipment is a manufacturer question, said on the sheet rather than implied by a line.
+        p.push(ln(cxGw, gb.top, cxGw, stackTop, { sw: SW_MED, stroke: '#1B5E20' }));
+        const fLbl = agg.outputOcpdA === null
+          ? 'GENERATION FEEDER — OUTPUT OCPD NOT EVALUATED'
+          : `${agg.outputOcpdA} A GENERATION FEEDER`;
+        const fw = textWidthUu(fLbl, F.tiny);
+        // 🚨 ON THE LEFT, AWAY FROM THE SERVICE CHAIN'S COLUMN. Placed on the right it reached into
+        // the corridor the branch feeders jog down, and the 200 A conductor from this system's
+        // knife switch ran through the last word of it. The audit called the sheet clean because a
+        // conductor is a LINE and the audit compares boxes — the picture is what showed it.
+        const fx = gb.left - 6;
+        const fy = (stackTop + gb.top) / 2;
+        p.push(txt(fx, +fy.toFixed(2), fLbl, { sz: F.tiny, anc: 'end' }));
+        boxes.push({ id: `aggregation-feeder-label-${agg.id}`, x: fx - fw, y: fy - capUu(F.tiny),
+                     w: fw, h: LBL_PITCH, kind: 'label' });
+        stackTop = gb.bottom;
+        lowest = Math.max(lowest, gb.bottom);
+      }
+
+      // 🚨 TWO POWERWALLS GO SIDE BY SIDE WHERE THERE IS ROOM FOR THEM.
+      //
+      // Stacked, a system column is a gateway, a panelboard, a generation panel and two cabinets —
+      // and the SECOND system then ran 200 uu off the bottom of the sheet, which the audit reported
+      // and the picture confirmed. Across, the pair costs one box height instead of two. They
+      // overhang the neighbouring column horizontally, which is harmless: that column is a row of
+      // boxes at the TOP of the band and empty this far down.
+      const essRow = inverting.length > 1 && wide;
+      const essStep = W_ESS + 26;
+      const essLeft = cxGw - ((inverting.length - 1) * essStep) / 2;
       let essY = stackTop + 58;
       const essBoxes = new Map<string, ReturnType<typeof drawBox>>();
-      inverting.forEach(u => {
-        const b = drawBox(`ess-${u.id}`, cxGw, essY, W_ESS, [
-          { t: u.label ?? u.productId, sz: F.sub, bold: true },
+      inverting.forEach((u, k) => {
+        const b = drawBox(`ess-${u.id}`, essRow ? essLeft + k * essStep : cxGw,
+          essRow ? stackTop + 58 : essY, W_ESS, [
+          { t: storageUnitLabelSld(t, u), sz: F.sub, bold: true },
           { t: `${amps(u.continuousOutputA)} AC · ${u.usableKwh ?? '—'} kWh`, sz: F.tiny },
           { t: `${amps(u.ocpdA)} OCPD`, sz: F.tiny },
-        ], { stroke: '#1B5E20' });
+          ...(u.outputConfigKw ? [{ t: `${u.outputConfigKw} kW CONFIGURED`, sz: F.tiny } as Line] : []),
+          // The DC side of a DC-coupled unit, named on the box the strings land in.
+          ...(dcCoupled
+            ? [{ t: u.pvInputLimits
+                   ? `PV DC INPUT — ${u.pvInputLimits.mppts} MPPT`
+                   : 'PV DC INPUT — LIMITS NOT EVALUATED',
+                 sz: F.tiny, fill: SEC_DC,
+                 ...(u.pvInputLimits ? {} : { bold: true }) } as Line]
+            : []),
+        ], { stroke: '#1B5E20', glyph: 'battery-inverter' });
         essBoxes.set(u.id, b);
-        // AC connection up into the gateway (or across to the panel busbar).
-        p.push(ln(cxGw, b.top, cxGw, stackTop, { sw: SW_MED, stroke: '#1B5E20' }));
+        if (dcCoupled) {
+          dcEntries.push({
+            cx: b.cx, bottom: b.bottom, label: storageUnitLabelSld(t, u),
+            mppts: u.pvInputLimits?.mppts ?? null,
+          });
+        }
+        if (essRow) {
+          // Up out of each cabinet to a shared collector just under the panel, then one drop in.
+          const collectY = stackTop + 22;
+          p.push(ln(b.cx, b.top, b.cx, collectY, { sw: SW_MED, stroke: '#1B5E20' }));
+          p.push(ln(b.cx, collectY, cxGw, collectY, { sw: SW_MED, stroke: '#1B5E20' }));
+          if (k === 0) p.push(ln(cxGw, collectY, cxGw, stackTop, { sw: SW_MED, stroke: '#1B5E20' }));
+        } else if (k === 0) {
+          // AC connection straight up into the gateway, the panel busbar, or this system's
+          // generation panel — whichever `stackTop` is now.
+          p.push(ln(cxGw, b.top, cxGw, stackTop, { sw: SW_MED, stroke: '#1B5E20' }));
+        } else {
+          // 🚨 THE SECOND UNIT'S CONDUCTOR GOES ROUND THE FIRST ONE, NOT THROUGH IT.
+          //
+          // One Powerwall per system drew one riser on the column's centre line and that was
+          // correct. Two Powerwalls stacked on that same line means the lower one's conductor
+          // crosses the upper one's cabinet — a line through a device, which is the defect class no
+          // box audit can see because a line is not a box. It leaves by the side and climbs clear.
+          const riserX = b.right + 16;
+          p.push(ln(b.cx, b.top, b.cx, b.top - 10, { sw: SW_MED, stroke: '#1B5E20' }));
+          p.push(ln(b.cx, b.top - 10, riserX, b.top - 10, { sw: SW_MED, stroke: '#1B5E20' }));
+          p.push(ln(riserX, b.top - 10, riserX, stackTop + 8, { sw: SW_MED, stroke: '#1B5E20' }));
+          p.push(ln(riserX, stackTop + 8, cxGw, stackTop + 8, { sw: SW_MED, stroke: '#1B5E20' }));
+          p.push(ln(cxGw, stackTop + 8, cxGw, stackTop, { sw: SW_MED, stroke: '#1B5E20' }));
+        }
         essY = b.bottom + 58;
         lowest = Math.max(lowest, b.bottom);
       });
@@ -3454,7 +3681,10 @@ export function renderTopologyServiceSection(opts: {
   let derY = Math.max(rowsBottom, opts.minY) + 40;
   const aggBoxes = new Map<string, ReturnType<typeof drawBox>>();
 
-  for (const agg of t.aggregationPanels ?? []) {
+  // 🚨 ONLY THE SITE-WIDE KIND. A panel that belongs to one system was already drawn in that
+  // system's column, between its Powerwalls and its Gateway. Drawn again here it would appear
+  // twice — and the second copy would be wired to a shared chain the design does not have.
+  for (const agg of (t.aggregationPanels ?? []).filter(a => !a.domainId)) {
     const sizing = sizeAggregationPanel(t, agg);
     // The sources this panel takes, drawn as a row above it so each drops straight in.
     const taken = agg.inputs.flatMap(i =>
@@ -3469,7 +3699,7 @@ export function renderTopologyServiceSection(opts: {
         { t: `${amps(s.continuousOutputA)} AC${unit?.usableKwh != null ? ` · ${unit.usableKwh} kWh` : ''}`,
           sz: F.tiny },
         { t: `${amps(s.ocpdA)} OCPD`, sz: F.tiny },
-      ], { stroke: '#1B5E20', anchor: 'top' });
+      ], { stroke: '#1B5E20', anchor: 'top', glyph: 'battery-inverter' });
       sourceBoxes.push(b);
       lowest = Math.max(lowest, b.bottom);
     });
@@ -3524,7 +3754,7 @@ export function renderTopologyServiceSection(opts: {
     }
 
     const aggBox = drawBox(`aggregation-${agg.id}`, derGroupCx, expBottom + 38, W_GW + 40, aggLines,
-      { stroke: '#1B5E20', anchor: 'top' });
+      { stroke: '#1B5E20', anchor: 'top', glyph: 'panelboard' });
     aggBoxes.set(agg.id, aggBox);
     // 🚨 THE AC COLLECTION CONDUCTOR GOES ROUND THE EXPANSION, NOT THROUGH IT.
     //
@@ -3570,7 +3800,18 @@ export function renderTopologyServiceSection(opts: {
   for (const poi of t.pointsOfInterconnection ?? []) {
     // A point of interconnection drawn beside its own domain belongs in that domain's column; the
     // shared one belongs at the bottom of the DER chain. Only the shared kind is drawn here.
-    if (!(t.aggregationPanels ?? []).length) continue;
+    //
+    // 🚨 "IS THERE AN AGGREGATION PANEL" IS NOT THE SAME QUESTION AS "IS THIS POI SHARED". With one
+    // generation panel PER SYSTEM the first test became true and both systems' own points of
+    // interconnection were drawn in the shared chain at the bottom of the sheet — detached from the
+    // systems they belong to, under a column that aggregates nothing.
+    const domainOwned = t.domains.some(d =>
+      poi.connectedToNodeId === d.gateway.id
+      || d.backedUpPanelIds.includes(poi.connectedToNodeId ?? '')
+      || d.storageUnitIds.includes(poi.derNodeId ?? '')
+      || (t.aggregationPanels ?? []).some(a => a.id === poi.derNodeId && a.domainId === d.id));
+    if (domainOwned) continue;
+    if (!(t.aggregationPanels ?? []).filter(a => !a.domainId).length) continue;
     const article = poiArticle(poi.relationship);
     const b = drawBox(`poi-${poi.id}`, derGroupCx, derY, W_DEV + 30, [
       { t: 'POINT OF INTERCONNECTION', sz: F.hdr, bold: true },
@@ -3604,7 +3845,7 @@ export function renderTopologyServiceSection(opts: {
     // And out to the service, where the arrangement says where. Nothing is drawn when it does not.
     const last = order[order.length - 1];
     const lastPoi = (t.pointsOfInterconnection ?? []).find(x => x.connectedToNodeId);
-    if (last && lastPoi && (t.aggregationPanels ?? []).length) {
+    if (last && lastPoi && (t.aggregationPanels ?? []).filter(a => !a.domainId).length) {
       p.push(ln(last.right, last.cy, cxDist, last.cy, { sw: SW_MED }));
       p.push(ln(cxDist, last.cy, cxDist, opts.busY, { sw: SW_MED }));
       const lbl = `AGGREGATED DER FEEDER TO ${nodeLabel(t, String(lastPoi.connectedToNodeId)).toUpperCase()}`;
@@ -3612,7 +3853,7 @@ export function renderTopologyServiceSection(opts: {
       p.push(txt(last.right + 8, +(last.cy - 6).toFixed(2), lbl, { sz: F.tiny, anc: 'start' }));
       boxes.push({ id: 'aggregated-feeder-label', x: last.right + 8, y: last.cy - 6 - capUu(F.tiny),
                    w: lw, h: LBL_PITCH, kind: 'label' });
-    } else if (last && (t.aggregationPanels ?? []).length) {
+    } else if (last && (t.aggregationPanels ?? []).filter(a => !a.domainId).length) {
       const lbl = 'INTERCONNECTION ARRANGEMENT REQUIRED';
       const lw = textWidthUu(lbl, F.tiny, true);
       p.push(txt(last.right + 10, +last.cy.toFixed(2), lbl,
@@ -3798,6 +4039,10 @@ export function renderTopologyServiceSection(opts: {
     entryX, entryY, entryLabel,
     boxes, notes, groundX,
     topY: highest, bottomY: lowest, rightX: cxDist + W_DIST / 2,
+    dcEntries,
+    // Left of everything this section draws: the panelboard column starts at `startX`, so a trunk
+    // dropped here crosses no box and no feeder callout on its way down the sheet.
+    dcBusX: opts.startX - 22,
   };
 }
 
@@ -3853,10 +4098,23 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   const _isOptimizerEco = _ecoTopo === 'optimizer';
   const _isMicroEco     = _ecoTopo === 'micro';
   const _rawIsMicro = input.topologyType === 'MICROINVERTER';
-  const isMicro = _isMicroEco || (_rawIsMicro && !_isOptimizerEco);
+  // 🚨 THE PROJECT'S RECORDED COUPLING OUTRANKS BOTH OF THEM.
+  //
+  // `ecosystemTopology` already outranks `topologyType` here, for exactly this reason — a stale
+  // field from a previous project reaching the drawing. The service graph's `solarCoupling` is the
+  // same kind of correction one level up: it is the project's own answer to "is there a PV inverter
+  // at all", and a design whose strings terminate on Powerwall DC inputs has no micro path to take
+  // however the equipment picker was last left.
+  const _couplingIsDc = (input.serviceTopology?.solarCoupling ?? null) === 'dc-coupled-storage';
+  const isMicro = !_couplingIsDc && (_isMicroEco || (_rawIsMicro && !_isOptimizerEco));
   if (_isOptimizerEco && _rawIsMicro) {
     console.error('[SLD TOPOLOGY CONTAMINATION] ecosystemTopology=optimizer but topologyType=MICROINVERTER' +
       ' — micro path blocked, rendering optimizer_string. brand=' + (input.selectedBrand ?? 'unknown'));
+  }
+  if (_couplingIsDc && (_isMicroEco || _rawIsMicro)) {
+    console.error('[SLD TOPOLOGY CONTAMINATION] project solarCoupling=dc-coupled-storage but '
+      + `topologyType=${input.topologyType} / ecosystemTopology=${_ecoTopo || 'none'} — the PV AC `
+      + 'chain is not drawn: the strings terminate on the battery DC inputs.');
   }
   // Instantiate overlap guard for this diagram — prevents parallel wires from overlapping
   const resolveSegY = makeOverlapGuard();
@@ -3970,8 +4228,14 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   // ── Title ─────────────────────────────────────────────────────────────────
   const tcx = (DX + TB_X) / 2;
   parts.push(txt(tcx, DY+16, 'SINGLE LINE DIAGRAM — PHOTOVOLTAIC SYSTEM', {sz:F.title, bold:true, anc:'middle'}));
+  // 🚨 THE ARCHITECTURE LINE SAYS WHAT IS ON THE SHEET. Printing `input.topologyType` under a
+  // drawing with no microinverter on it is the contradiction Ray read in the browser, in the one
+  // place a reviewer looks first.
+  const _archLabel = _couplingIsDc
+    ? 'PV DC COUPLED TO POWERWALL 3'
+    : esc(input.topologyType.replace(/_/g, ' '));
   parts.push(txt(tcx, DY+26,
-    `${esc(input.address)}  |  ${esc(input.topologyType.replace(/_/g,' '))}  |  ${input.totalModules} MODULES  |  ${Number(input.acOutputKw).toFixed(2)} kW AC`,
+    `${esc(input.address)}  |  ${_archLabel}  |  ${input.totalModules} MODULES  |  ${Number(input.acOutputKw).toFixed(2)} kW AC`,
     {sz:F.sub, anc:'middle', fill:'#444'}));
 
   // ── Schematic border ──────────────────────────────────────────────────────
@@ -4234,6 +4498,22 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       buildWireRun('SEGMENT_1_PV_TO_JBOX', pvOutX, _s1Y, _jbInPt.x, _s1Y, run, lines, !isMicro, 'OPEN_AIR'),  // Phase 1: OPEN_AIR — roof surface wiring
       lines, {fit:6}));
   }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // 🚨 EVERYTHING FROM HERE TO THE SERVICE IS THE AC-COUPLED PV CHAIN.
+  //
+  // Combiner / inverter / PV AC disconnect exist because the PV makes AC before it reaches the
+  // premises. On a DC-coupled design it does not: the strings land on the Powerwalls' own DC
+  // inputs and none of this equipment is installed. Ray, from the live browser: "SLD still shows
+  // Enphase equipment even though Tesla topology is selected. That means the SLD is not consuming
+  // the same project authority."
+  //
+  // So the span is MARKED here and dropped below when the project records DC coupling — the same
+  // single reviewable cut the service tail already gets, and for the same reason: every project
+  // that is AC coupled keeps this code byte-identical.
+  // ═══════════════════════════════════════════════════════════════════════
+  const _pvAcSpanFrom = parts.length;
+  const _pvAcGndFrom  = _gndNodes.length;
 
   // ── NODE 3: AC COMBINER (micro) or DC DISCONNECT (string) ─────────────────
   let node3RX: number;
@@ -4954,13 +5234,25 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   // that has no graph, which is what makes this a migration and not a fork.
   // ═══════════════════════════════════════════════════════════════════════
   let _svcSection: ServiceSectionResult | null = null;
+  const _dcCoupled = _svcTopology?.solarCoupling === 'dc-coupled-storage';
   if (_svcTopology) {
     parts.length = _svcSpanFrom;          // the single-service tail comes off the sheet
     _gndNodes.length = _svcGndFrom;       // and so do the ground drops it registered
+    if (_dcCoupled) {
+      // …and so does the AC-coupled PV chain, which this design does not contain.
+      parts.length = _pvAcSpanFrom;
+      _gndNodes.length = _pvAcGndFrom;
+    }
+    // 🚨 THE SPAN GREW WHEN THE AC-COUPLED CHAIN CAME OFF. `xMSP` is where the MSP would have been
+    // at the end of a combiner → inverter → disconnect chain that this design does not have, and
+    // reading it anyway handed the service section 533 uu of a sheet that was half empty — the
+    // NARROW layout, two systems stacked, and the second one 200 uu off the bottom. It starts where
+    // the drawing actually ends: just past the junction box.
+    const _svcStartX = _dcCoupled ? Math.min(xMSP - 79, _jbOutPt.x + 190) : xMSP - 79;
     _svcSection = renderTopologyServiceSection({
       topology: _svcTopology,
       evaluation: _svcEval ?? undefined,
-      startX: xMSP - 79,
+      startX: _svcStartX,
       endX: TB_X - 30,
       busY: BUS_Y,
       minY: SCH_Y + 30,
@@ -4970,11 +5262,60 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       hasGenerator: (input.generatorKw ?? 0) > 0,
       // The clear band under the PV chain — not under the service column, where it ran through
       // the sheet's legend.
-      notes: { x: SCH_X + 30, y: GND_Y + 96, w: Math.max(320, xDisco - SCH_X - 60),
+      // 🚨 THE NOTES BLOCK IS SIZED AGAINST WHAT IS ACTUALLY DRAWN. `xDisco` is where the PV AC
+      // disconnect would be, and on a DC-coupled sheet there is none — so the block kept its full
+      // AC-chain width and the DC trunk, which drops in the corridor just left of the service
+      // section, ran straight down through the requirement text.
+      notes: { x: SCH_X + 30, y: GND_Y + 96,
+               w: _dcCoupled
+                 ? Math.max(320, _svcStartX - 22 - (SCH_X + 30) - 40)
+                 : Math.max(320, xDisco - SCH_X - 60),
                maxY: CALC_Y - 40 },
     });
+    // ── THE PV, ON DC, INTO THE BATTERIES' OWN INPUTS ─────────────────────
+    //
+    // 🚨 THE STRINGS GO TO THE POWERWALLS. One trunk leaves the roof junction box, drops in the
+    // clear corridor left of the service section, and lands on each unit's PV input. No combiner,
+    // no inverter, no PV AC disconnect and no AC feeder onto the service — because on this design
+    // none of them exist.
+    if (_dcCoupled && _svcSection.dcEntries.length > 0) {
+      const busX = _svcSection.dcBusX;
+      // 🚨 IN AT THE BOTTOM OF EACH CABINET, AND ONE COLLECTOR PER ROW.
+      //
+      // Run straight at each unit's left edge, the conductor to the SECOND Powerwall in a row goes
+      // through the FIRST one's cabinet — a line through a device, which no box audit sees. The
+      // Powerwalls' AC leaves the top, so the bottom edge is clear, and one horizontal under each
+      // row serves every unit in it.
+      const rows = new Map<number, typeof _svcSection.dcEntries>();
+      for (const e of _svcSection.dcEntries) {
+        const key = Math.round(e.bottom);
+        rows.set(key, [...(rows.get(key) ?? []), e]);
+      }
+      const collectorY = (bottom: number) => bottom + 16;
+      const lowest = Math.max(...[...rows.keys()].map(collectorY));
+      const runY = Math.min(BUS_Y, ...[...rows.keys()].map(collectorY));
+      parts.push(ln(_jbOutPt.x, _jbOutPt.y, busX, _jbOutPt.y, { sw: SW_MED, stroke: SEC_DC }));
+      if (Math.abs(_jbOutPt.y - runY) > 1) parts.push(ln(busX, _jbOutPt.y, busX, runY, { sw: SW_MED, stroke: SEC_DC }));
+      parts.push(ln(busX, runY, busX, lowest, { sw: SW_MED, stroke: SEC_DC }));
+      for (const [bottom, group] of rows) {
+        const y = collectorY(bottom);
+        const rightMost = Math.max(...group.map(e => e.cx));
+        parts.push(ln(busX, y, rightMost, y, { sw: SW_MED, stroke: SEC_DC }));
+        for (const e of group) parts.push(ln(e.cx, y, e.cx, bottom, { sw: SW_MED, stroke: SEC_DC }));
+      }
+      // One callout on the trunk, naming what it is and where it goes. Placed on the horizontal
+      // leg out of the junction box, which is the only stretch with room for it.
+      const _dcLines = [
+        `${input.totalStrings || _svcSection.dcEntries.length} PV STRING HOME RUNS`,
+        `${input.dcWireGauge ?? '#10'} PV WIRE + EGC IN ${input.dcConduitType ?? 'EMT'}`,
+        `TO POWERWALL 3 PV INPUTS — DC COUPLED`,
+      ];
+      parts.push(tspan((_jbOutPt.x + busX) / 2,
+        +(_jbOutPt.y - 10 - 2 * LBL_PITCH).toFixed(2), _dcLines,
+        { sz: F.seg, anc: 'middle', lh: LBL_PITCH, fill: SEC_DC }));
+    }
     // The PV AC feeder leaves the AC disconnect and lands where the graph says it lands.
-    {
+    if (!_dcCoupled) {
       const jog = Math.max(discoResult.lineOutX + 20, _svcSection.entryX - 34);
       parts.push(ln(discoResult.lineOutX, discoResult.lineOutY, jog, discoResult.lineOutY, {sw:SW_MED}));
       if (Math.abs(_svcSection.entryY - discoResult.lineOutY) > 1) {
@@ -5006,8 +5347,8 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     // chain in front of it is, and it is 250 uu narrower on a string sheet with an external DC
     // disconnect than on a micro one. A test that hand-feeds a roomy span proves nothing about the
     // sheet that is actually drawn.
-    console.log(`[SLD SERVICE SECTION BUDGET] startX=${(xMSP - 79).toFixed(0)} `
-      + `endX=${(TB_X - 30).toFixed(0)} available=${(TB_X - 30 - (xMSP - 79)).toFixed(0)} `
+    console.log(`[SLD SERVICE SECTION BUDGET] startX=${_svcStartX.toFixed(0)} `
+      + `endX=${(TB_X - 30).toFixed(0)} available=${(TB_X - 30 - _svcStartX).toFixed(0)} `
       + `defects=${_svcDefects.length}`);
     for (const d of _svcDefects) console.log(`[SLD SERVICE SECTION LAYOUT DEFECT] ${d}`);
 
@@ -5824,14 +6165,26 @@ function titleBlockSvg(input: SLDProfessionalInput, dcKw: number): string {
   const sysY = tbY2+3;
   parts.push(rect(tbX, sysY, TB_W, 12, {fill:BLK, sw:0}));
   parts.push(txt(tbX+TB_W/2, sysY+9, 'SYSTEM SUMMARY', {sz:F.sub, bold:true, anc:'middle', fill:WHT}));
+  // 🚨 THE TITLE BLOCK IS THE FIRST THING READ AND THE LAST THING CORRECTED. It carried
+  // TOPOLOGY MICROINVERTER / INVERTER Enphase / MODEL IQ8PLUS and SERVICE 200 A on a sheet drawing
+  // a DC-coupled Tesla system on a 400 A service — every one of them from a scalar the service
+  // graph supersedes.
+  const _tbTopo = input.serviceTopology ?? null;
+  const _tbDc = (_tbTopo?.solarCoupling ?? null) === 'dc-coupled-storage';
+  const _tbInverting = (_tbTopo?.storage ?? []).filter(u => u.role === 'inverter-unit');
   const sysRows: [string,string][] = [
-    ['TOPOLOGY',input.topologyType.replace(/_/g,' ')],
+    ['TOPOLOGY', _tbDc ? 'PV DC COUPLED TO POWERWALL 3' : input.topologyType.replace(/_/g,' ')],
     ['DC SIZE',`${dcKw.toFixed(2)} kW`],
     ['AC OUTPUT',`${Number(input.acOutputKw).toFixed(2)} kW`],
     ['MODULES',`${input.totalModules} × ${input.panelWatts}W`],
-    ['INVERTER',esc(input.inverterManufacturer)],
-    ['MODEL',esc(input.inverterModel)],
-    ['SERVICE',`${input.mainPanelAmps}A`],
+    // On a DC-coupled design the inverter IS the battery, so the two rows name it rather than an
+    // AC-coupled product the job does not contain.
+    ...(_tbDc
+      ? ([['INVERTERS', `${_tbInverting.length} × ${_tbInverting[0]?.label ?? 'ESS'}`],
+          ['MODEL', 'INTEGRATED — SEE EQUIPMENT SCHEDULE']] as [string, string][])
+      : ([['INVERTER',esc(input.inverterManufacturer)],
+          ['MODEL',esc(input.inverterModel)]] as [string, string][])),
+    ['SERVICE', _tbTopo ? `${_tbTopo.service.ratedAmps}A` : `${input.mainPanelAmps}A`],
     ['UTILITY',esc(input.utilityName)],
     ['INTERCONN.',esc(input.interconnection)],
   ];

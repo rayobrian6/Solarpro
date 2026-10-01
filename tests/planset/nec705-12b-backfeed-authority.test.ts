@@ -133,22 +133,26 @@ describe('permit busbar — the battery is IN the 705.12(B) total', () => {
     expect(cs.interconnectionPass).toBe(true);
   });
 
-  it('one Powerwall 3: 30 A PV + 50 A battery = 80 A > 65 A → the permit FAILS', () => {
+  it('one Powerwall 3: 30 A PV + 60 A battery = 90 A > 65 A → the permit FAILS', () => {
     const cs = mk(true);
     // OLD: batteryBackfeedA/batteryCount were hard 0 and no batteryIds were
     // passed, so this read 30 and interconnectionPass was TRUE — the permit
     // cleared a busbar the engineering page failed.
-    expect(cs.backfeedBreakerAmps).toBe(80);
+    // 🚨 60, NOT 50. The catalogue's `backfeedBreakerA` for a Powerwall 3 was 50 A — below both
+    // Tesla's published device for the 11.5 kW setting and 125% of its own 48 A continuous output.
+    // This number is not the subject of this test; that the battery term REACHES the permit is. It
+    // moves because the one authority behind it was corrected.
+    expect(cs.backfeedBreakerAmps).toBe(90);
     expect(cs.interconnectionPass).toBe(false);
     const issue = cs.issues.find(i => i.code === 'NEC_705_12B_120PCT');
     expect(issue).toBeTruthy();
-    expect(issue!.message).toContain('50A battery');
+    expect(issue!.message).toContain('60A battery');
   });
 
   it('the battery term comes from resolveBatteryBranch — a brand/model-only design still resolves', () => {
     // A legacy design carries batteryBrand/batteryModel and NO catalogue id.
     // The authority owns the EXACT manufacturer+model recovery, so the permit
-    // gets the same 50 A the id-carrying design gets rather than a silent 0.
+    // gets the same 60 A the id-carrying design gets rather than a silent 0.
     const input: any = JSON.parse(JSON.stringify(roofProject));
     input.project.panelBusRating = 200;
     input.project.mainPanelAmps = 175;
@@ -158,7 +162,7 @@ describe('permit busbar — the battery is IN the 705.12(B) total', () => {
     input.project.batteryCount = 1;
     const cad = generateCADLayout(input);
     const cs = buildComputeSystemShadow(input, cad as any)!;
-    expect(cs.backfeedBreakerAmps).toBe(80);
+    expect(cs.backfeedBreakerAmps).toBe(90);
     expect(cs.interconnectionPass).toBe(false);
   });
 });

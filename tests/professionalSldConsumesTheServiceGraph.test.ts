@@ -98,8 +98,13 @@ describe('🚨 the generated sheet is the system Ray built', () => {
     expect(svg).toContain('MSP #2');
     // Both gateways, one per domain.
     expect(count(svg, 'Tesla Backup Gateway 3')).toBeGreaterThanOrEqual(2);
-    expect(svg).toContain('Branch A — 200 A FEEDER');
-    expect(svg).toContain('Branch B — 200 A FEEDER');
+    // 🚨 THE PATHS ARE NAMED AS AN ELECTRICIAN NAMES THEM. "Branch A" was the graph's word for it
+    // and it was printed on a permit sheet and on the installer's screen; the authoring default is
+    // now "200 A service path 1", and the label IS the name — there is no translation layer.
+    // The callout wraps to the column gap, so this asserts on the words, not one unbroken run.
+    expect(svg).toContain('200 A service path 1');
+    expect(svg).toContain('200 A service path 2');
+    expect((svg.match(/FEEDER/g) ?? []).length).toBeGreaterThanOrEqual(2);
   });
 
   it('🚨 the legacy single-service tail is GONE, not drawn beside it', () => {

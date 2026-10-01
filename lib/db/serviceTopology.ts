@@ -78,8 +78,13 @@ import type {
  * claimed about an assembly nobody described), no in-line placement (the default service chain,
  * which is what they meant) and no load model — which, with their demand scalars intact, still
  * resolves through `resolveDemands` exactly as it did before.
+ *
+ * 4 — the project's solar coupling architecture, the generation panel's system ownership and
+ * selected part, and each storage unit's commissioned output configuration, PV assignment and
+ * manufacturer DC-input limits. A version-3 graph reloads with no coupling recorded, which is
+ * exactly what it was: a design whose consumers each inferred one.
  */
-export const SERVICE_TOPOLOGY_SCHEMA_VERSION = 3;
+export const SERVICE_TOPOLOGY_SCHEMA_VERSION = 4;
 
 export interface StoredServiceTopology {
   schemaVersion: number;
@@ -217,6 +222,22 @@ function parseGateway(v: unknown): GatewayInstance | null {
     serviceEntranceRated: boolOrNull(v.serviceEntranceRated),
     mainBreakerA: numOrNull(v.mainBreakerA),
     sccrA: numOrNull(v.sccrA),
+    // 🚨 ALL THREE NUMBERS OR NONE. A half-read internal panelboard would let the landing check
+    // compare a 125 A generation breaker against an absent maximum and call it clear.
+    ...(() => {
+      const ip = v.internalPanelboard;
+      if (!isObj(ip)) return {};
+      const bus = numOrNull(ip.busbarRatingA);
+      const spaces = numOrNull(ip.spaces);
+      const maxB = numOrNull(ip.maxBranchBreakerA);
+      if (bus === null || spaces === null || maxB === null) return {};
+      return {
+        internalPanelboard: {
+          busbarRatingA: bus, spaces, maxBranchBreakerA: maxB,
+          basis: str(ip.basis) || 'Manufacturer documentation (basis not recorded).',
+        },
+      };
+    })(),
   };
 }
 
@@ -238,6 +259,41 @@ function parseStorage(v: unknown): StorageUnit | null {
     ocpdA: numOrNull(v.ocpdA),
     usableKwh: numOrNull(v.usableKwh),
     attachedToUnitId: typeof v.attachedToUnitId === 'string' ? v.attachedToUnitId : null,
+    // 🚨 THE COMMISSIONED OUTPUT SETTING SURVIVES, FOR THE SAME REASON THE ROLE DOES. Four
+    // Powerwalls at 11.5 kW are 48 A and a 60 A device each; reloaded as "unset" they would fall
+    // back to the catalogue's top row, which happens to be the same today — and would silently
+    // change the whole design the day a configuration is added above it.
+    ...(numOrNull(v.outputConfigKw) !== null ? { outputConfigKw: numOrNull(v.outputConfigKw) } : {}),
+    ...(numOrNull(v.pvDcStcKw) !== null ? { pvDcStcKw: numOrNull(v.pvDcStcKw) } : {}),
+    ...(parsePvInputLimits(v.pvInputLimits) ? { pvInputLimits: parsePvInputLimits(v.pvInputLimits) } : {}),
+  };
+}
+
+/**
+ * The manufacturer's DC input limits as they were resolved onto the unit.
+ *
+ * 🚨 ALL OF IT OR NONE OF IT. A half-read limit set would let the DC-coupling check compare a
+ * string against an absent maximum and call it clear, so a record missing any number comes back as
+ * no record at all and the check says the limits are not established.
+ */
+function parsePvInputLimits(v: unknown): StorageUnit['pvInputLimits'] | null {
+  if (!isObj(v)) return null;
+  const pair = (x: unknown): readonly [number, number] | null => {
+    if (!Array.isArray(x) || x.length !== 2) return null;
+    const a = numOrNull(x[0]); const b = numOrNull(x[1]);
+    return a === null || b === null ? null : [a, b];
+  };
+  const maxStcKw = numOrNull(v.maxStcKw);
+  const mppts = numOrNull(v.mppts);
+  const mpptVdc = pair(v.mpptVdc);
+  const inputVdc = pair(v.inputVdc);
+  const maxImpPerMpptA = numOrNull(v.maxImpPerMpptA);
+  const maxIscPerMpptA = numOrNull(v.maxIscPerMpptA);
+  if (maxStcKw === null || mppts === null || !mpptVdc || !inputVdc
+    || maxImpPerMpptA === null || maxIscPerMpptA === null) return null;
+  return {
+    maxStcKw, mppts, mpptVdc, inputVdc, maxImpPerMpptA, maxIscPerMpptA,
+    basis: str(v.basis) || 'Manufacturer documentation (basis not recorded).',
   };
 }
 
@@ -276,6 +332,12 @@ function parseAggregationPanel(v: unknown): DerAggregationPanel | null {
   return {
     id: str(v.id),
     label: str(v.label) || str(v.id),
+    // 🚨 WHICH SYSTEM OWNS IT. Dropped, two identical generation panels reload as two site-wide
+    // ones: the equipment schedule loses Domain A from Domain B, and the next run of the preset —
+    // which replaces per-system panels and leaves site-wide ones alone — would leave both behind
+    // and add two more.
+    ...(typeof v.domainId === 'string' && v.domainId ? { domainId: v.domainId } : {}),
+    ...(typeof v.productId === 'string' && v.productId ? { productId: v.productId } : {}),
     // Tri-state on purpose: false and "nobody said" are different answers and only one of them
     // lets the busbar check run.
     carriesPremisesLoad: boolOrNull(v.carriesPremisesLoad),
@@ -406,6 +468,14 @@ export function parseServiceTopology(raw: unknown): StoredServiceTopology | null
       pointsOfInterconnection,
       calculatedServiceDemandA: numOrNull(t.calculatedServiceDemandA),
       loads: parseLoadModel(t.loads),
+      // 🚨 THE COUPLING SURVIVES OR THE CONTRADICTION COMES BACK. Reloaded as null, every consumer
+      // returns to inferring it — which is the exact state Ray found in the browser, where the
+      // topology said Tesla and the drawing said MICROINVERTER. An unrecognised value reads back as
+      // null rather than as whichever member happens to be first.
+      solarCoupling: t.solarCoupling === 'dc-coupled-storage'
+        || t.solarCoupling === 'ac-coupled-inverter'
+        || t.solarCoupling === 'storage-only'
+        ? t.solarCoupling : null,
       interconnection: {
         utilityId: typeof ic.utilityId === 'string' ? ic.utilityId : null,
         // A graph written before the arrangement existed has NOT chosen one, and must come back

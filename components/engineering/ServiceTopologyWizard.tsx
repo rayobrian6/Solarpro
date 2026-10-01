@@ -26,10 +26,11 @@ import {
   DISTRIBUTION_PRESETS, SERVICE_SIZE_CHOICES, DISCONNECT_ROLES, buildServiceFromPreset,
   DER_ARRANGEMENT_CHOICES, applyDerArrangement,
   ISOLATION_ARRANGEMENTS, applyIsolationArrangement, describeArrangementFor,
+  SOLAR_COUPLING_CHOICES, applyPerSystemGenerationPanels, clearPerSystemGenerationPanels,
 } from '@/lib/electrical/topologyPresets';
 import {
   addBackupDomain, removeBackupDomain, setDomainEquipment, updatePanel, updateDomain,
-  addProtectiveDevice, removeProtectiveDevice, setInterconnection,
+  addProtectiveDevice, removeProtectiveDevice, setInterconnection, setSolarCoupling,
 } from '@/lib/electrical/topologyAuthoring';
 import { BACKUP_INTERFACES, BATTERIES } from '@/lib/equipment-db';
 
@@ -338,6 +339,44 @@ export function ServiceTopologyWizard({
                 </div>
               );
             })}
+            {/* ── THE GENERATION / COMBINER PANEL, AS A PHYSICAL BOX ──────────
+                🚨 NOT A NOTE AND NOT AN ASSUMED PIECE OF WIRING. Ray: "Each pair of Powerwall 3
+                units must first land in a generation / combiner panel before feeding its Gateway...
+                Do not represent the combiner as a note or invisible wiring assumption." One per
+                system, each sized from ITS OWN batteries — never one shared by both gateways. */}
+            {draft.domains.length > 0 ? (
+              <label data-testid="wizard-generation-panel"
+                     className="flex cursor-pointer items-start gap-2 rounded-lg border border-slate-700 p-2">
+                <input type="checkbox" className="mt-1"
+                       checked={(draft.aggregationPanels ?? []).some(p => p.domainId)}
+                       onChange={e => {
+                         if (e.target.checked) {
+                           const r = applyPerSystemGenerationPanels(draft);
+                           setDraft(r.topology);
+                           setNotes(prev => [...new Set([...prev, ...r.created])]);
+                         } else {
+                           setDraft(clearPerSystemGenerationPanels(draft));
+                         }
+                       }} />
+                <span>
+                  <span className="block text-xs font-bold text-slate-100">
+                    Each system&apos;s batteries land in their own generation / combiner panel
+                  </span>
+                  <span className="block text-[11px] text-slate-400">
+                    One panel per system, between the batteries and that system&apos;s gateway, with a
+                    breaker for each battery. {draft.domains.length} panel
+                    {draft.domains.length === 1 ? '' : 's'} — never one shared.
+                  </span>
+                  {(draft.aggregationPanels ?? []).filter(p => p.domainId).map(p => (
+                    <span key={p.id} className="mt-1 block text-[11px] text-sky-300">
+                      {p.label}: {p.busbarRatingA ?? '—'} A bus · {p.outputOcpdA ?? '—'} A output ·{' '}
+                      {p.inputs.length} breaker{p.inputs.length === 1 ? '' : 's'}
+                    </span>
+                  ))}
+                </span>
+              </label>
+            ) : null}
+
             {notes.length > 0 ? (
               <ul data-testid="wizard-unresolved"
                   className="list-disc space-y-0.5 pl-5 text-[11px] text-amber-300">
@@ -361,7 +400,37 @@ export function ServiceTopologyWizard({
                 Two 200 A systems... Avoid leading with terms like DER, graph node, aggregation
                 topology, domain semantics." The node it builds is still the generic DER aggregation
                 panel the engineering and the sheet speak about — one model, two vocabularies. */}
+            {/* ── HOW THE NEW SOLAR CONNECTS ────────────────────────────────
+                🚨 THE PROJECT'S ONE ANSWER, ASKED ONCE, HERE. Ray, from the live browser: "Service
+                Topology says Tesla. Main electrical system still says MICROINVERTER. SLD still
+                draws Enphase equipment. That is unacceptable. SolarPro needs one explicit
+                project-level solar coupling architecture." Unanswered, every consumer infers one. */}
             <div className="text-xs font-bold text-slate-200">
+              How does the new solar connect?
+            </div>
+            {SOLAR_COUPLING_CHOICES.map(c => (
+              <label key={c.id} data-testid={`wizard-coupling-${c.id}`}
+                     className={`flex cursor-pointer items-start gap-2 rounded-lg border p-2 ${
+                       (draft.solarCoupling ?? null) === c.id
+                         ? 'border-sky-400 bg-sky-500/10' : 'border-slate-700 hover:border-slate-500'}`}>
+                <input type="radio" name="solarCoupling" className="mt-1"
+                       checked={(draft.solarCoupling ?? null) === c.id}
+                       onChange={() => setDraft(setSolarCoupling(draft, c.id))} />
+                <span>
+                  <span className="block text-xs font-bold text-slate-100">
+                    {c.labelFor(draft)}
+                  </span>
+                  <span className="block text-[11px] text-slate-400">{c.describe}</span>
+                </span>
+              </label>
+            ))}
+            {(draft.solarCoupling ?? null) === null ? (
+              <div data-testid="wizard-coupling-unset" className="text-[11px] text-amber-300">
+                Not selected — until it is, the drawing and the equipment list each have to guess.
+              </div>
+            ) : null}
+
+            <div className="pt-2 text-xs font-bold text-slate-200">
               How do these systems connect to the service?
             </div>
             {DER_ARRANGEMENT_CHOICES.map(c => (

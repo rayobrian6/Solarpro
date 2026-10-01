@@ -260,6 +260,114 @@ describe('🚨 Ray builds his job through the guided flow', () => {
   });
 });
 
+/**
+ * 🚨 THE JOB AS IT STANDS ON 2026-10-01, answered in Ray's own words:
+ *   400 A → two 200 A main panels → back up both → Gateway 3 + TWO PW3 + a generation panel each
+ *   → solar DC into the batteries → one safety switch per path → save.
+ *
+ * Every step is a question an installer can answer without knowing the word "domain".
+ */
+async function buildCurrentJobGuided(f: ReturnType<typeof makeFetch>) {
+  render(<ServiceTopologyBuilder projectId={PROJECT} fetchImpl={f.impl} />);
+  await waitFor(() => expect(screen.getByTestId('service-topology-wizard')).toBeTruthy());
+
+  fireEvent.click(screen.getByTestId('wizard-service-400'));
+  next();
+  fireEvent.click(within(screen.getByTestId('wizard-dist-two-main-panels')).getByRole('radio'));
+  next();
+  next();   // both panels backed up, as the preset created them
+
+  // EQUIPMENT: two Powerwalls per system, NO expansions, and each pair in its own panel.
+  for (const d of ['domain-1', 'domain-2']) {
+    fireEvent.change(screen.getByTestId(`wizard-${d}-gateway`),
+      { target: { value: 'tesla-backup-gateway-3' } });
+    fireEvent.change(screen.getByTestId(`wizard-${d}-ess`),
+      { target: { value: 'tesla-powerwall-3' } });
+    fireEvent.change(screen.getByTestId(`wizard-${d}-ess-count`), { target: { value: '2' } });
+  }
+  fireEvent.click(within(screen.getByTestId('wizard-generation-panel')).getByRole('checkbox'));
+  next();
+
+  // INTERCONNECTION: how the solar connects, then how the systems reach the service.
+  fireEvent.click(within(screen.getByTestId('wizard-coupling-dc-coupled-storage')).getByRole('radio'));
+  fireEvent.click(within(screen.getByTestId('wizard-arrangement-independent-branch')).getByRole('radio'));
+  fireEvent.change(screen.getByTestId('wizard-meter-collar-permitted'), { target: { value: 'no' } });
+  fireEvent.click(screen.getByTestId('wizard-der-isolation-required'));
+  next();
+
+  // DISCONNECTS: one safety switch on each 200 A path.
+  fireEvent.click(within(screen.getByTestId('wizard-isolation-one-per-path')).getByRole('radio'));
+  fireEvent.click(within(screen.getByTestId('wizard-role-service-disconnect')).getByRole('checkbox'));
+
+  fireEvent.click(screen.getByTestId('wizard-finish'));
+  await waitFor(() => expect(screen.getByTestId('topology-summary')).toBeTruthy());
+  fireEvent.click(screen.getByTestId('topology-save'));
+  await waitFor(() => expect(screen.getByTestId('topology-message').textContent).toMatch(/saved/i));
+}
+
+describe('🚨 the CURRENT job, built through the guided flow', () => {
+  it('four full Powerwalls, zero Expansions, two generation panels, DC coupled', async () => {
+    const f = makeFetch();
+    await buildCurrentJobGuided(f);
+    const t = f.stored as any;
+    expect(equipmentQuantities(t)).toEqual({
+      'tesla-backup-gateway-3': 2,
+      'tesla-powerwall-3': 4,
+    });
+    const s = summariseStorage(t);
+    expect(s.inverterUnitCount).toBe(4);
+    expect(s.expansionUnitCount).toBe(0);
+    expect(s.totalUsableKwh).toBeCloseTo(54, 6);
+    // 🚨 192 A, not 96: four inverting units on nearly the same energy.
+    expect(s.totalContinuousOutputA).toBeCloseTo(192, 6);
+
+    // One generation panel per system, each taking only its own pair.
+    expect(t.aggregationPanels).toHaveLength(2);
+    for (const d of t.domains) {
+      const own = t.aggregationPanels.filter((p: any) => p.domainId === d.id);
+      expect(own).toHaveLength(1);
+      expect(own[0].feedsNodeId).toBe(d.gateway.id);
+      expect(own[0].inputs.map((i: any) => i.sourceId).sort()).toEqual([...d.storageUnitIds].sort());
+      expect(own[0].busbarRatingA).toBe(125);
+    }
+
+    expect(t.solarCoupling).toBe('dc-coupled-storage');
+    // One switch per path, each IN LINE ahead of its own gateway.
+    const iso = t.devices.filter((d: any) => d.roles.includes('der-isolation-disconnect'));
+    expect(iso).toHaveLength(2);
+    expect(iso.map((d: any) => d.ratedAmps)).toEqual([200, 200]);
+    for (const d of iso) expect(d.inlineOnNodeId).toBeTruthy();
+  });
+
+  it('the summary bar reads the current job back in the installer\'s words', async () => {
+    const f = makeFetch();
+    await buildCurrentJobGuided(f);
+    const bar = screen.getByTestId('topology-summary').textContent ?? '';
+    expect(bar).toContain('400 A service');
+    expect(bar).toContain('Two 200 A systems');
+    expect(bar).toContain('4 Tesla Powerwall 3');
+    expect(bar).toContain('54.0 kWh');
+    expect(bar).toContain('192 A');
+    expect(bar).toContain('2 external isolation switches');
+    expect(bar).toContain('2 generation panels — one per system');
+    expect(bar).toContain('PV DC coupled to Tesla Powerwall 3');
+    // 🚨 AND NO EXPANSION COUNT, because there are none.
+    expect(bar).not.toContain('Expansion');
+  });
+
+  it('🚨 the solar coupling is editable AFTER save, without the wizard', async () => {
+    const f = makeFetch();
+    await buildCurrentJobGuided(f);
+    // View → click a node → edit. The interconnection node carries the project's coupling.
+    fireEvent.click(screen.getByTestId('node-interconnection'));
+    await waitFor(() => expect(screen.getByTestId('node-inspector')).toBeTruthy());
+    fireEvent.click(within(screen.getByTestId('ic-coupling-ac-coupled-inverter')).getByRole('radio'));
+    fireEvent.click(screen.getByTestId('topology-save'));
+    await waitFor(() =>
+      expect((f.stored as any).solarCoupling).toBe('ac-coupled-inverter'));
+  });
+});
+
 describe('🚨 a SAVED topology can be reopened and EDITED', () => {
   // Ray, after live testing: "Ray saved a topology and then had no obvious way to edit it. Fix this.
   // Required lifecycle: View topology → Edit topology → change equipment/service/interconnection →
@@ -313,7 +421,7 @@ describe('🚨 a SAVED topology can be reopened and EDITED', () => {
     fireEvent.click(screen.getByTestId('node-domain-1'));
     const inspector = screen.getByTestId('node-inspector');
     // The LABEL, which is what the diagram shows — the id is `domain-1`.
-    expect(inspector.textContent).toContain('Domain A — backup domain');
+    expect(inspector.textContent).toContain('System 1 — backup domain');
     expect(screen.getByTestId('topology-save')).toBeTruthy();
   });
 
@@ -498,8 +606,8 @@ describe('🚨 the sheet drawn from what was built', () => {
 
     const svg = renderServiceTopologySvg(g);
     expect(svg).toContain('400 A service distribution');
-    expect(svg).toContain('Branch A feeder');
-    expect(svg).toContain('Branch B feeder');
+    expect(svg).toContain('200 A service path 1 feeder');
+    expect(svg).toContain('200 A service path 2 feeder');
     expect(svg).toContain('MSP #1');
     expect(svg).toContain('MSP #2');
     expect(svg).toContain('N-G BOND');

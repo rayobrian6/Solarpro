@@ -23,6 +23,7 @@ import {
   type ServiceTopology, type TopologyCheck,
 } from '@/lib/electrical/serviceTopology';
 import { equipmentQuantities } from '@/lib/electrical/topologyEquipment';
+import { labelForToken } from '@/lib/electrical/topologyOverview';
 import { foldConclusions, requiredInputs } from '@/lib/engineering/engineeringStatus';
 
 const A = (v: number | null | undefined) => (typeof v === 'number' ? `${v} A` : '—');
@@ -324,11 +325,20 @@ export function ServiceTopologyPanel({ topology, onChange }: ServiceTopologyPane
           The same instances the BOM and pricing consume.
         </div>
         <div className="mt-2 space-y-0.5">
-          {Object.entries(quantities).map(([id, n]) => (
-            <div key={id} data-testid={`qty-${id}`} className="text-xs text-slate-200">
-              {n} × {id}
-            </div>
-          ))}
+          {/* 🚨 THE NAME ON THE BOX, THEN ITS CATALOGUE KEY — not the key alone. It read
+              "2 × tesla-backup-gateway-3" on an installer's screen. The graph already carries the
+              label the diagram and the schedule print, so this reads it rather than minting one. */}
+          {Object.entries(quantities).map(([id, n]) => {
+            const name = topology.storage.find(u => u.productId === id)?.label
+              ?? topology.domains.find(d => d.gateway.productId === id)?.gateway.label
+              ?? null;
+            return (
+              <div key={id} data-testid={`qty-${id}`} className="text-xs text-slate-200">
+                {n} × {name ?? id}
+                {name ? <span className="ml-2 text-[10px] text-slate-500">{id}</span> : null}
+              </div>
+            );
+          })}
         </div>
       </section>
 
@@ -337,8 +347,16 @@ export function ServiceTopologyPanel({ topology, onChange }: ServiceTopologyPane
         <section data-testid="topology-required-inputs"
                  className="rounded-xl border border-amber-500/40 bg-amber-500/5 p-4">
           <div className="text-sm font-black text-amber-300">NOT EVALUATED — INPUT REQUIRED</div>
+          {/* 🚨 IN WORDS, NOT IN TOKENS. This list printed the raw `requires` keys —
+              `service.existingEquipment.catalogNumber`, `sccr:agg-1`, `pv.stringAssignment` — which
+              are TypeScript field paths and database ids on an installer's screen. The same defect
+              the permit sheet had, on the surface beside it, and it was found by dumping the DOM
+              and READING it, not by an assertion. `labelForToken` is the one place those become
+              English, so the sheet and the screen ask for a thing in the same words. */}
           <ul className="mt-1 list-disc pl-5 text-xs text-amber-200">
-            {requiredInputs(evaluation.checks).map(r => <li key={r}>{r}</li>)}
+            {requiredInputs(evaluation.checks).map(r => (
+              <li key={r}>{labelForToken(r, topology)}</li>
+            ))}
           </ul>
         </section>
       ) : null}

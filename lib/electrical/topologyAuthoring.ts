@@ -21,7 +21,7 @@ import type {
   ServiceTopology, ServiceBranch, PanelBoard, BackupDomain, StorageUnit,
   GatewayInstance, ProtectiveDevice, DeviceRole, ServicePhase,
   GenerationUnit, DerAggregationPanel, DerTapPoint, PointOfInterconnection, PoiRelationship,
-  ExistingServiceEquipment, LoadModel, LoadCalculationMethod,
+  ExistingServiceEquipment, LoadModel, LoadCalculationMethod, SolarCoupling,
 } from '@/lib/electrical/serviceTopology';
 import { sizeAggregationPanel } from '@/lib/electrical/serviceTopology';
 import { nextStandardOcpd } from '@/lib/electrical/stdSizes';
@@ -76,7 +76,13 @@ export function addServiceBranch(
   const id = nextId(t.branches, 'branch');
   const branch: ServiceBranch = {
     id,
-    label: opts.label ?? `Branch ${String.fromCharCode(65 + t.branches.length)}`,
+    // 🚨 WHAT AN ELECTRICIAN CALLS IT, BECAUSE THE LABEL IS WHAT EVERY SURFACE PRINTS. Ray, after
+    // building the thing himself: "Installer-facing UI currently contains things such as: Branch A,
+    // Branch B, BACKUP DOMAIN, Domain A... I built the system and even I have to stop and think
+    // about what the screen wants from me." There is no translation layer for this — a second name
+    // beside the first is how a sheet and a screen start disagreeing. The name IS the fix.
+    label: opts.label
+      ?? `${opts.ratedAmps} A service path ${t.branches.length + 1}`,
     ratedAmps: opts.ratedAmps,
     ocpdAmps: opts.ocpdAmps ?? opts.ratedAmps,
     calculatedDemandA: null,
@@ -138,6 +144,14 @@ export interface DomainIntent {
   storageProductIds: string[];
   /** Catalogue ids of the DC expansions, paired to the units above by index. */
   expansionProductIds?: string[];
+  /**
+   * The output configuration the storage units are commissioned at, for a configurable product.
+   *
+   * Absent ⇒ the catalogue's top row. Named ⇒ that published row is used for BOTH the continuous
+   * current and the OCPD, and a setting the product does not publish is reported rather than
+   * rounded to the nearest one.
+   */
+  outputConfigKw?: number | null;
 }
 
 export interface DomainBuild {
@@ -176,6 +190,9 @@ export function buildDomainFromCatalogue(intent: DomainIntent): DomainBuild {
     serviceEntranceRated: gwProduct?.serviceEntranceRated ?? null,
     mainBreakerA: intent.mainBreakerA ?? gwProduct?.mainBreakerA ?? null,
     sccrA: intent.sccrA ?? null,
+    // Resolved onto the instance from the catalogue, like the continuous rating beside it.
+    ...(gwProduct?.internalPanelboard
+      ? { internalPanelboard: { ...gwProduct.internalPanelboard } } : {}),
   };
   if (gateway.sccrA === null) {
     unresolved.push(
@@ -201,14 +218,43 @@ export function buildDomainFromCatalogue(intent: DomainIntent): DomainBuild {
         `'${productId}' is an energy expansion and was listed as an inverter unit. An expansion is `
         + 'a DC extension of a host unit; it has no AC output and no breaker of its own.');
     }
+    // 🚨 THE CONFIGURED OUTPUT, WHERE THE PRODUCT HAS CONFIGURATIONS.
+    //
+    // A Powerwall 3 is commissioned at 5.8 / 7.6 / 10 / 11.5 kW and BOTH its continuous current and
+    // its required OCPD move with that setting. Reading the row the manufacturer published is the
+    // only way to get 10 kW → 60 A right: scaling 41.7 A by 125% gives 52 A and would select a
+    // device Tesla does not specify.
+    const wantKw = intent.outputConfigKw ?? null;
+    const configs = p.outputConfigurations ?? [];
+    const chosen = wantKw === null ? null
+      : configs.find(c => c.nominalKw === wantKw) ?? null;
+    if (wantKw !== null && configs.length > 0 && !chosen) {
+      unresolved.push(
+        `${p.manufacturer} ${p.model} has no ${wantKw} kW output configuration. The published `
+        + `settings are ${configs.map(c => `${c.nominalKw} kW`).join(', ')}.`);
+    }
     storage.push({
       id: `${intent.id}-ess-${i + 1}`,
       productId,
       label: `${p.manufacturer} ${p.model}`,
       role,
-      continuousOutputA: p.maxContinuousOutputA ?? null,
-      ocpdA: p.backfeedBreakerA ?? null,
+      continuousOutputA: chosen?.maxContinuousOutputA ?? p.maxContinuousOutputA ?? null,
+      ocpdA: chosen?.ocpdA ?? p.backfeedBreakerA ?? null,
       usableKwh: p.usableCapacityKwh ?? null,
+      ...(chosen ? { outputConfigKw: chosen.nominalKw } : {}),
+      // Resolved onto the instance so the DC-coupling check has the manufacturer's limits without
+      // this file's catalogue reach leaking into `serviceTopology.ts`.
+      ...(p.pvInput ? {
+        pvInputLimits: {
+          maxStcKw: p.pvInput.maxStcKw,
+          mppts: p.pvInput.mppts,
+          mpptVdc: p.pvInput.mpptVdc,
+          inputVdc: p.pvInput.inputVdc,
+          maxImpPerMpptA: p.pvInput.maxImpPerMpptA,
+          maxIscPerMpptA: p.pvInput.maxIscPerMpptA,
+          basis: p.pvInput.basis,
+        },
+      } : {}),
     });
   }
 
@@ -258,15 +304,21 @@ export function addBackupDomain(
     expansionProductIds?: string[];
     label?: string;
     storageConnection?: BackupDomain['storageConnection'];
+    /** The output setting the storage units are commissioned at, for a configurable product. */
+    outputConfigKw?: number | null;
   },
 ): { topology: ServiceTopology; domain: BackupDomain; unresolved: string[] } {
   const id = nextId(t.domains, 'domain');
-  const label = opts.label ?? `Domain ${String.fromCharCode(65 + t.domains.length)}`;
+  // "System 1", not "Domain A". A backup domain IS one of the installer's systems — a gateway, its
+  // batteries and the panel behind it — and "domain" is the word the graph uses for it, not the
+  // word on the job. Same reasoning as the branch label above.
+  const label = opts.label ?? `System ${t.domains.length + 1}`;
   const build = buildDomainFromCatalogue({
     id, label,
     gatewayProductId: opts.gatewayProductId,
     storageProductIds: opts.storageProductIds,
     expansionProductIds: opts.expansionProductIds,
+    outputConfigKw: opts.outputConfigKw ?? null,
   });
   const domain: BackupDomain = {
     id, label,
@@ -451,6 +503,10 @@ export function addAggregationPanel(
     outputOcpdA?: number | null;
     outputConductorGauge?: string | null;
     feedsNodeId?: string | null;
+    /** The system this panel belongs to. Omitted ⇒ a site-wide panel owned by no one domain. */
+    domainId?: string | null;
+    /** The catalogue panelboard selected for it, when one has been. */
+    productId?: string | null;
   } = {},
 ): { topology: ServiceTopology; panel: DerAggregationPanel } {
   const existing = t.aggregationPanels ?? [];
@@ -458,6 +514,8 @@ export function addAggregationPanel(
   const panel: DerAggregationPanel = {
     id,
     label: opts.label ?? `DER aggregation panel ${existing.length + 1}`,
+    ...(opts.domainId ? { domainId: opts.domainId } : {}),
+    ...(opts.productId ? { productId: opts.productId } : {}),
     carriesPremisesLoad: opts.carriesPremisesLoad ?? null,
     busbarRatingA: opts.busbarRatingA ?? null,
     mainBreakerA: opts.mainBreakerA ?? null,
@@ -563,6 +621,46 @@ export function setDerArrangement(
   t: ServiceTopology, arrangement: ServiceTopology['interconnection']['derArrangement'],
 ): ServiceTopology {
   return { ...t, interconnection: { ...t.interconnection, derArrangement: arrangement } };
+}
+
+/**
+ * Record how the PV is coupled — the project-level answer every other surface defers to.
+ *
+ * 🚨 ONE WRITER, ONE FIELD. The whole point of `SolarCoupling` is that the drawing and the sidebar
+ * stop inferring it; a second place to store it would restore the contradiction with extra steps.
+ */
+export function setSolarCoupling(
+  t: ServiceTopology, coupling: SolarCoupling | null,
+): ServiceTopology {
+  return { ...t, solarCoupling: coupling };
+}
+
+/** Name the catalogue panelboard selected for a generation / aggregation panel. */
+export function selectAggregationProduct(
+  t: ServiceTopology, panelId: string, productId: string | null,
+): ServiceTopology {
+  return {
+    ...t,
+    aggregationPanels: (t.aggregationPanels ?? []).map(
+      p => p.id === panelId ? { ...p, productId } : p),
+  };
+}
+
+/**
+ * Assign PV STC capacity to one storage unit's own DC inputs.
+ *
+ * 🚨 THE DESIGN SAYS THIS, NOT A DIVISION. There is deliberately no "spread the array over the
+ * units" helper: Ray's instruction is "Do not arbitrarily do equal string counts simply because
+ * there are four batteries", and a convenience function that did it would be the fastest route
+ * back to a symmetrical drawing of a system nobody is installing.
+ */
+export function setStoragePvInput(
+  t: ServiceTopology, unitId: string, stcKw: number | null,
+): ServiceTopology {
+  return {
+    ...t,
+    storage: t.storage.map(u => u.id === unitId ? { ...u, pvDcStcKw: stcKw } : u),
+  };
 }
 
 /** Place a protective device on a specific path rather than the default service chain. */

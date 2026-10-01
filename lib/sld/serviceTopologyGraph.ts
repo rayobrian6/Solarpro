@@ -39,7 +39,7 @@
 import type { SLDNode, SLDEdge, RunSegment } from '@/lib/topology-engine';
 import {
   evaluateServiceTopology, sizeAggregationPanel, governingArticleFor, sourcesForAggregationInput,
-  topologyNodeLabel,
+  topologyNodeLabel, storageUnitLabel,
   type ServiceTopology, type TopologyEvaluation,
 } from '@/lib/electrical/serviceTopology';
 import { notEvaluatedLabel } from '@/lib/engineering/engineeringStatus';
@@ -228,6 +228,9 @@ export function buildServiceTopologyGraph(
     const aggNode = add({
       id: agg.id, type: 'DER_AGGREGATION_PANEL',
       label: agg.label,
+      // 🚨 WHICH SYSTEM IT IS IN, so a per-system generation panel is drawn inside that system's
+      // column rather than floating on the shared DER side with the site-wide kind.
+      domainId: agg.domainId ?? undefined,
       ratedCurrent: amps(agg.busbarRatingA),
       ocpdRating: agg.mainLugOnly ? 'MLO — no main OCPD' : amps(agg.mainBreakerA),
       // Stated on the node, because "why is this 125 A on a 400 A service" is the first question
@@ -451,7 +454,8 @@ export function buildServiceTopologyGraph(
       const landsAt = aggregationForSource.get(u.id) ?? acTargetId;
       const n = add({
         id: u.id, type: 'ESS_AC_SOURCE',
-        label: `ESS ${u.productId}`,
+        // 🚨 THE NAME ON THE CABINET AND ITS POSITION — not `ESS tesla-powerwall-3`, four times.
+        label: storageUnitLabel(topology, u),
         model: u.productId,
         ratedCurrent: amps(u.continuousOutputA),
         ocpdRating: amps(u.ocpdA),
@@ -465,8 +469,9 @@ export function buildServiceTopologyGraph(
       });
       const seg = add({
         id: `run-${u.id}`, type: 'RUN_SEGMENT',
-        label: `${u.productId} AC connection`,
-        runSegment: run('ESS_AC_RUN', `${u.productId} AC connection`, { ocpdAmps: u.ocpdA ?? 0 }),
+        label: `${storageUnitLabel(topology, u)} AC connection`,
+        runSegment: run('ESS_AC_RUN', `${storageUnitLabel(topology, u)} AC connection`,
+          { ocpdAmps: u.ocpdA ?? 0 }),
         domainId: domain.id,
       });
       link(n.id, seg, landsAt);
@@ -478,7 +483,7 @@ export function buildServiceTopologyGraph(
       const hostId = u.attachedToUnitId;
       const n = add({
         id: u.id, type: 'DC_BATTERY_EXPANSION',
-        label: `DC expansion ${u.productId}`,
+        label: storageUnitLabel(topology, u),
         model: u.productId,
         ratedPower: u.usableKwh === null ? undefined : `${u.usableKwh} kWh`,
         // Stated, so a reader cannot wonder whether one was left off by accident.

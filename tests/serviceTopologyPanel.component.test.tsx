@@ -100,7 +100,11 @@ describe('🚨 NOT EVALUATED names what would settle it', () => {
     render(<ServiceTopologyPanel topology={rayJob({ availableFaultCurrentA: null })} />);
     const box = screen.getByTestId('topology-required-inputs');
     expect(within(box).getByText(/NOT EVALUATED — INPUT REQUIRED/)).toBeTruthy();
-    expect(within(box).getByText('service.availableFaultCurrentA')).toBeTruthy();
+    // 🚨 IN WORDS. This line required the raw token `service.availableFaultCurrentA` on screen —
+    // it was PINNING the defect, the same way the sheet's assertion pinned the printed field path
+    // and the schedule's pinned `branch-a`. The token is still the key; it is not the label.
+    expect(within(box).getByText('Available fault current at the service')).toBeTruthy();
+    expect(within(box).queryByText('service.availableFaultCurrentA')).toBeNull();
     // And the input that would fix it is on screen, marked required rather than defaulted to 0.
     const fc = screen.getByTestId('service-fault-current') as HTMLInputElement;
     expect(fc.value).toBe('');
@@ -130,9 +134,12 @@ describe('🚨 NOT EVALUATED names what would settle it', () => {
     // that can take them. The first version of this test forgot, and the panel was right.
     // And it now includes the DER interconnection arrangement — the decision the designer owes the
     // drawing. The same forgetting, one level up, and the model was right again.
+    // And it now includes HOW THE PV IS COUPLED — the project-level answer that stops the
+    // drawing and the sidebar each inferring one. The same forgetting, one level further out.
     const t = rayJob({
       storageConnection: 'backed-up-panel-busbar',
       derArrangement: 'independent-branch',
+      solarCoupling: 'storage-only',
     });
     t.interconnection.multiGatewayMeteringDoc = {
       title: 'Multiple Backup Gateways on a Single Site — Application Note',

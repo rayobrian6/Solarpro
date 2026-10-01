@@ -24,6 +24,7 @@ import {
   updateAggregationPanel, updatePointOfInterconnection, recommendAggregationRatings,
   setExistingServiceEquipment, setLoadModel, setPanelLoad,
   placeDevice, placeDeviceInline, selectDeviceProduct,
+  setSolarCoupling, selectAggregationProduct,
 } from '@/lib/electrical/topologyAuthoring';
 import { governingArticleFor, resolveDemands } from '@/lib/electrical/serviceTopology';
 import type { LoadCalculationMethod } from '@/lib/electrical/serviceTopology';
@@ -40,6 +41,7 @@ function sourceLabel(t: ServiceTopology, sourceId: string): string {
 }
 import {
   DISCONNECT_ROLES, SERVICE_SIZE_CHOICES, ISOLATION_ARRANGEMENTS, applyIsolationArrangement,
+  SOLAR_COUPLING_CHOICES,
 } from '@/lib/electrical/topologyPresets';
 import { BACKUP_INTERFACES, BATTERIES } from '@/lib/equipment-db';
 
@@ -340,6 +342,33 @@ export function ServiceNodeInspector({
       <div data-testid="node-inspector" className="rounded-xl border border-sky-500/30 bg-slate-900/70 p-4">
         <div className="text-[10px] font-bold uppercase tracking-widest text-sky-400">Editing</div>
         <div className="text-sm font-black text-slate-100">Interconnection &amp; disconnects</div>
+
+        {/* ── HOW THE NEW SOLAR CONNECTS ───────────────────────────────────
+            🚨 EDITABLE AFTER SAVE, not only inside the guided flow. Ray: "The wizard creates the
+            topology. The wizard must not be the only way to edit it." The coupling is the project's
+            one answer to a question the drawing, the schedule and the sidebar all ask. */}
+        <div className="mt-3 rounded-lg border border-slate-700 p-2">
+          <div className="text-xs font-bold text-slate-200">How does the new solar connect?</div>
+          <div className="mt-1 space-y-1">
+            {SOLAR_COUPLING_CHOICES.map(c => (
+              <label key={c.id} data-testid={`ic-coupling-${c.id}`}
+                     className="flex cursor-pointer items-start gap-2 text-xs text-slate-300">
+                <input type="radio" name="ic-solar-coupling" className="mt-0.5"
+                       checked={(topology.solarCoupling ?? null) === c.id}
+                       onChange={() => onChange(setSolarCoupling(topology, c.id))} />
+                <span>
+                  {c.labelFor(topology)}
+                  <span className="block text-[10px] text-slate-500">{c.describe}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+          {(topology.solarCoupling ?? null) === null ? (
+            <div data-testid="ic-coupling-unset" className="mt-1 text-[10px] font-bold text-amber-300">
+              Not selected — the drawing and the equipment list each have to guess until it is.
+            </div>
+          ) : null}
+        </div>
 
         <div className="mt-3 space-y-2">
           <label className="flex items-start gap-2 text-xs text-slate-300">
@@ -831,7 +860,33 @@ export function ServiceNodeInspector({
     return (
       <div data-testid="node-inspector" className="rounded-xl border border-sky-500/30 bg-slate-900/70 p-4">
         <div className="text-[10px] font-bold uppercase tracking-widest text-sky-400">Editing</div>
-        <div className="text-sm font-black text-slate-100">{agg.label} — DER aggregation panel</div>
+        {/* Installer language: on a per-system panel this is the generation / combiner panel for
+            that system, which is what is written on the job. "DER aggregation panel" stays the
+            model's and the sheet's generic name for the same node. */}
+        <div className="text-sm font-black text-slate-100">
+          {agg.label}
+          {agg.domainId
+            ? ` — generation panel for ${topology.domains.find(d => d.id === agg.domainId)?.label
+                ?? 'this system'}`
+            : ' — shared generation panel'}
+        </div>
+
+        {/* 🚨 A CALCULATED MINIMUM IS NOT A PURCHASE. Ray: "engineering requirement → actual
+            catalog equipment selection → verify selected equipment satisfies requirement → BOM." */}
+        <label className="mt-3 block text-[11px] text-slate-400">
+          Selected equipment (catalogue / part number)
+          <input type="text" data-testid="inspector-agg-product"
+                 className={`mt-1 ${box} ${isFocus('productId') ? ring : ''}`}
+                 value={agg.productId ?? ''}
+                 placeholder="Not selected — nothing is ordered or drawn as a specific enclosure"
+                 onChange={e => onChange(
+                   selectAggregationProduct(topology, agg.id, e.target.value.trim() || null))} />
+          {agg.productId ? null : (
+            <span className="mt-0.5 block text-[10px] font-bold text-amber-300">
+              NOT EVALUATED — EQUIPMENT SELECTION REQUIRED
+            </span>
+          )}
+        </label>
 
         {/* 🚨 WHAT SOLARPRO COMPUTED, AND FROM WHAT. Ray: "Do not infer its rating from
             serviceAmps = 400. Calculate from the actual topology." So the arithmetic is shown, and

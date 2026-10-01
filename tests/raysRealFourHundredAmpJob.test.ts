@@ -7,8 +7,15 @@
 //   existing Eaton 400 A meter/service assembly, internals NOT verified
 //   two 200 A systems, independent; nothing recombined downstream
 //   one knife switch IN LINE in each path, ahead of that path's Gateway
-//   Gateway 3 + Powerwall 3 + one Expansion per system
+//   Gateway 3 + TWO full Powerwall 3 + one generation/combiner panel per system
+//   PV DC coupled to the Powerwalls — no microinverter, no PV inverter, no PV AC combiner
 //   no meter collar, no common combiner, and NO house-load inventory
+//
+// 🚨 THE HARDWARE CHANGED ON 2026-10-01 AND THIS FILE CHANGED WITH IT. Ray: "4 full Tesla
+// Powerwall 3, 0 Powerwall Expansions, 2 full PW3 per Gateway... customer specifically wants the
+// increased inverter/discharge capacity from four full PW3s." Four inverting units is 192 A of AC
+// source where two units plus two Expansions were 96 A, on almost the same 54 kWh — which is the
+// distinction the Expansion work exists to protect, now exercised from the other side.
 //
 // Ray's completion target, verbatim: "Ray must be able to (1) create the 400 A / two-200 A topology
 // (2) save it (3) reopen it (4) edit it (5) LEAVE DETAILED HOUSE LOADS BLANK (6) generate the SLD
@@ -33,6 +40,7 @@ import {
 import {
   setLoadModel, setPanelLoad, setExistingServiceEquipment, placeDeviceInline,
   selectDeviceProduct, addProtectiveDevice, updateBranch,
+  selectAggregationProduct, setStoragePvInput,
 } from '@/lib/electrical/topologyAuthoring';
 import {
   applyIsolationArrangement, ISOLATION_ARRANGEMENTS, describeArrangementFor,
@@ -45,6 +53,24 @@ import { renderSLDProfessional } from '@/lib/sld-professional-renderer';
 
 const check = (t: ServiceTopology, id: string) =>
   evaluateServiceTopology(t).checks.find(c => c.id === id);
+
+/** One sheet input, so any test in this file can render the drawing and read it. */
+const SHEET_BASE = {
+  projectName: 'RAY 400A TWO SYSTEMS', clientName: 'Ray', address: 'Chicago IL',
+  designer: 'SolarPro', drawingDate: '2026-10-01', drawingNumber: 'E-1', revision: 'A',
+  scale: 'NOT TO SCALE',
+  topologyType: 'MICROINVERTER', ecosystemTopology: 'micro', selectedBrand: 'enphase',
+  integratedDcDisconnect: false, totalModules: 30, totalStrings: 0, deviceCount: 30,
+  panelModel: 'Tesla TSP-420', panelWatts: 420, panelVoc: 40.92, panelIsc: 13.03,
+  dcWireGauge: '#10', dcConduitType: 'EMT', dcOCPD: 0,
+  inverterModel: 'IQ8PLUS-72-2-US', inverterManufacturer: 'Enphase',
+  acOutputKw: 8.7, acOutputAmps: 36.2, acWireGauge: '#6', acConduitType: 'EMT',
+  acOCPD: 50, backfeedAmps: 50, rapidShutdownIntegrated: true,
+  mainPanelAmps: 200, utilityName: 'ComEd', interconnection: 'LOAD_SIDE',
+  hasProductionMeter: false, hasBattery: false, batteryModel: '', batteryKwh: 0,
+};
+const sheetOf = (t: ServiceTopology, over: Record<string, unknown> = {}) =>
+  renderSLDProfessional({ ...SHEET_BASE, ...over, serviceTopology: t } as never);
 
 const requiresOf = (t: ServiceTopology) => {
   const seen = new Set<string>();
@@ -61,7 +87,9 @@ describe('two independent 200 A paths, one switch in each', () => {
     const cov = derIsolationCoverage(topology);
     expect(cov.conclusion).toBe('PASS');
     expect(cov.isolationDeviceIds).toHaveLength(2);
-    expect(cov.isolatedSourceIds).toHaveLength(2);
+    // Four inverting Powerwalls now, two per system, each reaching the utility through its own
+    // generation panel and gateway — and both switches still cut every one of those paths.
+    expect(cov.isolatedSourceIds).toHaveLength(4);
     expect(cov.reachableSourceIds).toEqual([]);
   });
 
@@ -80,7 +108,7 @@ describe('two independent 200 A paths, one switch in each', () => {
     const cov = derIsolationCoverage(beside);
     expect(cov.conclusion).toBe('FAIL');
     expect(cov.detail).toContain('DER ISOLATION DOES NOT ISOLATE ALL ON-SITE DER');
-    expect(cov.reachableSourceIds).toHaveLength(2);
+    expect(cov.reachableSourceIds).toHaveLength(4);
   });
 
   it('the branch feeder is RE-ROUTED through the switch, not duplicated past it', () => {
@@ -156,10 +184,16 @@ describe('two independent 200 A paths, one switch in each', () => {
 describe('🚨 where the Powerwall breaker lands decides whether the design is legal', () => {
   it('the Powerwall cannot land on a 200 A / 200 A MSP busbar — 705.12(B) FAILS', () => {
     // Ray's real MSPs are 200 A bus with a 200 A main, so the 120% allowance is
-    // 200 × 1.2 − 200 = 40 A and a Powerwall 3 needs a 50 A breaker. This is a genuine finding
-    // about the job, not a fixture artefact: the breaker has to land in the Gateway (which is what
-    // his own diagram shows), or the MSP's main has to come down.
-    const { topology } = buildRaysIntendedJob({ storageConnection: 'backed-up-panel-busbar' });
+    // 200 × 1.2 − 200 = 40 A and a Powerwall 3 needs a 60 A breaker — Tesla's own figure for the
+    // 11.5 kW configuration. This is a genuine finding about the job, not a fixture artefact: the
+    // breaker has to land somewhere other than that busbar, which on this job is the generation
+    // panel, or the MSP's main has to come down.
+    //
+    // Built WITHOUT the generation panel, because the panel is precisely what makes the question
+    // go away: with it, the Powerwalls land in it and the MSP busbar carries no storage at all.
+    const { topology } = buildRaysIntendedJob({
+      storageConnection: 'backed-up-panel-busbar', generationPanelPerSystem: false,
+    });
     const busbar = evaluateServiceTopology(topology).checks
       .filter(c => c.id === 'domain.busbar-705-12');
     expect(busbar).toHaveLength(2);
@@ -171,11 +205,120 @@ describe('🚨 where the Powerwall breaker lands decides whether the design is l
     // 🚨 AND NOT A PASS EITHER. Inside the controller's own panelboard the governing limit is the
     // manufacturer's, and SolarPro does not hold it — so this is NOT_EVALUATED, which is the honest
     // answer and not the comfortable one.
-    const { topology } = buildRaysIntendedJob();
+    const { topology } = buildRaysIntendedJob({ generationPanelPerSystem: false });
     const busbar = evaluateServiceTopology(topology).checks
       .filter(c => c.id === 'domain.busbar-705-12');
     for (const c of busbar) expect(c.conclusion).toBe('NOT_EVALUATED');
     expect(busbar[0].requires?.some(r => r.startsWith('manufacturer-limit:'))).toBe(true);
+  });
+
+  it('🚨 landing in the GENERATION PANEL moves the question to that panel, and it PASSES', () => {
+    // The actual job. The Powerwalls are not on the MSP busbar and are not in the controller: they
+    // are in their own generation panel, so the MSP's 120% allowance has nothing to carry and the
+    // panel's own busbar answers for them — 96 A aggregated, 125 A at 125%, on a 125 A bus.
+    const { topology } = buildRaysIntendedJob();
+    for (const d of topology.domains) expect(d.storageConnection).toBe('der-aggregation-panel');
+    const ev = evaluateServiceTopology(topology);
+    for (const c of ev.checks.filter(c => c.id === 'domain.busbar-705-12')) {
+      expect(c.conclusion).toBe('PASS');
+    }
+    const agg = ev.checks.filter(c => c.id === 'aggregation.busbar');
+    expect(agg).toHaveLength(2);
+    for (const c of agg) expect(c.conclusion).toBe('PASS');
+    // And the panel is sized from its own two Powerwalls, never from the 400 A service.
+    for (const p of topology.aggregationPanels) {
+      expect(p.busbarRatingA).toBe(125);
+      expect(p.outputOcpdA).toBe(125);
+      expect(p.inputs.map(i => i.ocpdA)).toEqual([60, 60]);
+    }
+  });
+
+  it('🚨 the two generation panels are two panels, one per system — never one shared', () => {
+    const { topology } = buildRaysIntendedJob();
+    expect(topology.aggregationPanels).toHaveLength(2);
+    const owners = topology.aggregationPanels.map(p => p.domainId);
+    expect(new Set(owners).size).toBe(2);
+    for (const d of topology.domains) {
+      const own = topology.aggregationPanels.filter(p => p.domainId === d.id);
+      expect(own).toHaveLength(1);
+      // Each panel feeds ITS OWN gateway and takes ITS OWN two Powerwalls. Nothing crosses.
+      expect(own[0].feedsNodeId).toBe(d.gateway.id);
+      expect(own[0].inputs.map(i => i.sourceId).sort()).toEqual([...d.storageUnitIds].sort());
+    }
+  });
+
+  it('🚨 the Powerwall OCPD is Tesla\'s 60 A, not the 50 A this catalogue used to carry', () => {
+    // The live drawing printed "48 A / 50 A OCPD". 48 A continuous with a 50 A device is below the
+    // 125% continuous figure AND below Tesla's own table, which gives 60 A at the 11.5 kW setting.
+    const { topology } = buildRaysIntendedJob();
+    const units = topology.storage.filter(u => u.role === 'inverter-unit');
+    expect(units).toHaveLength(4);
+    for (const u of units) {
+      expect(u.continuousOutputA).toBe(48);
+      expect(u.ocpdA).toBe(60);
+      expect(u.outputConfigKw).toBe(11.5);
+    }
+  });
+
+  it('🚨 the Gateway\'s OWN internal panelboard is a third bus, and the feeder is checked on it', () => {
+    // Tesla Gateway 3 Install Manual: "The internal panelboard is a 200 A-rated bussing that
+    // supports 8x 1-inch breaker spaces (16 circuits)" using "branch circuit breakers up to 125 A
+    // maximum". A 125 A generation feeder is therefore AT the manufacturer's limit and a larger one
+    // is a failure anybody can see — which is a different question from how much generation that
+    // bus may carry in total, and that second question is the one still named as unresolved.
+    const { topology } = buildRaysIntendedJob();
+    for (const d of topology.domains) {
+      expect(d.gateway.internalPanelboard?.busbarRatingA).toBe(200);
+      expect(d.gateway.internalPanelboard?.maxBranchBreakerA).toBe(125);
+      expect(d.gateway.internalPanelboard?.spaces).toBe(8);
+    }
+    const landing = evaluateServiceTopology(topology).checks
+      .filter(c => c.id === 'aggregation.landing');
+    expect(landing).toHaveLength(2);
+    for (const c of landing) {
+      expect(c.conclusion).toBe('NOT_EVALUATED');
+      expect(c.detail).toContain('200 A');
+      expect(c.detail).toContain('125 A');
+    }
+
+    // 🚨 AND A FEEDER THE MANUFACTURER DOES NOT PERMIT IS A FAIL, NOT ANOTHER UNKNOWN.
+    const oversized: ServiceTopology = {
+      ...topology,
+      aggregationPanels: topology.aggregationPanels.map(p => ({ ...p, outputOcpdA: 175 })),
+    };
+    const bad = evaluateServiceTopology(oversized).checks
+      .filter(c => c.id === 'aggregation.landing');
+    for (const c of bad) {
+      expect(c.conclusion).toBe('FAIL');
+      expect(c.detail).toContain('175 A');
+    }
+  });
+
+  it('the internal panelboard survives the round trip, or the check loses its limit', () => {
+    const stored = JSON.parse(JSON.stringify(serialiseServiceTopology(buildRaysIntendedJob().topology)));
+    const back = parseServiceTopology(stored)!.topology;
+    for (const d of back.domains) {
+      expect(d.gateway.internalPanelboard?.maxBranchBreakerA).toBe(125);
+    }
+    // Drop it and the landing check must go back to saying it has nothing to size against —
+    // never to passing.
+    for (const d of stored.topology.domains) delete d.gateway.internalPanelboard;
+    const stripped = parseServiceTopology(stored)!.topology;
+    const landing = evaluateServiceTopology(stripped).checks
+      .filter(c => c.id === 'aggregation.landing');
+    expect(landing).toHaveLength(2);
+    for (const c of landing) expect(c.conclusion).toBe('NOT_EVALUATED');
+  });
+
+  it('a different output configuration moves BOTH the current and the device', () => {
+    // 🚨 READ OFF THE PUBLISHED ROW, NOT SCALED. 41.7 A × 1.25 is 52 A, which would select a 60 A
+    // device by arithmetic — the same answer Tesla publishes, by luck. 7.6 kW is where the two
+    // disagree: 31.7 × 1.25 = 39.6 → 40 A, and Tesla says 40 A. The point is that the row is read.
+    const { topology } = buildRaysIntendedJob({ outputConfigKw: 7.6 });
+    for (const u of topology.storage.filter(u => u.role === 'inverter-unit')) {
+      expect(u.continuousOutputA).toBe(31.7);
+      expect(u.ocpdA).toBe(40);
+    }
   });
 });
 
@@ -325,12 +468,16 @@ describe('the existing service equipment is read, never designed', () => {
     // Ray: "Do not automatically add replacement 400 A service distribution equipment." Nothing
     // with no catalogue id is procurable, and the existing service has none.
     const q = equipmentQuantities(topology);
+    // 🚨 NO EXPANSION ROW AT ALL ON THIS JOB. Ray: "0 Powerwall Expansions". A BOM that still
+    // carried two would be ordering hardware nobody is installing.
     expect(Object.keys(q).sort()).toEqual([
-      'tesla-backup-gateway-3', 'tesla-powerwall-3', 'tesla-powerwall-3-expansion',
+      'tesla-backup-gateway-3', 'tesla-powerwall-3',
     ]);
     expect(q['tesla-backup-gateway-3']).toBe(2);
-    expect(q['tesla-powerwall-3']).toBe(2);
-    expect(q['tesla-powerwall-3-expansion']).toBe(2);
+    expect(q['tesla-powerwall-3']).toBe(4);
+    // And the two generation panels are not ordered either, because no part has been selected for
+    // them — the requirement is established and the purchase is not.
+    expect(topology.aggregationPanels.every(p => !p.productId)).toBe(true);
   });
 });
 
@@ -364,11 +511,20 @@ describe('the schedule and the screen speak the installer\'s language', () => {
     expect(s.systemsLabel).toBe('Two 200 A systems');
     expect(s.gatewayModelLabel).toBe('Tesla Backup Gateway 3');
     expect(s.batteryModelLabel).toBe('Tesla Powerwall 3');
-    expect(s.expansionUnitCount).toBe(2);
+    expect(s.invertingUnitCount).toBe(4);
+    expect(s.expansionUnitCount).toBe(0);
     expect(s.isolationSwitchCount).toBe(2);
+    expect(s.perSystemGenerationPanelCount).toBe(2);
     expect(s.serviceEquipmentIsExisting).toBe(true);
     expect(s.usableKwh).toBeCloseTo(54, 1);
-    expect(s.continuousOutputA).toBe(96);
+    // 🚨 192 A, NOT 96. Four inverting units, where two units and two Expansions were 96 A on the
+    // same energy — the whole reason the two counts are separate fields.
+    expect(s.continuousOutputA).toBe(192);
+    // 🚨 THE PRODUCT NAME IS COMPOSED FROM THE UNITS ACTUALLY IN THE GRAPH. The architecture member
+    // is generic (`dc-coupled-storage`) because the model may name no manufacturer; the SENTENCE an
+    // installer reads names the box on the wall.
+    expect(s.solarCouplingLabel).toBe('PV DC coupled to Tesla Powerwall 3');
+    expect(s.solarCouplingSelected).toBe(true);
   });
 
   it('a mixed-size service does not claim one system size', () => {
@@ -397,9 +553,14 @@ describe('the schedule and the screen speak the installer\'s language', () => {
 
     // 🚨 AND NO CATALOGUE KEY. The card read "Manufacturer busbar limit for
     // tesla-backup-gateway-3" — a database id, on an installer's screen.
-    const mfr = ov.requiredInputs.find(i => i.key.startsWith('manufacturer-limit:'))!;
-    expect(mfr.label).toBe('Manufacturer busbar limit for Tesla Backup Gateway 3');
     for (const i of ov.requiredInputs) expect(i.label).not.toMatch(/tesla-|-gateway-3|msp-\d/);
+
+    // The catalogue key only comes up where the Powerwall lands in the controller, which on this
+    // job it no longer does — so the variant that DOES is where the words are checked.
+    const gwLanding = buildRaysIntendedJob({ generationPanelPerSystem: false });
+    const ov2 = buildServiceOverview(gwLanding.topology);
+    const mfr = ov2.requiredInputs.find(i => i.key.startsWith('manufacturer-limit:'))!;
+    expect(mfr.label).toBe('Manufacturer busbar limit for Tesla Backup Gateway 3');
   });
 
   it('🚨 an OPTIONAL calculation is not what a 200 A path is waiting on', () => {
@@ -431,9 +592,9 @@ describe('the schedule and the screen speak the installer\'s language', () => {
     for (const r of switches) {
       // "on the path to branch-a" is a database key handed to an inspector.
       expect(r.notes).not.toMatch(/branch-[ab]\b/);
-      expect(r.notes).toMatch(/Branch [AB]/);
-      // 🚨 AND DOMAIN IDENTITY SURVIVES EVEN THOUGH BOTH SWITCHES ARE THE SAME MODEL AND RATING.
-      expect(r.domain).toMatch(/Domain [AB]/);
+      expect(r.notes).toMatch(/200 A service path [12]/);
+      // 🚨 AND SYSTEM IDENTITY SURVIVES EVEN THOUGH BOTH SWITCHES ARE THE SAME MODEL AND RATING.
+      expect(r.domain).toMatch(/System [12]/);
     }
     expect(new Set(switches.map(r => r.domain)).size).toBe(2);
   });
@@ -489,16 +650,55 @@ describe('save, reopen, edit — the lifecycle Ray could not complete', () => {
     expect(check(back, 'load.calculation')?.detail).toContain('LOAD CALCULATION NOT PROVIDED');
   });
 
-  it('every branch, panel, gateway, battery, expansion and switch comes back', () => {
+  it('every branch, panel, gateway, battery, generation panel and switch comes back', () => {
     const back = roundTrip(buildRaysIntendedJob().topology);
     expect(back.branches).toHaveLength(2);
     expect(back.panels).toHaveLength(2);
     expect(back.domains).toHaveLength(2);
-    expect(back.storage.filter(u => u.role === 'inverter-unit')).toHaveLength(2);
-    expect(back.storage.filter(u => u.role === 'energy-expansion')).toHaveLength(2);
+    expect(back.storage.filter(u => u.role === 'inverter-unit')).toHaveLength(4);
+    expect(back.storage.filter(u => u.role === 'energy-expansion')).toHaveLength(0);
     expect(back.devices).toHaveLength(3);
     expect(back.interconnection.derArrangement).toBe('independent-branch');
     expect(back.pointsOfInterconnection).toHaveLength(2);
+    // 🚨 AND THE TWO GENERATION PANELS COME BACK AS TWO SYSTEMS' PANELS, not two site-wide ones.
+    expect(back.aggregationPanels).toHaveLength(2);
+    expect(back.aggregationPanels.map(p => p.domainId).sort()).toEqual(['domain-a', 'domain-b']);
+    for (const p of back.aggregationPanels) expect(p.inputs).toHaveLength(2);
+  });
+
+  it('🚨 the solar coupling survives, or every consumer goes back to inferring one', () => {
+    const back = roundTrip(buildRaysIntendedJob().topology);
+    expect(back.solarCoupling).toBe('dc-coupled-storage');
+    expect(check(back, 'pv.coupling')?.conclusion).toBe('PASS');
+  });
+
+  it('the commissioned output setting survives, with the current and the device it chose', () => {
+    const back = roundTrip(buildRaysIntendedJob().topology);
+    for (const u of back.storage.filter(u => u.role === 'inverter-unit')) {
+      expect(u.outputConfigKw).toBe(11.5);
+      expect(u.continuousOutputA).toBe(48);
+      expect(u.ocpdA).toBe(60);
+      // The manufacturer's DC input limits come back too, or the DC-coupling check has nothing to
+      // compare a string against and would clear it by default.
+      expect(u.pvInputLimits?.mppts).toBe(6);
+      expect(u.pvInputLimits?.maxStcKw).toBe(20);
+    }
+  });
+
+  it('🚨 RED PROOF — dropping the panel\'s system ownership launders two systems into one site', () => {
+    // The same law as `feedsNodeId`: save/reload may never improve a conclusion by forgetting
+    // topology. Here the forgetting is subtler — the panels survive, their OWNERS do not — and the
+    // result is a drawing that no longer knows which Powerwalls belong to which gateway.
+    const { topology } = buildRaysIntendedJob();
+    const stored = JSON.parse(JSON.stringify(serialiseServiceTopology(topology)));
+    for (const p of stored.topology.aggregationPanels) delete p.domainId;
+    const back = parseServiceTopology(stored)!.topology;
+    expect(back.aggregationPanels.every(p => !p.domainId)).toBe(true);
+    const ov = buildServiceOverview(back);
+    expect(ov.summary.perSystemGenerationPanelCount).toBe(0);
+    // And the sheet stops drawing them inside their systems: they fall into the shared DER group,
+    // which is the arrangement this job explicitly does not have.
+    expect(sheetOf(back)).toContain('AGGREGATED DER FEEDER');
   });
 });
 
@@ -564,9 +764,50 @@ describe('the SLD shows the system Ray intends to install', () => {
   });
 
   it('an Expansion is a DC extension on the sheet, never an AC source or a breaker', () => {
-    const svg = sheet(buildRaysIntendedJob().topology);
+    // 🚨 THIS JOB HAS NONE, so the drawing must not show one — and the rule it proves is still
+    // live, on the arrangement that does have them.
+    expect(sheet(buildRaysIntendedJob().topology)).not.toContain('DC EXPANSION');
+    const withExpansions = buildRaysIntendedJob({
+      powerwallsPerSystem: 1, expansionsPerSystem: 1, generationPanelPerSystem: false,
+    }).topology;
+    const svg = sheet(withExpansions);
     expect((svg.match(/DC EXPANSION/g) ?? []).length).toBeGreaterThanOrEqual(2);
     expect(svg).toContain('NO AC OUTPUT · NO OCPD');
+  });
+
+  it('🚨 the generation panel is on the sheet, in its system, sized from its own Powerwalls', () => {
+    const svg = sheet(buildRaysIntendedJob().topology);
+    expect(svg).toContain('GENERATION PANEL — SYSTEM 1');
+    expect(svg).toContain('GENERATION PANEL — SYSTEM 2');
+    // 125 A on a 400 A service, with the arithmetic printed beside it.
+    expect((svg.match(/96 A AGGREGATED · 125 A AT 125%/g) ?? []).length).toBe(2);
+    expect((svg.match(/2 BRANCH OCPD @ 60 A/g) ?? []).length).toBe(2);
+    expect((svg.match(/125 A GENERATION FEEDER/g) ?? []).length).toBe(2);
+    // All four cabinets, each named by its position.
+    for (const n of [1, 2, 3, 4]) expect(svg).toContain(`Tesla Powerwall 3 #${n}`);
+  });
+
+  it('🚨 a DC-coupled design draws NO microinverter, combiner, inverter or PV AC disconnect', () => {
+    // Ray, from the live browser: "SLD still draws Enphase equipment" under a Tesla topology.
+    const svg = sheet(buildRaysIntendedJob().topology);
+    expect(svg).toContain('PV DC COUPLED TO POWERWALL 3');
+    expect(svg).not.toContain('AC COMBINER');
+    expect(svg).not.toContain('IQ8PLUS');
+    expect(svg).not.toContain('ENPHASE Q CABLE');
+    expect(svg).not.toContain('AC DISCONNECT');
+    expect(svg).not.toContain('MICROINVERTER');
+    // The strings land where they actually land.
+    expect(svg).toContain('TO POWERWALL 3 PV INPUTS — DC COUPLED');
+    expect((svg.match(/PV DC INPUT — 6 MPPT/g) ?? []).length).toBe(4);
+  });
+
+  it('the SAME project with AC-coupled PV keeps the whole AC chain', () => {
+    // 🚨 THE COUPLING DECIDES, NOT THE PRESENCE OF A POWERWALL. Ray: "Do not assume Tesla storage
+    // always eliminates Enphase because legitimate AC-coupled Tesla installations exist."
+    const { topology } = buildRaysIntendedJob({ solarCoupling: 'ac-coupled-inverter' });
+    const svg = sheet(topology);
+    expect(svg).toContain('AC COMBINER');
+    expect(svg).not.toContain('TO POWERWALL 3 PV INPUTS — DC COUPLED');
   });
 
   it('🚨 the sheet asks in WORDS, once, and says which item is optional', () => {
@@ -677,7 +918,10 @@ describe('the hybrid sheet does not contradict the service graph', () => {
     expect(svg).toContain('MSP #1');
     expect(svg).toContain('MSP #2');
     expect(svg).toContain('Storage Capacity');
-    expect(svg).toContain('DC Expansions');
+    // 🚨 FOUR INVERTING UNITS AND NO EXPANSION ROW, because this job has none. The row appears
+    // only where expansions exist — a schedule that printed one here would be inventing hardware.
+    expect(svg).toContain('4 × Tesla Powerwall 3');
+    expect(svg).not.toContain('DC Expansions');
     // The scalar's number is gone from the schedule's Main Panel row.
     expect(svg).not.toMatch(/>Main Panel<[\s\S]{0,400}?>125 A</);
   });
@@ -733,10 +977,17 @@ describe('🚨 the job CAN be finished — the model is not merely pessimistic',
       sccrA: 22_000, verified: true,
     });
     for (const d of t.devices) t = selectDeviceProduct(t, d.id, 'eaton-dg224urk');
+    // The generation panels: the part actually bought, its nameplate interrupting rating, and the
+    // PV the string layout put on each Powerwall.
+    for (const p of t.aggregationPanels) t = selectAggregationProduct(t, p.id, 'eaton-ch8l125rp');
+    for (const u of t.storage.filter(u => u.role === 'inverter-unit')) {
+      t = setStoragePvInput(t, u.id, 7.5);
+    }
     t = {
       ...t,
       devices: t.devices.map(d => ({ ...d, sccrA: 22_000 })),
       panels: t.panels.map(p => ({ ...p, sccrA: 22_000 })),
+      aggregationPanels: t.aggregationPanels.map(p => ({ ...p, sccrA: 22_000 })),
       interconnection: {
         ...t.interconnection,
         isolationArrangementAccepted: true,
@@ -754,27 +1005,28 @@ describe('🚨 the job CAN be finished — the model is not merely pessimistic',
   it('with every answerable input answered, only the OPTIONAL calculation is outstanding', () => {
     const t = fullyAnswered();
     const notPass = evaluateServiceTopology(t).checks.filter(c => c.conclusion !== 'PASS');
-    // 🚨 THE GATEWAY BUSBAR IS STILL THE MANUFACTURER'S. Nothing here invents that limit, so the
-    // 705.12(B) check for each domain stays NOT_EVALUATED — which is the honest end state for this
-    // arrangement, not a failure of the design.
+    // 🚨 WHAT THE GENERATION PANEL LANDS IN IS STILL THE MANUFACTURER'S. Nothing here invents how
+    // much generation a Gateway 3's internal panelboard accepts, so that stays NOT_EVALUATED —
+    // which is the honest end state for this arrangement, not a failure of the design.
     expect(notPass.map(c => c.id).sort())
-      .toEqual(['branch.demand', 'branch.demand', 'domain.backed-up-load', 'domain.backed-up-load',
-                'domain.busbar-705-12', 'domain.busbar-705-12', 'load.calculation', 'service.demand']);
+      .toEqual(['aggregation.landing', 'aggregation.landing',
+                'branch.demand', 'branch.demand', 'domain.backed-up-load', 'domain.backed-up-load',
+                'load.calculation', 'service.demand']);
     const ov = buildServiceOverview(t);
     expect(ov.summary.optionalCount).toBe(1);
-    // What is left required is the one manufacturer limit — and it is named, not hidden.
+    // What is left required is the one manufacturer question — and it is named, not hidden.
     expect(ov.requiredInputs.filter(i => i.owner !== 'optional-calculation')
-      .every(i => i.key.startsWith('manufacturer-limit:'))).toBe(true);
+      .every(i => i.key.startsWith('manufacturer-document:'))).toBe(true);
   });
 
-  it('adding the load analysis leaves ONLY the manufacturer limit', () => {
+  it('adding the load analysis leaves ONLY the manufacturer question', () => {
     let t = fullyAnswered();
     t = setPanelLoad(t, 'msp-1', 118, { method: 'optional-220-82', basis: 'Appliance inventory.' });
     t = setPanelLoad(t, 'msp-2', 96);
     const ov = buildServiceOverview(t);
     expect(ov.summary.optionalCount).toBe(0);
     expect(ov.requiredInputs.map(i => i.key))
-      .toEqual(['manufacturer-limit:tesla-backup-gateway-3']);
+      .toEqual(['manufacturer-document:gateway-generation-input']);
     // Everything the load model derives now passes.
     for (const id of ['service.demand', 'branch.demand', 'domain.backed-up-load', 'load.calculation']) {
       expect(evaluateServiceTopology(t).checks.filter(c => c.id === id)

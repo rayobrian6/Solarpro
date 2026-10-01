@@ -54,9 +54,21 @@ export interface ServiceTopologyBuilderProps {
   projectId: string | null;
   /** Injected in tests; defaults to the browser fetch. */
   fetchImpl?: typeof fetch;
+  /**
+   * 🚨 THE REST OF THE PAGE NEEDS TO KNOW WHAT THIS IS.
+   *
+   * Ray, from the live browser: "Service Topology says Tesla. Main electrical system still says
+   * MICROINVERTER... The sidebar and SLD must share authority." The sidebar could not agree with
+   * the topology because it had never seen it — this component loaded the graph and kept it. This
+   * hands the loaded graph up so the page reads the SAME object, rather than a second copy fetched
+   * somewhere else that can drift from it.
+   */
+  onTopologyChange?: (t: ServiceTopology | null) => void;
 }
 
-export function ServiceTopologyBuilder({ projectId, fetchImpl }: ServiceTopologyBuilderProps) {
+export function ServiceTopologyBuilder({
+  projectId, fetchImpl, onTopologyChange,
+}: ServiceTopologyBuilderProps) {
   const doFetch = fetchImpl ?? (typeof fetch !== 'undefined' ? fetch : null);
   const [topology, setTopology] = useState<ServiceTopology | null>(null);
   const [loading, setLoading] = useState(false);
@@ -120,6 +132,10 @@ export function ServiceTopologyBuilder({ projectId, fetchImpl }: ServiceTopology
   }, [projectId, doFetch]);
 
   useEffect(() => { void load(); }, [load]);
+
+  // Every change, not only the loads: the sidebar must follow an edit in progress too, or it goes
+  // back to disagreeing with the screen beside it the moment somebody picks a coupling.
+  useEffect(() => { onTopologyChange?.(topology); }, [topology, onTopologyChange]);
 
   const save = useCallback(async () => {
     if (!projectId || !topology || !doFetch) return;
@@ -256,15 +272,32 @@ export function ServiceTopologyBuilder({ projectId, fetchImpl }: ServiceTopology
               {summary.isolationSwitchCount === 1 ? '' : 'es'}
             </span>
           ) : null}
-          {summary.aggregationPanelCount > 0 ? (
+          {/* 🚨 ONE PER SYSTEM AND ONE SHARED ARE DIFFERENT DESIGNS, so they are different words.
+              Ray's job has two of the first kind and none of the second; a bar that said "2
+              generation panels" for either would hide the distinction the whole arrangement turns
+              on. */}
+          {summary.perSystemGenerationPanelCount > 0 ? (
+            <span data-testid="topology-generation-panels" className="text-sm text-emerald-300">
+              {summary.perSystemGenerationPanelCount} generation panel
+              {summary.perSystemGenerationPanelCount === 1 ? '' : 's'} — one per system
+            </span>
+          ) : null}
+          {summary.aggregationPanelCount - summary.perSystemGenerationPanelCount > 0 ? (
             <span className="text-sm text-emerald-300">
-              {summary.aggregationPanelCount} combined generation panel
-              {summary.aggregationPanelCount === 1 ? '' : 's'}
+              {summary.aggregationPanelCount - summary.perSystemGenerationPanelCount} combined
+              generation panel
             </span>
           ) : null}
           <span data-testid="topology-arrangement" className={`text-sm ${
             summary.derArrangementLabel ? 'text-slate-300' : 'text-amber-300'}`}>
             {summary.derArrangementLabel ?? 'Connection arrangement not chosen'}
+          </span>
+          {/* The project's one answer about the PV, on the bar — the contradiction Ray read in the
+              browser was between two surfaces that each inferred this. */}
+          <span data-testid="topology-solar-coupling" className={`text-sm ${
+            summary.solarCouplingSelected ? 'text-slate-300' : 'text-amber-300'}`}>
+            {summary.solarCouplingSelected
+              ? summary.solarCouplingLabel : 'Solar connection not chosen'}
           </span>
           <span className="ml-auto flex items-center gap-2">
             <StatusBadge status={overview.site.conclusion} />

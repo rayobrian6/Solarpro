@@ -24,7 +24,7 @@ exports[`Wave 0 golden — save-config write-back (reconcileFromEngineeringConfi
       "pricePerUnit": 0,
       "roundTripEfficiency": 97.5,
       "voltage": 50,
-      "weight": 287,
+      "weight": 291.2,
     },
   ],
   "batteryCount": 2,

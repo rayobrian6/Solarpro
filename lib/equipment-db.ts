@@ -2673,6 +2673,62 @@ export interface BatterySystem {
   backfeedBreakerA?: number;       // ← NEC 705.12(B): adds to bus loading
   minDedicatedBreakerA?: number;
   /**
+   * 🚨 THE MANUFACTURER'S OWN OUTPUT TABLE, WHERE THE PRODUCT HAS ONE.
+   *
+   * A Powerwall 3's AC output is CONFIGURED at commissioning, and its continuous current and its
+   * required OCPD both move with that setting — 5.8 / 7.6 / 10 / 11.5 kW give 24 / 31.7 / 41.7 / 48 A
+   * and 30 / 40 / 60 / 60 A. Held as the table the datasheet prints, so a design that selects a
+   * configuration reads the row rather than scaling a scalar: 11.5 kW is not "48 A × 1.25 rounded",
+   * it is a number Tesla published, and on this product the 10 kW setting takes the SAME 60 A
+   * device as the 11.5 kW one. `maxContinuousOutputA` / `backfeedBreakerA` stay the top row, which
+   * is what a consumer that knows nothing about configurations should assume.
+   *
+   * Absent ⇒ the product has one output and the scalars are it. Not a defect.
+   */
+  outputConfigurations?: ReadonlyArray<{
+    /** Nominal AC output power for this setting. */
+    nominalKw: number;
+    /** Maximum continuous AC current at that setting. */
+    maxContinuousOutputA: number;
+    /** The overcurrent protective device the manufacturer specifies for that setting. */
+    ocpdA: number;
+  }>;
+  /**
+   * The published short-circuit current rating of the unit itself, where the manufacturer states
+   * one. Absent ⇒ not published / not transcribed, and the engineering says NOT_EVALUATED rather
+   * than assuming a typical value.
+   */
+  sccrA?: number;
+  /**
+   * PV INPUT, for a battery with an integrated solar inverter.
+   *
+   * 🚨 THIS IS WHAT MAKES "DC COUPLED" ENGINEERABLE INSTEAD OF A LABEL. Strings land on these
+   * inputs, and whether a given string fits is a question about Voc, Isc and the MPPT window —
+   * all four numbers below. Absent ⇒ the product takes no PV, and a design that tries to land
+   * strings on it is reported as unresolved rather than drawn.
+   */
+  pvInput?: {
+    /** Maximum PV STC input power the unit accepts. */
+    maxStcKw: number;
+    /** Maximum withstand voltage of the PV input. */
+    withstandVdc: number;
+    /** Operating input voltage range. */
+    inputVdc: readonly [number, number];
+    /** MPPT tracking range — narrower than the input range on this product. */
+    mpptVdc: readonly [number, number];
+    /** Independent MPPT inputs. */
+    mppts: number;
+    /** Maximum operating (Imp) current per MPPT. */
+    maxImpPerMpptA: number;
+    /** Maximum short-circuit (Isc) current per MPPT. */
+    maxIscPerMpptA: number;
+    /** With two MPPTs jumpered into one input, per the datasheet footnote. */
+    jumperedImpA?: number;
+    jumperedIscA?: number;
+    /** Exactly where these came from. */
+    basis: string;
+  };
+  /**
    * The manufacturer's published branch rule set.
    *
    * Present ⇔ the step function has been transcribed from the datasheet and
@@ -2733,19 +2789,56 @@ export const BATTERIES: BatterySystem[] = [
     usableCapacityKwh: 13.5, peakPowerKw: 11.5, continuousPowerKw: 11.5,
     roundTripEfficiencyPct: 97.5, chemistry: 'LFP', voltageNominalV: 50,
     acOutputVoltageV: 240, maxContinuousOutputA: 48,
-    backfeedBreakerA: 50,        // NEC 705.12(B): 50A breaker adds to bus loading
+    // 🚨 60 A, FROM TESLA'S OWN TABLE — NOT 50 A, WHICH IS WHAT THIS ROW SAID.
+    //
+    // Powerwall 3 Datasheet (2025), "Powerwall 3 Technical Specifications":
+    //
+    //     Nominal Output Power (AC)        5.8 kW   7.6 kW   10 kW    11.5 kW
+    //     Maximum Continuous Current       24 A     31.7 A   41.7 A   48 A
+    //     Overcurrent Protection Device    30 A     40 A     60 A     60 A
+    //
+    // 48 A continuous with a 50 A device is not a transcription slip, it is below the 125%
+    // continuous-duty figure (60 A) and below the manufacturer's stated device. It reached the
+    // drawing, the busbar calculation and the BOM, because this scalar is the single authority all
+    // three read. The 120% comment it carried was the giveaway: a breaker size was being justified
+    // by the rule that CONSUMES it.
+    backfeedBreakerA: 60,
     minDedicatedBreakerA: 60,
-    weightLbs: 287, outdoorRated: true, ipRating: 'IP67',
+    outputConfigurations: [
+      { nominalKw: 5.8, maxContinuousOutputA: 24, ocpdA: 30 },
+      { nominalKw: 7.6, maxContinuousOutputA: 31.7, ocpdA: 40 },
+      { nominalKw: 10, maxContinuousOutputA: 41.7, ocpdA: 60 },
+      { nominalKw: 11.5, maxContinuousOutputA: 48, ocpdA: 60 },
+    ],
+    // "Maximum Short-Circuit Current Rating — 10 kA", same table.
+    sccrA: 10000,
+    pvInput: {
+      maxStcKw: 20, withstandVdc: 600,
+      inputVdc: [60, 550], mpptVdc: [60, 480], mppts: 6,
+      // Footnote 7: 15 A only on units whose label states 15 A IMP; others are 13 A. The higher
+      // figure is the product's maximum and the design has to confirm the label on the unit fitted.
+      maxImpPerMpptA: 15, maxIscPerMpptA: 19,
+      // Footnote 8: two MPPTs jumpered into one input.
+      jumperedImpA: 30, jumperedIscA: 38,
+      basis: 'Powerwall 3 Datasheet (2025) — Solar Technical Specifications. Imp 15 A applies only '
+        + 'to units labelled 15 A IMP; otherwise 13 A IMP / 15 A ISC.',
+    },
+    weightLbs: 291.2,            // Datasheet: "Total Weight of Installed Unit — 132 kg (291.2 lb)"
+    outdoorRated: true, ipRating: 'IP67',
     gridFormingCapable: true, backupCapable: true, wholeHomeBackup: true,
-    requiresGateway: true, gatewayModel: 'Tesla Backup Gateway 2',
+    // Datasheet: "Supported Islanding Devices — Gateway 3, Backup Switch, Backup Gateway 2".
+    // Gateway 3 is the current device and was missing from both of these.
+    requiresGateway: true, gatewayModel: 'Tesla Gateway 3',
     warrantyYears: 10, cycleGuarantee: 'Unlimited cycles', capacityRetentionPct: 70,
     msrpUsd: 9300,
     necRefs: ['NEC 705.12(B) — 120% rule: battery backfeed breaker adds to bus loading', 'NEC 706 — Energy Storage Systems', 'NEC 705.11 — supply-side connection option'],
-    ulListing: 'UL 9540 / UL 9540A', certifications: ['UL 9540', 'UL 9540A', 'IEEE 1547', 'IEC 62619'],
-    // v47.397 Phase B — Tesla ecosystem (Powerwall 3 is AC-coupled w/ integrated solar inverter)
+    ulListing: 'UL 9540 / UL 9540A', certifications: ['UL 9540', 'UL 9540A', 'UL 1741 SB', 'UL 3741', 'IEEE 1547', 'IEC 62619'],
+    // v47.397 Phase B — Tesla ecosystem. The unit's own output is AC; its SOLAR input is DC, on the
+    // six MPPTs above — which is why `pvInput` exists and why "DC coupled" is a real architecture
+    // for this product rather than a label.
     ecosystemBrand: 'tesla',
     ecosystemFamily: 'powerwall',
-    compatibleWith: ['tesla-backup-gateway-2', 'tesla-wall-connector-gen3'],
+    compatibleWith: ['tesla-backup-gateway-3', 'tesla-backup-gateway-2', 'tesla-wall-connector-gen3'],
     active: true,
     datasheetUrl: 'https://energylibrary.tesla.com/docs/Public/EnergyStorage/Powerwall/3/Datasheet/en-us/Powerwall-3-Datasheet.pdf',
   },
@@ -3808,6 +3901,31 @@ export interface BackupInterface {
   necRefs: string[];
   ulListing: string;
   compatibleBatteries: string[];   // battery IDs
+  /**
+   * 🚨 THE CONTROLLER'S OWN INTERNAL PANELBOARD, WHERE IT HAS ONE.
+   *
+   * A backup gateway is not just a transfer switch: a Gateway 3 contains a panelboard that load
+   * AND generation breakers land in, and whether a generation feeder fits is a question about THAT
+   * bus — not about the MSP downstream and not about the service upstream. Without these numbers
+   * the engineering can only say "the manufacturer decides"; with them it can state the bus, the
+   * largest branch device the manufacturer permits, and what is still open.
+   *
+   * Absent ⇒ the product has no internal panelboard, or nobody has transcribed it.
+   */
+  internalPanelboard?: {
+    busbarRatingA: number;
+    /** 1-inch breaker spaces (a 16-circuit board is 8 spaces). */
+    spaces: number;
+    /** The largest branch overcurrent device the manufacturer permits in it. */
+    maxBranchBreakerA: number;
+    basis: string;
+  };
+  /**
+   * The published short-circuit current rating, which on a service-entrance-rated controller
+   * depends on the MAIN BREAKER FITTED — so it is a range of stated options, not one number, and
+   * the instance still has to say which breaker was installed.
+   */
+  sccrOptionsA?: ReadonlyArray<{ a: number; withMainBreaker: string }>;
   isNew?: boolean; // UI badge flag
   // v47.400 — datasheet URL (additive, optional)
   datasheetUrl?: string;
@@ -3878,6 +3996,26 @@ export const BACKUP_INTERFACES: BackupInterface[] = [
     category: 'backup_interface', subcategory: 'gateway_controller',
     maxBackupOutputKw: 48, maxContinuousOutputA: 200,
     serviceEntranceRated: true, mainBreakerA: 200,
+    // Gateway 3 Datasheet + Install Manual, "Install Load / Generation Breakers on Internal
+    // Panelboard": "The internal panelboard is a 200 A-rated bussing that supports 8x 1-inch
+    // breaker spaces (16 circuits)" "using branch circuit breakers up to 125 A maximum".
+    //
+    // 🚨 AND TESLA STATES NO BUSBAR ALLOWANCE OF ITS OWN FOR IT — the same page says only that
+    // "Breaker sizing and installation must comply with the National Electric Code". So these are
+    // the facts the manufacturer publishes, and what a given generation feeder is allowed to be on
+    // that bus is NOT one of them.
+    internalPanelboard: {
+      busbarRatingA: 200, spaces: 8, maxBranchBreakerA: 125,
+      basis: 'Tesla Gateway 3 Install Manual — Install Load / Generation Breakers on Internal '
+        + 'Panelboard (energylibrary.tesla.com).',
+    },
+    // Datasheet: "Maximum Supply Short Circuit Current — 22 kA with Square D or Eaton main
+    // breaker; 25 kA with Eaton main breaker." It is the breaker that decides, which is why the
+    // instance still carries its own `sccrA` and the catalogue states options rather than a value.
+    sccrOptionsA: [
+      { a: 22_000, withMainBreaker: 'Square D or Eaton main breaker' },
+      { a: 25_000, withMainBreaker: 'Eaton main breaker' },
+    ],
     gridFormingCapable: true, islandingCapable: true,
     loadSheddingCapable: false,
     generatorCompatible: false,
@@ -3896,7 +4034,9 @@ export const BACKUP_INTERFACES: BackupInterface[] = [
     compatibleWith: ['tesla-powerwall-3', 'tesla-powerwall-3-expansion'],
     active: true,
     isNew: true,
-    datasheetUrl: 'https://energylibrary.tesla.com/docs/Public/EnergyStorage/Powerwall/3/',
+    // The product's own datasheet, not the library root it used to point at.
+    datasheetUrl: 'https://energylibrary.tesla.com/docs/Public/EnergyStorage/Powerwall/General/'
+      + 'Datasheet/Gateway/3/en-us/Gateway-3-Datasheet.pdf',
   },
   {
     id: 'generac-pwrmanager',

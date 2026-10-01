@@ -43,6 +43,10 @@ function fullySpecified(): ServiceTopology {
     // service is a choice somebody has to make, and a job that has not made it is not fully
     // specified — which is exactly what this suite went red to say when the check was added.
     derArrangement: 'independent-branch',
+    // 🚨 AND IT INCLUDES HOW THE PV IS COUPLED. Same reasoning one more time: a project that has
+    // not recorded it leaves every consumer inferring one, which is the state Ray found in the
+    // browser with the topology saying Tesla and the drawing saying MICROINVERTER.
+    solarCoupling: 'storage-only',
   });
   // Establish the remaining instance facts the fixture deliberately leaves open.
   for (const d of topology.devices) d.sccrA = 22_000;
@@ -84,7 +88,15 @@ describe('🚨 the catalogue knows the two products that did not exist', () => {
   it('the Powerwall 3 itself is unchanged — this added a product, it did not edit one', () => {
     const pw = getBatteryById('tesla-powerwall-3')!;
     expect(pw.maxContinuousOutputA).toBe(48);
-    expect(pw.backfeedBreakerA).toBe(50);
+    // 🚨 60 A, AND THIS ASSERTION USED TO SAY 50. The 50 was wrong — Tesla's own table gives a
+    // 60 A overcurrent device at the 11.5 kW setting, and 48 A continuous at 125% is 60 A too, so
+    // the catalogue was specifying a device below both the manufacturer's figure and the Code's.
+    // It reached the drawing, the busbar calculation and the BOM, because this scalar is the one
+    // authority all three read. This line was pinning it.
+    expect(pw.backfeedBreakerA).toBe(60);
+    // The published configuration table, which is what makes 10 kW → 60 A right as well.
+    expect(pw.outputConfigurations?.map(c => [c.nominalKw, c.maxContinuousOutputA, c.ocpdA]))
+      .toEqual([[5.8, 24, 30], [7.6, 31.7, 40], [10, 41.7, 60], [11.5, 48, 60]]);
     expect(pw.usableCapacityKwh).toBe(13.5);
     expect(pw.storageRole ?? 'inverter-unit').toBe('inverter-unit');
   });

@@ -42,12 +42,12 @@ describe('🚨 the equipment schedule is one row per physical instance', () => {
     expect(gws[0].model).toBe(gws[1].model);
     expect(gws[0].rating).toBe(gws[1].rating);
     expect(new Set(gws.map(r => r.tag)).size).toBe(2);
-    expect(gws.map(r => r.domain)).toEqual(['Domain A', 'Domain B']);
+    expect(gws.map(r => r.domain)).toEqual(['System 1', 'System 2']);
     // 🚨 THE NAME ON THE ENCLOSURE, NOT THE KEY IN THE DATABASE. This assertion used to require
     // 'branch-a' and 'msp-1' — it was PINNING the defect: an inspector reading the schedule was
     // being handed internal ids, exactly as the diagram once printed `TO DEVICE-1`.
-    expect(gws[0].notes).toContain('Branch A');
-    expect(gws[1].notes).toContain('Branch B');
+    expect(gws[0].notes).toContain('200 A service path 1');
+    expect(gws[1].notes).toContain('200 A service path 2');
     expect(gws[0].notes).toContain('MSP #1');
     expect(gws[1].notes).toContain('MSP #2');
     expect(gws[0].notes).not.toMatch(/\b(branch-a|msp-1)\b/);
@@ -119,6 +119,9 @@ describe('🚨 a drawable topology is not necessarily a releasable one', () => {
     const t = job({
       storageConnection: 'backed-up-panel-busbar',
       derArrangement: 'independent-branch',
+      // And how the PV is coupled, for the same reason the arrangement is here: an unrecorded
+      // architecture is a decision the drawing is still waiting on.
+      solarCoupling: 'storage-only',
     });
     t.interconnection.multiGatewayMeteringDoc = {
       title: 'Multiple Backup Gateways on a Single Site — Application Note',
