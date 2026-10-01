@@ -127,7 +127,43 @@ export async function POST(req: NextRequest) {
       try {
         const { readServiceTopology } = await import('@/lib/db/serviceTopology');
         const _stored2 = await readServiceTopology(String(body.projectId), _auth.user.id);
-        if (_stored2) body.serviceTopology = _stored2.topology;
+        if (_stored2) {
+          // ── 🚨 THE CANONICAL ELECTRICAL MODEL DECIDES THE ARCHITECTURE ────────
+          //
+          // Not the renderer, and not whatever the equipment picker was last left on. Ray, after
+          // the authority audit: "SLD may not infer system architecture independently. It consumes
+          // the canonical electrical model."
+          //
+          // This is what fixes the reported sheet. A project saved before `solarCoupling` existed
+          // reloads with it null, the renderer's `_couplingIsDc` never fires, and the Enphase chain
+          // is drawn beside the Tesla one. `resolveElectricalProject` canonicalises that ONCE from
+          // the persisted evidence — no separate inverter selected, storage that publishes its own
+          // PV inputs — and the drawing is handed the answer rather than a gap to fill.
+          //
+          // 🚨 AND A CONFLICT IS NOT CANONICALISED. Where the project holds BOTH an explicit
+          // inverter and a DC-coupled graph, the resolver returns no patch and the sheet keeps
+          // whatever was recorded, with the conflict reported — because picking a side silently is
+          // how one drawing came to contain two architectures.
+          const { resolveElectricalProject } = await import('@/lib/electrical/projectModel');
+          const _model = resolveElectricalProject({
+            topology: _stored2.topology,
+            selectedEquipment: {
+              inverterId: (body as Record<string, unknown>).inverterId as string ?? null,
+              moduleCount: Number((body as Record<string, unknown>).totalModules ?? 0) || null,
+            },
+          });
+          body.serviceTopology = _model.canonicalizationPatch
+            ? { ..._stored2.topology, ..._model.canonicalizationPatch }
+            : _stored2.topology;
+          console.log('[sld/POST] electrical model:'
+            + ` coupling=${_model.solarCoupling ?? 'UNRESOLVED'}`
+            + ` (${_model.solarCouplingProvenance.source})`
+            + ` conflicts=${_model.conflicts.length}`);
+          for (const c of _model.conflicts) {
+            console.warn(`[sld/POST] ELECTRICAL CONFLICT — ${c.fact}: `
+              + c.claims.map(x => `${x.source} says ${x.says}`).join(' | '));
+          }
+        }
       } catch (e) {
         console.warn('[sld/POST] service topology unreadable; drawing the legacy service tail', e);
       }

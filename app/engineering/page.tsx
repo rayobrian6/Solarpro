@@ -32,6 +32,7 @@ import type { ServiceTopology as ServiceTopologyForPage } from '@/lib/electrical
 // The repo's existing representation of "no inverter has been selected" — honoured by the SLD
 // renderer, the permit SLD adapter and the permit helpers. Reused rather than re-invented.
 import { INVERTER_UNSELECTED } from '@/lib/permit/utils/helpers';
+import { resolveElectricalProject, type ElectricalProjectModel } from '@/lib/electrical/projectModel';
 import { useSubscription } from '@/hooks/useSubscription';
 import {
   Zap, Download, Printer, Plus, Trash2, Settings,
@@ -1160,6 +1161,8 @@ function EngineeringPageInner() {
    * MICROINVERTER beside a Tesla topology on the next tab.
    */
   const [svcTopology, setSvcTopology] = useState<ServiceTopologyForPage | null>(null);
+  /** The canonical electrical model, composed from the stores that own its parts. */
+  const [electrical, setElectrical] = useState<ElectricalProjectModel | null>(null);
   // 🚨 THE PROJECT'S RECORDED COMBINER SELECTION — the installer's answer, read
   // from projects.selected_equipment. It is sent with every drawing/BOM payload
   // so downstream CONSUMES it instead of re-deriving a device from compatibility.
@@ -1169,6 +1172,42 @@ function EngineeringPageInner() {
   // pick, so the handler has to know whether the id actually CHANGED before it
   // drops the cached SLD — and a closure over the rendered state would compare
   // against a stale value when two reports land before a re-render.
+  // ══════════════════════════════════════════════════════════════════════════
+  // 🚨 THE ELECTRICAL TRUTH IS LOADED BY THE PAGE, NOT BY A TAB.
+  //
+  // Ray, after the authority audit: "Electrical truth must not depend on whether the Service
+  // Topology tab is mounted. `ServiceTopologyBuilder` may edit topology. It must not be the
+  // mechanism by which the rest of the Engineering page learns what topology exists."
+  //
+  // It was. `ServiceTopologyBuilder` is mounted inside `{activeTab === 'service' ? … : null}` and
+  // its `onTopologyChange` was the ONLY writer of `svcTopology` — so on every other tab, and after
+  // every reload until somebody visited that tab, the page believed the project had no graph and
+  // the Engineering Intelligence badge fell back to `inverters[0].type === 'micro'` and printed
+  // MICROINVERTER. Exactly the `show3D` conditional-mount defect, one subsystem along.
+  //
+  // This effect is keyed on the PROJECT, not the tab. Switching tabs, deep-linking into another
+  // tab and reloading all produce the same electrical state, because none of them is what loads it.
+  // The builder still edits the graph and still reports changes up; it is no longer the source.
+  // ══════════════════════════════════════════════════════════════════════════
+  useEffect(() => {
+    if (!currentProjectId) { setSvcTopology(null); setElectrical(null); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/projects/${currentProjectId}/service-topology`,
+          { cache: 'no-store' });
+        const data = await res.json().catch(() => null);
+        if (cancelled) return;
+        const t = data?.success && data.available
+          ? (data.topology as ServiceTopologyForPage) : null;
+        setSvcTopology(t);
+      } catch {
+        if (!cancelled) setSvcTopology(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [currentProjectId]);
+
   const projectCombinerIdRef = useRef<string | null>(null);
   projectCombinerIdRef.current = projectCombinerId;
   // The project open NOW, for async answers that must not land on another one.
@@ -2995,6 +3034,19 @@ function EngineeringPageInner() {
 
   const totalPanels = config.inverters.reduce((sum, inv) =>
     sum + inv.strings.reduce((s2, str) => s2 + str.panelCount, 0), 0);
+
+  // The composition is derived, never stored: one fact, one owner, and a provenance for each.
+  useEffect(() => {
+    setElectrical(resolveElectricalProject({
+      topology: svcTopology,
+      selectedEquipment: {
+        inverterId: config.inverters[0]?.inverterId ?? null,
+        inverterType: config.inverters[0]?.type ?? null,
+        moduleCount: totalPanels,
+      },
+    }));
+  }, [svcTopology, config.inverters, totalPanels]);
+
 
   // ─── MASTER TASK — SOURCE OF TRUTH for system panel count ─────────────
   // Priority (non-negotiable):
@@ -9015,8 +9067,12 @@ function EngineeringPageInner() {
   // still draws Enphase equipment. That is unacceptable." The picker's default was reaching this
   // badge on a project whose service graph says the strings terminate on battery DC inputs; the
   // SLD renderer applies the same precedence, from the same field, so the two cannot disagree.
-  const _svcCouplingIsDc =
-    (svcTopology?.solarCoupling ?? null) === 'dc-coupled-storage';
+  // 🚨 AND IT READS THE CANONICAL MODEL, NOT THE RAW FIELD. A project saved before `solarCoupling`
+  // existed has it null, and reading the field directly sent the badge straight back to the
+  // equipment picker's answer — which is the live defect. `electrical.solarCoupling` is the
+  // canonicalised value with its provenance, so a legacy Tesla project reads DC coupled here for
+  // the same reason, and from the same function, as it does on the drawing.
+  const _svcCouplingIsDc = electrical?.solarCoupling === 'dc-coupled-storage';
   const topologyLabel = _svcCouplingIsDc ? 'PV DC COUPLED TO STORAGE'
     : subSystemCounts.isHybrid ? 'HYBRID SYSTEM'
     : config.inverters[0]?.type === 'micro' ? 'MICROINVERTER'
@@ -9029,16 +9085,23 @@ function EngineeringPageInner() {
     : 'text-amber-400 border-amber-500/40 bg-amber-500/10';
   /** The one-line detail under the badge, when the graph is the authority for it. */
   const _svcTopologyDetail = (() => {
-    if (!svcTopology || !_svcCouplingIsDc) return null;
-    const units = svcTopology.storage.filter(u => u.role === 'inverter-unit');
-    const models = [...new Set(units.map(u => u.label ?? u.productId))];
-    const kwh = units.reduce<number | null>(
-      (n, u) => (n === null || u.usableKwh === null ? null : n + u.usableKwh), 0);
-    return `${units.length} × ${models.length === 1 ? models[0] : 'battery inverter'}`
-      + ` · ${svcTopology.domains.length} system${svcTopology.domains.length === 1 ? '' : 's'}`
-      + ` · ${kwh === null ? '—' : kwh.toFixed(1)} kWh`
+    if (!electrical || !_svcCouplingIsDc) return null;
+    // Every count here comes from the model's resolved storage, which counts physical instances in
+    // the graph — not from `batteryCount`, which the audit found reporting 0 beside four of them.
+    const st = electrical.storage;
+    return `${st.invertingUnitCount} × ${st.models.length === 1 ? st.models[0] : 'battery inverter'}`
+      + ` · ${st.gatewayCount} system${st.gatewayCount === 1 ? '' : 's'}`
+      + ` · ${st.usableKwh === null ? '—' : st.usableKwh.toFixed(1)} kWh`
       + ` · ${totalPanels} modules · ${totalKw} kW DC`;
   })();
+
+  /**
+   * 🚨 A PERSISTED DISAGREEMENT IS SHOWN, NOT RESOLVED BEHIND THE OPERATOR'S BACK.
+   *
+   * Ray: "Surface an electrical-configuration conflict requiring resolution unless a documented
+   * migration rule can prove which state is obsolete." One line, in the sidebar, naming both sides.
+   */
+  const _electricalConflicts = electrical?.conflicts ?? [];
 
   // ── Permit Readiness — derived from live engineering state ────────────
   const _firstInvCfg  = config.inverters[0];
@@ -18148,6 +18211,23 @@ function EngineeringPageInner() {
                 {topologySwitching ? (
                   <div className="text-xs mt-1 animate-pulse">⚡ Propagating ecosystem…</div>
                 ) : null}
+                {/* 🚨 THE DISAGREEMENT, NAMED. Two stores holding different answers is not
+                    something to average or to pick a winner from silently — it is a question for
+                    the person who built the project. */}
+                {_electricalConflicts.map((c, i) => (
+                  <div key={i} data-testid={`electrical-conflict-${i}`}
+                       className="mt-2 rounded border border-amber-500/50 bg-amber-500/10 p-2">
+                    <div className="text-[11px] font-black text-amber-300">
+                      ELECTRICAL CONFLICT — {c.fact}
+                    </div>
+                    {c.claims.map((cl, j) => (
+                      <div key={j} className="text-[10px] text-amber-200/90">
+                        {cl.source}: {cl.says}
+                      </div>
+                    ))}
+                    <div className="mt-1 text-[10px] text-slate-300">{c.question}</div>
+                  </div>
+                ))}
               </div>
 
               {/* System Health */}
