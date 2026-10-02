@@ -215,6 +215,44 @@ Every guard written for this correction was run against the defect it exists for
 
 ---
 
+## 6a. What rendering the sheet found that no assertion could
+
+The SLD was rendered from the real job and **looked at** (rasterised with Arial substituted, or the
+PNG lies about text width by ~29%). Two defects surfaced that every assertion in the SLD suites
+passed straight over, both now fixed and guarded (`6163ae28`):
+
+### The sheet contradicted its own conductor schedule
+The conduit & conductor schedule branched only on `isMicro`, so a DC-coupled job fell into the STRING
+rows and printed `ROOF J-BOX → DC DISCO`, `INVERTER → AC DISCO`, `AC DISCO → MSP` — **three runs
+between four devices that are nowhere on the drawing above them**. The picture showed two 200 A
+systems landing in generation panels; its own schedule described a single string inverter feeding a
+disconnect. `_couplingIsDc` was already resolved thousands of lines earlier; the schedule never asked.
+
+The guard checks both directions — an AC-coupled sheet must still get its inverter and disconnect
+runs, or the fix is just a different defect.
+
+### The generation-feeder callout was not beside its conductor
+`fx = gb.left - 6` anchored the label to the generation panel's **left edge** while the conductor runs
+from its **centre** — about 130 uu of white space between the words and the line. It read as an orphan
+label nearer the service-path tag than the feeder. It stays on the left (the right-hand placement
+collided with the branch-feeder jog corridor last slice); only the anchor changed.
+
+## 6b. Browser verification — and where it stops
+
+Run against `next dev` with the Browser pane:
+
+- **`GET /engineering` → 200.** The page compiles and renders with the staleness banner, the
+  `electricalRevision` import, the freshness `useMemo` and the new ref — a real signal, since those
+  edits are inside a 19,000-line client component.
+- **`GET /api/dev/electrical-authority` → 401 "Not authenticated".** The route compiles, is
+  registered, passes its development gate (it did not 404), and refuses an unauthenticated read.
+
+**This working copy has no `DATABASE_URL` and no `JWT_SECRET`** — only `.env.example` is present. So
+there is no session to establish and no project to load, and the acceptance criteria that matter
+(Ray's real 400 A project showing TESLA in the sidebar, the SLD matching it, the interpretation not
+moving across tabs) **cannot be exercised here**. That is the `NEEDS RAY — LIVE PROJECT ACCEPTANCE`
+gate, and it is the only gate in that state.
+
 ## 7. Verification state
 
 - `npx tsc --noEmit` — **0 errors**
