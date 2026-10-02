@@ -30,9 +30,14 @@ import { getDbReady, isValidUUID } from '@/lib/db-neon';
 import { parseServiceTopology } from '@/lib/db/serviceTopology';
 import {
   resolveElectricalProject,
+  takesPvOnDc,
   type ElectricalProjectModel,
   type SelectedEquipmentView,
 } from '@/lib/electrical/projectModel';
+import {
+  parseStoredProvenance, type StoredEquipmentProvenance,
+} from '@/lib/electrical/equipmentProvenance';
+import { classifyLegacyInverter } from '@/lib/electrical/legacyInverterEvidence';
 import { electricalRevision } from '@/lib/electrical/revision';
 import type { ServiceTopology } from '@/lib/electrical/serviceTopology';
 
@@ -110,6 +115,18 @@ export function selectedEquipmentView(raw: unknown): SelectedEquipmentView | nul
     batteryCount: numOrNull(se.batteryCount),
     moduleCount: null,
   };
+}
+
+/**
+ * 🚨 READ THE STORED PROVENANCE BLOCK off `selected_equipment`.
+ *
+ * Absent on every project saved before it existed — which is the case the legacy analysis handles,
+ * so absence returns null and is never substituted with a default kind.
+ */
+export function storedEquipmentProvenance(raw: unknown): StoredEquipmentProvenance | null {
+  const se = asObject(raw);
+  if (!se) return null;
+  return parseStoredProvenance(se.provenance);
 }
 
 /**
@@ -194,10 +211,29 @@ export function composeElectricalProject(
   const override = ec ? numOrNull((ec as { serviceRatedAmpsOverride?: unknown }).serviceRatedAmpsOverride) : null;
   if (ec) sources.engineeringConfig = 'projects.engineering_config';
 
+  // ── WHERE THE SELECTED EQUIPMENT CAME FROM ────────────────────────────────
+  //
+  // 🚨 THE HALF THE SECOND LIVE ACCEPTANCE RUN WAS ABOUT. Ray: "persisted equipment existence alone
+  // does not prove installer intent." A stored provenance block answers it outright; without one,
+  // the evidence is gathered from the catalogue HERE (the resolver must stay catalogue-free) and the
+  // resolver receives a finished verdict.
+  const equipmentProvenance = storedEquipmentProvenance(row.selected_equipment);
+  const pvCapableUnitCount = (topology?.storage ?? []).filter(takesPvOnDc).length;
+  const legacyInverter = selected?.inverterId
+    ? classifyLegacyInverter({
+        inverterId: selected.inverterId,
+        provenanceRecorded: !!equipmentProvenance?.inverter,
+        topology,
+        pvCapableUnitCount,
+      })
+    : null;
+
   const model = resolveElectricalProject({
     topology,
     selectedEquipment: selected ? { ...selected, moduleCount: modules } : (modules !== null ? { moduleCount: modules } : null),
     engineeringConfig: override !== null ? { serviceRatedAmpsOverride: override } : null,
+    equipmentProvenance,
+    legacyInverter,
   });
 
   return { projectId, model, revision: electricalRevision(model), sources, refreshes };
@@ -279,7 +315,10 @@ export async function persistElectricalCanonicalization(
   if (!isValidUUID(loaded.projectId) || !isValidUUID(userId)) return 'nothing-to-do';
   try {
     const { readServiceTopology, writeServiceTopology } = await import('@/lib/db/serviceTopology');
-    const stored = await readServiceTopology(loaded.projectId, userId);
+    // 🚨 'as-issued' — see the same call in the architecture-resolution route. This function writes
+    // the graph back, so it must read the STORED bytes; the hydrated copy would freeze today's
+    // manufacturer facts onto the row and destroy the historical read.
+    const stored = await readServiceTopology(loaded.projectId, userId, 'as-issued');
     if (!stored) return 'nothing-to-do';
     // Re-read rather than writing the in-memory copy: between the load and here, the row may have
     // moved, and the coupling is the ONLY field this is entitled to set.

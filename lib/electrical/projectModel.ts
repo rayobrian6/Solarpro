@@ -41,6 +41,10 @@ import type {
   ServiceTopology, SolarCoupling, StorageUnit,
 } from '@/lib/electrical/serviceTopology';
 import { summariseStorage, solarCouplingLabel } from '@/lib/electrical/serviceTopology';
+import type {
+  StoredEquipmentProvenance, LegacyInverterClassification, EquipmentProvenanceKind,
+} from '@/lib/electrical/equipmentProvenance';
+import { isInstallerDecision, PROVENANCE_LABEL } from '@/lib/electrical/equipmentProvenance';
 
 /** The stores a fact can come from, named so provenance is readable rather than a file path. */
 export type ElectricalSource =
@@ -68,7 +72,22 @@ export interface ElectricalProvenance {
  * returns everything else it could resolve — a conflict about the PV does not stop the service
  * engineering — and the consumer decides whether it can proceed.
  */
+/**
+ * 🚨 A MACHINE-READABLE NAME FOR THE DISAGREEMENT.
+ *
+ * `fact` is a sentence for a human and will be reworded; a consumer that must BLOCK on a specific
+ * conflict cannot key off prose. Ray: "Do not generate a permit-grade SLD from an unresolved
+ * architecture conflict" — that gate needs to know WHICH conflict, not how many there are.
+ */
+export type ElectricalConflictCode =
+  /** Where the PV lands: a separate AC inverter, or the storage's DC inputs. Blocks the drawing. */
+  | 'SOLAR_COUPLING_UNRESOLVED'
+  /** The catalogue's battery count disagrees with the graph's instances. Does not block. */
+  | 'STORAGE_COUNT_MIRROR_STALE';
+
 export interface ElectricalConflict {
+  /** 🚨 THE STABLE IDENTITY of this disagreement. Gates key off this, never off `fact`. */
+  code: ElectricalConflictCode;
   /** The fact two stores disagree about. */
   fact: string;
   /** What each store claims, in the operator's words. */
@@ -93,6 +112,35 @@ export interface ResolvedStorage {
   provenance: ElectricalProvenance;
 }
 
+/**
+ * Where a separate PV inverter on this project came from, resolved from stored provenance when the
+ * project has it and from legacy evidence when it does not.
+ */
+export interface ExternalInverterOrigin {
+  /** The stored kind, or `'UNRECORDED'` when nothing was stored and evidence could not settle it. */
+  kind: EquipmentProvenanceKind | 'UNRECORDED';
+  /** A short label for a badge. */
+  label: string;
+  /** One sentence for an operator. */
+  basis: string;
+  /** The evidence lines, when this came from legacy analysis. Shown verbatim. */
+  evidence: string[];
+  /** 🚨 Does this origin stand as the installer's decision? */
+  isInstallerDecision: boolean;
+}
+
+/** One answer to the architecture question, with the values a resolution would persist. */
+export interface ArchitectureChoice {
+  /** The coupling this choice records. */
+  coupling: SolarCoupling;
+  /** The button text. */
+  label: string;
+  /** What choosing it does to the project, stated before it is clicked. */
+  consequence: string;
+  /** Does choosing this retire the separate inverter selection from current design authority? */
+  retiresExternalInverter: boolean;
+}
+
 export interface ElectricalProjectModel {
   /** The connection graph. null ⇒ none has been built. */
   topology: ServiceTopology | null;
@@ -102,7 +150,31 @@ export interface ElectricalProjectModel {
   solarCouplingProvenance: ElectricalProvenance;
   /** Does this project have a separate AC PV inverter at all? */
   hasExternalInverter: boolean;
+  /** Its catalogue id, when there is one. Exposed because a resolution has to NAME what it retires. */
+  externalInverterId: string | null;
   externalInverterProvenance: ElectricalProvenance;
+  /**
+   * 🚨 WHERE THE SEPARATE INVERTER CAME FROM — null when there is no separate inverter.
+   *
+   * This is the field that answers Ray's "persisted equipment existence alone does not prove
+   * installer intent". A surface that lists the inverter must read this before presenting it as the
+   * installer's choice.
+   */
+  externalInverterOrigin: ExternalInverterOrigin | null;
+  /**
+   * 🚨 MUST A HUMAN CHOOSE THE ARCHITECTURE BEFORE THIS PROJECT CAN BE DRAWN?
+   *
+   * True only for the coupling conflict — the one disagreement where every downstream surface would
+   * otherwise have to pick a side to render at all. A stale battery-count mirror does not set this:
+   * Ray, "Other unrelated project engineering may continue."
+   */
+  architectureResolutionRequired: boolean;
+  /**
+   * The two answers the question has, ready for the dialog. Empty unless
+   * `architectureResolutionRequired`. Carried on the model so every surface offers the SAME two
+   * choices with the same wording and the same values.
+   */
+  architectureChoices: ArchitectureChoice[];
   /** Service rating. null ⇒ not established — which is NOT a reason to discard anything. */
   serviceRatedAmps: number | null;
   serviceProvenance: ElectricalProvenance;
@@ -146,6 +218,21 @@ export interface ResolveElectricalInput {
   selectedEquipment: SelectedEquipmentView | null;
   /** Engineering inputs and explicit overrides. Never inventory, never topology. */
   engineeringConfig?: { serviceRatedAmpsOverride?: number | null } | null;
+  /**
+   * 🚨 HOW THE SELECTED EQUIPMENT CAME TO BE SELECTED, when the project recorded it.
+   *
+   * Absent on every project saved before provenance existed — which is exactly the case this
+   * model must handle without guessing, so absence is a normal input and not a gap to fill.
+   */
+  equipmentProvenance?: StoredEquipmentProvenance | null;
+  /**
+   * The verdict of the legacy evidence analysis, for a row that recorded no provenance.
+   *
+   * Computed OUTSIDE the resolver because it needs the catalogue (what the auto-picker would have
+   * chosen) and this function stays catalogue-free so the browser and the server agree. Null when
+   * nothing needed classifying.
+   */
+  legacyInverter?: LegacyInverterClassification | null;
 }
 
 const NONE: ElectricalProvenance = { source: 'none', basis: 'Nothing in this project states it.' };
@@ -157,7 +244,7 @@ const NONE: ElectricalProvenance = { source: 'none', basis: 'Nothing in this pro
  * limits (resolved from its catalogue row when it was built), so "can this battery be DC coupled"
  * is a property of the equipment rather than a guess from the word Tesla.
  */
-const takesPvOnDc = (u: StorageUnit): boolean =>
+export const takesPvOnDc = (u: StorageUnit): boolean =>
   u.role === 'inverter-unit' && !!u.pvInputLimits;
 
 /**
@@ -186,6 +273,47 @@ export function resolveElectricalProject(
     : { source: 'selected-equipment',
         basis: 'No separate PV inverter has been selected. That is a state, not a missing value.' };
 
+  // ── WHERE DID THAT INVERTER COME FROM? ───────────────────────────────────
+  //
+  // 🚨 ASKED BEFORE THE COUPLING IS DERIVED, because the answer changes what the derivation is
+  // allowed to conclude. A stored `USER_SELECTED` is an installer decision and the conflict names it
+  // as one; an `AUTO_SUGGESTED_LEGACY` verdict means the inverter is a suggestion nobody confirmed,
+  // and the conflict says THAT instead — which is the difference between asking Ray to adjudicate
+  // between two of his own decisions and telling him one side was never his.
+  const storedInvProv = input.equipmentProvenance?.inverter ?? null;
+  const legacy = input.legacyInverter ?? null;
+  const externalInverterOrigin: ExternalInverterOrigin | null = !hasExternalInverter ? null
+    : storedInvProv
+      ? {
+          kind: storedInvProv.kind,
+          label: PROVENANCE_LABEL[storedInvProv.kind],
+          basis: storedInvProv.basis
+            || `Recorded as ${PROVENANCE_LABEL[storedInvProv.kind]}`
+               + `${storedInvProv.by ? ` by ${storedInvProv.by}` : ''}.`,
+          evidence: [],
+          isInstallerDecision: isInstallerDecision(storedInvProv),
+        }
+      : legacy && legacy.verdict === 'AUTO_SUGGESTED_LEGACY'
+        ? {
+            kind: 'AUTO_SUGGESTED_LEGACY',
+            label: PROVENANCE_LABEL.AUTO_SUGGESTED_LEGACY,
+            basis: legacy.basis,
+            evidence: legacy.evidence,
+            isInstallerDecision: false,
+          }
+        : {
+            // 🚨 UNRECORDED IS ITS OWN ANSWER. Not `USER_SELECTED` with low confidence — a surface
+            // that renders this must not print "selected by the installer" over a row that never
+            // said so.
+            kind: 'UNRECORDED',
+            label: 'Origin not recorded',
+            basis: legacy?.basis
+              ?? 'This project was saved before SolarPro recorded how equipment was chosen, so how '
+                 + 'this inverter was selected is not known.',
+            evidence: legacy?.evidence ?? [],
+            isInstallerDecision: false,
+          };
+
   // ── THE PV COUPLING ──────────────────────────────────────────────────────
   const recorded = t?.solarCoupling ?? null;
   const pvCapableUnits = (t?.storage ?? []).filter(takesPvOnDc);
@@ -208,6 +336,7 @@ export function resolveElectricalProject(
     // winner, because picking one silently is how the drawing came to contain both.
     if (recorded === 'dc-coupled-storage' && hasExternalInverter) {
       conflicts.push({
+        code: 'SOLAR_COUPLING_UNRESOLVED',
         fact: 'How the PV is coupled',
         claims: [
           { source: 'service-topology',
@@ -244,10 +373,17 @@ export function resolveElectricalProject(
     // `derArrangement` asks. Once they record it, the recorded value wins and this never fires again.
     // ══════════════════════════════════════════════════════════════════════
     conflicts.push({
+      code: 'SOLAR_COUPLING_UNRESOLVED',
       fact: 'How the PV is coupled',
       claims: [
+        // 🚨 THE CLAIM REPORTS ITS OWN STANDING. Ray's live row holds an inverter nobody clicked, so
+        // "a separate PV inverter is selected" was itself a misleading sentence — it describes the
+        // bytes accurately and the act wrongly.
         { source: 'selected-equipment',
-          says: `A separate PV inverter is selected: '${explicitInverterId}'.` },
+          says: externalInverterOrigin && !externalInverterOrigin.isInstallerDecision
+            ? `A separate PV inverter is on the project ('${explicitInverterId}'), but its origin `
+              + `does not stand as a decision: ${externalInverterOrigin.label.toLowerCase()}.`
+            : `A separate PV inverter is selected: '${explicitInverterId}'.` },
         { source: 'service-topology',
           says: `${pvCapableUnits.length} storage unit(s) publish their own PV DC inputs, so the `
             + 'strings could terminate there instead.' },
@@ -330,6 +466,7 @@ export function resolveElectricalProject(
     const sc = typeof sel?.batteryCount === 'number' ? sel.batteryCount : null;
     if (sc !== null && sc !== s.inverterUnitCount + s.expansionUnitCount) {
       conflicts.push({
+        code: 'STORAGE_COUNT_MIRROR_STALE',
         fact: 'How many storage units this project has',
         claims: [
           { source: 'service-topology',
@@ -374,13 +511,45 @@ export function resolveElectricalProject(
             basis: 'No service rating has been established. The graph is still evaluated; the '
               + 'conclusions that need the rating report NOT_EVALUATED naming it.' };
 
+  // ── THE GATE ─────────────────────────────────────────────────────────────
+  //
+  // 🚨 ONLY THE COUPLING BLOCKS. Ray: "Until the conflict is resolved, downstream production
+  // surfaces must not pretend STRING INVERTER is authoritative… Other unrelated project engineering
+  // may continue." A stale `batteryCount` mirror is a real conflict and it must NOT stop a drawing,
+  // so the gate names the one code it blocks on instead of counting conflicts.
+  const architectureResolutionRequired =
+    conflicts.some(c => c.code === 'SOLAR_COUPLING_UNRESOLVED');
+
+  const architectureChoices: ArchitectureChoice[] = !architectureResolutionRequired ? [] : [
+    {
+      coupling: 'dc-coupled-storage',
+      label: 'PV connects directly to the batteries (DC coupled)',
+      consequence: 'The strings terminate on the storage DC inputs. The separate inverter stops '
+        + 'counting as design authority — it stays on the record as history, and the strings are '
+        + 'resized against the published PV input limits. No module is added or removed.',
+      retiresExternalInverter: true,
+    },
+    {
+      coupling: 'ac-coupled-inverter',
+      label: `PV uses the separate inverter${explicitInverterId ? ` (${explicitInverterId})` : ''}`,
+      consequence: 'The strings run through the separate inverter and reach the premises on AC. The '
+        + 'inverter is recorded as a decision the installer made and stops being reported as a '
+        + 'suggestion.',
+      retiresExternalInverter: false,
+    },
+  ];
+
   return {
     topology: t,
     solarCoupling,
     solarCouplingLabel: solarCouplingLabel(solarCoupling, t ?? undefined),
     solarCouplingProvenance,
     hasExternalInverter,
+    externalInverterId: hasExternalInverter ? explicitInverterId : null,
     externalInverterProvenance,
+    externalInverterOrigin,
+    architectureResolutionRequired,
+    architectureChoices,
     serviceRatedAmps,
     serviceProvenance,
     storage,
