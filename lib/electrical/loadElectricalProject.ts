@@ -206,9 +206,12 @@ export function composeElectricalProject(
   const modules = numOrNull(row.total_panels);
   if (modules !== null) sources.moduleCount = 'layouts.total_panels';
 
-  // ── Explicit engineering overrides, and ONLY those ────────────────────────
+  // ── 🚨 `engineering_config` IS READ FOR ITS PRESENCE, AND FOR NOTHING ELSE ────────────────
+  //
+  // It used to supply `serviceRatedAmpsOverride`, a key no production code has ever written — the
+  // override channel the inspector advertised could not be reached. The field is gone; the source is
+  // still reported so the inspector can say the row exists.
   const ec = asObject(row.engineering_config);
-  const override = ec ? numOrNull((ec as { serviceRatedAmpsOverride?: unknown }).serviceRatedAmpsOverride) : null;
   if (ec) sources.engineeringConfig = 'projects.engineering_config';
 
   // ── WHERE THE SELECTED EQUIPMENT CAME FROM ────────────────────────────────
@@ -231,7 +234,7 @@ export function composeElectricalProject(
   const model = resolveElectricalProject({
     topology,
     selectedEquipment: selected ? { ...selected, moduleCount: modules } : (modules !== null ? { moduleCount: modules } : null),
-    engineeringConfig: override !== null ? { serviceRatedAmpsOverride: override } : null,
+    engineeringConfig: null,
     equipmentProvenance,
     legacyInverter,
   });

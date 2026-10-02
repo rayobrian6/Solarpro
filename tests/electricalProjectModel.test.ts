@@ -211,14 +211,27 @@ describe('🚨 CASE C — a partial project keeps everything it has', () => {
     expect(m.conflicts).toEqual([]);
   });
 
-  it('an explicit engineering override outranks the graph, and says so', () => {
+  it('🚨 the GRAPH is the only owner of the service rating', () => {
+    // This test used to assert that `engineering_config.serviceRatedAmpsOverride` outranked the
+    // graph. It was the ONLY place in the repository that ever set that key — no route, no page, no
+    // migration, no seed wrote it, so the override channel the authority inspector advertised could
+    // not be reached by anything except this fixture.
+    //
+    // A documented answer to "can another store win?" that describes a mechanism which does not
+    // exist is worse than no answer, because it stops the question being asked again — and the store
+    // that ACTUALLY competes (`engineering_config.mainPanelAmps`, which the engineer's own control
+    // edits) went unnamed the whole time.
+    //
+    // If an override is ever needed it is a DECISION and must be built like one, with recorded
+    // provenance — exactly as the solar coupling now is. A silent scalar in a config blob is how
+    // this class of defect started.
     const m = resolveElectricalProject({
       topology: current(),
       selectedEquipment: null,
-      engineeringConfig: { serviceRatedAmpsOverride: 320 },
+      engineeringConfig: null,
     });
-    expect(m.serviceRatedAmps).toBe(320);
-    expect(m.serviceProvenance.source).toBe('engineering-config');
+    expect(m.serviceRatedAmps).toBe(400);
+    expect(m.serviceProvenance.source).toBe('service-topology');
   });
 
   it('no graph at all: the catalogue selection is all there is, and it says that', () => {

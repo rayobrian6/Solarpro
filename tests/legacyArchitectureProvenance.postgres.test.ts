@@ -1551,3 +1551,51 @@ describe('🚨 RULE ELEVEN — the drawing takes NO architecture from the UI', (
     expect(json.architecture.overrodeRequestBody).toBe(false);
   });
 });
+
+
+describe('🚨 THE SERVICE RATING HAS ONE OWNER', () => {
+  it('🚨 the dump names engineering_config.mainPanelAmps when it disagrees with the graph', async () => {
+    // The model used to consult `engineering_config.serviceRatedAmpsOverride`, which NO production
+    // code has ever written — so the documented override channel was unreachable, while THIS field,
+    // the one the engineer's control edits and the page computes NEC 705.12(B) from, went unnamed.
+    await writeRaysLiveRow({ inverterId: null, generationPanels: true });
+    await db.query(
+      `UPDATE projects SET engineering_config = $2 WHERE id = $1`,
+      [PROJECT, JSON.stringify({ schemaVersion: 2, inverters: [], mainPanelAmps: 200 })]);
+
+    const { electricalStateDump } = await import('@/lib/electrical/stateDump');
+    const d = (await electricalStateDump(PROJECT, USER_ID))!;
+    expect(d.topology.serviceRatedAmps).toBe(400);
+    const risk = d.mirrorsThatCouldWin.find(r => r.field === 'engineering_config.mainPanelAmps');
+    expect(risk, 'the competing service rating is still invisible').toBeTruthy();
+    expect(risk!.value).toBe('200 A');
+    expect(risk!.contradicts).toContain('400 A');
+  });
+
+  it('a config rating that AGREES with the graph is not reported', async () => {
+    await writeRaysLiveRow({ inverterId: null, generationPanels: true });
+    await db.query(
+      `UPDATE projects SET engineering_config = $2 WHERE id = $1`,
+      [PROJECT, JSON.stringify({ schemaVersion: 2, inverters: [], mainPanelAmps: 400 })]);
+    const { electricalStateDump } = await import('@/lib/electrical/stateDump');
+    const d = (await electricalStateDump(PROJECT, USER_ID))!;
+    expect(d.mirrorsThatCouldWin.find(r => r.field === 'engineering_config.mainPanelAmps'))
+      .toBeUndefined();
+  });
+
+  it('🚨 the dead override key is gone from the model entirely', async () => {
+    // A documented mechanism that does not exist stops the question being asked again.
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const model = readFileSync(join(ROOT, 'lib/electrical/projectModel.ts'), 'utf8');
+    const loader = readFileSync(join(ROOT, 'lib/electrical/loadElectricalProject.ts'), 'utf8');
+    const inspector = readFileSync(join(ROOT, 'lib/electrical/authorityInspector.ts'), 'utf8');
+    // It may be NAMED in the comment that explains its removal, but never READ.
+    expect(model).not.toContain('input.engineeringConfig?.serviceRatedAmpsOverride');
+    expect(loader).not.toContain('.serviceRatedAmpsOverride)');
+    // The phrase survives in the comment that explains the removal; what must not survive is the
+    // CLAIM — the `owner:` value the inspector prints.
+    expect(inspector).not.toContain("owner: 'service_topology.service.ratedAmps, overridable");
+    expect(inspector).toContain('the graph, and nothing else');
+  });
+});

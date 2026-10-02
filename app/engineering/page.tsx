@@ -9295,6 +9295,28 @@ function EngineeringPageInner() {
   // So the unresolved state is now its own label, ABOVE every equipment-derived arm — because any
   // arm below it is a claim about an architecture nobody has settled.
   // ══════════════════════════════════════════════════════════════════════════
+  // ═════════════════════════════════════════════════════════════════════════
+  // 🚨 THE SERVICE RATING THE SCREEN USES COMES FROM THE GRAPH.
+  //
+  // `serviceRatedAmps` appeared ZERO times in this file. Every number on screen — the 120% busbar
+  // allowance, the Max PV figure, the permit-readiness gate — was computed from
+  // `config.mainPanelAmps`, which is `engineering_config`: a different persisted store from the one
+  // the SLD, BOM and PDF routes project the drawing's service rating from. The same project could
+  // therefore state one service on screen and another on the sheet, and nothing compared them.
+  //
+  // This is a PROJECTION, one way, owner to display: the graph's value is shown and used, and the
+  // config scalar is left alone as the legacy mirror it is. Where no graph exists the config value
+  // is still the only answer there is, which is correct.
+  // ═════════════════════════════════════════════════════════════════════════
+  const _canonicalServiceAmps = electrical?.serviceRatedAmps ?? null;
+  /** The service rating to display and compute from: the graph where there is one. */
+  const serviceAmpsForDisplay = _canonicalServiceAmps ?? config.mainPanelAmps ?? null;
+  /** True when the config scalar disagrees with the graph — shown, never silently corrected. */
+  const _serviceAmpsDisagree =
+    _canonicalServiceAmps !== null
+    && typeof config.mainPanelAmps === 'number'
+    && config.mainPanelAmps !== _canonicalServiceAmps;
+
   const _archUnresolved = !!electrical?.architectureResolutionRequired;
   // 🚨 ASK THE SERVER WHERE THE EQUIPMENT CAME FROM. See `_archDetail`: the browser can see THAT the
   // architecture is unresolved, but only the server can say whether the inverter was ever a decision.
@@ -10789,8 +10811,11 @@ function EngineeringPageInner() {
                         </div>
                         {/* 120% rule indicator */}
                         {(() => {
-                          const busRating = config.panelBusRating ?? config.mainPanelAmps ?? 200;
-                          const mainAmps = config.mainPanelAmps ?? 200;
+                          // 🚨 THE GRAPH'S RATING, where the project has a graph. See
+                          // `serviceAmpsForDisplay`: this calculation used `config.mainPanelAmps`,
+                          // a different store from the one the drawing is built from.
+                          const busRating = config.panelBusRating ?? serviceAmpsForDisplay ?? 200;
+                          const mainAmps = serviceAmpsForDisplay ?? 200;
                           const maxPV = Math.floor(busRating * 1.2 - mainAmps);
                           return maxPV > 0 ? (
                             <>

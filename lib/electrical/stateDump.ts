@@ -133,7 +133,7 @@ export async function electricalStateDump(
     'selected_equipment.inverter / .inverterId — the catalogue pick; the architecture owns whether '
       + 'it is part of the design.',
     'engineering_config.inverters — the page working fleet; it carries strings, not architecture.',
-    'engineering_config.mainPanelAmps — a scalar projection of the graph service rating.',
+    'engineering_config.mainPanelAmps — what the engineer edits; the graph owns the rating.',
   ];
 
   // ── 🚨 WHAT COULD ACTUALLY WIN, RIGHT NOW, ON THIS ROW ────────────────────
@@ -176,6 +176,24 @@ export async function electricalStateDump(
         'Written by persistElectricalCanonicalization rather than by a person. The model re-tests it '
         + 'against the evidence instead of obeying it, so it only stands while the evidence agrees. '
         + 'Recording the designer answer through the service topology clears this.',
+    });
+  }
+
+  // 🚨 THE SERVICE RATING'S REAL COMPETITOR. The model used to consult
+  // `engineering_config.serviceRatedAmpsOverride`, which no production code has ever written — so
+  // the documented override channel was unreachable while THIS field, the one the engineer's own
+  // control edits and the engineering page computes NEC 705.12(B) from, went unnamed.
+  const cfgAmps = typeof ec?.mainPanelAmps === 'number' ? ec.mainPanelAmps as number : null;
+  if (m.serviceRatedAmps !== null && cfgAmps !== null && cfgAmps !== m.serviceRatedAmps) {
+    mirrorsThatCouldWin.push({
+      field: 'engineering_config.mainPanelAmps',
+      value: `${cfgAmps} A`,
+      contradicts: `${m.serviceRatedAmps} A recorded on the service graph`,
+      howItWins:
+        'The engineering page computes the 120% busbar allowance, the permit-readiness gate and the '
+        + 'Max PV figure from this scalar, not from the graph. The SLD, BOM and PDF routes do project '
+        + 'the graph rating over it, so the drawing and the screen can state different services for '
+        + 'the same project.',
     });
   }
 

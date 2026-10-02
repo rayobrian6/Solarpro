@@ -160,7 +160,10 @@ export function inspectElectricalAuthority(
   const rows: AuthorityRow[] = [
     {
       field: 'Service rating (A)',
-      owner: 'service_topology.service.ratedAmps, overridable by engineering_config',
+      // 🚨 NOT "overridable by engineering_config". That override had NO WRITER — this row
+      // advertised a mechanism that did not exist, while the store that actually competes
+      // (`engineering_config.mainPanelAmps`, which the engineer's own control edits) went unnamed.
+      owner: 'service_topology.service.ratedAmps — the graph, and nothing else',
       persistedAt: 'projects.service_topology → topology.service.ratedAmps',
       value: m.serviceRatedAmps === null
         ? 'NOT ESTABLISHED — dependent conclusions report NOT_EVALUATED'

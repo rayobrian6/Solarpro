@@ -217,7 +217,25 @@ export interface ResolveElectricalInput {
   topology: ServiceTopology | null;
   selectedEquipment: SelectedEquipmentView | null;
   /** Engineering inputs and explicit overrides. Never inventory, never topology. */
-  engineeringConfig?: { serviceRatedAmpsOverride?: number | null } | null;
+  /**
+   * 🚨 THE OVERRIDE CHANNEL IS GONE, BECAUSE NOTHING COULD EVER WRITE IT.
+   *
+   * `serviceRatedAmpsOverride` was read here and in `loadElectricalProject`, declared in this
+   * interface, and set by exactly one TEST FIXTURE. An exhaustive search of the repository found no
+   * production writer — no route, no page, no migration, no seed. The authority inspector and
+   * `docs/ELECTRICAL-AUTHORITY-REAUDIT.md` both advertised it as the way `engineering_config` could
+   * outrank the graph, and it could not be reached.
+   *
+   * That is worse than a missing feature: it is a documented answer to "can another store win?"
+   * that describes a mechanism which does not exist, while the store that ACTUALLY competes
+   * (`engineering_config.mainPanelAmps`, which the engineer's own control edits) went unnamed.
+   *
+   * So the graph is the only owner of the service rating, stated plainly. If an engineer ever needs
+   * to override a wrong graph rating, that is a DECISION and must be built like one — with a
+   * recorded provenance, exactly as the coupling now is. A silent scalar in a config blob is how
+   * this whole class of defect started.
+   */
+  engineeringConfig?: null;
   /**
    * 🚨 HOW THE SELECTED EQUIPMENT CAME TO BE SELECTED, when the project recorded it.
    *
@@ -593,19 +611,16 @@ export function resolveElectricalProject(
 
   // ── THE SERVICE RATING ───────────────────────────────────────────────────
   //
-  // The graph owns it. An engineering override is an explicit, recorded decision and outranks it;
-  // `engineering_config` is where overrides belong and the only thing it may own here.
-  const override = input.engineeringConfig?.serviceRatedAmpsOverride ?? null;
-  const graphRating = typeof t?.service.ratedAmps === 'number' ? t.service.ratedAmps : null;
-  const serviceRatedAmps = typeof override === 'number' ? override : graphRating;
+  // 🚨 ONE OWNER: THE GRAPH. See `engineeringConfig` above — the override this used to consult had
+  // no writer anywhere in the codebase, so "overridable by engineering_config" was a documented
+  // mechanism that did not exist.
+  const serviceRatedAmps = typeof t?.service.ratedAmps === 'number' ? t.service.ratedAmps : null;
   const serviceProvenance: ElectricalProvenance =
-    typeof override === 'number'
-      ? { source: 'engineering-config', basis: 'An explicit engineering override is recorded.' }
-      : graphRating !== null
-        ? { source: 'service-topology', basis: 'The service rating recorded on the graph.' }
-        : { source: 'none',
-            basis: 'No service rating has been established. The graph is still evaluated; the '
-              + 'conclusions that need the rating report NOT_EVALUATED naming it.' };
+    serviceRatedAmps !== null
+      ? { source: 'service-topology', basis: 'The service rating recorded on the graph.' }
+      : { source: 'none',
+          basis: 'No service rating has been established. The graph is still evaluated; the '
+            + 'conclusions that need the rating report NOT_EVALUATED naming it.' };
 
   // ── THE GATE ─────────────────────────────────────────────────────────────
   //
