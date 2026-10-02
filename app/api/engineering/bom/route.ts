@@ -192,6 +192,19 @@ export async function POST(req: NextRequest) {
         const { loadElectricalProject } = await import('@/lib/electrical/loadElectricalProject');
         _electrical = await loadElectricalProject(String(body.projectId), _auth.user.id);
         const _m = _electrical?.model;
+        // 🚨 A BOM FOR AN UNRESOLVED ARCHITECTURE WOULD ORDER THE LOSING SIDE'S EQUIPMENT.
+        // Ray: "SLD/BOM/permit should report ELECTRICAL ARCHITECTURE REQUIRES RESOLUTION rather
+        // than drawing one of the competing systems." A parts list is the same artefact in
+        // another format — it would quote two inverters nobody chose.
+        {
+          const { architectureRefusal } = await import('@/lib/electrical/architectureGate');
+          const _refusal = architectureRefusal(_m, _electrical?.revision ?? null);
+          if (_refusal) {
+            console.warn('[bom] REFUSED: electrical architecture requires resolution'
+              + ` (project ${body.projectId})`);
+            return NextResponse.json(_refusal, { status: 409 });
+          }
+        }
         if (_m?.topology) {
           const _posted = Number(body.batteryCount) || 0;
           // Inverting units are the AC-producing cabinets; expansions are energy only and are

@@ -142,6 +142,32 @@ export async function POST(req: NextRequest) {
         if (_loaded?.model.topology) {
           const _model = _loaded.model;
           const _stored2 = { topology: _model.topology };
+
+          // ══════════════════════════════════════════════════════════════════
+          // 🚨 AN UNRESOLVED ARCHITECTURE DOES NOT GET DRAWN.
+          //
+          // Ray, after the second live acceptance run:
+          //   "Until the conflict is resolved, downstream production surfaces must not pretend
+          //    STRING INVERTER is authoritative. Do not generate a permit-grade SLD from an
+          //    unresolved architecture conflict. SLD/BOM/permit should report ELECTRICAL
+          //    ARCHITECTURE REQUIRES RESOLUTION rather than drawing one of the competing systems."
+          //
+          // The model already refused to pick a side — `solarCoupling` comes back null with the
+          // conflict attached. What it could not do is stop this route from rendering the OTHER
+          // authority: `body` still held `topologyType: 'STRING'` and an inverter model from the
+          // page's React state, so the sheet drew the losing side of a conflict as fact. Proving
+          // the model was right never mattered to the sheet, because the sheet never asked it.
+          //
+          // 409 CONFLICT, not 200 with a banner: a permit-grade sheet that exists can be printed,
+          // attached and submitted. The only safe artefact here is no artefact, plus the question.
+          // ══════════════════════════════════════════════════════════════════
+          const { architectureRefusal } = await import('@/lib/electrical/architectureGate');
+          const _refusal = architectureRefusal(_model, _loaded.revision);
+          if (_refusal) {
+            console.warn('[sld] REFUSED: electrical architecture requires resolution'
+              + ` (project ${body.projectId})`);
+            return NextResponse.json(_refusal, { status: 409 });
+          }
           // ── 🚨 THE CANONICAL ELECTRICAL MODEL DECIDES THE ARCHITECTURE ────────
           //
           // Not the renderer, and not whatever the equipment picker was last left on. Ray, after
@@ -242,22 +268,21 @@ export async function POST(req: NextRequest) {
           //
           // Scoped to DC-coupled and to units that publish limits; every other job keeps the posted
           // inverter's specs exactly as before.
-          const _pvUnits = _model.topology.storage.filter(
-            u => u.role === 'inverter-unit' && u.pvInputLimits);
-          if (_model.solarCoupling === 'dc-coupled-storage' && _pvUnits.length > 0) {
-            const lim = _pvUnits[0].pvInputLimits!;
-            body.inverterMaxDcV = lim.inputVdc[1];
-            body.maxDcVoltage = lim.inputVdc[1];
-            body.mpptVoltageMin = lim.mpptVdc[0];
-            body.mpptVoltageMax = lim.mpptVdc[1];
-            body.maxInputCurrentPerMppt = lim.maxImpPerMpptA;
-            // Every cabinet's MPPTs are available to the array.
-            body.mpptChannels = lim.mppts * _pvUnits.length;
-            console.log('[sld/POST] DC string limits taken from the storage, not an inverter:'
-              + ` ${lim.inputVdc[0]}–${lim.inputVdc[1]} V input,`
-              + ` ${lim.mpptVdc[0]}–${lim.mpptVdc[1]} V MPPT,`
-              + ` ${lim.maxImpPerMpptA} A Imp/MPPT, ${lim.mppts}×${_pvUnits.length} MPPT channels`
-              + ` (${lim.basis})`);
+          // 🚨 ONE DERIVATION, SHARED WITH THE SIZING ROUTE — `lib/electrical/dcStringLimits`.
+          // This was inline here. The Electrical Sizing tab needed the same window, and writing it
+          // twice is how two surfaces come to disagree about the same device.
+          const { dcStringLimits, dcStringLimitsNote } =
+            await import('@/lib/electrical/dcStringLimits');
+          const _dcLim = dcStringLimits(_model.topology, _model.solarCoupling);
+          if (_dcLim) {
+            body.inverterMaxDcV = _dcLim.maxDcVoltage;
+            body.maxDcVoltage = _dcLim.maxDcVoltage;
+            body.mpptVoltageMin = _dcLim.mpptVoltageMin;
+            body.mpptVoltageMax = _dcLim.mpptVoltageMax;
+            body.maxInputCurrentPerMppt = _dcLim.maxInputCurrentPerMppt;
+            body.mpptChannels = _dcLim.mpptChannels;
+            console.log('[sld/POST] DC string limits taken from the storage, not an inverter: '
+              + dcStringLimitsNote(_dcLim));
           }
           const _doms = _model.topology.domains;
           if (_doms.length > 0 && _doms.every(d => d.storageConnection === 'der-aggregation-panel')) {

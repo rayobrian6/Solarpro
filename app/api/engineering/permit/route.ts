@@ -794,6 +794,17 @@ export async function POST(req: NextRequest) {
         const { loadElectricalProject } = await import('@/lib/electrical/loadElectricalProject');
         _electrical = await loadElectricalProject(projectId, user.id);
         const _m = _electrical?.model;
+        // 🚨 THE PERMIT IS THE SEALED PACKAGE. If anything refuses an unresolved architecture, it is
+        // this: a plan set leaves the building and goes to an AHJ.
+        {
+          const { architectureRefusal } = await import('@/lib/electrical/architectureGate');
+          const _refusal = architectureRefusal(_m, _electrical?.revision ?? null);
+          if (_refusal) {
+            console.warn('[permit] REFUSED: electrical architecture requires resolution'
+              + ` (project ${projectId})`);
+            return NextResponse.json(_refusal, { status: 409 });
+          }
+        }
         if (_m?.topology) {
           // 🚨 THE GRAPH REACHES THE PACKAGE. The one write this field has ever had.
           //

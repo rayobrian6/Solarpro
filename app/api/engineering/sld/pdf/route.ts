@@ -179,6 +179,17 @@ export async function POST(req: NextRequest) {
           await import('@/lib/electrical/loadElectricalProject');
         const _loaded = await loadElectricalProject(String(buildInput.projectId), user.id);
         const _m = _loaded?.model;
+        // 🚨 AND THE PDF IS THE PRINTABLE ONE. Gating the SVG route and not this one would leave the
+        // exact artefact that gets attached to a submission reachable.
+        {
+          const { architectureRefusal } = await import('@/lib/electrical/architectureGate');
+          const _refusal = architectureRefusal(_m, _loaded?.revision ?? null);
+          if (_refusal) {
+            console.warn('[sld/pdf] REFUSED: electrical architecture requires resolution'
+              + ` (project ${buildInput.projectId})`);
+            return NextResponse.json(_refusal, { status: 409 });
+          }
+        }
         if (_m?.topology) {
           _electricalRevision = _loaded!.revision;
           // A conflict is never canonicalised away — the sheet keeps what was recorded.
