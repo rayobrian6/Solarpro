@@ -78,7 +78,12 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     // 🚨 SHAPE-CHECKED BEFORE IT IS STORED, BY THE SAME FUNCTION THE READ USES. A graph that would
     // not survive a reload must not be accepted — otherwise "save succeeded" and "reload lost two
     // MSPs" are both true at once, which is the exact failure this slice exists to stop.
-    const checked = parseServiceTopology({ topology: incoming, schemaVersion: 1, updatedAt: '' });
+    // 🚨 'as-sent': THE CHECK MUST NOT ALTER WHAT IT IS CHECKING. An 'active' read refreshes
+    // manufacturer facts from the catalogue, which is right for loading a project and wrong here —
+    // validating a payload and then storing something the caller never submitted is a different act
+    // from validating it. The refresh reaches this graph the next time it is LOADED.
+    const checked = parseServiceTopology(
+      { topology: incoming, schemaVersion: 1, updatedAt: '' }, 'as-sent');
     if (!checked) {
       return NextResponse.json({
         success: false,

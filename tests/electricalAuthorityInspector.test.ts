@@ -44,6 +44,8 @@ function loaded(moduleCount = 72, inverterId: string | null = null): LoadedElect
       engineeringConfig: 'absent',
       moduleCount: 'layouts.total_panels',
     },
+    // No refreshes: this fixture is built from the current catalogue, so nothing is stale.
+    refreshes: [],
   };
 }
 

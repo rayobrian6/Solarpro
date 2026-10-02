@@ -55,6 +55,18 @@ export interface LoadedElectricalProject {
   /** The name of this electrical state. Stamp it on anything you generate. */
   revision: string;
   sources: ElectricalLoadSources;
+  /**
+   * 🚨 THE MANUFACTURER FACTS THIS READ REFRESHED, AND WHAT THEY WERE.
+   *
+   * Non-empty ⇒ the project was authored against older catalogue data and the load corrected it —
+   * e.g. a Powerwall 3 saved with the stale `ocpdA: 50` coming back as Tesla's published 60. Empty
+   * on a project that already agrees, so the list is a signal rather than noise.
+   *
+   * This is the provenance proof Ray asked for: "A current manufacturer correction must reach an
+   * active editable project. An issued historical drawing must remain traceable to the data it was
+   * issued with." A historical read (`'as-issued'`) refreshes nothing and reports nothing.
+   */
+  refreshes: import('@/lib/electrical/hydrateInstances').InstanceRefresh[];
 }
 
 /** Narrow an unknown JSONB cell to a plain object, tolerating the text form some drivers return. */
@@ -155,10 +167,16 @@ export function composeElectricalProject(
 
   // ── The connection graph ─────────────────────────────────────────────────
   let topology: ServiceTopology | null = null;
+  let refreshes: import('@/lib/electrical/hydrateInstances').InstanceRefresh[] = [];
   if (row.service_topology != null) {
-    const parsed = parseServiceTopology(row.service_topology);
-    if (parsed) { topology = parsed.topology; sources.serviceTopology = 'projects.service_topology'; }
-    else { sources.serviceTopology = 'unparseable'; }
+    // 'active': this IS the editable project, so manufacturer facts are refreshed from the
+    // catalogue and what moved is reported. A historical read uses 'as-issued' and refreshes nothing.
+    const parsed = parseServiceTopology(row.service_topology, 'active');
+    if (parsed) {
+      topology = parsed.topology;
+      refreshes = parsed.refreshes;
+      sources.serviceTopology = 'projects.service_topology';
+    } else { sources.serviceTopology = 'unparseable'; }
   }
 
   // ── The catalogue selection ──────────────────────────────────────────────
@@ -182,7 +200,7 @@ export function composeElectricalProject(
     engineeringConfig: override !== null ? { serviceRatedAmpsOverride: override } : null,
   });
 
-  return { projectId, model, revision: electricalRevision(model), sources };
+  return { projectId, model, revision: electricalRevision(model), sources, refreshes };
 }
 
 /**

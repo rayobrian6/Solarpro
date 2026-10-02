@@ -200,6 +200,38 @@ export async function POST(req: NextRequest) {
             body.interconnectionType = _ic.value;
           }
 
+          // ═══════════════════════════════════════════════════════════════
+          // 🚨 THE STORAGE FACTS COMPUTESYSTEM SIZES WITH COME FROM THE GRAPH.
+          //
+          // Ray's §11: "computeSystem / sizing are still evidently reconstructing an older electrical
+          // architecture. They must consume canonical architecture rather than independently
+          // deriving… Derived arithmetic stays in the sizing engine. Architecture does not."
+          //
+          // `batteryCount` was a posted scalar — the same class as the BOM's, and wrong for the same
+          // reason: a catalogue pick cannot say how many cabinets are installed.
+          //
+          // 🚨 AND `batteryBackfeedA` IS AN ARCHITECTURE QUESTION, NOT A SUM. NEC 705.12(B) adds the
+          // backfeed breakers ON A GIVEN BUSBAR. Where each system's cabinets land in their own
+          // generation panel and that panel feeds the gateway, NOTHING of the storage lands on the
+          // MSP's busbar — `evaluateServiceTopology` already says exactly this ("No source is
+          // connected to {panel}'s busbar: the storage lands in a DER aggregation panel"). Feeding
+          // the sum anyway would size the MSP against 240 A of backfeed that is not there.
+          //
+          // So the number follows the recorded connection, which is the installer's decision, and is
+          // left untouched when that decision has not been made.
+          body.batteryCount = _model.storage.invertingUnitCount;
+          const _doms = _model.topology.domains;
+          if (_doms.length > 0 && _doms.every(d => d.storageConnection === 'der-aggregation-panel')) {
+            body.batteryBackfeedA = 0;
+            console.log('[sld/POST] storage backfeed on the service panel busbar = 0 —'
+              + ' every system lands in its own generation panel, which feeds its gateway.');
+          } else if (_doms.length > 0 && _doms.every(d => d.storageConnection !== 'unresolved')) {
+            const _units = _model.topology.storage.filter(u => u.role === 'inverter-unit');
+            if (!_units.some(u => u.ocpdA == null)) {
+              body.batteryBackfeedA = _units.reduce((n, u) => n + (u.ocpdA as number), 0);
+            }
+          }
+
           // 🚨 THE SHEET CARRIES THE REVISION IT WAS DRAWN FROM.
           //
           // Ray: "Generated electrical artifacts must carry the project/electrical revision they

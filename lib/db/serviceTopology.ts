@@ -91,7 +91,36 @@ export interface StoredServiceTopology {
   schemaVersion: number;
   topology: ServiceTopology;
   updatedAt: string;
+  /**
+   * 🚨 WHAT THE READ REFRESHED FROM THE CATALOGUE, AND WHAT IT WAS BEFORE. The provenance proof.
+   *
+   * Ray: "A current manufacturer correction such as PW3 OCPD 50 → 60 must reach an active editable
+   * project. An issued historical drawing must remain traceable to the revision/data it was issued
+   * with. Do not solve current-project correctness by destroying historical reproducibility."
+   *
+   * Empty on an unhydrated read and on a project whose instances already agree with the catalogue —
+   * so a non-empty list is exactly "this project was authored against older manufacturer data, and
+   * here is every number that moved".
+   */
+  refreshes: import('@/lib/electrical/hydrateInstances').InstanceRefresh[];
 }
+
+/**
+ * How a stored graph is being read.
+ *
+ * 🚨 THE DISTINCTION RAY ASKED FOR, MADE EXPLICIT AT THE CALL SITE rather than implied by which
+ * function you happened to use:
+ *
+ *   'active'     — the editable project. MANUFACTURER FACTS are refreshed from the catalogue, so a
+ *                  correction reaches the design the installer is still working on. USER DECISIONS
+ *                  (which product, which output configuration, every relationship) are untouched.
+ *   'as-issued'  — a historical record. NOTHING is refreshed: the graph comes back exactly as it was
+ *                  stored, so an issued drawing stays traceable to the data it was issued with.
+ *   'as-sent'    — a payload being shape-checked before storage. Nothing is refreshed either: this
+ *                  is validating what the caller SENT, and quietly altering it before the check
+ *                  would mean storing something nobody submitted.
+ */
+export type ServiceTopologyReadMode = 'active' | 'as-issued' | 'as-sent';
 
 const isObj = (v: unknown): v is Record<string, unknown> =>
   !!v && typeof v === 'object' && !Array.isArray(v);
@@ -407,7 +436,17 @@ function parseDomain(v: unknown): BackupDomain | null {
  * service topology on this project", which is honest, rather than engineering against a graph with
  * holes in it.
  */
-export function parseServiceTopology(raw: unknown): StoredServiceTopology | null {
+export function parseServiceTopology(
+  raw: unknown,
+  /**
+   * 🚨 DEFAULTS TO 'active', BECAUSE THE DEFAULT MUST BE THE SAFE ONE FOR A LIVE PROJECT.
+   *
+   * A reader that forgets to say which kind of read it is gets a correctly-hydrated current design.
+   * The two modes that must NOT refresh — a historical record, and a payload being validated — are
+   * both places where the caller knows exactly what it is doing and says so.
+   */
+  mode: ServiceTopologyReadMode = 'active',
+): StoredServiceTopology | null {
   let v: unknown = raw;
   if (typeof v === 'string') { try { v = JSON.parse(v); } catch { return null; } }
   if (v instanceof Uint8Array) {
@@ -454,6 +493,8 @@ export function parseServiceTopology(raw: unknown): StoredServiceTopology | null
   const parsed: StoredServiceTopology = {
     schemaVersion: numOrNull(v.schemaVersion) ?? SERVICE_TOPOLOGY_SCHEMA_VERSION,
     updatedAt: str(v.updatedAt),
+    // Nothing refreshed yet — the hydration below fills this, and only for an 'active' read.
+    refreshes: [],
     topology: {
       service: {
         ratedAmps,
@@ -538,20 +579,25 @@ export function parseServiceTopology(raw: unknown): StoredServiceTopology | null
   // See `lib/electrical/hydrateInstances.ts` for the full argument, including why a differing value
   // is NOT treated as a deliberate override.
   // ═══════════════════════════════════════════════════════════════════════
+  // 🚨 ONLY THE ACTIVE PROJECT IS REFRESHED. A historical record comes back as it was stored, and a
+  // payload under validation comes back as it was sent — see `ServiceTopologyReadMode`.
+  if (mode !== 'active') return parsed;
+
   const { topology: hydrated, refreshes } = hydrateTopologyFromCatalogue(parsed.topology);
   if (refreshes.length > 0) {
     console.log('[serviceTopology] refreshed', refreshes.length,
       'manufacturer fact(s) from the catalogue on read:',
       refreshes.map(r => `${r.instanceId}.${r.field} ${r.was}→${r.now}`).join(', '));
   }
-  return { ...parsed, topology: hydrated };
+  return { ...parsed, topology: hydrated, refreshes };
 }
 
 /** Serialise for storage. Whole graph, no projection, no scalars. */
 export function serialiseServiceTopology(
   topology: ServiceTopology, updatedAt = new Date().toISOString(),
 ): StoredServiceTopology {
-  return { schemaVersion: SERVICE_TOPOLOGY_SCHEMA_VERSION, topology, updatedAt };
+  // Serialising records a design; nothing is refreshed on the way OUT.
+  return { schemaVersion: SERVICE_TOPOLOGY_SCHEMA_VERSION, topology, updatedAt, refreshes: [] };
 }
 
 // ── Persistence ─────────────────────────────────────────────────────────────

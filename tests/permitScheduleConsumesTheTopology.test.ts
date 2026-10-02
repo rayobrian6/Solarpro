@@ -184,3 +184,58 @@ describe('🚨 the schedule sheet renders the instances, not a summary of them',
     expect(fn).toContain('ENGINEERING INPUT REQUIRED');
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 🚨 THE GATEWAY IS IN THE SERVICE PATH, NOT BESIDE IT — ON EVERY SURFACE.
+//
+// Tesla's Gateway 3 install manual: "All loads and Tesla equipment breakers are downstream of the
+// Gateway 3 contactor", and the load panel's conductors land on the Gateway's BACKUP terminals.
+//
+// The SLD captioned the Gateway→MSP run with the SERVICE BRANCH's name, which asserted that the MSP
+// sat on the service path rather than downstream of the contactor. Ray: "Audit conductor schedule,
+// BOM descriptions and permit schedule for the same semantic error."
+//
+// Audited: the permit schedule and the service-graph BOM were already right. These assertions exist
+// so they stay right — the SLD was right once too.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('🚨 gateway → panel semantics, across every surface', () => {
+  it('the permit schedule says the gateway is FED BY a branch and BACKS UP a panel', async () => {
+    const { serviceTopologyScheduleRows } = await import('@/lib/permit/utils/serviceTopologySchedule');
+    const { buildRaysIntendedJob } = await import('@/lib/electrical/fixtures/tesla400aTwoGateway');
+    const rows = serviceTopologyScheduleRows(buildRaysIntendedJob().topology);
+    const gws = rows.filter(r => r.deviceType === 'backup-gateway');
+    expect(gws.length).toBe(2);
+    for (const g of gws) {
+      // Direction stated explicitly: supply side named as the feed, load side as what it backs up.
+      expect(g.notes, 'the gateway row does not say what feeds it').toMatch(/Fed by /);
+      expect(g.notes, 'the gateway row does not say what it backs up').toMatch(/backs up /);
+      // 🚨 AND THE PANEL IS NEVER DESCRIBED AS FEEDING IT.
+      expect(g.notes).not.toMatch(/Fed by MSP/i);
+    }
+  });
+
+  it('the service-graph BOM describes a gateway per domain, not per service branch', async () => {
+    const { bomFromServiceTopology } = await import('@/lib/bom/topologyBom');
+    const { buildRaysIntendedJob } = await import('@/lib/electrical/fixtures/tesla400aTwoGateway');
+    const bom = bomFromServiceTopology(buildRaysIntendedJob().topology);
+    const gw = bom.items.find(i => /gateway/i.test(`${i.manufacturer} ${i.model}`));
+    expect(gw, 'no gateway line in the service-graph BOM').toBeTruthy();
+    expect(gw!.quantity).toBe(2);
+    expect(gw!.derivedFrom, 'the gateway count is not derived from the backup domains')
+      .toMatch(/domain/i);
+  });
+
+  it('🚨 the SLD labels that conductor as the BACKUP feeder', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const src = readFileSync(
+      join(__dirname, '..', 'lib', 'sld-professional-renderer.ts'), 'utf8');
+    // The run from the gateway to its backed-up panel.
+    const at = src.indexOf('// GATEWAY → PANEL feeder');
+    expect(at, 'the gateway→panel feeder block is gone').toBeGreaterThan(0);
+    const before = src.slice(Math.max(0, at - 1600), at);
+    expect(before, 'the backup feeder is labelled with the service branch identity again')
+      .toContain('BACKUP FEEDER');
+    expect(before).not.toMatch(/const feederLabel = `\$\{branch\.label\}/);
+  });
+});

@@ -176,6 +176,64 @@ describe('🚨 the legacy row is genuinely legacy', () => {
     }
   });
 
+  // ═══════════════════════════════════════════════════════════════════════
+  // 🚨 THE FOUR CLASSES, AND THE PROOF THAT CORRECTING ONE DOES NOT REWRITE HISTORY.
+  //
+  // Ray: "A current manufacturer correction such as PW3 OCPD 50 → 60 must reach an active editable
+  // project. An issued historical drawing must remain traceable to the revision/data it was issued
+  // with. Do not solve current-project correctness by destroying historical reproducibility."
+  // ═══════════════════════════════════════════════════════════════════════
+  it('🚨 an AS-ISSUED read returns the graph exactly as it was stored', async () => {
+    await writeLegacyRow({ withGenerationPanels: true });
+    const { parseServiceTopology } = await import('@/lib/db/serviceTopology');
+    const row = (await db.query(`SELECT service_topology FROM projects WHERE id = $1`, [PROJECT]))
+      .rows[0] as { service_topology: unknown };
+
+    const issued = parseServiceTopology(row.service_topology, 'as-issued')!;
+    for (const u of issued.topology.storage.filter(x => x.role === 'inverter-unit')) {
+      expect(u.ocpdA, 'a historical read was rewritten by a later catalogue correction').toBe(50);
+      expect(u.pvInputLimits, 'a historical read gained a field it was never issued with')
+        .toBeFalsy();
+    }
+    expect(issued.refreshes, 'a historical read refreshed something').toEqual([]);
+
+    // 🚨 THE SAME BYTES, READ AS THE ACTIVE PROJECT, GET THE CORRECTION.
+    const active = parseServiceTopology(row.service_topology, 'active')!;
+    for (const u of active.topology.storage.filter(x => x.role === 'inverter-unit')) {
+      expect(u.ocpdA, 'the correction did not reach the active project').toBe(60);
+    }
+    // And the refresh is itemised, so "which number moved, and from what" is answerable.
+    const ocpd = active.refreshes.filter(r => r.field === 'ocpdA');
+    expect(ocpd.length).toBe(4);
+    expect(ocpd[0].was).toBe('50');
+    expect(ocpd[0].now).toBe('60');
+    expect(ocpd[0].productId).toBe('tesla-powerwall-3');
+  });
+
+  it('🚨 an AS-SENT read does not alter the payload it is validating', async () => {
+    // The write path shape-checks what the caller submitted. Refreshing there would store something
+    // nobody sent — a different act from checking it.
+    await writeLegacyRow({ withGenerationPanels: true });
+    const { parseServiceTopology } = await import('@/lib/db/serviceTopology');
+    const row = (await db.query(`SELECT service_topology FROM projects WHERE id = $1`, [PROJECT]))
+      .rows[0] as { service_topology: unknown };
+    const sent = parseServiceTopology(row.service_topology, 'as-sent')!;
+    for (const u of sent.topology.storage.filter(x => x.role === 'inverter-unit')) {
+      expect(u.ocpdA).toBe(50);
+    }
+    expect(sent.refreshes).toEqual([]);
+  });
+
+  it('a project already matching the catalogue refreshes nothing — no churn', async () => {
+    // A non-empty `refreshes` must mean something. If every read reported changes, nobody could use
+    // it to find the projects that actually predate a correction.
+    const { writeServiceTopology, readServiceTopology } = await import('@/lib/db/serviceTopology');
+    const { buildRaysIntendedJob } = await import('@/lib/electrical/fixtures/tesla400aTwoGateway');
+    await writeServiceTopology(PROJECT, USER_ID, buildRaysIntendedJob().topology);
+    const stored = (await readServiceTopology(PROJECT, USER_ID))!;
+    expect(stored.refreshes, 'a current project reported spurious refreshes').toEqual([]);
+  });
+
   it('🚨 and reading it REFRESHES the manufacturer facts from the catalogue', async () => {
     await writeLegacyRow({ withGenerationPanels: true });
     const { readServiceTopology } = await import('@/lib/db/serviceTopology');
@@ -342,6 +400,76 @@ describe('🚨 THE LIVE SHEET, through the real route, with the wrong architectu
   it('the sheet carries an electrical revision', async () => {
     const { json } = await generateSld();
     expect(String(json.electricalRevision ?? '').startsWith('ELEC-')).toBe(true);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 🚨 EXPORT PDF MUST DRAW THE SAME SYSTEM AS THE DIAGRAM TAB.
+//
+// Two rendering entry points. Before the migration this route had ZERO references to the service
+// graph, so "Export PDF" drew the legacy single-service tail while the Diagram tab drew two 200 A
+// systems — and the exported one is what reaches an AHJ.
+//
+// Driven with `format: 'svg'`, which is the route's own branch: same auth, same canonical load, same
+// input assembly, same renderer. Only the Chrome step is skipped, and Chrome does not decide what
+// the drawing says.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('🚨 the PDF export route, on the same legacy project', () => {
+  beforeEach(async () => {
+    await writeLegacyRow({ withGenerationPanels: true });
+    await setSelectedEquipment(null);
+  });
+
+  async function exportPdfAsSvg(): Promise<string> {
+    const { POST } = await import('@/app/api/engineering/sld/pdf/route');
+    const { NextRequest } = await import('next/server');
+    const res = await POST(new NextRequest('http://localhost/api/engineering/sld/pdf', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        format: 'svg',
+        buildInput: {
+          projectId: PROJECT, projectName: 'Hussey Ethos', clientName: 'Hussey Ethos',
+          address: '238 N Warwick Ave', drawingDate: '2026-07-29', drawingNumber: 'SLD-001',
+          // The same wrong architecture the page posted.
+          topologyType: 'STRING',
+          inverterModel: 'Tesla Solar Inverter 5.7kW', inverterManufacturer: 'Tesla',
+          totalModules: 37, totalStrings: 4,
+          panelModel: 'Philadelphia Solar PS-MNB108(HCBF)-440W',
+          panelWatts: 440, panelVoc: 52.7, panelIsc: 13.7,
+          acOutputKw: 11.4, acOutputAmps: 24, acOCPD: 60,
+          mainPanelAmps: 400, interconnection: 'SUPPLY_SIDE_TAP',
+          hasBattery: true, batteryModel: 'Powerwall 3', batteryCount: 4,
+        },
+      }),
+    }));
+    expect(res.status, 'the PDF route refused the request').toBe(200);
+    return await res.text();
+  }
+
+  it('the exported sheet is DC coupled, with no invented inverter', async () => {
+    const svg = await exportPdfAsSvg();
+    expect(svg).toContain('PV DC COUPLED TO POWERWALL 3');
+    for (const forbidden of ['Tesla Solar Inverter', 'STRING INVERTER', 'Enphase', 'MICROINVERTER']) {
+      expect(svg.includes(forbidden), `the exported PDF names '${forbidden}'`).toBe(false);
+    }
+  });
+
+  it('🚨 it draws the same equipment the Diagram tab draws', async () => {
+    const svg = await exportPdfAsSvg();
+    for (const n of [1, 2, 3, 4]) expect(svg).toContain(`Tesla Powerwall 3 #${n}`);
+    expect(count(svg, 'GENERATION PANEL —'), 'the export is missing the generation panels').toBe(2);
+    expect(count(svg, 'LOCK/VIS OPEN'), 'the export is missing an isolation switch').toBe(2);
+    expect(svg).toContain('BACKUP FEEDER');
+    expect(svg.includes('50 A OCPD'), 'the export carries the stale OCPD').toBe(false);
+  });
+
+  it('🚨 and its calculation blocks do not describe a phantom inverter either', async () => {
+    const svg = await exportPdfAsSvg();
+    expect(svg.includes('11.40 kW'), 'the export prints the phantom inverter output').toBe(false);
+    expect(svg.includes('A FUSED DISCO'), 'the export names a phantom fused disconnect').toBe(false);
+    expect(svg.includes('ATS_TO_MSP_RUN'), 'the export carries the phantom ATS run').toBe(false);
+    expect(svg.includes('✗ FAIL'), 'the export prints a FAIL row').toBe(false);
+    expect(svg).toContain('N/A — DC COUPLED');
   });
 });
 

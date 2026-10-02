@@ -68,6 +68,14 @@ export interface ElectricalAuthorityReport {
   /** Every input the revision was taken over, for "which fact moved it?". */
   revisionInputs: string[];
   /**
+   * 🚨 MANUFACTURER FACTS THIS LOAD CORRECTED, AND WHAT THEY WERE — the provenance proof.
+   *
+   * Non-empty ⇒ the project was authored against older catalogue data. On Ray's real job this is
+   * where `ocpdA 50 → 60` and the restored PV input limits appear, which is the difference between
+   * "the catalogue was fixed" and "the fix reached the design".
+   */
+  refreshes: LoadedElectricalProject['refreshes'];
+  /**
    * The one-time canonicalization this project still owes, if any. Present ⇒ the project is legacy
    * and the next generation will record the decision; absent ⇒ already canonical, or conflicted.
    */
@@ -324,6 +332,7 @@ export function inspectElectricalAuthority(
     rows,
     conflicts: m.conflicts,
     revisionInputs: revisionInputs(m),
+    refreshes: loaded.refreshes,
     pendingCanonicalization: m.canonicalizationPatch
       ? `solarCoupling = ${m.canonicalizationPatch.solarCoupling} (${m.solarCouplingProvenance.basis})`
       : null,
