@@ -125,8 +125,18 @@ export interface ProjectConfig {
    * cannot express it forces every caller to pick one of the four. That is how `?? 'LOAD_SIDE'`
    * reached the engines, the BOM, the page defaults and a persisted preliminary report.
    */
-  interconnectionMethod: 'LOAD_SIDE' | 'SUPPLY_SIDE_TAP' | 'MAIN_BREAKER_DERATE' | 'PANEL_UPGRADE'
-    | 'UNRESOLVED';
+  /**
+   * 🚨 ONE TYPE, FROM THE OWNER. This was a hand-written copy of the union — two of them, here and
+   * in the sibling module — and neither knew about MANUFACTURER_INTEGRATED or METER_COLLAR, so a
+   * config could not even EXPRESS a Powerwall whose PV lands inside the listed assembly. The page
+   * then could not compare against those states without a type error, which is how a hand-copied
+   * union quietly constrains what the product can describe.
+   *
+   * `InterconnectionMethod` in lib/electrical-calc.ts is the owner: it carries the four NEC methods
+   * plus the three states that are deliberately NOT a choice of article, and
+   * `isNecEvaluableInterconnection` is the predicate that separates them.
+   */
+  interconnectionMethod: import('@/lib/electrical-calc').InterconnectionMethod;
   /** Where the consumption CTs clamp. ''/absent ⇒ the documented default for
    *  the interconnection (lib/equipment/currentTransformers). */
   consumptionCtLocation?: '' | 'sec-line-side-of-main' | 'between-tap-and-main' | 'main-breaker-load-side';

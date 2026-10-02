@@ -73,6 +73,32 @@ export const ARCHITECTURE_NEEDS_INPUT: NeedsInput = {
     + 'the project — service, storage, structural — keeps working.',
 };
 
+/**
+ * 🚨 THE INTERCONNECTION QUESTION — the one `?? 'LOAD_SIDE'` used to answer silently.
+ *
+ * Ray, 2026-10-02: "A system that cannot evaluate a fact must say why." And from the course
+ * correction: every NEEDS INPUT must explain what, why, who, and what it blocks — in installer
+ * language, not internal vocabulary.
+ *
+ * This is deliberately NOT phrased as "the POI relationship is unresolved". An installer knows
+ * where the wire lands; they do not necessarily know that SolarPro calls it a point of
+ * interconnection, and they certainly should not have to know which NEC article follows from it.
+ */
+export const INTERCONNECTION_NEEDS_INPUT: NeedsInput = {
+  what: 'Where does the solar connect to the service — on a breaker in a panel, or ahead of the '
+    + 'main breaker on the service conductors?',
+  why: 'The two connections are governed by different code rules. A breaker in a panel has to fit '
+    + 'the 120% busbar allowance (NEC 705.12(B)); a tap ahead of the main does not, and is sized a '
+    + 'different way (NEC 705.11). Until it is answered SolarPro will not state which rule applies, '
+    + 'because guessing it prints a code basis the design has not earned.',
+  who: 'The installer or designer who knows how the system will be tied in. On an existing service '
+    + 'it is often a site-survey answer rather than a design one.',
+  blocks: false,
+  blocksWhat: 'the 120% busbar check and the consumption-CT placement, both of which are reported '
+    + 'as NOT EVALUATED rather than guessed. The drawing, the equipment schedule and the storage '
+    + 'design are unaffected.',
+};
+
 /** The generation-panel question, for the topology wizard. */
 export const AGGREGATION_NEEDS_INPUT: NeedsInput = {
   what: 'How are the battery AC circuits combined before the gateway?',

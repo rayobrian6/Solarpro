@@ -47,12 +47,17 @@ export interface ProjectInputs {
   mainPanelAmps: number;
   panelBusRating: number;
   /**
-   * 🚨 'UNRESOLVED' IS ONE OF THE VALUES. A project that has not recorded how the PV connects to the
-   * service is in a real state, and the type has to be able to say so — otherwise every caller is
-   * forced to pick one of the four, which is exactly how `?? 'LOAD_SIDE'` got everywhere.
+   * 🚨 ONE TYPE, FROM THE OWNER. This was a hand-written copy of the union — two of them, here and
+   * in the sibling module — and neither knew about MANUFACTURER_INTEGRATED or METER_COLLAR, so a
+   * config could not even EXPRESS a Powerwall whose PV lands inside the listed assembly. The page
+   * then could not compare against those states without a type error, which is how a hand-copied
+   * union quietly constrains what the product can describe.
+   *
+   * `InterconnectionMethod` in lib/electrical-calc.ts is the owner: it carries the four NEC methods
+   * plus the three states that are deliberately NOT a choice of article, and
+   * `isNecEvaluableInterconnection` is the predicate that separates them.
    */
-  interconnectionMethod: 'LOAD_SIDE' | 'SUPPLY_SIDE_TAP' | 'MAIN_BREAKER_DERATE' | 'PANEL_UPGRADE'
-    | 'UNRESOLVED';
+  interconnectionMethod: import('@/lib/electrical-calc').InterconnectionMethod;
   systemVoltage: number;
   // Wiring
   wireGauge: string;

@@ -34,7 +34,7 @@ import type { ServiceTopology as ServiceTopologyForPage } from '@/lib/electrical
 import { INVERTER_UNSELECTED } from '@/lib/permit/utils/helpers';
 import { resolveElectricalProject, type ElectricalProjectModel } from '@/lib/electrical/projectModel';
 import { topologyBadge } from '@/lib/electrical/architectureLabel';
-import { sourceLabel, ARCHITECTURE_NEEDS_INPUT } from '@/lib/electrical/installerLanguage';
+import { sourceLabel, ARCHITECTURE_NEEDS_INPUT, INTERCONNECTION_NEEDS_INPUT } from '@/lib/electrical/installerLanguage';
 import {
   electricalRevision, electricalArtifactFreshness, freshnessLabel,
 } from '@/lib/electrical/revision';
@@ -3601,7 +3601,7 @@ function EngineeringPageInner() {
       mainPanelAmps: config.mainPanelAmps ?? 200,
       mainPanelBrand: config.mainPanelBrand ?? 'Square D',
       panelBusRating: config.panelBusRating ?? config.mainPanelAmps ?? 200,
-      interconnectionMethod: config.interconnectionMethod ?? 'LOAD_SIDE',
+      interconnectionMethod: config.interconnectionMethod ?? 'UNRESOLVED',
       systemType: systemTypeStr as ComputedSystemInput['systemType'],   // adds the SolFence mounting row to the equipment schedule for fence
 
       branchCount: topology === 'micro' ? Math.ceil(geomPanels / (modulesPerDevice * branchLimit)) : undefined,
@@ -3766,7 +3766,7 @@ function EngineeringPageInner() {
       return computeMultiSystem(inputs, {
         mainPanelAmps: config.mainPanelAmps ?? 200,
         busRating: config.panelBusRating ?? config.mainPanelAmps ?? 200,
-        interconnectionMethod: config.interconnectionMethod ?? 'LOAD_SIDE',
+        interconnectionMethod: config.interconnectionMethod ?? 'UNRESOLVED',
       });
     } catch (e) {
       console.error('ComputedMultiSystem error (hybrid) — falling back to whole-project aggregate:', e);
@@ -3830,7 +3830,7 @@ function EngineeringPageInner() {
         hasBattery: !!batteryEnabled,
         overrideDeviceIds: config.combinerId ? [config.combinerId] : undefined,
         selectedCombinerId: projectCombinerId,
-        interconnectionRaw: config.interconnectionMethod ?? 'LOAD_SIDE',
+        interconnectionRaw: config.interconnectionMethod ?? 'UNRESOLVED',
         ungroundedConductorCount: 2,
         consumptionCtLocation: config.consumptionCtLocation || null,
       });
@@ -3874,7 +3874,7 @@ function EngineeringPageInner() {
       return hybridLaneMetering({
         lanes: hybridSldSources,
         selectedCombinerId: projectCombinerId,
-        interconnectionRaw: config.interconnectionMethod ?? 'LOAD_SIDE',
+        interconnectionRaw: config.interconnectionMethod ?? 'UNRESOLVED',
         // The hybrid's own record (above) — never a single-lane-era one.
         consumptionCtLocation: _hybridCtLocation || null,
         systemVoltage: 240,
@@ -6556,7 +6556,7 @@ function EngineeringPageInner() {
         dcDisconnect: config.dcDisconnect,
         engineeringMode,
         interconnection: {
-          method: config.interconnectionMethod ?? 'LOAD_SIDE',
+          method: config.interconnectionMethod ?? 'UNRESOLVED',
           busRating: config.panelBusRating ?? 200,
           mainBreaker: config.mainPanelAmps ?? 200,
         },
@@ -7431,7 +7431,7 @@ function EngineeringPageInner() {
           notes:          config.notes,
           format:         'svg',
           // Interconnection method — drives SLD rendering (load-side tap vs backfed breaker)
-          interconnection: config.interconnectionMethod ?? 'LOAD_SIDE',
+          interconnection: config.interconnectionMethod ?? 'UNRESOLVED',
           // Where the consumption CTs clamp ('' ⇒ interconnection default) —
           // the topology's own record (ctLocationForRequests).
           consumptionCtLocation: ctLocationForRequests || undefined,
@@ -7910,7 +7910,7 @@ function EngineeringPageInner() {
           })(),
           spliceAtRows:     config.spliceAtRows === true,
           // Interconnection method — controls whether backfed breaker appears in BOM
-          interconnectionMethod: config.interconnectionMethod ?? 'LOAD_SIDE',
+          interconnectionMethod: config.interconnectionMethod ?? 'UNRESOLVED',
           consumptionCtLocation: ctLocationForRequests || undefined,
           panelBusRating:   config.panelBusRating ?? config.mainPanelAmps ?? 200,
           // Pass ComputedSystem.runs as single source of truth for wire/conduit quantities
@@ -9084,7 +9084,7 @@ function EngineeringPageInner() {
           rafterSpan: config.rafterSpan || undefined,
           rafterSpecies: config.rafterSpecies || undefined,
           attachmentSpacing: config.attachmentSpacing,
-          interconnectionMethod: config.interconnectionMethod ?? 'LOAD_SIDE',
+          interconnectionMethod: config.interconnectionMethod ?? 'UNRESOLVED',
           // The topology's own CT record: a hybrid never inherits a
           // single-lane-era location (its digest would move) — see
           // ctLocationForRequests.
@@ -10978,7 +10978,12 @@ function EngineeringPageInner() {
                           <span className="text-slate-500">Method:</span>
                           <span className="text-emerald-400 font-bold text-[10px]">
                             {(() => {
-                              const m = config.interconnectionMethod ?? 'LOAD_SIDE';
+                              const m = config.interconnectionMethod ?? 'UNRESOLVED';
+                              // 🚨 A TOKEN IS NOT A LABEL. Falling through to `return m` would
+                              // print the literal 'UNRESOLVED' at an installer.
+                              if (m === 'UNRESOLVED') return 'Not established';
+                              if (m === 'MANUFACTURER_INTEGRATED') return 'Inside listed assembly';
+                              if (m === 'METER_COLLAR') return 'Meter collar';
                               if (m === 'LOAD_SIDE') return 'Load-Side Tap';
                               if (m === 'SUPPLY_SIDE_TAP') return 'Supply-Side Tap';
                               if (m === 'MAIN_BREAKER_DERATE') return 'Main Derate';
@@ -12972,7 +12977,11 @@ function EngineeringPageInner() {
                                   // (the tap lands on the very span the CTs occupy), so the
                                   // option says so — and stays selectable. Read from the
                                   // same table the composer uses, not restated here.
-                                  const _side = pvConnectionSide(config.interconnectionMethod ?? 'LOAD_SIDE');
+                                  // 🚨 NO DEFAULT. `pvConnectionSide` already maps null and any
+                                  // unrecognised token to 'unresolved' (currentTransformers.ts:352,
+                                  // :369), so `?? 'LOAD_SIDE'` was overriding a correct answer with
+                                  // a guess before the authority ever saw the absence.
+                                  const _side = pvConnectionSide(config.interconnectionMethod);
                                   const _noMode = _side === 'supply-side'
                                     && deriveConsumptionMeteringMode(consumptionCtBoundaryFor(loc, _side), _side) === 'INDETERMINATE';
                                   return (
@@ -13429,18 +13438,53 @@ function EngineeringPageInner() {
                           {(() => {
                             const elec = compliance.electrical as any;
                             const ic = elec?.interconnection;
-                            const icMethod = String(ic?.method ?? config.interconnectionMethod ?? 'LOAD_SIDE').toUpperCase();
+                            const icMethod = String(ic?.method ?? config.interconnectionMethod ?? 'UNRESOLVED').toUpperCase();
                             const isSupplySide = icMethod === 'SUPPLY_SIDE_TAP' || icMethod.includes('SUPPLY') || icMethod.includes('LINE_SIDE');
                             const isMainDerate = icMethod === 'MAIN_BREAKER_DERATE';
                             const isPanelUpgrade = icMethod === 'PANEL_UPGRADE';
+                            // 🚨 AND THE THIRD STATE, WHICH THIS PANEL USED TO RENDER AS LOAD-SIDE.
+                            //
+                            // `?? 'LOAD_SIDE'` made every unestablished interconnection fall into
+                            // the `showBackfedBreaker` branch below, so the Compliance tab printed
+                            // a backfeed breaker with a "(120% cap)" annotation for a design whose
+                            // governing article nobody had determined — a computed-looking number
+                            // from a rule the engine had refused to run. The engine now reports
+                            // `conclusion: 'NOT_EVALUATED'` for exactly this case
+                            // (lib/electrical-calc.ts), so the panel states it instead of filling it.
+                            const icNotEvaluated = ic?.conclusion === 'NOT_EVALUATED'
+                              || icMethod === 'UNRESOLVED'
+                              || icMethod === 'MANUFACTURER_INTEGRATED'
+                              || icMethod === 'METER_COLLAR';
                             // NEC 705.12(B): backfed breaker = min(solarBreakerRequired, maxAllowedSolarBreaker)
                             const solarRequired = ic?.solarBreakerRequired ?? elec?.acSizing?.ocpdAmps ?? 0;
                             const maxAllowed = (ic?.maxAllowedSolarBreaker != null && ic.maxAllowedSolarBreaker < 9999) ? ic.maxAllowedSolarBreaker : solarRequired;
                             const backfedBreakerAmps = Math.min(solarRequired, maxAllowed);
                             const isCapped = backfedBreakerAmps < solarRequired;
-                            const showBackfedBreaker = !isSupplySide && !isMainDerate && !isPanelUpgrade && backfedBreakerAmps > 0;
+                            const showBackfedBreaker = !icNotEvaluated && !isSupplySide && !isMainDerate && !isPanelUpgrade && backfedBreakerAmps > 0;
                             return (
                               <>
+                                {icNotEvaluated ? (
+                                  <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-2">
+                                    <div className="flex items-start gap-1.5">
+                                      <AlertCircle size={11} className="mt-0.5 flex-shrink-0 text-amber-400" />
+                                      <div>
+                                        <div className="font-bold text-amber-300 text-[11px] uppercase tracking-wider">
+                                          120% busbar check — not evaluated
+                                        </div>
+                                        <div className="mt-1 opacity-80">{INTERCONNECTION_NEEDS_INPUT.what}</div>
+                                        <div className="mt-1 opacity-60 text-[10px]">{INTERCONNECTION_NEEDS_INPUT.why}</div>
+                                        <div className="mt-1 opacity-60 text-[10px]">
+                                          <span className="font-semibold">Who answers it: </span>
+                                          {INTERCONNECTION_NEEDS_INPUT.who}
+                                        </div>
+                                        <div className="mt-1 opacity-60 text-[10px]">
+                                          <span className="font-semibold">What it blocks: </span>
+                                          {INTERCONNECTION_NEEDS_INPUT.blocksWhat}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                ) : null}
                                 {showBackfedBreaker ? (
                                   <div className="flex justify-between">
                                     <span className="text-slate-500">Backfeed Breaker</span>
@@ -15095,8 +15139,8 @@ function EngineeringPageInner() {
                                 rapidShutdown: config.rapidShutdown,
                                 conduitType: config.conduitType,
                                 notes: config.notes,
-                                interconnection: config.interconnectionMethod ?? 'LOAD_SIDE',
-                                interconnectionType: config.interconnectionMethod ?? 'LOAD_SIDE',
+                                interconnection: config.interconnectionMethod ?? 'UNRESOLVED',
+                                interconnectionType: config.interconnectionMethod ?? 'UNRESOLVED',
                                 consumptionCtLocation: ctLocationForRequests || undefined,
                                 panelBusRating: config.panelBusRating ?? config.mainPanelAmps ?? 200,
                                 combinerId: config.combinerId || undefined,
@@ -17280,7 +17324,7 @@ function EngineeringPageInner() {
                                 rafterSize: config.rafterSize,
                                 rafterSpacing: config.rafterSpacing,
                                 attachmentSpacing: config.attachmentSpacing,
-                                interconnectionMethod: config.interconnectionMethod ?? 'LOAD_SIDE',
+                                interconnectionMethod: config.interconnectionMethod ?? 'UNRESOLVED',
                                 consumptionCtLocation: ctLocationForRequests || undefined,
                                 panelBusRating: config.panelBusRating ?? config.mainPanelAmps ?? 200,
                                 combinerId: config.combinerId || undefined,
