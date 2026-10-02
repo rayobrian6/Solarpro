@@ -1065,6 +1065,16 @@ describe('🚨 THE WHOLE ROUND TRIP, on the row Ray actually has', () => {
     expect(se.provenance.architecture.kind).toBe('USER_SELECTED');
     const afterCfg = await readEngCfg();
     expect(afterCfg.inverters, 'engineering_config still holds a standalone inverter').toEqual([]);
+    // 🚨 AND THE MODULE ASSIGNMENT SURVIVES. "Actual physical identity always outranks convenient
+    // arithmetic" — the first version of this blanked the fleet and threw away the committed
+    // 10/9/9/9 string layout. The strings genuinely cannot stand (a 10-module string is 659 V cold
+    // against a 550 V PV input), so they are RETIRED with the reason, not deleted in silence.
+    expect(afterCfg.retiredInverterFleet, 'the committed string assignment was deleted').toBeTruthy();
+    expect(afterCfg.retiredInverterFleet.moduleCount,
+      'the retired record does not account for all 37 modules').toBe(37);
+    expect(afterCfg.retiredInverterFleet.inverters.length).toBe(2);
+    expect(String(afterCfg.retiredInverterFleet.retiredBecause))
+      .toContain('No module is added or removed');
     // History survives.
     expect(se.retiredInverter.id).toBe(RAYS_INVERTER);
     expect(se.retiredInverterHistory.length).toBe(1);
@@ -1597,5 +1607,95 @@ describe('🚨 THE SERVICE RATING HAS ONE OWNER', () => {
     // CLAIM — the `owner:` value the inspector prints.
     expect(inspector).not.toContain("owner: 'service_topology.service.ratedAmps, overridable");
     expect(inspector).toContain('the graph, and nothing else');
+  });
+});
+
+
+describe('🚨 THE PRIMARY UI SPEAKS INSTALLER LANGUAGE', () => {
+  it('store names are mapped for display, and the model keeps its own vocabulary', async () => {
+    const { sourceLabel } = await import('@/lib/electrical/installerLanguage');
+    expect(sourceLabel('selected-equipment')).toBe('Equipment selection');
+    expect(sourceLabel('service-topology')).toBe('Service topology');
+    expect(sourceLabel('derived')).toBe('Calculated by SolarPro');
+    expect(sourceLabel('none')).toBe('Not recorded');
+
+    // 🚨 AND THE MODEL IS UNCHANGED. A display mapping that renamed the underlying values would
+    // make the developer inspector harder to use, not easier.
+    await writeRaysLiveRow({ recordedCoupling: 'ac-coupled-inverter' });
+    const m = (await load())!.model;
+    expect(m.conflicts[0].claims.map(c => c.source))
+      .toEqual(['service-topology', 'selected-equipment', 'service-topology']);
+  });
+
+  it('🚨 the conflict panel no longer prints a store name at an installer', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const page = readFileSync(join(ROOT, 'app/engineering/page.tsx'), 'utf8');
+    expect(page, 'the raw source id is still rendered in the conflict panel')
+      .not.toContain('{cl.source}: {cl.says}');
+    expect(page).toContain('{sourceLabel(cl.source)}: {cl.says}');
+  });
+
+  it('🚨 every NEEDS INPUT item answers all four questions', async () => {
+    const L = await import('@/lib/electrical/installerLanguage');
+    for (const item of [L.ARCHITECTURE_NEEDS_INPUT, L.AGGREGATION_NEEDS_INPUT]) {
+      expect(item.what.length, 'no question').toBeGreaterThan(20);
+      expect(item.why.length, 'no reason it matters').toBeGreaterThan(20);
+      expect(item.who.length, 'nobody is named as the answerer').toBeGreaterThan(20);
+      expect(typeof item.blocks).toBe('boolean');
+      // If it blocks, it must say WHAT it blocks — "this is blocked" is not an explanation.
+      expect(item.blocksWhat && item.blocksWhat.length > 20).toBe(true);
+    }
+    // 🚨 AND THE ARCHITECTURE ITEM MUST SAY WHAT KEEPS WORKING. Ray: "Other unrelated project
+    // engineering may continue" — an installer told only that something is blocked will stop.
+    expect(L.ARCHITECTURE_NEEDS_INPUT.blocksWhat).toContain('keeps working');
+  });
+});
+
+
+describe('🚨 INTERCONNECTION METHOD HAS ONE OWNER TOO', () => {
+  it('🚨 the graph establishes it, and a mixed/unresolved POI establishes NOTHING', async () => {
+    const { interconnectionMethodScalar } =
+      await import('@/lib/electrical/loadElectricalProject');
+    await writeRaysLiveRow({ inverterId: null, generationPanels: true });
+    const m = (await load())!.model;
+    const ic = interconnectionMethodScalar(m.topology);
+    // Ray's job is a supply-side tap; whatever the graph says, it must come FROM the graph and
+    // carry its reasoning rather than a `?? 'LOAD_SIDE'`.
+    if (ic) {
+      expect(ic.value.length).toBeGreaterThan(0);
+      expect(ic.basis.length, 'the projection does not say why').toBeGreaterThan(10);
+    }
+    // An empty graph settles nothing — and that is an answer, not a gap to fill.
+    expect(interconnectionMethodScalar(null)).toBeNull();
+  });
+
+  it('🚨 a site survey no longer overwrites what the service topology owns', async () => {
+    // The survey path stays: a surveyor on a roof is the best authority on roof type, pitch,
+    // rafters, the panel brand and the meter. It is not the authority on supply-side vs load-side,
+    // which decides whether NEC 705.11 or 705.12(B) governs the whole package.
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const src = readFileSync(join(ROOT, 'app/api/engineering/permit/route.ts'), 'utf8');
+    const block = src.slice(src.indexOf('const SURVEY_WINS_FIELDS'),
+      src.indexOf('] as const;', src.indexOf('const SURVEY_WINS_FIELDS')));
+    expect(block, 'the survey still overwrites the interconnection method')
+      .not.toContain('interconnectionMethod');
+    expect(block, 'the survey still overwrites the service rating').not.toContain('mainPanelAmps');
+    expect(block, 'the survey still overwrites the busbar rating').not.toContain('panelBusRating');
+    // The measurements it IS authoritative for are untouched.
+    expect(block).toContain('roofPitch');
+    expect(block).toContain('rafterSize');
+    expect(block).toContain('utilityMeter');
+    // And the observation is still reported to the operator rather than dropped.
+    expect(src).toContain('service topology owns it');
+  });
+
+  it('🚨 the permit projects the method, like every other output already did', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const permit = readFileSync(join(ROOT, 'app/api/engineering/permit/route.ts'), 'utf8');
+    expect(permit, 'the sealed package still takes the interconnection method on trust')
+      .toContain('interconnectionMethodScalar');
   });
 });

@@ -34,6 +34,7 @@ import type { ServiceTopology as ServiceTopologyForPage } from '@/lib/electrical
 import { INVERTER_UNSELECTED } from '@/lib/permit/utils/helpers';
 import { resolveElectricalProject, type ElectricalProjectModel } from '@/lib/electrical/projectModel';
 import { topologyBadge } from '@/lib/electrical/architectureLabel';
+import { sourceLabel, ARCHITECTURE_NEEDS_INPUT } from '@/lib/electrical/installerLanguage';
 import {
   electricalRevision, electricalArtifactFreshness, freshnessLabel,
 } from '@/lib/electrical/revision';
@@ -9308,6 +9309,56 @@ function EngineeringPageInner() {
   // config scalar is left alone as the legacy mirror it is. Where no graph exists the config value
   // is still the only answer there is, which is correct.
   // ═════════════════════════════════════════════════════════════════════════
+  // ═════════════════════════════════════════════════════════════════════
+  // 🚨 THE SERVICE-RATING CONTROL WRITES THE OWNER — it is not removed, it is REDIRECTED.
+  //
+  // Ray's course correction: "If a value is legitimately editable in System Config, preserve that.
+  // Fix where those controls write so they update the proper owner. Do not solve redundancy by
+  // deleting useful engineering capability."
+  //
+  // I had deleted the override channel outright. That was the wrong remedy for the right finding:
+  // the dead `serviceRatedAmpsOverride` key genuinely had no writer, but the ANSWER is not "the
+  // engineer may no longer state the service rating" — it is that stating it must update the thing
+  // that owns it. A 400 A service is a fact about how the service is BUILT, so the service topology
+  // owns it, and this control edits that.
+  //
+  // With no graph, `config.mainPanelAmps` is still the only answer there is, and the control keeps
+  // writing it. That is not a competing authority; it is the only one present.
+  // ═════════════════════════════════════════════════════════════════════
+  const [_serviceAmpsSaving, setServiceAmpsSaving] = useState(false);
+  const [_serviceAmpsError, setServiceAmpsError] = useState<string | null>(null);
+
+  const setServiceRatedAmps = async (amps: number) => {
+    // No graph: the config scalar is the only place this fact can live.
+    if (!svcTopology || !currentProjectId) { updateConfig({ mainPanelAmps: amps }); return; }
+    setServiceAmpsSaving(true);
+    setServiceAmpsError(null);
+    try {
+      const next = { ...svcTopology, service: { ...svcTopology.service, ratedAmps: amps } };
+      const res = await fetch(`/api/projects/${currentProjectId}/service-topology`, {
+        method: 'PUT', cache: 'no-store',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ topology: next }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.success) {
+        setServiceAmpsError(String(data?.error || 'Could not update the service rating.'));
+        return;
+      }
+      logDecision('Service Rating', `Service rated amps set to ${amps} A`, 'manual');
+      // The drawing depicts a service this project no longer has.
+      setSldSvg(null);
+      // Keep the legacy mirror in step so an autosave cannot write the old value back over the
+      // graph. The graph is the owner; this is the projection following it, never the reverse.
+      updateConfig({ mainPanelAmps: amps });
+      setSvcTopologyReloadKey(k => k + 1);
+    } catch (e: unknown) {
+      setServiceAmpsError((e as Error).message);
+    } finally {
+      setServiceAmpsSaving(false);
+    }
+  };
+
   const _canonicalServiceAmps = electrical?.serviceRatedAmps ?? null;
   /** The service rating to display and compute from: the graph where there is one. */
   const serviceAmpsForDisplay = _canonicalServiceAmps ?? config.mainPanelAmps ?? null;
@@ -10832,10 +10883,35 @@ function EngineeringPageInner() {
 
                       <div className="grid grid-cols-2 gap-3">
                         <div>
-                          <label className="eng-label">Main Panel (Amps)</label>
-                          <select value={config.mainPanelAmps} onChange={e => updateConfig({ mainPanelAmps: +e.target.value })} className="eng-select">
+                          <label className="eng-label">
+                            Main Panel (Amps)
+                            {_canonicalServiceAmps !== null ? (
+                              <span className="ml-1.5 text-[10px] font-normal text-slate-500">
+                                — from the service topology
+                              </span>
+                            ) : null}
+                          </label>
+                          <select
+                            data-testid="service-rated-amps"
+                            value={serviceAmpsForDisplay ?? config.mainPanelAmps}
+                            disabled={_serviceAmpsSaving}
+                            onChange={e => { void setServiceRatedAmps(+e.target.value); }}
+                            className="eng-select">
                             {[100, 150, 200, 225, 320, 400].map(a => <option key={a} value={a}>{a}A</option>)}
                           </select>
+                          {_serviceAmpsSaving ? (
+                            <div className="mt-1 text-[10px] text-slate-400">Updating the service…</div>
+                          ) : null}
+                          {_serviceAmpsError ? (
+                            <div className="mt-1 text-[10px] text-rose-300">{_serviceAmpsError}</div>
+                          ) : null}
+                          {_serviceAmpsDisagree ? (
+                            <div className="mt-1 text-[10px] text-amber-300">
+                              The saved configuration says {config.mainPanelAmps} A. The service
+                              topology says {_canonicalServiceAmps} A, and that is what the drawings
+                              use — change it here to update both.
+                            </div>
+                          ) : null}
                         </div>
                         <div>
                           <label className="eng-label">Panel Brand</label>
@@ -18606,7 +18682,7 @@ function EngineeringPageInner() {
                     </div>
                     {c.claims.map((cl, j) => (
                       <div key={j} className="text-[10px] text-amber-200/90">
-                        {cl.source}: {cl.says}
+                        {sourceLabel(cl.source)}: {cl.says}
                       </div>
                     ))}
                     <div className="mt-1 text-[10px] text-slate-300">{c.question}</div>
@@ -18645,6 +18721,28 @@ function EngineeringPageInner() {
                         ))}
                       </div>
                     ) : null}
+                    {/* 🚨 WHAT / WHY / WHO / DOES IT BLOCK — Ray: "Every NEEDS INPUT item must
+                        explain: what information is needed; why it matters; who supplies it;
+                        whether it blocks the current task. Do not dump internal requirements at
+                        the user." The four come from one shared definition so the sidebar, System
+                        Config and the SLD refusal cannot word the same question three ways. */}
+                    <div className="mt-2 space-y-1">
+                      <div className="text-[11px] font-bold text-slate-100">
+                        {ARCHITECTURE_NEEDS_INPUT.what}
+                      </div>
+                      <div className="text-[10px] text-slate-400">
+                        <span className="font-bold text-slate-300">Why it matters: </span>
+                        {ARCHITECTURE_NEEDS_INPUT.why}
+                      </div>
+                      <div className="text-[10px] text-slate-400">
+                        <span className="font-bold text-slate-300">Who answers it: </span>
+                        {ARCHITECTURE_NEEDS_INPUT.who}
+                      </div>
+                      <div className="text-[10px] text-amber-300/90">
+                        <span className="font-bold">Until it is answered: </span>
+                        this blocks {ARCHITECTURE_NEEDS_INPUT.blocksWhat}
+                      </div>
+                    </div>
                     <div className="mt-2 text-[10px] text-slate-300">
                       Choose the actual installed design:
                     </div>

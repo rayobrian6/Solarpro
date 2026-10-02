@@ -794,6 +794,36 @@ export async function POST(req: NextRequest) {
         const { loadElectricalProject } = await import('@/lib/electrical/loadElectricalProject');
         _electrical = await loadElectricalProject(projectId, user.id);
         const _m = _electrical?.model;
+        // 🚨 THE SEALED PACKAGE TAKES THE INTERCONNECTION METHOD FROM THE GRAPH.
+        //
+        // The SLD, BOM and PDF routes all project `interconnectionMethodScalar`; the permit — the
+        // one artefact that leaves the building — loaded the canonical model and never did. So the
+        // drawing could say SUPPLY SIDE TAP while the package it is bound into said LOAD_SIDE,
+        // which is the difference between NEC 705.11 and 705.12(B) applying.
+        //
+        // An unresolved or mixed point of interconnection projects NOTHING rather than being
+        // assigned a method by a `??`. "Unknown means NOT EVALUATED / INPUT REQUIRED, not a
+        // plausible-looking answer."
+        if (_m?.topology) {
+          const { interconnectionMethodScalar } =
+            await import('@/lib/electrical/loadElectricalProject');
+          const _ic = interconnectionMethodScalar(_m.topology);
+          if (_ic) {
+            const _pb = body as unknown as Record<string, unknown>;
+            const _proj = (_pb.project ?? {}) as Record<string, unknown>;
+            const _posted = String(_proj.interconnectionMethod ?? _pb.interconnectionMethod ?? '');
+            if (_posted && _posted.toUpperCase() !== _ic.value) {
+              console.warn('[permit/POST] interconnection method corrected from the service graph:'
+                + ` posted=${_posted} canonical=${_ic.value} (${_ic.basis})`);
+            }
+            _proj.interconnectionMethod = _ic.value;
+            _pb.project = _proj;
+            _pb.interconnectionMethod = _ic.value;
+          } else {
+            console.warn('[permit/POST] the service graph does not establish one interconnection '
+              + 'method (unresolved or mixed points of interconnection) — nothing projected.');
+          }
+        }
         // 🚨 THE PERMIT IS THE SEALED PACKAGE. If anything refuses an unresolved architecture, it is
         // this: a plan set leaves the building and goes to an AHJ.
         {
@@ -1357,12 +1387,38 @@ export async function POST(req: NextRequest) {
             if (patch.project) {
               const pp = patch.project as Record<string, unknown>;
               const ep = enrichedBody.project as Record<string, unknown>;
-              // Physical measurement fields — survey is authoritative
+              // ════════════════════════════════════════════════════════
+              // 🚨 A SURVEY MEASURES THE SITE. IT DOES NOT DECIDE THE ELECTRICAL DESIGN.
+              //
+              // The survey path is legitimate and stays: a surveyor on a roof is the best authority
+              // on roof type, pitch, rafter size and spacing, the panel brand on the wall and the
+              // meter. Those are MEASUREMENTS, and they outrank anything typed in an office.
+              //
+              // Three fields did not belong in that list:
+              //   · `interconnectionMethod` — supply-side vs load-side is a CONNECTION DECISION owned
+              //     by the service topology, and NEC 705.12(B) applies or does not apply on the
+              //     strength of it. A free-text survey field was silently overwriting it in the
+              //     sealed package.
+              //   · `mainPanelAmps` / `panelBusRating` — owned by the service graph, which the SLD,
+              //     BOM and PDF already project from. Letting the survey win here is what allowed the
+              //     permit to state one service while the drawing stated another.
+              //
+              // Removing only the competing authority. Nothing stops a surveyor recording what they
+              // saw — it reaches the designer, who changes the service topology, which is the stage
+              // that owns it.
+              // ════════════════════════════════════════════════════════
               const SURVEY_WINS_FIELDS = [
                 'roofType', 'roofPitch', 'rafterSize', 'rafterSpacing',
-                'mainPanelAmps', 'mainPanelBrand', 'utilityMeter',
-                'interconnectionMethod', 'panelBusRating',
+                'mainPanelBrand', 'utilityMeter',
               ] as const;
+              // Reported, never applied: the surveyor's observation is information for the designer.
+              for (const observed of ['mainPanelAmps', 'panelBusRating', 'interconnectionMethod']) {
+                if (pp[observed] != null && pp[observed] !== ep[observed]) {
+                  console.warn(`[permit/survey] survey observed ${observed}=${pp[observed]} but the `
+                    + `service topology owns it (package keeps ${ep[observed] ?? 'unset'}) — change `
+                    + 'it in the service topology if the survey is right.');
+                }
+              }
               for (const field of SURVEY_WINS_FIELDS) {
                 if (pp[field] != null) {
                   ep[field] = pp[field];

@@ -177,12 +177,36 @@ export async function POST(req: NextRequest) {
           Record<string, unknown> | null;
         if (cfg && Array.isArray(cfg.inverters) && cfg.inverters.length > 0) {
           const before = cfg.inverters.length;
-          // 🚨 EVERY standalone PV inverter goes, not only the one named in the retirement.
-          // A DC-coupled design has none of them. Removing the matching id and leaving a second
-          // fleet entry would hand the page another inverter to call the architecture from — which
-          // is this whole defect, with a different row.
-          const kept: unknown[] = [];
-          cfg.inverters = kept;
+          // 🚨 THE FLEET GOES; THE MODULE ASSIGNMENT IS KEPT. Ray: "Actual physical identity always
+          // outranks convenient arithmetic" — and the first version of this blanked
+          // `engineering_config.inverters` outright, which threw away the per-string module counts
+          // the installer had committed (10/9/9/9 on his job). The modules themselves live in
+          // `layouts`, so none were lost, but the ASSIGNMENT is design data and deleting it silently
+          // is the same sin as inventing one.
+          //
+          // The strings genuinely cannot survive as they are: a 10-module string of this panel is
+          // 659 V cold, against a Powerwall 3's published 550 V PV input. They must be re-derived
+          // against the real endpoint. So the old assignment is RETIRED — recorded with why — and
+          // the re-derivation is reported rather than performed in silence.
+          const retiredStrings = (cfg.inverters as Array<Record<string, unknown>>).map(inv => ({
+            inverterId: inv.inverterId ?? null,
+            strings: Array.isArray(inv.strings)
+              ? (inv.strings as Array<Record<string, unknown>>).map(st => ({
+                  panelId: st.panelId ?? null, panelCount: st.panelCount ?? null }))
+              : [],
+          }));
+          const retiredModuleCount = retiredStrings.reduce((n, inv) =>
+            n + inv.strings.reduce((m, st) => m + (Number(st.panelCount) || 0), 0), 0);
+          cfg.retiredInverterFleet = {
+            retiredAt: new Date().toISOString(),
+            retiredBecause: 'The installer resolved the electrical architecture to PV DC coupled to '
+              + 'storage. The PV strings terminate on the storage DC inputs, whose published input '
+              + 'window differs from the retired inverter, so the string lengths are re-derived '
+              + 'against it. No module is added or removed.',
+            moduleCount: retiredModuleCount,
+            inverters: retiredStrings,
+          };
+          cfg.inverters = [];
           clearedFleetEntries = before;
           await sql`
             UPDATE projects
@@ -190,8 +214,9 @@ export async function POST(req: NextRequest) {
                    engineering_updated_at = NOW()
              WHERE id = ${projectId} AND user_id = ${user.id} AND deleted_at IS NULL
           `;
-          console.log(`[electrical] cleared ${before} inverter fleet entr`
-            + `${before === 1 ? 'y' : 'ies'} from engineering_config (project ${projectId})`);
+          console.log(`[electrical] retired ${before} inverter fleet entr`
+            + `${before === 1 ? 'y' : 'ies'} from engineering_config (project ${projectId}); `
+            + `the string assignment is kept as engineering_config.retiredInverterFleet`);
         }
       } catch (e) {
         // 🚨 NOT SILENT. If the fleet survives, the architecture can come back — so this failure is
