@@ -263,7 +263,7 @@ describe('🚨 every file the registry names exists and does what it is said to 
 
 describe('the production gate on the dev inspector', () => {
   it('refuses production and preview, allows local and test', async () => {
-    const { devDiagnosticsAllowed } = await import('@/app/api/dev/electrical-authority/route');
+    const { devDiagnosticsAllowed } = await import('@/lib/devDiagnostics');
     expect(devDiagnosticsAllowed({ VERCEL_ENV: 'production' } as unknown as NodeJS.ProcessEnv)).toBe(false);
     expect(devDiagnosticsAllowed({ VERCEL_ENV: 'preview' } as unknown as NodeJS.ProcessEnv)).toBe(false);
     // Non-Vercel hosting: NODE_ENV is the only signal, so production there is refused too.

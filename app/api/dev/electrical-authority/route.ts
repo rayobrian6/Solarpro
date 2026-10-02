@@ -25,13 +25,10 @@ import { getUserFromRequest } from '@/lib/auth';
 import { isValidUUID } from '@/lib/db-neon';
 import { loadElectricalProject } from '@/lib/electrical/loadElectricalProject';
 import { inspectElectricalAuthority, mirrorsThatCouldWin } from '@/lib/electrical/authorityInspector';
-
-/** True when this deployment may expose developer diagnostics. */
-export function devDiagnosticsAllowed(env: NodeJS.ProcessEnv = process.env): boolean {
-  if (env.VERCEL_ENV === 'production' || env.VERCEL_ENV === 'preview') return false;
-  if (!env.VERCEL_ENV && env.NODE_ENV === 'production') return false;
-  return true;
-}
+// 🚨 IMPORTED, NOT DEFINED HERE. A Next.js route module may export only its HTTP handlers and the
+// known config keys — any other export fails the generated route-type check at build time. Defining
+// the gate here so a test could import it would have broken `next build`.
+import { devDiagnosticsAllowed } from '@/lib/devDiagnostics';
 
 export async function GET(req: NextRequest) {
   if (!devDiagnosticsAllowed()) {
