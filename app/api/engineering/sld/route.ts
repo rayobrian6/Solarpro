@@ -220,6 +220,45 @@ export async function POST(req: NextRequest) {
           // So the number follows the recorded connection, which is the installer's decision, and is
           // left untouched when that decision has not been made.
           body.batteryCount = _model.storage.invertingUnitCount;
+
+          // ═══════════════════════════════════════════════════════════════
+          // 🚨 ON A DC-COUPLED JOB THE STRINGS ARE SIZED AGAINST THE CABINETS, NOT A PHANTOM
+          //    INVERTER'S DEFAULTS. THIS ONE WAS PRINTING AN IMPOSSIBLE DESIGN.
+          //
+          // `computeSystem` takes the DC input window from `body.inverterMaxDcV ?? 600`,
+          // `mpptVoltageMax ?? 600`, `maxInputCurrentPerMppt ?? 15`, `mpptChannels ?? 2` — a
+          // standalone PV inverter's specs, defaulted. On this project it produced, on the sheet:
+          //
+          //     Number of Strings 2 · Panels per String 19 · String Voc × 1.25 = 1345.8 V
+          //
+          // against a Powerwall 3 whose published PV input is 60–550 V DC. A string more than twice
+          // the device's maximum, drawn, scheduled and printed with no failure anywhere — because
+          // the limits it was checked against belonged to an inverter that is not in the design.
+          //
+          // The real limits are already on the instances (`pvInputLimits`, resolved from the
+          // catalogue and restored on read by `hydrateInstances`). Ray's §11: architecture comes from
+          // the canonical model; derived arithmetic stays in the sizing engine. These are the
+          // manufacturer's numbers for the device the strings actually land on.
+          //
+          // Scoped to DC-coupled and to units that publish limits; every other job keeps the posted
+          // inverter's specs exactly as before.
+          const _pvUnits = _model.topology.storage.filter(
+            u => u.role === 'inverter-unit' && u.pvInputLimits);
+          if (_model.solarCoupling === 'dc-coupled-storage' && _pvUnits.length > 0) {
+            const lim = _pvUnits[0].pvInputLimits!;
+            body.inverterMaxDcV = lim.inputVdc[1];
+            body.maxDcVoltage = lim.inputVdc[1];
+            body.mpptVoltageMin = lim.mpptVdc[0];
+            body.mpptVoltageMax = lim.mpptVdc[1];
+            body.maxInputCurrentPerMppt = lim.maxImpPerMpptA;
+            // Every cabinet's MPPTs are available to the array.
+            body.mpptChannels = lim.mppts * _pvUnits.length;
+            console.log('[sld/POST] DC string limits taken from the storage, not an inverter:'
+              + ` ${lim.inputVdc[0]}–${lim.inputVdc[1]} V input,`
+              + ` ${lim.mpptVdc[0]}–${lim.mpptVdc[1]} V MPPT,`
+              + ` ${lim.maxImpPerMpptA} A Imp/MPPT, ${lim.mppts}×${_pvUnits.length} MPPT channels`
+              + ` (${lim.basis})`);
+          }
           const _doms = _model.topology.domains;
           if (_doms.length > 0 && _doms.every(d => d.storageConnection === 'der-aggregation-panel')) {
             body.batteryBackfeedA = 0;

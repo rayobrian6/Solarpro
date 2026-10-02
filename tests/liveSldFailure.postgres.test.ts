@@ -359,6 +359,32 @@ describe('🚨 THE LIVE SHEET, through the real route, with the wrong architectu
     expect(svg).toContain('ESS OCPD / unit');
   });
 
+  it('🚨 the strings are sized against the Powerwalls, not a phantom inverter', async () => {
+    // ═══════════════════════════════════════════════════════════════════
+    // THIS ONE WAS AN IMPOSSIBLE DESIGN, PRINTED WITH NO FAILURE ANYWHERE.
+    //
+    // `computeSystem` took its DC window from `body.inverterMaxDcV ?? 600` / `mpptVoltageMax ?? 600`
+    // — a standalone inverter's specs, defaulted — and produced:
+    //
+    //     Number of Strings 2 · Panels per String 19 · String Voc × 1.25 = 1345.8 V
+    //
+    // against a Powerwall 3 whose published PV input is 60–550 V DC. More than TWICE the device
+    // maximum, drawn and scheduled, with nothing flagging it, because the limits it was checked
+    // against belonged to an inverter that is not in the design.
+    //
+    // The real limits live on the instances and are restored on read by `hydrateInstances`.
+    // ═══════════════════════════════════════════════════════════════════
+    const { svg } = await generateSld();
+    const voc125 = svg.match(/String Voc × 1\.25[\s\S]{0,400}?(\d+(?:\.\d+)?) V/);
+    expect(voc125, 'no corrected string voltage on the sheet').toBeTruthy();
+    const v = Number(voc125![1]);
+    // The Powerwall 3's published input maximum. A string above it cannot be built.
+    expect(v, `String Voc × 1.25 is ${v} V, above the Powerwall 3's 550 V PV input maximum`)
+      .toBeLessThanOrEqual(550);
+    // And it is a real design, not a degenerate one-module-per-string dodge.
+    expect(v).toBeGreaterThan(200);
+  });
+
   it('🚨 DC/AC ratio is reported as not applicable, not recomputed with a new denominator', async () => {
     // Ray: "Do not simply replace 11.40 kW with 46 kW… Do not preserve a misleading metric merely
     // because the UI already has a box for it." The ratio measures clipping at a dedicated PV
