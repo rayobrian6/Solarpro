@@ -344,29 +344,86 @@ export function ServiceTopologyWizard({
                 units must first land in a generation / combiner panel before feeding its Gateway...
                 Do not represent the combiner as a note or invisible wiring assumption." One per
                 system, each sized from ITS OWN batteries — never one shared by both gateways. */}
+            {/* ══════════════════════════════════════════════════════════════
+                🚨 ASK THE PHYSICAL QUESTION. DO NOT OFFER AN OPT-IN.
+
+                This was a checkbox, and Ray's real project is the proof that a checkbox is the wrong
+                control: he never ticked it, so his saved graph has NO generation panels, and the
+                drawing, the BOM, the schedules and the permit have all been describing a design
+                missing two physical panelboards. Ray: "The current opt-in checkbox is too easy to
+                omit and leaves the project graph materially incomplete."
+
+                An unticked checkbox is indistinguishable from a decision not to use one. A radio
+                group with no default is not: until one is chosen the graph says `unresolved`, and
+                every surface already reports NOT EVALUATED for that — which is the honest state.
+
+                The three options are not invented for this control. They ARE
+                `BackupDomain.storageConnection`, which has modelled exactly these since the graph was
+                built, and each selects a DIFFERENT governing calculation:
+                  · backed-up-panel-busbar — NEC 705.12(B), the 120% busbar rule
+                  · gateway-panelboard     — the MANUFACTURER's limits, which SolarPro does not hold
+                  · der-aggregation-panel  — the generation panel's own busbar
+                Tesla's Gateway 3 manual supports both of the first two (internal panelboard, or an
+                external generation panel), so neither is a default and the question is real.
+               ══════════════════════════════════════════════════════════════ */}
             {draft.domains.length > 0 ? (
-              <label data-testid="wizard-generation-panel"
-                     className="flex cursor-pointer items-start gap-2 rounded-lg border border-slate-700 p-2">
-                <input type="checkbox" className="mt-1"
-                       checked={(draft.aggregationPanels ?? []).some(p => p.domainId)}
-                       onChange={e => {
-                         if (e.target.checked) {
-                           const r = applyPerSystemGenerationPanels(draft);
-                           setDraft(r.topology);
-                           setNotes(prev => [...new Set([...prev, ...r.created])]);
-                         } else {
-                           setDraft(clearPerSystemGenerationPanels(draft));
-                         }
-                       }} />
+              <div data-testid="wizard-generation-panel"
+                   className="rounded-lg border border-slate-700 p-2">
+                <span className="block text-xs font-bold text-slate-100">
+                  How are the battery AC circuits combined before the gateway?
+                </span>
+                <span className="mb-1 block text-[11px] text-slate-400">
+                  A physical question with a different code rule behind each answer. Required —
+                  unanswered, the busbar check cannot be evaluated.
+                </span>
+                {([
+                  ['der-aggregation-panel',
+                    'External generation / combiner panel — one per system',
+                    `${draft.domains.length} panel${draft.domains.length === 1 ? '' : 's'}, each between that system's batteries and its gateway, with a breaker per battery. Never one shared.`],
+                  ['gateway-panelboard',
+                    'Inside the gateway’s own panelboard',
+                    'The battery breakers sit in the gateway’s internal panelboard. Governed by the manufacturer’s limits, which SolarPro does not hold — the busbar check will say so rather than pass.'],
+                  ['backed-up-panel-busbar',
+                    'On the backed-up panel’s busbar',
+                    'The battery breaker is in the backed-up panel, so its output counts against that panel’s busbar and NEC 705.12(B) governs.'],
+                ] as const).map(([value, title, detail]) => {
+                  const chosen = draft.domains.every(d => d.storageConnection === value);
+                  return (
+                    <label key={value}
+                           data-testid={`wizard-storage-connection-${value}`}
+                           className="mt-1 flex cursor-pointer items-start gap-2 rounded border border-slate-800 p-1.5">
+                      <input type="radio" name="storage-connection" className="mt-1"
+                             checked={chosen}
+                             onChange={() => {
+                               // One answer for the whole site: the question is about the
+                               // arrangement, and a site with two systems wired differently is the
+                               // 'custom' case, reached by editing a domain directly.
+                               let next = draft;
+                               next = value === 'der-aggregation-panel'
+                                 ? (() => {
+                                     const r = applyPerSystemGenerationPanels(next);
+                                     setNotes(prev => [...new Set([...prev, ...r.created])]);
+                                     return r.topology;
+                                   })()
+                                 : clearPerSystemGenerationPanels(next);
+                               for (const d of next.domains) {
+                                 next = updateDomain(next, d.id, { storageConnection: value });
+                               }
+                               setDraft(next);
+                             }} />
+                      <span>
+                        <span className="block text-xs font-bold text-slate-100">{title}</span>
+                        <span className="block text-[11px] text-slate-400">{detail}</span>
+                      </span>
+                    </label>
+                  );
+                })}
                 <span>
-                  <span className="block text-xs font-bold text-slate-100">
-                    Each system&apos;s batteries land in their own generation / combiner panel
-                  </span>
-                  <span className="block text-[11px] text-slate-400">
-                    One panel per system, between the batteries and that system&apos;s gateway, with a
-                    breaker for each battery. {draft.domains.length} panel
-                    {draft.domains.length === 1 ? '' : 's'} — never one shared.
-                  </span>
+                  {draft.domains.some(d => d.storageConnection === 'unresolved') ? (
+                    <span className="mt-1 block text-[11px] font-bold text-amber-300">
+                      NOT ANSWERED — the busbar check reports NOT EVALUATED until it is.
+                    </span>
+                  ) : null}
                   {(draft.aggregationPanels ?? []).filter(p => p.domainId).map(p => (
                     <span key={p.id} className="mt-1 block text-[11px] text-sky-300">
                       {p.label}: {p.busbarRatingA ?? '—'} A bus · {p.outputOcpdA ?? '—'} A output ·{' '}
@@ -374,7 +431,7 @@ export function ServiceTopologyWizard({
                     </span>
                   ))}
                 </span>
-              </label>
+              </div>
             ) : null}
 
             {notes.length > 0 ? (

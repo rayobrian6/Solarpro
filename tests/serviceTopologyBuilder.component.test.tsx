@@ -285,7 +285,14 @@ async function buildCurrentJobGuided(f: ReturnType<typeof makeFetch>) {
       { target: { value: 'tesla-powerwall-3' } });
     fireEvent.change(screen.getByTestId(`wizard-${d}-ess-count`), { target: { value: '2' } });
   }
-  fireEvent.click(within(screen.getByTestId('wizard-generation-panel')).getByRole('checkbox'));
+  // 🚨 THE PHYSICAL QUESTION, ANSWERED — not a checkbox ticked.
+  //
+  // This was `getByRole('checkbox')`, and Ray's real project is why it is not any more: an unticked
+  // checkbox is indistinguishable from a decision not to use a generation panel, so his saved graph
+  // has none and every surface has been describing a design missing two physical panelboards. The
+  // control now asks how the battery AC circuits are combined, with no default.
+  fireEvent.click(within(screen.getByTestId('wizard-storage-connection-der-aggregation-panel'))
+    .getByRole('radio'));
   next();
 
   // INTERCONNECTION: how the solar connects, then how the systems reach the service.

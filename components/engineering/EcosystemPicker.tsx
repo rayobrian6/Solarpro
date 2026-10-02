@@ -312,6 +312,7 @@ export default function EcosystemPicker({
             setSelectedEvCharger={setSelectedEvCharger}
             onApply={handleApply}
             canApply={Boolean(onApply)}
+            inverterOptional={!!pvCoupledToStorage}
           />
         ) : (
           <SimplifiedKitPanel
@@ -327,6 +328,7 @@ export default function EcosystemPicker({
             onApply={handleApply}
             onExpertMode={() => setExpertMode(true)}
             canApply={Boolean(onApply)}
+            inverterOptional={!!pvCoupledToStorage}
           />
         )
       ) : null}
@@ -349,6 +351,8 @@ interface SimplifiedKitPanelProps {
   onApply: () => void;
   onExpertMode: () => void;
   canApply: boolean;
+  /** 🚨 THE ARCHITECTURE HAS NO STANDALONE INVERTER, so an apply must not require one. */
+  inverterOptional?: boolean;
 }
 
 function SimplifiedKitPanel(props: SimplifiedKitPanelProps) {
@@ -365,6 +369,7 @@ function SimplifiedKitPanel(props: SimplifiedKitPanelProps) {
     onApply,
     onExpertMode,
     canApply,
+    inverterOptional,
   } = props;
 
   const brandName = ECOSYSTEM_BRANDS.find((b) => b.id === brandId)?.displayName ?? brandId;
@@ -381,11 +386,18 @@ function SimplifiedKitPanel(props: SimplifiedKitPanelProps) {
   // record the pick): nothing records it.
   const referenceGw = combinerChoices.length === 0 ? kit.monitoringGateways[0] : undefined;
 
+  // 🚨 "NO STANDALONE INVERTER" AND "THIS BRAND SELLS NONE" ARE THE SAME SITUATION HERE.
+  //
+  // `canActuallyApply` required a selected inverter, so removing the auto-selection for a DC-coupled
+  // project made Apply unreachable — a regression I introduced with the fix, caught by the guard that
+  // asserts the apply fires. A battery-only ecosystem already had the right answer: apply on the
+  // strength of the other selections. An architecture with no standalone inverter is the same case
+  // arrived at from the other direction.
   const isBatteryOnlyEcosystem = allInverters.length === 0;
   const hasNonInverterSelection = Boolean(
     autoSelections.battery || selectedCombiner || autoSelections.evCharger
   );
-  const canActuallyApply = isBatteryOnlyEcosystem
+  const canActuallyApply = (isBatteryOnlyEcosystem || inverterOptional)
     ? canApply && hasNonInverterSelection
     : canApply && Boolean(autoSelections.inverter);
 
@@ -566,6 +578,8 @@ interface KitPanelProps {
   setSelectedEvCharger: (v: string) => void;
   onApply: () => void;
   canApply: boolean;
+  /** 🚨 THE ARCHITECTURE HAS NO STANDALONE INVERTER, so an apply must not require one. */
+  inverterOptional?: boolean;
 }
 
 function EcosystemKitPanel(props: KitPanelProps) {
@@ -584,6 +598,7 @@ function EcosystemKitPanel(props: KitPanelProps) {
     setSelectedEvCharger,
     onApply,
     canApply,
+    inverterOptional,
   } = props;
 
   // Merge all inverter categories into one dropdown
@@ -620,7 +635,9 @@ function EcosystemKitPanel(props: KitPanelProps) {
   const hasNonInverterSelection = Boolean(
     selectedBattery || selectedCombiner || selectedEvCharger
   );
-  const canActuallyApply = isBatteryOnlyEcosystem
+  // Same reasoning as the simplified panel: an architecture with no standalone inverter applies on
+  // the strength of its other selections, exactly as a battery-only ecosystem does.
+  const canActuallyApply = (isBatteryOnlyEcosystem || inverterOptional)
     ? canApply && hasNonInverterSelection
     : canApply && Boolean(selectedInverter);
 

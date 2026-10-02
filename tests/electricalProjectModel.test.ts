@@ -233,6 +233,83 @@ describe('🚨 CASE C — a partial project keeps everything it has', () => {
   });
 });
 
+// ═══════════════════════════════════════════════════════════════════════════
+// 🚨 NO BRANCH ORDERING MAY DECIDE ELECTRICAL ARCHITECTURE.
+//
+// Ray: "`hasExternalInverter` and `hasDcStoragePv` simultaneously true is a conflict, not an if/else
+// ordering question… Add an adversarial test that reverses branch ordering and proves the conclusion
+// is unchanged."
+//
+// The live defect WAS an ordering: `else if (hasExternalInverter)` sat above the DC branch, so
+// whichever was tested first won, and a graph holding four Powerwall 3 resolved to AC-coupled
+// because an inverter had been auto-selected. The fix is not "put the DC branch first" — that would
+// be the same bug facing the other way. It is that both-true produces no answer at all.
+//
+// A source test cannot prove this (the branches are a chain of `else if`), so this proves the
+// PROPERTY the ordering question is really about: the conclusion is symmetric in its two inputs.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('🚨 ordering cannot decide the architecture', () => {
+  /** The same project, with the two competing pieces of evidence present or absent. */
+  const resolve = (opts: { inverter: boolean; dcInputs: boolean }) => {
+    const t = current();
+    return resolveElectricalProject({
+      topology: {
+        ...t,
+        solarCoupling: null,                        // nothing recorded: derivation is in play
+        storage: t.storage.map(u => ({ ...u, pvInputLimits: opts.dcInputs ? u.pvInputLimits : null })),
+      },
+      selectedEquipment: {
+        inverterId: opts.inverter ? 'enphase-iq8plus' : null, moduleCount: 37,
+      },
+    });
+  };
+
+  it('inverter ALONE ⇒ AC coupled', () => {
+    const m = resolve({ inverter: true, dcInputs: false });
+    expect(m.solarCoupling).toBe('ac-coupled-inverter');
+    expect(m.conflicts).toEqual([]);
+  });
+
+  it('DC inputs ALONE ⇒ DC coupled', () => {
+    const m = resolve({ inverter: false, dcInputs: true });
+    expect(m.solarCoupling).toBe('dc-coupled-storage');
+    expect(m.conflicts).toEqual([]);
+  });
+
+  it('🚨 BOTH ⇒ no answer and a conflict — whichever way round you read it', () => {
+    const m = resolve({ inverter: true, dcInputs: true });
+    expect(m.solarCoupling, 'an ordering decided it').toBeNull();
+    expect(m.canonicalizationPatch, 'an ordering was about to be persisted').toBeNull();
+    expect(m.conflicts.some(c => c.fact === 'How the PV is coupled')).toBe(true);
+  });
+
+  it('🚨 the conflict names BOTH claims, so neither side is the implied winner', () => {
+    const m = resolve({ inverter: true, dcInputs: true });
+    const c = m.conflicts.find(x => x.fact === 'How the PV is coupled')!;
+    expect(c.claims.map(x => x.source).sort()).toEqual(['selected-equipment', 'service-topology']);
+    // Both claims carry substance — a conflict where one side says nothing is a winner in disguise.
+    for (const claim of c.claims) expect(claim.says.length).toBeGreaterThan(20);
+  });
+
+  it('NEITHER ⇒ nothing derived, and still no conflict — absence is not disagreement', () => {
+    const m = resolve({ inverter: false, dcInputs: false });
+    expect(m.solarCoupling).toBeNull();
+    expect(m.conflicts).toEqual([]);
+  });
+
+  it('🚨 and a RECORDED coupling outranks the lot, which is what ends the argument', () => {
+    // Once a human answers, derivation stops entirely — including the conflict.
+    const t = current();
+    const m = resolveElectricalProject({
+      topology: { ...t, solarCoupling: 'dc-coupled-storage' },
+      selectedEquipment: { inverterId: null, moduleCount: 37 },
+    });
+    expect(m.solarCoupling).toBe('dc-coupled-storage');
+    expect(m.solarCouplingProvenance.source).toBe('service-topology');
+    expect(m.conflicts).toEqual([]);
+  });
+});
+
 describe('🚨 the model persists nothing and composes everything', () => {
   it('resolving twice from the same stores gives the same answer', () => {
     const input = {
