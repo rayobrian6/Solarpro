@@ -2499,6 +2499,23 @@ and prints `MODE TBD`, which is honest but silent. Your standard is that every N
 explains what, why, who and what it blocks — so this should print a NEEDS-INPUT row rather than an
 absence. Not done.
 
+## Phase 2 — Pattern A, owner by owner
+
+Ray's method, per owner: confirm it represents the intended semantic fact, connect the real
+consumer, remove the competing read, prove the old path cannot win.
+
+| Owner | Status | What happened |
+|---|---|---|
+| `configStringPanelCounts` | **ADVERSARIAL PROVEN** | 11.5b. The SLD route was the one caller that skipped it. Now gated on active + sums + **fits the DC window**. |
+| **canonical module count** (`ElectricalProjectModel.moduleCount`) | **ADVERSARIAL PROVEN** | Zero consumers anywhere in the repo while `/api/engineering/bom` sized the parts list from `body.moduleCount \|\| body.totalPanels`. The route already held the model. Both spellings are now projected from it, a disagreement is logged, and a project with no layout count has **nothing invented**. Proof posts a deliberately stale `20` against a 37-module design; the mutation that stops projecting turns it red (exit 1), and the repair green (exit 0). |
+| `TopologyEvaluation` | **OPEN — and my Part I claim was overstated** | Part I §2.1 said the topology's conclusions "reach no professional output". **Not accurate.** `lib/sld-professional-renderer.ts:4253` computes `evaluateServiceTopology` itself and uses it at `:5342`, `:6018` and `:6142` (the schedule-row overlay). What is true is narrower and still serious: the conclusions **gate nothing** — `architectureGate.ts:21` refuses only on the coupling conflict, so a FAIL on the busbar rule, on `service.branch-sum` or on DER isolation still produces an SLD, a BOM, a priced proposal and a permit. Making a FAIL block a drawing is a real behavioural decision, so it is not something I am doing unilaterally at the end of a repair pass. |
+| `PermitSystemModel` | **OPEN** | reported as reaching the renderer and never being read — the "single source of truth bridge". Next. |
+| `ComputedSystem.bomQuantities` | **OPEN** | produced, merged, posted, forwarded, declared; zero readers. |
+| `electricalRevision` on the permit input | **OPEN — digest hazard** | zero readers, so a graph change cannot move the permit digest. Giving it a reader may itself rotate the digest — same constraint as §2 above. Needs the same deliberate decision. |
+| `legacyServiceScalars` | **OPEN — do not flatten** | the sanctioned graph→scalar projection, zero callers. Ray: `panelsNotRepresented > 0` must be respected; a 400 A / 2 × 200 A service **cannot** be described by one `mainPanelAmps`, so the consumer gets migrated rather than the graph flattened. |
+| `acSourcesFromTopology` | **OPEN** | zero callers; the Compliance path still uses `resolveBatteryBranch(batteryId, batteryCount)`. |
+| `buildServiceTopologyGraph` | **OPEN** | zero callers; documented replacement for the drawing's service half. |
+
 ## What the repair actually changed, in one place
 
 | New / changed | Why |
@@ -2527,7 +2544,7 @@ Four existing guards went red on a correct change. Every one of them pinned a TO
 
 | Item | Status | Note |
 |---|---|---|
-| Phase 2 — wire the remaining Pattern A owners | **OPEN** | `TopologyEvaluation`, `legacyServiceScalars`, `acSourcesFromTopology`, `buildServiceTopologyGraph`, `PermitSystemModel`, `ComputedSystem.bomQuantities`, `electricalRevision`, the canonical module count. `configStringPanelCounts` is DONE (11.5b). |
+| Phase 2 — wire the remaining Pattern A owners | **IN PROGRESS** | see the Phase 2 table below. |
 | Phase 3 — the remaining permissive collapses | **OPEN** | missing compliance block → PASS; missing DC run → PASS; inapplicable → `✓ PASS`; VAL-1 printing ALL CHECKS PASSED. |
 | Phase 4 — `aggregateServiceRatingA` / `panelBusbarRatingA` / `panelMainBreakerA` | **OPEN** | the `mainPanelAmps` collision is still live at `sld/route.ts` — the busbar still falls back to it. Fixture A records all three separately so the repair has something to prove against. |
 | Phase 5 — make the renderers dumb | **OPEN** | deliberately after Phase 2. Removing the renderer's compensation before the conclusions reach it makes the sheets worse, not better. |

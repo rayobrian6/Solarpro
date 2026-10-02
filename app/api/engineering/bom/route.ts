@@ -266,9 +266,46 @@ export async function POST(req: NextRequest) {
             console.warn('[bom/POST] 🚨 INTERCONNECTION ARRANGEMENT NOT RESOLVED on this project —'
               + ' the graph declines to name one, so the legacy scalar is deciding the code article.');
           }
+          // ═══════════════════════════════════════════════════════════════
+          // 🚨 PATTERN A — THE CANONICAL MODULE COUNT HAD ZERO CONSUMERS ANYWHERE IN THE REPO.
+          //
+          // `ElectricalProjectModel.moduleCount` is assembled by `loadElectricalProject` from the
+          // layout (`layouts.panels.length` > `layouts.total_panels` > the engineering seed), and
+          // this route already holds the model. It then sized the parts list from
+          // `body.moduleCount || body.totalPanels || 0` — the browser's count — so the number of
+          // modules somebody ORDERS came from React state rather than from the design.
+          //
+          // Ray's law: "37 MODULES MEANS 37 MODULES." This is the owner for that fact, and the
+          // consumer was reading a mirror.
+          //
+          // 🚨 THE GRAPH-RICHNESS CAVEAT STILL APPLIES. Ray: "Do not blindly wire compatibility
+          // projections where the model is richer than the projection." A module count is a
+          // SCALAR in both places — one number means one number — so there is nothing the model
+          // can express here that the field cannot. Where the model holds NO count (a project
+          // with no layout yet) nothing is projected and the posted value stands, because
+          // inventing a count would be the defect in the other direction.
+          //
+          // A disagreement is LOGGED rather than swallowed: it means a surface is still deriving
+          // the module count, and that is worth seeing in the server log.
+          // ═══════════════════════════════════════════════════════════════
+          if (typeof _m.moduleCount === 'number' && _m.moduleCount > 0) {
+            const _postedModules = Number(body.moduleCount) || Number(body.totalPanels) || 0;
+            if (_postedModules !== _m.moduleCount) {
+              console.warn('[bom/POST] module count corrected from the canonical model:'
+                + ` posted=${_postedModules || 'none'} canonical=${_m.moduleCount}`
+                + ' — the parts list is sized from the design, not from the browser.');
+            }
+            body.moduleCount = _m.moduleCount;
+            body.totalPanels = _m.moduleCount;
+          } else {
+            console.warn('[bom/POST] the canonical model holds no module count for this project —'
+              + ' the posted value stands. Nothing is invented.');
+          }
+
           console.log('[bom/POST] canonical electrical model:'
             + ` revision=${_electrical!.revision}`
             + ` coupling=${_m.solarCoupling ?? 'UNRESOLVED'}`
+            + ` modules=${_m.moduleCount ?? 'NOT ESTABLISHED'}`
             + ` storage=${_canonical} expansions=${_m.storage.expansionUnitCount}`
             + ` gateways=${_m.storage.gatewayCount}`
             + ` genPanels=${_m.storage.perSystemGenerationPanelCount}`

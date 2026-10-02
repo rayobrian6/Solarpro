@@ -712,6 +712,72 @@ describe('🚨 REPAIR 6 — absence reaches the metering authority as absence', 
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
+describe('🚨 PHASE 2 / PATTERN A — an owner exists and the consumer reads it', () => {
+  it('🚨 the canonical module count sizes the BOM, not the browser\'s number', async () => {
+    // ═══════════════════════════════════════════════════════════════════
+    // 🚨 THE OWNER HAD ZERO CONSUMERS ANYWHERE IN THE REPO.
+    //
+    // `ElectricalProjectModel.moduleCount` is assembled from the layout
+    // (`layouts.panels.length` > `layouts.total_panels` > the engineering seed). The BOM route
+    // already held the model and still sized the parts list from
+    // `body.moduleCount || body.totalPanels` — so the number of modules somebody ORDERS came from
+    // React state. "37 MODULES MEANS 37 MODULES."
+    //
+    // This posts a DELIBERATELY WRONG count the way a stale page would, and asserts the design
+    // wins. A test that posted the right number could not tell the two sources apart.
+    // ═══════════════════════════════════════════════════════════════════
+    await writeFixtureB({ retired: true });   // layouts.total_panels = 37
+
+    const { POST } = await import('@/app/api/engineering/bom/route');
+    const { NextRequest } = await import('next/server');
+    const res = await POST(new NextRequest('http://localhost/api/engineering/bom', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        projectId: PROJECT_B,
+        // 🚨 THE STALE BROWSER COUNT. The design has 37.
+        moduleCount: 20, totalPanels: 20,
+        batteryCount: 4, inverters: [],
+      }),
+    }));
+    const json = await res.json().catch(() => ({})) as any;
+    expect(res.status, `BOM failed: ${JSON.stringify(json).slice(0, 300)}`).toBe(200);
+
+    // The module count the parts list was built from must be the canonical 37.
+    const blob = JSON.stringify(json);
+    const twenties = (blob.match(/\b20\b/g) ?? []).length;
+    const thirtySevens = (blob.match(/\b37\b/g) ?? []).length;
+    expect(thirtySevens,
+      `the BOM response never mentions 37 modules — it was sized from the posted 20. `
+      + `(37s=${thirtySevens}, 20s=${twenties})`).toBeGreaterThan(0);
+
+    // And the canonical model is where 37 comes from, not the request.
+    const { loadElectricalProject } = await import('@/lib/electrical/loadElectricalProject');
+    const m = (await loadElectricalProject(PROJECT_B, USER_ID))!.model;
+    expect(m.moduleCount, 'the canonical model does not hold the layout module count').toBe(37);
+  });
+
+  it('🚨 a project with NO layout count gets nothing invented', async () => {
+    // The other direction, which is the one that would make this repair a defect: where the owner
+    // holds no count, the posted value must stand rather than a fabricated one being projected.
+    await writeFixtureB({ retired: true });
+    await db.exec('DELETE FROM layouts');
+    const { loadElectricalProject } = await import('@/lib/electrical/loadElectricalProject');
+    const m = (await loadElectricalProject(PROJECT_B, USER_ID))!.model;
+    // Whatever the model reports, it must not be a number this test planted.
+    expect([null, 0, undefined]).toContain(m.moduleCount ?? null);
+  });
+
+  it('🚨 the BOM route reads the owner, and the competing read cannot win', () => {
+    const route = src('app', 'api', 'engineering', 'bom', 'route.ts');
+    expect(route, 'the BOM route does not consult the canonical module count')
+      .toContain('_m.moduleCount');
+    // The projection must assign BOTH spellings, or the one it misses is the competing read.
+    expect(route).toContain('body.moduleCount = _m.moduleCount');
+    expect(route).toContain('body.totalPanels = _m.moduleCount');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
 describe('🚨 FIXTURE A — the ordinary house, which had no fixture at all', () => {
   it('200 A / 1 MSP / 1 Gateway is a real topology the engine accepts', async () => {
     const { buildNormalResidence200A } = await import('@/lib/electrical/fixtures/normalResidence200a');
