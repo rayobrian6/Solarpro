@@ -638,7 +638,12 @@ const defaultProject: ProjectConfig = {
   rafterSpacing: 24, rafterSpan: 12, rafterSize: '2x6', rafterSpecies: 'Douglas Fir-Larch',
   framingType: 'unknown',  // V2 structural engine — auto-detected or user-specified
   attachmentSpacing: 48, railSpacing: 60, notes: '',
-  interconnectionMethod: 'LOAD_SIDE', panelBusRating: 200,
+  // 🚨 'UNRESOLVED', NOT 'LOAD_SIDE'. This is INITIAL REACT STATE for a project nobody has opened
+  // yet, and it asserted a point of interconnection — the fact that decides whether NEC 705.12(B) or
+  // 705.11 governs. From here it reached the posted payloads, the busbar display and the permit.
+  // A blank form does not know how the PV connects to the service; saying so is the answer.
+  // The service topology owns this, and projects it over the scalar once a graph exists.
+  interconnectionMethod: 'UNRESOLVED', panelBusRating: 200,
   utilityId: '', ahjId: '',
 };
 
@@ -9310,31 +9315,49 @@ function EngineeringPageInner() {
   // is still the only answer there is, which is correct.
   // ═════════════════════════════════════════════════════════════════════════
   // ═════════════════════════════════════════════════════════════════════
-  // 🚨 THE SERVICE-RATING CONTROL WRITES THE OWNER — it is not removed, it is REDIRECTED.
+  // 🚨 THREE DIFFERENT FACTS, AND I HAD JUST CONFLATED TWO OF THEM.
   //
-  // Ray's course correction: "If a value is legitimately editable in System Config, preserve that.
-  // Fix where those controls write so they update the proper owner. Do not solve redundancy by
-  // deleting useful engineering capability."
+  //   aggregate service rating   — 400 A on Ray's job        → service.ratedAmps
+  //   panelboard busbar rating   — 200 A on MSP #1           → panels[i].busbarRatingA
+  //   panelboard main / OCPD     — 200 A on MSP #1           → panels[i].mainBreakerA
   //
-  // I had deleted the override channel outright. That was the wrong remedy for the right finding:
-  // the dead `serviceRatedAmpsOverride` key genuinely had no writer, but the ANSWER is not "the
-  // engineer may no longer state the service rating" — it is that stating it must update the thing
-  // that owns it. A 400 A service is a fact about how the service is BUILT, so the service topology
-  // owns it, and this control edits that.
+  // A control labelled "Main Panel (Amps)" is the THIRD of those. In the previous pass I bound it to
+  // the FIRST, which on a 400 A / 2 × 200 A site means selecting 200 would have silently rewritten
+  // the site's service from 400 A to 200 A — and worse, it fed the aggregate into NEC 705.12(B):
+  // 400 × 1.2 − 400 = 80 A of allowable PV on a busbar whose real answer is 200 × 1.2 − 200 = 40 A.
+  // A permissive busbar result on a safety calculation, from a label that did not mean what it said.
   //
-  // With no graph, `config.mainPanelAmps` is still the only answer there is, and the control keeps
-  // writing it. That is not a competing authority; it is the only one present.
+  // So the control edits the PANELBOARD INSTANCE it names, the aggregate service gets its own
+  // control, and the 120% rule reads the panel. Ray: "A control labeled Main Panel must never write
+  // the site's aggregate service rating."
   // ═════════════════════════════════════════════════════════════════════
-  const [_serviceAmpsSaving, setServiceAmpsSaving] = useState(false);
-  const [_serviceAmpsError, setServiceAmpsError] = useState<string | null>(null);
+  const [_svcSaving, setSvcSaving] = useState(false);
+  const [_svcError, setSvcError] = useState<string | null>(null);
 
-  const setServiceRatedAmps = async (amps: number) => {
-    // No graph: the config scalar is the only place this fact can live.
-    if (!svcTopology || !currentProjectId) { updateConfig({ mainPanelAmps: amps }); return; }
-    setServiceAmpsSaving(true);
-    setServiceAmpsError(null);
+  /** The panelboards on the service graph, in order. Empty when there is no graph. */
+  const _svcPanels = svcTopology?.panels ?? [];
+  /** The panelboard this single-scalar control edits: the first, which is MSP #1. */
+  const _primaryPanel = _svcPanels.length > 0 ? _svcPanels[0] : null;
+
+  /** The AGGREGATE service rating. Display only here — the service topology builder owns editing it. */
+  const canonicalServiceRatedAmps = electrical?.serviceRatedAmps ?? null;
+  /** The PANEL MAIN this control shows and edits. */
+  const panelMainAmpsForDisplay =
+    (_primaryPanel?.mainBreakerA ?? null) ?? config.mainPanelAmps ?? null;
+  /** The PANEL BUSBAR, which is what NEC 705.12(B) is actually about. */
+  const panelBusRatingForDisplay =
+    (_primaryPanel?.busbarRatingA ?? null) ?? config.panelBusRating ?? config.mainPanelAmps ?? null;
+  /** The legacy scalar disagrees with the panel it mirrors — shown, never silently corrected. */
+  const _panelMainDisagrees =
+    _primaryPanel?.mainBreakerA != null
+    && typeof config.mainPanelAmps === 'number'
+    && config.mainPanelAmps !== _primaryPanel.mainBreakerA;
+
+  const writeTopology = async (next: NonNullable<typeof svcTopology>, what: string) => {
+    if (!currentProjectId) return false;
+    setSvcSaving(true);
+    setSvcError(null);
     try {
-      const next = { ...svcTopology, service: { ...svcTopology.service, ratedAmps: amps } };
       const res = await fetch(`/api/projects/${currentProjectId}/service-topology`, {
         method: 'PUT', cache: 'no-store',
         headers: { 'Content-Type': 'application/json' },
@@ -9342,31 +9365,43 @@ function EngineeringPageInner() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data?.success) {
-        setServiceAmpsError(String(data?.error || 'Could not update the service rating.'));
-        return;
+        setSvcError(String(data?.error || `Could not update ${what}.`));
+        return false;
       }
-      logDecision('Service Rating', `Service rated amps set to ${amps} A`, 'manual');
-      // The drawing depicts a service this project no longer has.
-      setSldSvg(null);
-      // Keep the legacy mirror in step so an autosave cannot write the old value back over the
-      // graph. The graph is the owner; this is the projection following it, never the reverse.
-      updateConfig({ mainPanelAmps: amps });
+      logDecision('Service', what, 'manual');
+      setSldSvg(null);              // the drawing depicts a service this project no longer has
       setSvcTopologyReloadKey(k => k + 1);
+      return true;
     } catch (e: unknown) {
-      setServiceAmpsError((e as Error).message);
+      setSvcError((e as Error).message);
+      return false;
     } finally {
-      setServiceAmpsSaving(false);
+      setSvcSaving(false);
     }
   };
 
-  const _canonicalServiceAmps = electrical?.serviceRatedAmps ?? null;
-  /** The service rating to display and compute from: the graph where there is one. */
-  const serviceAmpsForDisplay = _canonicalServiceAmps ?? config.mainPanelAmps ?? null;
-  /** True when the config scalar disagrees with the graph — shown, never silently corrected. */
-  const _serviceAmpsDisagree =
-    _canonicalServiceAmps !== null
-    && typeof config.mainPanelAmps === 'number'
-    && config.mainPanelAmps !== _canonicalServiceAmps;
+  /** Edit THIS PANELBOARD's main breaker. Never the aggregate service. */
+  const setPrimaryPanelMainAmps = async (amps: number) => {
+    if (!svcTopology || !_primaryPanel) { updateConfig({ mainPanelAmps: amps }); return; }
+    const next = {
+      ...svcTopology,
+      // 🚨 `panels` is a TOP-LEVEL list on the topology, not a member of `service`. The panelboards
+      // and the service entrance are siblings precisely because they are different facts.
+      panels: _svcPanels.map((pb, i) => i === 0 ? { ...pb, mainBreakerA: amps } : pb),
+    };
+    const ok = await writeTopology(next, `${_primaryPanel.label} main set to ${amps} A`);
+    // Keep the legacy mirror in step so an autosave cannot write the old value back over the graph.
+    // 🚨 THE AGGREGATE SERVICE IS NOT TOUCHED.
+    if (ok) updateConfig({ mainPanelAmps: amps });
+  };
+
+  /** Edit the AGGREGATE service rating. A separate fact, with its own control. */
+  const setServiceRatedAmps = async (amps: number) => {
+    if (!svcTopology) { updateConfig({ mainPanelAmps: amps }); return; }
+    await writeTopology(
+      { ...svcTopology, service: { ...svcTopology.service, ratedAmps: amps } },
+      `Service rating set to ${amps} A`);
+  };
 
   const _archUnresolved = !!electrical?.architectureResolutionRequired;
   // 🚨 ASK THE SERVER WHERE THE EQUIPMENT CAME FROM. See `_archDetail`: the browser can see THAT the
@@ -10862,11 +10897,13 @@ function EngineeringPageInner() {
                         </div>
                         {/* 120% rule indicator */}
                         {(() => {
-                          // 🚨 THE GRAPH'S RATING, where the project has a graph. See
-                          // `serviceAmpsForDisplay`: this calculation used `config.mainPanelAmps`,
-                          // a different store from the one the drawing is built from.
-                          const busRating = config.panelBusRating ?? serviceAmpsForDisplay ?? 200;
-                          const mainAmps = serviceAmpsForDisplay ?? 200;
+                          // 🚨 NEC 705.12(B) IS ABOUT ONE PANELBOARD'S BUSBAR, not the site's
+                          // service. On a 400 A / 2 × 200 A job the aggregate gives
+                          // 400 × 1.2 − 400 = 80 A where MSP #1's real answer is 40 A — a
+                          // permissive result on a safety calculation. Both values come from
+                          // the panelboard instance on the graph.
+                          const busRating = panelBusRatingForDisplay ?? 200;
+                          const mainAmps = panelMainAmpsForDisplay ?? 200;
                           const maxPV = Math.floor(busRating * 1.2 - mainAmps);
                           return maxPV > 0 ? (
                             <>
@@ -10884,32 +10921,44 @@ function EngineeringPageInner() {
                       <div className="grid grid-cols-2 gap-3">
                         <div>
                           <label className="eng-label">
-                            Main Panel (Amps)
-                            {_canonicalServiceAmps !== null ? (
+                            {_primaryPanel ? `${_primaryPanel.label} main (A)` : 'Main Panel (Amps)'}
+                            {_primaryPanel ? (
                               <span className="ml-1.5 text-[10px] font-normal text-slate-500">
-                                — from the service topology
+                                — this panelboard, not the service
                               </span>
                             ) : null}
                           </label>
                           <select
-                            data-testid="service-rated-amps"
-                            value={serviceAmpsForDisplay ?? config.mainPanelAmps}
-                            disabled={_serviceAmpsSaving}
-                            onChange={e => { void setServiceRatedAmps(+e.target.value); }}
+                            data-testid="panel-main-amps"
+                            value={panelMainAmpsForDisplay ?? config.mainPanelAmps}
+                            disabled={_svcSaving}
+                            onChange={e => { void setPrimaryPanelMainAmps(+e.target.value); }}
                             className="eng-select">
                             {[100, 150, 200, 225, 320, 400].map(a => <option key={a} value={a}>{a}A</option>)}
                           </select>
-                          {_serviceAmpsSaving ? (
-                            <div className="mt-1 text-[10px] text-slate-400">Updating the service…</div>
+                          {/* 🚨 THE AGGREGATE SERVICE IS A DIFFERENT FACT AND SAYS SO. On Ray's job
+                              this reads 400 A while the panel main above reads 200 A, which is the
+                              distinction the previous control erased. */}
+                          {canonicalServiceRatedAmps !== null ? (
+                            <div data-testid="service-rated-amps" className="mt-1 text-[10px] text-slate-400">
+                              Service rating: <span className="font-bold text-slate-200">
+                                {canonicalServiceRatedAmps} A
+                              </span>
+                              {_svcPanels.length > 1 ? ` across ${_svcPanels.length} panels` : ''}
+                              <span className="text-slate-500"> — edit in Service Topology</span>
+                            </div>
                           ) : null}
-                          {_serviceAmpsError ? (
-                            <div className="mt-1 text-[10px] text-rose-300">{_serviceAmpsError}</div>
+                          {_svcSaving ? (
+                            <div className="mt-1 text-[10px] text-slate-400">Updating…</div>
                           ) : null}
-                          {_serviceAmpsDisagree ? (
+                          {_svcError ? (
+                            <div className="mt-1 text-[10px] text-rose-300">{_svcError}</div>
+                          ) : null}
+                          {_panelMainDisagrees ? (
                             <div className="mt-1 text-[10px] text-amber-300">
                               The saved configuration says {config.mainPanelAmps} A. The service
-                              topology says {_canonicalServiceAmps} A, and that is what the drawings
-                              use — change it here to update both.
+                              topology says {_primaryPanel?.mainBreakerA} A for this panel, and that
+                              is what the drawings use.
                             </div>
                           ) : null}
                         </div>

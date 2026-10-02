@@ -46,7 +46,13 @@ export interface ProjectInputs {
   // Service
   mainPanelAmps: number;
   panelBusRating: number;
-  interconnectionMethod: 'LOAD_SIDE' | 'SUPPLY_SIDE_TAP' | 'MAIN_BREAKER_DERATE' | 'PANEL_UPGRADE';
+  /**
+   * 🚨 'UNRESOLVED' IS ONE OF THE VALUES. A project that has not recorded how the PV connects to the
+   * service is in a real state, and the type has to be able to say so — otherwise every caller is
+   * forced to pick one of the four, which is exactly how `?? 'LOAD_SIDE'` got everywhere.
+   */
+  interconnectionMethod: 'LOAD_SIDE' | 'SUPPLY_SIDE_TAP' | 'MAIN_BREAKER_DERATE' | 'PANEL_UPGRADE'
+    | 'UNRESOLVED';
   systemVoltage: number;
   // Wiring
   wireGauge: string;

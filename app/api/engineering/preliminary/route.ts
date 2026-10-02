@@ -34,6 +34,10 @@ import { normalizeSurvey } from '@/lib/siteSurvey/normalizeSurvey';
 import { enrichSurvey } from '@/lib/siteSurvey/enrichSurvey';
 import type { EnrichedSiteSurvey } from '@/lib/siteSurvey/types';
 import { upsertEngineeringReport, generateReportId } from '@/lib/engineering/db-engineering';
+// 🚨 NOT EXPORTED FROM THIS MODULE. A Next.js route may export only its HTTP handlers and
+// the known config keys; any other export fails the generated route-type check at build
+// time. This is the same trap `lib/devDiagnostics.ts` exists to avoid.
+import { PRELIMINARY_ASSUMPTIONS } from '@/lib/engineering/preliminaryAssumptions';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 export const dynamic = 'force-dynamic';
@@ -142,10 +146,26 @@ function buildSyntheticEngConfig(panelCount: number, stateCode?: string | null) 
     rapidShutdown: true,
     acDisconnect: true,
     dcDisconnect: false,
-    interconnectionMethod: 'LOAD_SIDE',
+    // ══════════════════════════════════════════════════════════════════
+    // 🚨 A PRELIMINARY ESTIMATE MAY SUGGEST. IT MAY NOT PERSIST A DECISION NOBODY MADE.
+    //
+    // Ray: "Preliminary/default workflows may suggest a path to the user. They may not persist an
+    // engineering decision that was never made."
+    //
+    // This config feeds `generateEngineeringReport`, which is UPSERTED — so `'LOAD_SIDE'` here was
+    // a stored engineering report asserting a point of interconnection for a prospect whose service
+    // nobody has looked at. The estimate still needs a shape to compute against, so the assumption
+    // is NAMED rather than removed: the value is marked assumed and `preliminaryAssumptions` travels
+    // with it, so a reader can tell an estimate from an engineered design.
+    // ══════════════════════════════════════════════════════════════════
+    interconnectionMethod: 'UNRESOLVED',
     panelBusRating: DEFAULTS.mainPanelAmps,
+    isPreliminaryEstimate: true,
+    preliminaryAssumptions: PRELIMINARY_ASSUMPTIONS,
   };
 }
+
+
 
 
 // ── Production factor by state (kWh/kW/year) ─────────────────────────────────
@@ -407,7 +427,10 @@ export async function POST(req: NextRequest) {
         requiresRapidShutdown: true,
         requiresWarningLabels: true,
         topologyType:          DEFAULTS.topologyType,
-        interconnectionMethod: 'LOAD_SIDE',
+        // 🚨 See PRELIMINARY_ASSUMPTIONS — an estimate does not get to record a point of
+        // interconnection. `UNRESOLVED` quotes no interconnection-specific hardware rather than
+        // quoting the wrong hardware.
+        interconnectionMethod: 'UNRESOLVED',
         panelBusRating:        DEFAULTS.mainPanelAmps,
       };
       const bomResult = generateBOMV4(bomInput as any);
@@ -763,7 +786,10 @@ export async function POST(req: NextRequest) {
           hasRapidShutdown: true,
           hasACDisconnect: true,
           hasDCDisconnect: false,
-          interconnectionMethod: 'LOAD_SIDE' as const,
+          // 🚨 THE THIRD SITE. See PRELIMINARY_ASSUMPTIONS — this one feeds the snapshot that is
+          // UPSERTED as an engineering report, so it was the one actually persisting a point of
+          // interconnection for a prospect whose service nobody has surveyed.
+          interconnectionMethod: 'UNRESOLVED' as const,
           inverterType: 'micro' as const,
           topologyType: DEFAULTS.topologyType,
           stringsPerInverter: 1,

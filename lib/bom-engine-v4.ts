@@ -244,6 +244,7 @@ export interface BOMGenerationInputV4 {
 
   // Interconnection method — controls whether backfed breaker appears in BOM
   // 'LOAD_SIDE' | 'SUPPLY_SIDE_TAP' | 'MAIN_BREAKER_DERATE' | 'PANEL_UPGRADE' | 'BACKFED_BREAKER'
+  // | 'UNRESOLVED' — see `interconnectionMethodOrUnresolved`.
   interconnectionMethod?: string;
   /** Where the consumption CTs clamp ('' / absent ⇒ interconnection default).
    *  Changes no quantity — only whether the metering MODE resolves. */
@@ -844,6 +845,25 @@ function emitRackingBOMInto(
 }
 
 // ─── Main BOM Generation Function ────────────────────────────────────────────
+
+
+/**
+ * 🚨 THE INTERCONNECTION METHOD, OR THE HONEST ABSENCE OF ONE.
+ *
+ * Three call sites in this file read `input.interconnectionMethod ?? 'LOAD_SIDE'`, and between them
+ * they decide whether a BACKFED BREAKER appears on the order and whether supply-side tap hardware
+ * does. A project that has not recorded its point of interconnection therefore had hardware chosen
+ * for it by a default.
+ *
+ * `'UNRESOLVED'` matches none of the branches, so nothing interconnection-specific is quoted and the
+ * absence shows up as a missing line rather than as a wrong one. Ray: "Accurate incompleteness is
+ * preferable to a plausible false answer."
+ */
+function interconnectionMethodOrUnresolved(v: unknown): string {
+  const raw = typeof v === 'string' ? v.trim() : '';
+  if (!raw) return 'UNRESOLVED';
+  return raw.toUpperCase();
+}
 
 export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV4 {
   // ── Wave 2c fork: hybrid (N>1 sub-systems) takes the per-sub path ──────────
@@ -1758,7 +1778,10 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
 
   // Interconnection method — needed for fused/non-fused disconnect decision
   // (also used below in Backfeed Breaker section)
-  const interconMethod = String(input.interconnectionMethod ?? 'LOAD_SIDE').toUpperCase();
+  // 🚨 `?? 'LOAD_SIDE'` ORDERED HARDWARE. A load-side connection needs a backfed breaker; a
+  // supply-side tap does not. A project that never recorded which it is got a breaker quoted for it,
+  // because an old default needed a value. Ray: "Missing information must remain UNRESOLVED."
+  const interconMethod = interconnectionMethodOrUnresolved(input.interconnectionMethod);
   const isSupplySideTap = interconMethod === 'SUPPLY_SIDE_TAP' ||
     interconMethod.includes('SUPPLY_SIDE') ||
     interconMethod.includes('LINE_SIDE') ||
@@ -2296,7 +2319,7 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     // Point-of-interconnection label — method-specific. A supply-side tap job
     // has no backfeed breaker; ordering a "backfeed breaker label" for it
     // contradicted E-1/PV-4A ("Backfed Breaker: N/A — Tap Connection").
-    if (String(input.interconnectionMethod ?? 'LOAD_SIDE').toUpperCase() === 'SUPPLY_SIDE_TAP') {
+    if (interconnectionMethodOrUnresolved(input.interconnectionMethod) === 'SUPPLY_SIDE_TAP') {
       items.push(addItem('labels', 'label', 'HellermannTyton', 'Supply-Side Tap POI Label',
         'LABEL-SST', 'Point-of-interconnection label per NEC 705.10 (supply-side tap, NEC 705.11)',
         1, 'ea', 'NEC 705.10', 'perSystem', '1', true));
@@ -3200,7 +3223,10 @@ function generateBOMV4PerSubSystem(
       necReference: 'NEC 300.15 / 358.30' });
   }
 
-  const interconMethod = String(input.interconnectionMethod ?? 'LOAD_SIDE').toUpperCase();
+  // 🚨 `?? 'LOAD_SIDE'` ORDERED HARDWARE. A load-side connection needs a backfed breaker; a
+  // supply-side tap does not. A project that never recorded which it is got a breaker quoted for it,
+  // because an old default needed a value. Ray: "Missing information must remain UNRESOLVED."
+  const interconMethod = interconnectionMethodOrUnresolved(input.interconnectionMethod);
   const isSupplySideTap = interconMethod === 'SUPPLY_SIDE_TAP' ||
     interconMethod.includes('SUPPLY_SIDE') ||
     interconMethod.includes('LINE_SIDE') ||

@@ -361,6 +361,13 @@ export interface ComputedSystem {
   acOcpdAmps: number;         // A — next standard OCPD
   backfeedBreakerAmps: number; // A — for MSP interconnection
   interconnectionPass: boolean; // NEC 705.12(B) 120% rule
+  /**
+   * 🚨 WHY THE 120% RULE WAS NOT EVALUATED, when it was not.
+   *
+   * Non-null ⇒ `interconnectionPass` is false because the rule could not be applied, NOT because
+   * the design failed it. A consumer that prints a verdict must print this instead.
+   */
+  interconnectionRefusal?: string | null;
   /** 🚨 TRUE when a battery on this design could NOT be resolved, so its
    *  705.12(B) contribution is MISSING from `backfeedBreakerAmps` and from the
    *  120% sum. `interconnectionPass` is then the arithmetic over the terms that
@@ -1529,8 +1536,29 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
   // NEC 705.12(B) — 120% rule applies ONLY to load-side connections
   // NEC 705.11 — Supply-side tap: 120% rule does NOT apply (connection before main breaker)
   // NEC 706 / 705.12(B) — AC-coupled battery backfeed breakers ALSO add to bus loading
-  const _interconMethodRaw = String(input.interconnectionMethod ?? 'LOAD_SIDE').toUpperCase();
+  // ═════════════════════════════════════════════════════════════════════
+  // 🚨 `?? 'LOAD_SIDE'` DECIDED WHICH ARTICLE OF THE CODE APPLIES.
+  //
+  // NEC 705.12(B) governs a load-side connection; NEC 705.11 governs a supply-side tap and has no
+  // busbar term at all. A project that has not recorded which one it is got 705.12(B) applied to it
+  // silently, because an old signature needed a value — and if that arithmetic happened to clear,
+  // the sheet printed a 120% PASS for a rule that may not even be the governing one.
+  //
+  // Ray: "Missing information must remain UNRESOLVED. It must not become LOAD_SIDE because an old
+  // function requires a value."
+  //
+  // So absence is its own state, and the CONCLUSION becomes NOT EVALUATED — the same treatment an
+  // unresolved battery already gets below, and for the same reason: a rule that was never evaluated
+  // must not be reported as satisfied.
+  // ═════════════════════════════════════════════════════════════════════
+  const _interconRecorded = typeof input.interconnectionMethod === 'string'
+    && input.interconnectionMethod.trim().length > 0
+    && input.interconnectionMethod.trim().toUpperCase() !== 'UNRESOLVED';
+  const _interconMethodRaw = _interconRecorded
+    ? String(input.interconnectionMethod).toUpperCase()
+    : 'UNRESOLVED';
   const _isSupplySideTap = _interconMethodRaw.includes('SUPPLY') || _interconMethodRaw.includes('LINE_SIDE');
+  const _interconUnresolved = !_interconRecorded;
 
   // ── Battery contribution — ONE authority, not a Math.max of two models ────
   //
@@ -1575,6 +1603,8 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
   let batteryBusImpactFromIds = 0;
   let _batteryUnresolved = false;
   let _batteryRefusal: string | null = null;
+  /** Set when the interconnection method is unrecorded, so 705.12(B) could not be evaluated. */
+  let _interconnectionRefusal: string | null = null;
   for (const [id, count] of _batteryCountsById) {
     const r = resolveBatteryBranch(id, count);
     if (r.resolved && r.busbarContributionA != null) batteryBusImpactFromIds += r.busbarContributionA;
@@ -1633,10 +1663,34 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
   }
   const totalBackfeedA = backfeedBreakerAmps + batteryBusImpactA;
 
-  const interconnectionPass = _isSupplySideTap
-    ? true  // NEC 705.11: supply-side tap — no busbar loading concern
-    : (totalBackfeedA + input.mainPanelAmps) <= (input.panelBusRating * 1.2);
-  if (!interconnectionPass) {
+  // 🚨 AN UNRECORDED INTERCONNECTION METHOD REFUSES THE CONCLUSION. Carried on the result, like
+  // `batteryRefusal`, so a consumer cannot fail to see it: `interconnectionPass` is FALSE here, which
+  // means "not shown to be compliant" rather than "shown to be non-compliant" — and the refusal text
+  // says which, naming the fact and the stage that owns it.
+  if (_interconUnresolved) {
+    _interconnectionRefusal =
+      'NEC 705.12(B) NOT EVALUATED — this project has not recorded how the PV connects to the '
+      + 'service (supply-side tap, load-side breaker, or manufacturer-integrated). The 120% busbar '
+      + 'rule applies to a load-side connection and NEC 705.11 governs a supply-side tap, so the '
+      + 'governing article is not yet known. Record the point of interconnection in the service '
+      + 'topology.';
+    console.warn('[COMPUTED-SYSTEM]', _interconnectionRefusal);
+    issues.push({
+      severity: 'error',
+      code: 'INTERCONNECTION_METHOD_UNRESOLVED',
+      message: _interconnectionRefusal,
+      necReference: 'NEC 705.11 / 705.12(B)',
+      autoFixed: false,
+      suggestion: 'Record the point of interconnection in the service topology — it decides which '
+        + 'article governs.',
+    });
+  }
+  const interconnectionPass = _interconUnresolved
+    ? false  // not evaluated; see `interconnectionRefusal` on the result
+    : _isSupplySideTap
+      ? true  // NEC 705.11: supply-side tap — no busbar loading concern
+      : (totalBackfeedA + input.mainPanelAmps) <= (input.panelBusRating * 1.2);
+  if (!interconnectionPass && !_interconUnresolved) {
     // Use correct terminology based on interconnection method
     const _interconLabel = (_interconMethodRaw.includes('BACKFED') || _interconMethodRaw.includes('BREAKER'))
       ? 'backfed breaker'
@@ -3195,6 +3249,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     // already renders as PENDING.
     interconnectionUnresolved: _batteryUnresolved,
     batteryRefusal: _batteryRefusal,
+    interconnectionRefusal: _interconnectionRefusal,
     runs,
     runMap,
     segmentSchedule,
@@ -3219,7 +3274,10 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
   let sbIssues: import('./segment-model').EngineeringIssue[] | undefined;
   let sbInterconnectionPass: boolean | undefined;
   try {
-    const interconRaw = String(input.interconnectionMethod ?? 'LOAD_SIDE').toUpperCase();
+    // 🚨 The same unrecorded state, in the segment builder. It needs a shape to build against, so
+    // it keeps the load-side geometry — but the CONCLUSION above is already NOT EVALUATED, so no
+    // verdict rests on this choice.
+    const interconRaw = _interconMethodRaw;
     let interconType: InterconnectionType;
     if (interconRaw === 'SUPPLY_SIDE_TAP' || interconRaw.includes('SUPPLY') || interconRaw.includes('LINE')) {
       interconType = InterconnectionType.SUPPLY_SIDE_TAP;

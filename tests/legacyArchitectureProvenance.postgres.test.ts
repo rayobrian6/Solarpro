@@ -1699,3 +1699,231 @@ describe('🚨 INTERCONNECTION METHOD HAS ONE OWNER TOO', () => {
       .toContain('interconnectionMethodScalar');
   });
 });
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 🚨 THREE DIFFERENT FACTS — and the previous pass conflated two of them.
+//
+//   aggregate service rating  400 A   → topology.service.ratedAmps
+//   panelboard busbar         200 A   → topology.panels[i].busbarRatingA
+//   panelboard main / OCPD    200 A   → topology.panels[i].mainBreakerA
+//
+// Binding a control labelled "Main Panel (Amps)" to the aggregate meant selecting 200 would rewrite
+// a 400 A service — and fed the aggregate into NEC 705.12(B), giving 400 × 1.2 − 400 = 80 A of
+// allowable PV on a busbar whose real answer is 40 A. A permissive result on a safety calculation.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('🚨 SERVICE RATING vs PANEL MAIN vs PANEL BUSBAR', () => {
+  const putTopology = async (topology: unknown) => {
+    const { PUT } = await import('@/app/api/projects/[id]/service-topology/route');
+    const { NextRequest } = await import('next/server');
+    const res = await PUT(
+      new NextRequest(`http://localhost/api/projects/${PROJECT}/service-topology`, {
+        method: 'PUT', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ topology }),
+      }),
+      { params: Promise.resolve({ id: PROJECT }) },
+    );
+    return { status: res.status, json: await res.json().catch(() => ({})) as Record<string, unknown> };
+  };
+  const graph = async () => (await load())!.model.topology!;
+
+  it('🚨 400 A service + two 200 A MSPs survives save and reload as three distinct values',
+    async () => {
+      await writeRaysLiveRow({ inverterId: null, generationPanels: true });
+      const t = await graph();
+      expect(t.service.ratedAmps).toBe(400);
+      expect(t.panels.length).toBe(2);
+      for (const pb of t.panels) {
+        expect(pb.busbarRatingA, `${pb.label} busbar`).toBe(200);
+        expect(pb.mainBreakerA, `${pb.label} main`).toBe(200);
+      }
+      // Round trip through the real writer.
+      expect((await putTopology(t)).status).toBe(200);
+      const back = await graph();
+      expect(back.service.ratedAmps).toBe(400);
+      expect(back.panels.map(pb => pb.mainBreakerA)).toEqual([200, 200]);
+      expect(back.panels.map(pb => pb.busbarRatingA)).toEqual([200, 200]);
+    });
+
+  it('🚨 editing MSP #1 does NOT change the service rating', async () => {
+    await writeRaysLiveRow({ inverterId: null, generationPanels: true });
+    const t = await graph();
+    const next = {
+      ...t, panels: t.panels.map((pb, i) => i === 0 ? { ...pb, mainBreakerA: 225 } : pb),
+    };
+    expect((await putTopology(next)).status).toBe(200);
+
+    const back = await graph();
+    expect(back.panels[0].mainBreakerA, 'MSP #1 did not take the edit').toBe(225);
+    expect(back.panels[1].mainBreakerA, 'editing MSP #1 moved MSP #2').toBe(200);
+    expect(back.service.ratedAmps,
+      'editing a panel main rewrote the site service rating').toBe(400);
+  });
+
+  it('🚨 editing the service rating does NOT silently rewrite the panel mains', async () => {
+    await writeRaysLiveRow({ inverterId: null, generationPanels: true });
+    const t = await graph();
+    const next = { ...t, service: { ...t.service, ratedAmps: 320 } };
+    expect((await putTopology(next)).status).toBe(200);
+
+    const back = await graph();
+    expect(back.service.ratedAmps).toBe(320);
+    expect(back.panels.map(pb => pb.mainBreakerA),
+      'changing the service rating rewrote the panel mains').toEqual([200, 200]);
+    expect(back.panels.map(pb => pb.busbarRatingA)).toEqual([200, 200]);
+  });
+
+  it('🚨 the 120% allowance comes from the PANEL, not the aggregate service', async () => {
+    // 400 × 1.2 − 400 = 80 A  ← what the conflated control produced
+    // 200 × 1.2 − 200 = 40 A  ← the real answer for MSP #1
+    await writeRaysLiveRow({ inverterId: null, generationPanels: true });
+    const t = await graph();
+    const pb = t.panels[0];
+    const fromPanel = Math.floor((pb.busbarRatingA as number) * 1.2 - (pb.mainBreakerA as number));
+    const fromService = Math.floor((t.service.ratedAmps as number) * 1.2
+      - (t.service.ratedAmps as number));
+    expect(fromPanel).toBe(40);
+    expect(fromService).toBe(80);
+    expect(fromPanel, 'the aggregate gives a MORE PERMISSIVE busbar answer than the panel')
+      .toBeLessThan(fromService);
+  });
+
+  it('🚨 the control is bound to the panel and the aggregate is read-only beside it', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const page = readFileSync(join(ROOT, 'app/engineering/page.tsx'), 'utf8');
+    // The editable control writes a panelboard main.
+    expect(page).toContain('setPrimaryPanelMainAmps');
+    expect(page).toContain('mainBreakerA: amps');
+    // The 120% calculation reads the panel, never the aggregate.
+    expect(page).toContain('const busRating = panelBusRatingForDisplay ?? 200;');
+    expect(page).toContain('const mainAmps = panelMainAmpsForDisplay ?? 200;');
+    expect(page, 'the busbar rule still reads the aggregate service rating')
+      .not.toContain('const mainAmps = serviceAmpsForDisplay');
+    // And the aggregate is shown as its own, separate fact.
+    expect(page).toContain('Service rating:');
+    expect(page).toContain('edit in Service Topology');
+  });
+});
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 🚨 NO DEFAULT MAY DECIDE THE INTERCONNECTION.
+//
+// Ray: "Missing information must remain UNRESOLVED. It must not become LOAD_SIDE because an old
+// function requires a value." NEC 705.12(B) governs a load-side connection and 705.11 governs a
+// supply-side tap — `?? 'LOAD_SIDE'` was choosing which article applies, and if the arithmetic
+// happened to clear, printing a 120% PASS for a rule that may not even be the governing one.
+// ═══════════════════════════════════════════════════════════════════════════
+/**
+ * Source with comment lines removed.
+ *
+ * A comment may NAME a removed pattern — explaining a removal requires quoting it — so a source scan
+ * that forbids the pattern has to look at code only, or the explanation trips its own guard.
+ */
+const stripComments = (src: string): string =>
+  src.split(String.fromCharCode(10)).filter(l => {
+    const t = l.trim();
+    return !t.startsWith('//') && !t.startsWith('*') && !t.startsWith('/*');
+  }).join(' ');
+
+describe('🚨 UNRESOLVED INTERCONNECTION IS A STATE, NOT A GAP', () => {
+  const run = async (method?: string) => {
+    const { computeSystem } = await import('@/lib/computed-system');
+    return computeSystem({
+      topology: 'string',
+      interconnectionMethod: method,
+      totalPanels: 20, panelWatts: 400, panelVoc: 49.6, panelIsc: 10.18,
+      panelVmp: 41.8, panelImp: 9.57, panelTempCoeffVoc: -0.27, panelTempCoeffIsc: 0.05,
+      panelManufacturer: 'Generic', panelModel: '400W',
+      inverterManufacturer: 'Fronius', inverterModel: 'Primo 8.2-1',
+      inverterAcKw: 8.2, inverterMaxDcV: 600, inverterMpptMinV: 100, inverterMpptMaxV: 600,
+      mainPanelAmps: 200, mainPanelBrand: 'Square D', mainPanelBusRating: 200, panelBusRating: 200,
+      systemVoltage: 240, ambientTempC: 35, rooftopTempAdderC: 30, designTempMinC: -10,
+      conduitType: 'EMT', maxACVoltageDropPct: 3, maxDCVoltageDropPct: 2,
+      systemType: 'roof', runLengths: {},
+    } as never) as unknown as {
+      interconnectionPass: boolean;
+      interconnectionRefusal?: string | null;
+      issues: Array<{ code: string; message: string }>;
+    };
+  };
+
+  it('🚨 an unrecorded method does NOT get NEC 705.12(B) applied silently', async () => {
+    const cs = await run(undefined);
+    expect(cs.interconnectionRefusal, 'the rule was applied with no method recorded').toBeTruthy();
+    expect(cs.interconnectionRefusal).toContain('NOT EVALUATED');
+    expect(cs.interconnectionRefusal).toContain('705.11');
+    // 🚨 FALSE MEANS "not shown to be compliant", and the refusal says which.
+    expect(cs.interconnectionPass).toBe(false);
+    expect(cs.issues.map(i => i.code)).toContain('INTERCONNECTION_METHOD_UNRESOLVED');
+    // It must NOT be reported as a 120% FAILURE — the design did not fail a rule nobody applied.
+    expect(cs.issues.map(i => i.code)).not.toContain('NEC_705_12B_120PCT');
+  });
+
+  it('the literal string UNRESOLVED behaves the same as absence', async () => {
+    const cs = await run('UNRESOLVED');
+    expect(cs.interconnectionRefusal).toBeTruthy();
+    expect(cs.interconnectionPass).toBe(false);
+  });
+
+  it('🚨 a RECORDED method is evaluated exactly as before', async () => {
+    const load = await run('LOAD_SIDE');
+    expect(load.interconnectionRefusal).toBeFalsy();
+    // 20 × 400 W on an 8.2 kW inverter, 200 A bus, 200 A main — a real 705.12(B) evaluation.
+    expect(typeof load.interconnectionPass).toBe('boolean');
+    expect(load.issues.map(i => i.code)).not.toContain('INTERCONNECTION_METHOD_UNRESOLVED');
+
+    const supply = await run('SUPPLY_SIDE_TAP');
+    expect(supply.interconnectionRefusal).toBeFalsy();
+    // NEC 705.11 — no busbar loading concern.
+    expect(supply.interconnectionPass).toBe(true);
+  });
+
+  it('🚨 the BOM quotes no interconnection hardware for an unrecorded method', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const bom = readFileSync(join(ROOT, 'lib/bom-engine-v4.ts'), 'utf8');
+    // Comments may NAME the old pattern — the explanation of a removal has to quote it. What must
+    // not survive is the pattern as CODE, so comment lines are stripped before the check.
+    const bomCode = stripComments(bom);
+    expect(bomCode, 'the BOM still defaults the interconnection method')
+      .not.toContain("input.interconnectionMethod ?? 'LOAD_SIDE'");
+    expect(bom).toContain('interconnectionMethodOrUnresolved');
+  });
+
+  it('🚨 no production default asserts an interconnection decision any more', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const page = readFileSync(join(ROOT, 'app/engineering/page.tsx'), 'utf8');
+    const prelim = readFileSync(join(ROOT, 'app/api/engineering/preliminary/route.ts'), 'utf8');
+    const cs = readFileSync(join(ROOT, 'lib/computed-system.ts'), 'utf8');
+
+    // Initial React state for a project nobody has opened.
+    expect(page).toContain("interconnectionMethod: 'UNRESOLVED', panelBusRating: 200,");
+    // A preliminary estimate suggests; it does not persist a decision.
+    const prelimCode = stripComments(prelim);
+    expect(prelimCode, 'the preliminary route still persists LOAD_SIDE')
+      .not.toContain("interconnectionMethod: 'LOAD_SIDE'");
+    expect(prelim).toContain('PRELIMINARY_ASSUMPTIONS');
+    // The engines.
+    const csCode = stripComments(cs);
+    expect(csCode, 'computeSystem still defaults the interconnection method')
+      .not.toContain("input.interconnectionMethod ?? 'LOAD_SIDE'");
+  });
+
+  it('🚨 the preliminary estimate NAMES every fact it assumed', async () => {
+    const { PRELIMINARY_ASSUMPTIONS } =
+      await import('@/lib/engineering/preliminaryAssumptions');
+    expect(PRELIMINARY_ASSUMPTIONS.length).toBeGreaterThanOrEqual(3);
+    for (const a of PRELIMINARY_ASSUMPTIONS) {
+      expect(a.fact.length).toBeGreaterThan(5);
+      expect(a.assumed.length).toBeGreaterThan(2);
+      expect(a.why.length, `${a.fact} does not say why`).toBeGreaterThan(20);
+      expect(a.owner.length, `${a.fact} does not name who owns the real answer`)
+        .toBeGreaterThan(10);
+    }
+    expect(PRELIMINARY_ASSUMPTIONS.map(a => a.fact))
+      .toContain('Point of interconnection');
+  });
+});

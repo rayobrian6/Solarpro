@@ -119,7 +119,14 @@ export interface ProjectConfig {
   spliceAtRows?: boolean;
   panelCoordinates?: Array<{ x: number; y: number; row: number; col: number; }>;
   notes: string;
-  interconnectionMethod: 'LOAD_SIDE' | 'SUPPLY_SIDE_TAP' | 'MAIN_BREAKER_DERATE' | 'PANEL_UPGRADE';
+  /**
+   * 🚨 'UNRESOLVED' IS ONE OF THE VALUES — see the same union in `lib/computed-plan.ts`. A project
+   * that has not recorded how the PV connects to the service is in a real state, and a type that
+   * cannot express it forces every caller to pick one of the four. That is how `?? 'LOAD_SIDE'`
+   * reached the engines, the BOM, the page defaults and a persisted preliminary report.
+   */
+  interconnectionMethod: 'LOAD_SIDE' | 'SUPPLY_SIDE_TAP' | 'MAIN_BREAKER_DERATE' | 'PANEL_UPGRADE'
+    | 'UNRESOLVED';
   /** Where the consumption CTs clamp. ''/absent ⇒ the documented default for
    *  the interconnection (lib/equipment/currentTransformers). */
   consumptionCtLocation?: '' | 'sec-line-side-of-main' | 'between-tap-and-main' | 'main-breaker-load-side';
