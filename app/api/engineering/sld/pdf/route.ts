@@ -205,6 +205,98 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // ═══════════════════════════════════════════════════════════════════
+    // 🚨 THE EXPORTED SHEET DERIVES ITS STRINGS FROM THE ENGINE, NOT FROM THE REQUEST.
+    //
+    // This route carried NO engine values at all: it never called `generateStringConfig` and
+    // never called `computeSystem`, so every string fact on the printed sheet was whatever the
+    // browser happened to post — `totalStrings` defaulted to 2 (line ~342) and
+    // `stringPanelCounts` was never set.
+    //
+    // The end-to-end probe made the consequence plain. On Ray's 400 A Powerwall 3 job the Diagram
+    // tab drew `Strings 5: 9 / 9 / 9 / 8 / 2 panels` with a 538.3 V maximum system voltage, and
+    // the EXPORTED PDF of the same project, in the same request, printed
+    // `4 — ASSIGNMENT REQUIRES RE-DERIVATION`. Repair 11.1 put both routes on one canonical
+    // ARCHITECTURE projection; this is the other half — one canonical STRING derivation.
+    //
+    // 🚨 IT CALLS THE OWNER RATHER THAN RE-DERIVING. `generateStringConfig` is the NEC 690.7
+    // string engine, and `stringSizingBounds` inside it owns the cold-Voc correction. The inputs
+    // are the ones the canonical projection just set on `buildInput` — on a DC-coupled job
+    // the DC window comes from the STORAGE (`dcStringLimits`), so the strings are sized against
+    // the Powerwall 3's published 60–480 V MPPT / 550 V input rather than a phantom inverter's
+    // defaults. Same function, same inputs, same answer as the SVG route.
+    //
+    // Non-fatal: if the derivation throws, the posted values stand exactly as before.
+    // ═══════════════════════════════════════════════════════════════════
+    let _pdfStringResult: import('@/lib/string-generator').StringGeneratorResult | null = null;
+    {
+      const _topoRaw = String(buildInput.topologyType ?? '');
+      const _isMicroForStrings = /MICRO/i.test(_topoRaw);
+      const _isOptimizerForStrings = /OPTIMIZER/i.test(_topoRaw);
+      const _modules = Number(buildInput.totalModules) || 0;
+      if (!_isMicroForStrings && _modules > 0) {
+        try {
+          const { generateStringConfig, moduleSpecsFromRegistry, inverterSpecsFromRegistry } =
+            await import('@/lib/string-generator');
+          const _designTempMin = Number(
+            buildInput.designTempMin ?? buildInput.designTempMinC ?? -18);
+          _pdfStringResult = generateStringConfig({
+            totalModules: _modules,
+            moduleSpecs: moduleSpecsFromRegistry({
+              voc: Number(buildInput.panelVoc) || undefined,
+              vmp: Number(buildInput.panelVmp) || undefined,
+              isc: Number(buildInput.panelIsc) || undefined,
+              imp: Number(buildInput.panelImp) || undefined,
+              watts: Number(buildInput.panelWatts) || undefined,
+              tempCoeffVoc: buildInput.panelTempCoeffVoc != null
+                ? Number(buildInput.panelTempCoeffVoc)
+                : (buildInput.tempCoeffVoc != null ? Number(buildInput.tempCoeffVoc) : undefined),
+              tempCoeffVmp: buildInput.tempCoeffVmp != null
+                ? Number(buildInput.tempCoeffVmp) : undefined,
+              maxSeriesFuseRating: buildInput.maxSeriesFuse != null
+                ? Number(buildInput.maxSeriesFuse) : undefined,
+            }),
+            inverterSpecs: inverterSpecsFromRegistry({
+              // Set by the canonical projection from the storage on a DC-coupled job.
+              maxDcVoltage: Number(buildInput.inverterMaxDcV ?? buildInput.maxDcVoltage) || undefined,
+              mpptVoltageMin: Number(buildInput.mpptVoltageMin) || undefined,
+              mpptVoltageMax: Number(buildInput.mpptVoltageMax) || undefined,
+              mpptChannels: Number(buildInput.mpptChannels) || undefined,
+              maxInputCurrent: Number(buildInput.maxInputCurrentPerMppt) || undefined,
+              acOutputKw: Number(buildInput.acOutputKw) || undefined,
+              maxPanelsPerString: Number(buildInput.maxPanelsPerString) || undefined,
+            }),
+            designTempMin: _designTempMin,
+            topology: _isOptimizerForStrings ? 'optimizer' : 'string',
+          });
+
+          const _counts = _pdfStringResult.strings
+            .map(st => st.panelsInString)
+            .filter((n): n is number => typeof n === 'number' && n > 0);
+          if (_counts.length > 0 && _counts.reduce((a, b) => a + b, 0) === _modules) {
+            buildInput.stringPanelCounts = _counts;
+            buildInput.totalStrings = _pdfStringResult.totalStrings;
+            buildInput.panelsPerString = _counts[0];
+            buildInput.lastStringPanels = _counts[_counts.length - 1];
+            buildInput.vocCorrected = _pdfStringResult.vocCorrected;
+            buildInput.stringVoc = _pdfStringResult.vocCorrected * _counts[0];
+            buildInput.minPanelsPerString = _pdfStringResult.minPanelsPerString;
+            buildInput.maxPanelsPerString = _pdfStringResult.maxPanelsPerString;
+            console.log('[sld/pdf/POST] strings derived by the engine: '
+              + `[${_counts.join('/')}] = ${_modules} modules, `
+              + `${_pdfStringResult.vocCorrected.toFixed(1)} V/module corrected to `
+              + `${_designTempMin} °C, ceiling ${_pdfStringResult.maxPanelsPerString}/string`);
+          } else {
+            console.warn('[sld/pdf/POST] the string derivation did not describe this array '
+              + `([${_counts.join('/')}] vs ${_modules} modules) — the posted values stand.`);
+          }
+        } catch (e) {
+          console.warn('[sld/pdf/POST] string derivation skipped (non-fatal):',
+            (e as Error)?.message);
+        }
+      }
+    }
+
     // Extract inverter data from inverterSpecs array if present
     const firstInvSpec = buildInput.inverterSpecs?.[0];
     const firstPanelSpec = buildInput.panelSpecs?.[0];
@@ -339,7 +431,15 @@ export async function POST(req: NextRequest) {
       // dropped the selection the on-screen single-lane sheet honoured.
       selectedCombinerId:      buildInput.selectedCombinerId ? String(buildInput.selectedCombinerId) : null,
       totalModules:            Number(buildInput.totalModules)           || 20,
-      totalStrings:            Number(buildInput.totalStrings)           || 2,
+      // 🚨 NOT `|| 2`. The engine pass above sets this from the derivation; the literal was a
+      // fabricated string count on a printed sheet.
+      totalStrings:            Number(buildInput.totalStrings) || 0,
+      // 🚨 THE DISTRIBUTION, so the schedule states the real assignment instead of a scalar
+      // times a count — the same field the SVG route forwards.
+      stringPanelCounts:       Array.isArray(buildInput.stringPanelCounts)
+                                 && buildInput.stringPanelCounts.length > 0
+                                 ? buildInput.stringPanelCounts.map(Number)
+                                 : undefined,
       panelModel:              String(buildInput.panelModel ?? (firstPanelSpec ? `${firstPanelSpec.manufacturer} ${firstPanelSpec.model}` : 'Q.PEAK DUO BLK ML-G10+ 400W')),
       panelWatts:              Number(buildInput.panelWatts ?? firstPanelSpec?.watts)   || 400,
       panelVoc:                Number(buildInput.panelVoc   ?? firstPanelSpec?.voc)     || 49.6,

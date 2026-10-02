@@ -5831,8 +5831,35 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       ['Voc Corrected',           vc != null ? `${vc.toFixed(2)} V` : NOT_COMPUTED],
       ['Panels per String', pps===lsp?`${pps}`:`${pps} (last: ${lsp})`],
       ['Number of Strings',`${input.totalStrings}`],
-      ['String Voc (corrected)',  sv != null ? `${sv.toFixed(1)} V`        : NOT_COMPUTED],
-      ['String Voc × 1.25',       sv != null ? `${(sv*1.25).toFixed(1)} V` : NOT_COMPUTED],
+      // ═══════════════════════════════════════════════════════════════════════
+      // 🚨 ONE MAXIMUM SYSTEM VOLTAGE, BY ONE METHOD — THIS SHEET WAS OVERSTATING IT BY 25%.
+      //
+      // What stood here printed TWO rows: the β-corrected string Voc, and then that same value
+      // MULTIPLIED BY 1.25. `sv` is already `vocCorrected × panelsPerString`, and `vocCorrected`
+      // is `moduleVoc × (1 + β/100 × (Tmin − 25))` from `stringSizingBounds` — so the second row
+      // applied the NEC 690.7 TABLE factor on top of the NEC 690.7 COEFFICIENT method. They are
+      // alternatives, not a sequence.
+      //
+      // This repository already states the law, at lib/permit/utils/panelSpecs.ts:135:
+      //
+      //   "THE cold-Voc law (NEC 690.7(A)) — β-based correction when the module's Voc temperature
+      //    coefficient is known, else the conservative blanket ×1.25 … Register P1-4: this is the
+      //    ONE law; no sheet may hand-roll `voc * 1.25` when β is resolvable."
+      //
+      // `coldVocFactor` returns the β factor OR 1.25, never their product. This row hand-rolled
+      // the forbidden multiplication, on the sheet that goes to an AHJ.
+      //
+      // 🚨 WHAT IT COST, on Ray's 400 A Powerwall 3 job: nine 440 W modules at β = −0.25 %/°C
+      // correct to 59.8 V each — 538.3 V, inside the Powerwall 3's published 550 V PV input. The
+      // sheet printed 672.9 V. A reviewer reading that would reject a compliant string, and a
+      // designer would shorten strings that did not need shortening. It is also what made an
+      // existing guard demand `sv × 1.25 ≤ 550`, which no β-corrected design can satisfy at a
+      // sensible string length.
+      //
+      // One row now, naming the article it is computed under. The per-module `Voc Corrected` row
+      // above it already shows the correction itself, so nothing is lost.
+      // ═══════════════════════════════════════════════════════════════════════
+      ['Max System Voltage (690.7(A))', sv != null ? `${sv.toFixed(1)} V` : NOT_COMPUTED],
       ['String Isc × 1.25',`${(si*1.25).toFixed(2)} A`],
       ['DC OCPD / String',`${op} A`],
       ['DC Wire Gauge',`${resolvedDcWire}`],

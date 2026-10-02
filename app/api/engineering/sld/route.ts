@@ -862,40 +862,58 @@ export async function POST(req: NextRequest) {
           // ═════════════════════════════════════════════════════════════
           // 🚨 AND IT MUST FIT THE DEVICE THE STRINGS ACTUALLY LAND ON.
           //
-          // Ray, 2026-10-02: "Do not blindly resurrect Ray's retired 10/9/9/9 assignment. That
-          // assignment belonged to the previous standalone-inverter architecture and has already
-          // been determined incompatible with the current PW3 endpoint… ACTIVE compatible
-          // assignment may travel through configStringPanelCounts. RETIRED assignment is history
-          // only and may not become active by being passed to computeSystem."
+          // Ray: "ACTIVE compatible assignment may travel through configStringPanelCounts.
+          // RETIRED assignment is history only and may not become active by being passed to
+          // computeSystem."
           //
-          // Checking only the SUM was not enough, and the existing guard in
-          // `tests/liveSldFailure.postgres.test.ts` caught it: the 10-module first string of the
-          // old assignment adds up to 37 perfectly and prints **672.9 V** on the sheet against a
-          // Powerwall 3's published 550 V PV input maximum. A string that cannot be built is not
-          // made acceptable by summing correctly.
+          // Checking only the SUM was not enough — the old 10/9/9/9 assignment adds up to 37
+          // perfectly and printed 672.9 V against a Powerwall 3's 550 V PV input.
           //
-          // `maxDcVoltage` is the window the canonical projection established — taken from the
-          // STORAGE on a DC-coupled job (`dcStringLimits`), not from a phantom inverter's
-          // defaults. The 1.25 factor is the same NEC 690.7 basis the sheet prints and the guard
-          // asserts, so this refuses exactly what that guard would fail.
+          // 🚨 AND MY FIRST VERSION OF THIS CHECK WAS ITSELF A SECOND DERIVATION — the exact
+          // defect this whole pass is about. It used `panelVoc * 1.25` as the cold-Voc basis.
+          // That is not how this codebase corrects Voc. `stringSizingBounds`
+          // (lib/string-generator.ts:228-254) is the owner and applies the real NEC 690.7
+          // temperature correction:
           //
-          // Refused ⇒ the engine derives its own against the real limits, and the schedule says
-          // so. It does NOT silently keep the incompatible one.
+          //     vocCorrected       = moduleVoc * (1 + tempCoeffVoc/100 * (designTempMinC - 25))
+          //     maxPanelsPerString = floor(inverterMaxDcVoltage / vocCorrected)
+          //
+          // On Ray's job that is 58.4 V/module at the design minimum, not 65.9 V — so a 9-module
+          // string is 523.4 V and FITS the 550 V window, while the 1.25 factor refused it. The
+          // end-to-end probe caught it: the SVG route derived and drew a valid 5-string layout
+          // while the PDF route printed "ASSIGNMENT REQUIRES RE-DERIVATION" for the same project.
+          // Two sheets disagreeing again — caused by the repair meant to stop exactly that.
+          //
+          // So the bound comes from the engine that owns it. `stringResult` is the
+          // `generateStringConfig` run above, already made against the DC window the canonical
+          // projection took from the STORAGE, so `maxPanelsPerString` is the real device limit,
+          // temperature-corrected once, by one function.
+          //
+          // Refused ⇒ the engine's own derivation stands and the schedule says so. It does NOT
+          // silently keep an assignment the hardware cannot accept.
           // ═════════════════════════════════════════════════════════════
-          const _vocCold = panelVoc * 1.25;
-          const _overLimit = stringPanelCounts.filter(n => n * _vocCold > maxDcVoltage);
-          if (maxDcVoltage > 0 && _overLimit.length > 0) {
+          const _maxPPS = stringResult?.maxPanelsPerString ?? null;
+          const _minPPS = stringResult?.minPanelsPerString ?? null;
+          const _tooLong = (_maxPPS != null && _maxPPS > 0)
+            ? stringPanelCounts.filter(n => n > _maxPPS) : [];
+          const _tooShort = (_minPPS != null && _minPPS > 0)
+            ? stringPanelCounts.filter(n => n < _minPPS) : [];
+          if (_tooLong.length > 0 || _tooShort.length > 0) {
             console.warn('[sld/POST] STRING ASSIGNMENT REQUIRES RE-DERIVATION — the recorded '
-              + `assignment [${stringPanelCounts.join('/')}] has `
-              + `${_overLimit.length} string(s) above the ${maxDcVoltage} V DC input maximum `
-              + `(${_overLimit.map(n => `${n}×${panelVoc}V×1.25 = ${(n * _vocCold).toFixed(1)}V`).join(', ')}). `
-              + 'It is NOT passed to the engine: it belongs to a different endpoint and is '
-              + 'history, not an active design. The engine re-derives against the real limits.');
+              + `assignment [${stringPanelCounts.join('/')}] does not fit this endpoint: `
+              + (_tooLong.length > 0
+                  ? `${_tooLong.length} string(s) longer than ${_maxPPS} modules `
+                    + `(${stringResult?.vocCorrected?.toFixed(1)} V/module at ${designTempMin} °C `
+                    + `against a ${maxDcVoltage} V input); ` : '')
+              + (_tooShort.length > 0
+                  ? `${_tooShort.length} string(s) shorter than ${_minPPS} modules; ` : '')
+              + 'it belongs to a different endpoint and is history, not an active design. '
+              + 'The engine re-derives against the real limits.');
             return undefined;
           }
           console.log('[sld/POST] string assignment handed to computeSystem: '
-            + `[${stringPanelCounts.join('/')}] = ${_sum} modules, every string within `
-            + `${maxDcVoltage} V`);
+            + `[${stringPanelCounts.join('/')}] = ${_sum} modules, within the engine's `
+            + `${_maxPPS ?? '?'}-module ceiling for a ${maxDcVoltage} V input`);
           return stringPanelCounts;
         })(),
         panelWatts:                    panelWatts,

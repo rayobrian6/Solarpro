@@ -778,6 +778,125 @@ describe('🚨 PHASE 2 / PATTERN A — an owner exists and the consumer reads it
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
+describe('🚨 NEC 690.7(A) — ONE cold-Voc method, never both', () => {
+  it('🚨 no sheet multiplies a β-corrected voltage by 1.25', async () => {
+    // ═══════════════════════════════════════════════════════════════════
+    // lib/permit/utils/panelSpecs.ts:135 — "THE cold-Voc law (NEC 690.7(A)) — β-based correction
+    // when the module's Voc temperature coefficient is known, else the conservative blanket
+    // ×1.25 … this is the ONE law; no sheet may hand-roll `voc * 1.25` when β is resolvable."
+    //
+    // The SLD renderer printed `String Voc (corrected)` AND that same value × 1.25, which is the
+    // coefficient method and the table method applied in sequence. On Ray's job it overstated the
+    // maximum system voltage by 25% — 672.9 V printed against a real 538.3 V — and would have a
+    // reviewer reject a string that is inside the Powerwall 3's 550 V input.
+    // ═══════════════════════════════════════════════════════════════════
+    const { coldVocFactor } = await import('@/lib/permit/utils/panelSpecs');
+    // The owner returns the β factor OR 1.25 — never their product.
+    const withBeta = coldVocFactor(-0.25, -18);
+    const withoutBeta = coldVocFactor(undefined, -18);
+    expect(withoutBeta, 'the blanket factor is not 1.25').toBe(1.25);
+    expect(withBeta, 'a resolvable β did not produce a β factor').toBeCloseTo(1.1075, 3);
+    expect(withBeta, 'the two methods were multiplied together').toBeLessThan(1.25);
+
+    const renderer = src('lib', 'sld-professional-renderer.ts');
+    const live = renderer.split('\n').filter(l => !l.trim().startsWith('//'));
+    expect(live.some(l => /sv\s*\*\s*1\.25/.test(l)),
+      'the renderer multiplies an already-corrected string voltage by 1.25 again').toBe(false);
+    expect(renderer, 'the sheet no longer states the governing article for its max voltage')
+      .toContain('Max System Voltage (690.7(A))');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+describe('🚨 FIXTURE B — the two sheets describe the SAME system', () => {
+  /** The value of the schedule cell that follows a label, as the sheet renders it. */
+  const cellAfter = (sv: string, label: string): string => {
+    const i = sv.indexOf('>' + label + '<');
+    if (i < 0) return '(label absent)';
+    const tail = sv.slice(i, i + 900);
+    const vals = [...tail.matchAll(/>([^<>]{1,60})</g)].map(x => x[1])
+      .filter(v => v.trim() && v !== label);
+    return (vals[0] ?? '(no value)').trim();
+  };
+
+  it('🚨 architecture, module count, string assignment and max voltage all agree', async () => {
+    // ═══════════════════════════════════════════════════════════════════
+    // 🚨 RAY'S PRODUCTION-PROOF REQUIREMENT, AS A GUARD.
+    //
+    //   "For Fixture B verify through the actual production chain: System Config → Service
+    //    Topology → Sizing → Compliance → SVG SLD → PDF SLD → BOM → Permit. They must describe
+    //    the same system."
+    //
+    // An end-to-end probe found they did not, twice, AFTER the mutation run was green:
+    //   · the PDF printed `4 — ASSIGNMENT REQUIRES RE-DERIVATION` while the diagram drew
+    //     `5: 9 / 9 / 9 / 8 / 2 panels`, because the PDF route never called the string engine at
+    //     all — `totalStrings` defaulted to 2 and `stringPanelCounts` was never set;
+    //   · and before that, a cold-Voc check of mine refused a compliant assignment on one route
+    //     and not the other.
+    //
+    // Both were invisible to every existing guard, because every existing guard tested ONE sheet.
+    // This one compares them.
+    // ═══════════════════════════════════════════════════════════════════
+    await writeFixtureB({ retired: true });
+
+    const svg = await generateSld(PROJECT_B);
+    const pdf = await exportPdfSheet(PROJECT_B);
+    expect(svg.status, `diagram failed: ${JSON.stringify(svg.json).slice(0, 300)}`).toBe(200);
+    expect(pdf.status, `export failed: ${JSON.stringify(pdf.json).slice(0, 300)}`).toBe(200);
+
+    for (const label of ['Total Modules', 'Strings']) {
+      const a = cellAfter(svg.svg, label);
+      const b = cellAfter(pdf.svg, label);
+      expect(a, `the diagram has no '${label}' cell`).not.toMatch(/absent|no value/);
+      expect(b, `the exported sheet has no '${label}' cell`).not.toMatch(/absent|no value/);
+      expect(b, `the two sheets disagree on '${label}': diagram='${a}' exported='${b}'`).toBe(a);
+    }
+
+    // 🚨 THE MODULE COUNT IS RAY'S, NOT A DEFAULT. "37 MODULES MEANS 37 MODULES."
+    expect(cellAfter(svg.svg, 'Total Modules')).toBe('37');
+
+    // 🚨 AND THE ASSIGNMENT ADDS UP TO IT. A schedule that states a layout which does not sum to
+    // the module count printed two rows above is the defect this cell was rewritten for.
+    const strings = cellAfter(svg.svg, 'Strings');
+    const nums = [...strings.matchAll(/\d+/g)].map(n => Number(n[0]));
+    if (/\//.test(strings)) {
+      // itemised form, "5: 9 / 9 / 9 / 8 / 2 panels" — drop the leading count
+      const parts = nums.slice(1);
+      expect(parts.reduce((a, b) => a + b, 0),
+        `the stated assignment '${strings}' does not sum to 37`).toBe(37);
+    }
+
+    // Neither sheet may name a standalone inverter this design does not have.
+    for (const [name, sheet] of [['diagram', svg.svg], ['exported', pdf.svg]] as const) {
+      expect(sheet, `the ${name} names a Fronius`).not.toMatch(/Fronius/i);
+      expect(sheet, `the ${name} draws a standalone Tesla Solar Inverter`)
+        .not.toMatch(/Tesla Solar Inverter/i);
+      expect(sheet, `the ${name} does not state the DC-coupled architecture`)
+        .toMatch(/DC COUPLED/i);
+    }
+  });
+
+  it('🚨 the stated max system voltage is inside the Powerwall 3 DC input window', async () => {
+    await writeFixtureB({ retired: true });
+    const svg = await generateSld(PROJECT_B);
+    const v = cellAfter(svg.svg, 'Max System Voltage (690.7(A))');
+    const volts = Number((v.match(/([\d.]+)/) ?? [])[1]);
+    expect(Number.isFinite(volts), `no max system voltage on the sheet (got '${v}')`).toBe(true);
+
+    // The device's published limit, from the canonical model rather than a literal here.
+    const { loadElectricalProject } = await import('@/lib/electrical/loadElectricalProject');
+    const { dcStringLimits } = await import('@/lib/electrical/dcStringLimits');
+    const m = (await loadElectricalProject(PROJECT_B, USER_ID))!.model;
+    const lim = dcStringLimits(m.topology, m.solarCoupling);
+    expect(lim, 'the DC window is not projected from the storage').toBeTruthy();
+
+    expect(volts,
+      `the sheet states ${volts} V against the storage's ${lim!.maxDcVoltage} V PV input maximum`)
+      .toBeLessThanOrEqual(lim!.maxDcVoltage);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
 describe('🚨 FIXTURE A — the ordinary house, which had no fixture at all', () => {
   it('200 A / 1 MSP / 1 Gateway is a real topology the engine accepts', async () => {
     const { buildNormalResidence200A } = await import('@/lib/electrical/fixtures/normalResidence200a');

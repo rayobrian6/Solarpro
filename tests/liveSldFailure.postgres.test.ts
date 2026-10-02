@@ -375,8 +375,22 @@ describe('🚨 THE LIVE SHEET, through the real route, with the wrong architectu
     // The real limits live on the instances and are restored on read by `hydrateInstances`.
     // ═══════════════════════════════════════════════════════════════════
     const { svg } = await generateSld();
-    const voc125 = svg.match(/String Voc × 1\.25[\s\S]{0,400}?(\d+(?:\.\d+)?) V/);
-    expect(voc125, 'no corrected string voltage on the sheet').toBeTruthy();
+    // ═══════════════════════════════════════════════════════════════════
+    // 🚨 THIS GUARD USED TO READ THE WRONG QUANTITY.
+    //
+    // It matched the sheet's `String Voc × 1.25` row and required it to be ≤ 550 V. That row was
+    // the β-corrected string voltage multiplied by the NEC 690.7 TABLE factor — the two
+    // alternative methods applied in sequence, which this repo's own cold-Voc law forbids
+    // ("no sheet may hand-roll `voc * 1.25` when β is resolvable",
+    // lib/permit/utils/panelSpecs.ts:135). No β-corrected design can satisfy that at a sensible
+    // string length, so the guard was demanding a defect: it passed only while the engine was
+    // ALSO being handed a shorter layout than the design.
+    //
+    // The sheet now prints one `Max System Voltage (690.7(A))` row, and that is the figure the
+    // Powerwall 3's 550 V PV input actually constrains.
+    // ═══════════════════════════════════════════════════════════════════
+    const voc125 = svg.match(/Max System Voltage \(690\.7\(A\)\)[\s\S]{0,400}?(\d+(?:\.\d+)?) V/);
+    expect(voc125, 'no maximum system voltage on the sheet').toBeTruthy();
     const v = Number(voc125![1]);
     // The Powerwall 3's published input maximum. A string above it cannot be built.
     expect(v, `String Voc × 1.25 is ${v} V, above the Powerwall 3's 550 V PV input maximum`)
