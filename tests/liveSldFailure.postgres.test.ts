@@ -268,6 +268,77 @@ describe('🚨 THE LIVE SHEET, through the real route, with the wrong architectu
     expect(svg).toContain('BACKUP FEEDER');
   });
 
+  // ═══════════════════════════════════════════════════════════════════════
+  // 🚨 THE CALCULATION BLOCKS MUST DESCRIBE THE SYSTEM DRAWN ABOVE THEM.
+  //
+  // Ray, after reading the sheet: "the same drawing says 'PV DC coupled to PW3' at the top and
+  // '11.40 kW string inverter / 60 A fused disconnect / ATS run' in the calculation blocks below.
+  // That's exactly the kind of internally contradictory permit sheet we're trying to eliminate."
+  // ═══════════════════════════════════════════════════════════════════════
+  it('🚨 no ATS run, no ATS check, and no FAIL row for a project with no ATS', async () => {
+    // The law: no physical path → no conductor run → no engineering check → no FAIL row.
+    // The route derived an ATS rating from the SERVICE rating, so a 400 A service manufactured a
+    // 400 A transfer switch, sized its feeder, failed the ampacity check, and printed the failure.
+    const { svg } = await generateSld();
+    for (const forbidden of ['ATS_TO_MSP_RUN', 'ATS LOAD TERMINALS', 'ATS LOAD TO MSP']) {
+      expect(svg.includes(forbidden),
+        `the sheet contains '${forbidden}' for a project with no transfer switch`).toBe(false);
+    }
+    // 🚨 AND NO FAILING ROW AT ALL. A permit sheet carrying a ✗ for equipment nobody has is worse
+    // than one carrying no row: it sends an installer looking for a device that does not exist.
+    expect(svg.includes('✗ FAIL'), 'the sheet prints a FAIL row').toBe(false);
+  });
+
+  it('🚨 the AC calculations describe the storage, not a phantom PV inverter', async () => {
+    const { svg } = await generateSld();
+    // The invented inverter's numbers, which were printed under "AC SYSTEM CALCULATIONS".
+    expect(svg.includes('11.40 kW'), 'the phantom inverter output is still printed').toBe(false);
+    expect(svg.includes('A FUSED DISCO'),
+      'the sheet names a fused disconnect from the inverter chain').toBe(false);
+    // What it says instead: the storage, from the same summary the equipment schedule uses.
+    expect(svg).toContain('ESS AC Amps');
+    expect(svg).toContain('192 A (4 inverting units)');
+    expect(svg).toContain('ESS OCPD / unit');
+  });
+
+  it('🚨 DC/AC ratio is reported as not applicable, not recomputed with a new denominator', async () => {
+    // Ray: "Do not simply replace 11.40 kW with 46 kW… Do not preserve a misleading metric merely
+    // because the UI already has a box for it." The ratio measures clipping at a dedicated PV
+    // inverter; there is none, so the row says so and the governing limit is stated instead.
+    const { svg } = await generateSld();
+    expect(svg).toContain('N/A — DC COUPLED');
+    expect(svg).toContain('PV vs ESS DC input');
+    // The published PV STC capacity of the four units — a manufacturer figure, not arithmetic.
+    expect(svg).toContain('80.0 kW published');
+  });
+
+  it('🚨 the conductor schedule describes the system drawn above it', async () => {
+    const { svg } = await generateSld();
+    // Every AC conductor on the drawing has a row: cabinets → generation panel, panel → gateway,
+    // gateway → backed-up panel. Excluding the engine's inverter-chain runs had left ONE row
+    // describing only the DC strings, which is as contradictory as inventing rows.
+    expect(svg).toContain('ESS PV DC INPUTS');
+    expect(svg).toContain('ESS AC OUTPUT (2 UNITS)');
+    expect(svg).toContain('Generation panel — System 1');
+    expect(svg).toContain('Generation panel — System 2');
+    expect(svg).toContain('MSP #1');
+    expect(svg).toContain('MSP #2');
+
+    // 🚨 AND NO CONDUCTOR GAUGE SolarPro DID NOT SIZE. The backup feeder carries a 200 A panel;
+    // borrowing the PV circuit's #6 AWG for it would be a gauge an installer pulls wire from.
+    expect(svg).toContain('SIZE FOR 200 A — NOT EVALUATED');
+    expect(svg).toContain('SIZE FOR 60 A — NOT EVALUATED');
+    // The one the graph DOES record is printed as a real gauge.
+    expect(svg).toContain('#1 AWG THWN-2');
+  });
+
+  it('🚨 every OCPD on the sheet names the device it protects', async () => {
+    const { svg } = await generateSld();
+    // The tap row used to borrow the PV inverter's breaker. It now names the generation panel's own
+    // output OCPD, which is the device that actually performs that function here.
+    expect(svg).toContain('GEN PANEL OUTPUT');
+  });
+
   it('the sheet carries an electrical revision', async () => {
     const { json } = await generateSld();
     expect(String(json.electricalRevision ?? '').startsWith('ELEC-')).toBe(true);

@@ -4262,7 +4262,17 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     ? 'PV DC COUPLED TO POWERWALL 3'
     : esc(input.topologyType.replace(/_/g, ' '));
   parts.push(txt(tcx, DY+26,
-    `${esc(input.address)}  |  ${_archLabel}  |  ${input.totalModules} MODULES  |  ${Number(input.acOutputKw).toFixed(2)} kW AC`,
+    // 🚨 THE SUBTITLE'S AC FIGURE FOLLOWS THE ARCHITECTURE BESIDE IT.
+    //
+    // `_archLabel` already says "PV DC COUPLED TO POWERWALL 3" here, and the next clause printed the
+    // auto-selected string inverter's 11.40 kW — the two halves of one sentence describing two
+    // different systems. The storage is the AC source on this architecture.
+    `${esc(input.address)}  |  ${_archLabel}  |  ${input.totalModules} MODULES  |  ${(() => {
+      if (!_couplingIsDc) return Number(input.acOutputKw).toFixed(2);
+      const inv = (_svcTopology?.storage ?? []).filter(u => u.role === 'inverter-unit');
+      if (inv.length === 0 || inv.some(u => u.continuousOutputA == null)) return '—';
+      return ((inv.reduce((n, u) => n + (u.continuousOutputA as number), 0) * 240) / 1000).toFixed(2);
+    })()} kW AC`,
     {sz:F.sub, anc:'middle', fill:'#444'}));
 
   // ── Schematic border ──────────────────────────────────────────────────────
@@ -5650,6 +5660,11 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   // box, so k reaches ~1.0 and the same 8.67 uu type prints at ~6.5 pt with no
   // change to a single value.
   const _cbStack = !!input.calcBandStacked;
+  // The calculation band's own view of the architecture. `_dcCoupled` further up is block-scoped to
+  // the service section; the calc panels need the same fact and must not be able to disagree with
+  // it, so both read the one field the canonical model records on the graph.
+  const _cbDcCoupled = (input.serviceTopology?.solarCoupling ?? null) === 'dc-coupled-storage';
+  const _cbNotEstablished = '— NOT COMPUTED';
   // 1340 uu inside a 1420 uu canvas. Chosen so the planset's 1402.88 uu drawing
   // box scales it at k = 0.988 instead of 0.7036 -- the SAME 8.67 uu type then
   // prints at 6.4 pt rather than 4.57, with no value and no row changed.
@@ -5771,7 +5786,33 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       ['DC OCPD / String',`${op} A`],
       ['DC Wire Gauge',`${resolvedDcWire}`],
       ['Total DC Power',`${dcKw.toFixed(2)} kW`],
-      ['DC/AC Ratio',`${dar.toFixed(2)}`],
+      // ═══════════════════════════════════════════════════════════════════
+      // 🚨 DC/AC RATIO IS NOT APPLICABLE TO A DC-COUPLED SYSTEM.
+      //
+      // The ratio measures PV DC watts against a dedicated PV INVERTER's AC watts — it is how you
+      // reason about clipping at that inverter. A DC-coupled job has no such inverter: the strings
+      // land on the storage's own MPPTs, and what bounds them is the manufacturer's PV INPUT limit,
+      // not an AC output.
+      //
+      // Ray: "Do not simply replace 11.40 kW with 46 kW… Do not preserve a misleading metric merely
+      // because the UI already has a box for it." Dividing the array by the batteries' AC rating
+      // would be arithmetic with no engineering meaning behind it — a number an AHJ could reproduce
+      // and still learn nothing from.
+      //
+      // So the row says it does not apply, and the row beneath it states the limit that DOES govern:
+      // the published PV STC capacity of the units the strings actually land on. Where the catalogue
+      // has not published those limits, it says NOT EVALUATED rather than inventing a denominator.
+      ...(_cbDcCoupled
+        ? ([
+            ['DC/AC Ratio', 'N/A — DC COUPLED'],
+            ['PV vs ESS DC input', (() => {
+              const inv = (_svcTopology?.storage ?? []).filter(u => u.role === 'inverter-unit');
+              const lim = inv.find(u => u.pvInputLimits)?.pvInputLimits ?? null;
+              if (!lim || inv.some(u => !u.pvInputLimits)) return NOT_COMPUTED;
+              return `${dcKw.toFixed(2)} kW / ${(lim.maxStcKw * inv.length).toFixed(1)} kW published`;
+            })()],
+          ] as [string, string][])
+        : ([['DC/AC Ratio', `${dar.toFixed(2)}`]] as [string, string][])),
     ];
     const rh = _cbStack ? PRH_MAX : Math.min(PRH_MAX, (CALC_H-17)/rows.length);
     PCH1 = _cbStack ? PBH + rows.length * rh + 6 : CALC_H;
@@ -5791,10 +5832,45 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   const PY2 = _cbStack ? PY1 + PCH1 + _stackGap : CALC_Y;
   const _frame2 = parts.push('') - 1;
   parts.push(txt(PX2+PCW/2, PY2+10, 'AC SYSTEM CALCULATIONS', {sz:PFH, bold:true, anc:'middle', fill:WHT}));
+  // ═══════════════════════════════════════════════════════════════════════
+  // 🚨 ON A DC-COUPLED JOB THE AC SOURCE IS THE STORAGE, NOT A PV INVERTER.
+  //
+  // `input.acOutputKw` / `acOutputAmps` / `resolvedAcOCPD` describe a dedicated PV inverter, and on
+  // Ray's sheet they printed 11.40 kW / 24 A / 60 A — the output of a Tesla string inverter the
+  // ecosystem picker auto-selected and nobody chose. The drawing above them said PV DC COUPLED TO
+  // POWERWALL 3 with four cabinets at 48 A. One sheet, two systems.
+  //
+  // The AC source here is the inverting storage, and its figures come from the SAME summary the
+  // equipment schedule prints ("192 A (4 inverting units)") rather than from a second computation —
+  // a calculation block that disagrees with the schedule beside it is the whole defect in miniature.
+  //
+  // 🚨 AND THERE IS NO SINGLE SYSTEM "AC OCPD" ON THIS ARCHITECTURE. Each cabinet has its own
+  // device and each generation panel has its own output OCPD; collapsing them into one number would
+  // name a breaker that does not exist. Ray: "Every displayed OCPD/disconnect value must identify
+  // the physical device it protects or isolates." So the row names the per-unit device when they
+  // agree, and says so when they do not.
+  const _dcAcRows: [string, string][] = (() => {
+    if (!_cbDcCoupled) return [];
+    const inv = (_svcTopology?.storage ?? []).filter(u => u.role === 'inverter-unit');
+    const amps = inv.some(u => u.continuousOutputA == null) ? null
+      : inv.reduce((n, u) => n + (u.continuousOutputA as number), 0);
+    const kw = amps === null ? null : (amps * 240) / 1000;
+    const ocpds = [...new Set(inv.map(u => u.ocpdA).filter(n => n != null))] as number[];
+    return [
+      ['ESS AC Output', kw === null ? _cbNotEstablished : `${kw.toFixed(2)} kW`],
+      ['ESS AC Amps', amps === null ? _cbNotEstablished
+        : `${amps} A (${inv.length} inverting unit${inv.length === 1 ? '' : 's'})`],
+      ['ESS OCPD / unit', ocpds.length === 1 ? `${ocpds[0]} A` : ocpds.length === 0
+        ? _cbNotEstablished : `${Math.min(...ocpds)}–${Math.max(...ocpds)} A`],
+    ];
+  })();
+
   const acRows: [string,string][] = [
-    ['AC Output (kW)',`${Number(input.acOutputKw).toFixed(2)} kW`],
-    ['AC Output Amps',`${input.acOutputAmps} A`],
-    ['AC OCPD (125%)',`${resolvedAcOCPD} A`],
+    ...(_cbDcCoupled ? _dcAcRows : [
+      ['AC Output (kW)',`${Number(input.acOutputKw).toFixed(2)} kW`] as [string,string],
+      ['AC Output Amps',`${input.acOutputAmps} A`] as [string,string],
+      ['AC OCPD (125%)',`${resolvedAcOCPD} A`] as [string,string],
+    ]),
     ['AC Wire Gauge',`${resolvedAcWire}`],
     ['AC Conduit Type',resolvedAcCondType],
     ['Conduit Size',resolvedAcConduit||'—'],
@@ -5855,7 +5931,29 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     })() : isSupplySide ? [
       ['Interconnection','Supply Side Tap'] as [string,string],
       ['NEC Reference','NEC 705.11'] as [string,string],
-      ['Tap OCPD',`${pvBreakerAmps} A FUSED DISCO`] as [string,string],
+      // 🚨 "TAP OCPD — 60 A FUSED DISCO" NAMED A DEVICE THAT IS NOT ON THIS DESIGN.
+      //
+      // `pvBreakerAmps` is the PV INVERTER's breaker, and the fused disconnect it describes belongs
+      // to the standalone-inverter chain. On a DC-coupled job that chain does not exist: the storage
+      // reaches the service through its generation panel and its gateway. Printing an inverter's
+      // breaker as the tap OCPD asserts a fused disconnect an inspector will look for and not find.
+      //
+      // Ray: "Do not automatically replace the old value with another disconnect unless the actual
+      // device performs that electrical function. Every displayed OCPD/disconnect value must
+      // identify the physical device it protects or isolates." So this names the generation panel's
+      // own output OCPD where the graph records one, and otherwise says the device has not been
+      // established. It does not borrow a number from elsewhere on the sheet.
+      ...(_cbDcCoupled
+        ? (() => {
+            const outs = [...new Set((_svcTopology?.aggregationPanels ?? [])
+              .map(a => a.outputOcpdA).filter(n => n != null))] as number[];
+            return [['Tap OCPD', outs.length === 1
+              ? `${outs[0]} A — GEN PANEL OUTPUT`
+              : outs.length > 1
+                ? `${Math.min(...outs)}–${Math.max(...outs)} A — GEN PANEL OUTPUTS`
+                : 'NOT ESTABLISHED — TAP DEVICE REQUIRED'] as [string,string]];
+          })()
+        : [['Tap OCPD',`${pvBreakerAmps} A FUSED DISCO`] as [string,string]]),
       ['Backfed Breaker','N/A — LINE-SIDE TAP'] as [string,string],
       ['120% Rule','N/A — Supply Side'] as [string,string],
     ] : [
@@ -6155,6 +6253,73 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     ];
   }
 
+  // ═══════════════════════════════════════════════════════════════════════
+  // 🚨 THE STORAGE SIDE HAS CONDUCTORS TOO, AND THE SIZING ENGINE DOES NOT MODEL THEM.
+  //
+  // With engine runs present the schedule is built from those, and the engine only knows the
+  // string-inverter chain — so once its inverter runs were excluded for a DC-coupled job, the table
+  // was left with ONE row describing the DC strings, while the drawing above it showed four
+  // cabinets feeding two generation panels feeding two gateways feeding two panels. A schedule that
+  // omits every AC conductor on the sheet is as contradictory as one that invents them.
+  //
+  // These rows come from the GRAPH, which is the only thing that knows how many systems there are
+  // and what each panel's output device is. Ray: "The calculation blocks and conductor schedule must
+  // describe the same system drawn above them."
+  //
+  // Appended only when the engine path ran AND the job is DC-coupled: the hand-built branch above
+  // already carries them, and every other architecture is untouched.
+  if (input.runs && input.runs.length > 0 && _couplingIsDc && _svcTopology) {
+    const _egc = resolvedEgcGauge.replace('#', '').replace(' AWG', '');
+    const _aggs = _svcTopology.aggregationPanels ?? [];
+    const _byDomain = new Map(_svcTopology.domains.map(d => [d.id, d]));
+    _aggs.forEach((agg, i) => {
+      const n = i + 1;
+      const units = (agg.inputs ?? []).length;
+      const perUnit = [...new Set((agg.inputs ?? []).map(x => x.ocpdA).filter(v => v != null))] as number[];
+      const dom = agg.domainId ? _byDomain.get(agg.domainId) : undefined;
+      // 🚨 A CONDUCTOR SolarPro HAS NOT SIZED IS NOT PRINTED AS IF IT HAD.
+      //
+      // `resolvedAcWire` is the PV AC feeder's gauge. Borrowing it for a storage branch put "#6 AWG"
+      // behind a 60 A device by luck and, on the backup feeders below, "#6 AWG" behind a 200 A one —
+      // #6 is about 65 A. A schedule row an installer pulls wire from must not contain a gauge that
+      // came from a different circuit. Where the graph records the conductor, it is printed; where it
+      // does not, the row says so. Ray: "No fake arithmetic."
+      const _ampsFor = (ocpd: number) => ocpd > 0 ? `SIZE FOR ${ocpd} A — NOT EVALUATED` : 'NOT EVALUATED';
+      sRows.push({
+        id: `A-${n}a`, from: `ESS AC OUTPUT (${units} UNIT${units === 1 ? '' : 'S'})`,
+        to: agg.label || `GENERATION PANEL ${n}`,
+        conductors: _ampsFor(perUnit.length === 1 ? perUnit[0] : 0),
+        conduit: `${resolvedAcCondType} ${resolvedAcConduit}`,
+        fill: 0, amp: 0, ocpd: perUnit.length === 1 ? perUnit[0] : 0, vdrop: 0, len: 0, pass: true,
+      });
+      sRows.push({
+        id: `A-${n}b`, from: agg.label || `GENERATION PANEL ${n}`,
+        to: dom?.gateway.label || 'BACKUP GATEWAY',
+        // This one the graph DOES record — the generation panel's own output conductor.
+        conductors: agg.outputConductorGauge
+          ? `${agg.outputConductorGauge} THWN-2 + 1×#${_egc} GRN`
+          : _ampsFor(agg.outputOcpdA ?? 0),
+        conduit: `${resolvedAcCondType} ${resolvedAcConduit}`,
+        fill: 0, amp: 0, ocpd: agg.outputOcpdA ?? 0, vdrop: 0, len: 0, pass: true,
+      });
+    });
+    // And the backup feeder out of each gateway to the panel it backs up — the run Tesla's manual
+    // puts on the Gateway's BACKUP terminals, downstream of the contactor.
+    _svcTopology.domains.forEach((d, i) => {
+      const panel = _svcTopology.panels.find(p => d.backedUpPanelIds.includes(p.id));
+      if (!panel) return;
+      sRows.push({
+        id: `B-${i + 1}`, from: d.gateway.label || 'BACKUP GATEWAY', to: panel.label || 'MSP',
+        // The backup feeder carries the whole backed-up panel, so it is sized from that panel's
+        // main — a 200 A feeder, not the PV circuit's #6. SolarPro has not sized it, and says so.
+        conductors: panel.mainBreakerA
+          ? `SIZE FOR ${panel.mainBreakerA} A — NOT EVALUATED` : 'NOT EVALUATED',
+        conduit: `${resolvedAcCondType} ${resolvedAcConduit}`,
+        fill: 0, amp: 0, ocpd: panel.mainBreakerA ?? 0, vdrop: 0, len: 0, pass: true,
+      });
+    });
+  }
+
   // 🚨 NO ROW HERE FOR A STANDALONE GATEWAY'S SUPPLY CIRCUIT. This band is
   // the SLD PDF's conductor schedule; the permit package suppresses it and
   // prints PV-4B.1, built from engine runs — and no engine run carries the
@@ -6253,7 +6418,18 @@ function titleBlockSvg(input: SLDProfessionalInput, dcKw: number): string {
   const sysRows: [string,string][] = [
     ['TOPOLOGY', _tbDc ? 'PV DC COUPLED TO POWERWALL 3' : input.topologyType.replace(/_/g,' ')],
     ['DC SIZE',`${dcKw.toFixed(2)} kW`],
-    ['AC OUTPUT',`${Number(input.acOutputKw).toFixed(2)} kW`],
+    // 🚨 THE AC OUTPUT OF A DC-COUPLED SYSTEM IS ITS STORAGE'S, NOT A PV INVERTER'S.
+    //
+    // The title block already deferred to the coupling for TOPOLOGY and MODEL two lines above, and
+    // then printed `input.acOutputKw` — the auto-selected string inverter's 11.40 kW — right beneath
+    // them. Same block, same sheet, two architectures.
+    ['AC OUTPUT', (() => {
+      if (!_tbDc) return `${Number(input.acOutputKw).toFixed(2)} kW`;
+      const inv = (_tbTopo?.storage ?? []).filter(u => u.role === 'inverter-unit');
+      if (inv.length === 0 || inv.some(u => u.continuousOutputA == null)) return 'NOT EVALUATED';
+      const a = inv.reduce((n, u) => n + (u.continuousOutputA as number), 0);
+      return `${((a * 240) / 1000).toFixed(2)} kW`;
+    })()],
     ['MODULES',`${input.totalModules} × ${input.panelWatts}W`],
     // On a DC-coupled design the inverter IS the battery, so the two rows name it rather than an
     // AC-coupled product the job does not contain.

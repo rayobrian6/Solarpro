@@ -804,8 +804,30 @@ export async function POST(req: NextRequest) {
       (body.generatorOutputBreakerA ? Number(body.generatorOutputBreakerA) :
         (_genKw > 0 ? Math.ceil((_genKw * 1000 / 240) * 1.25 / 5) * 5 : undefined));
 
-    const _atsAmpRating = body.atsAmpRating ? Number(body.atsAmpRating) :
-      (body.mainPanelAmps ? Number(body.mainPanelAmps) : undefined);
+    // ═══════════════════════════════════════════════════════════════════════
+    // 🚨 AN ATS RATING COMES FROM AN ATS. THERE IS NO OTHER SOURCE.
+    //
+    // This read `body.atsAmpRating ?? body.mainPanelAmps`, so a project with NO transfer switch was
+    // handed one rated at the whole service. `computeSystem` emits `ATS_TO_MSP_RUN` on exactly
+    // `atsAmpRating > 0` (lib/computed-system.ts:2449), sized it for 400 A continuous behind a 500 A
+    // OCPD, the conductor failed ampacity — and a permit sheet printed
+    //
+    //     ATS_TO_MSP_RUN   ATS LOAD TERMINALS → MAIN SERVICE PANEL   ✗ FAIL
+    //
+    // for a device nobody has, nobody selected and the drawing above does not contain.
+    //
+    // Ray's law: "No physical path → no conductor run → no engineering check → no FAIL row."
+    //
+    // 🚨 AND THE CANONICAL MIGRATION MADE IT WORSE, NOT BETTER. Projecting the graph's service
+    // rating onto `mainPanelAmps` means that fallback now fires on every project with a service
+    // graph, where before it needed the page to have posted a panel rating. A fabrication downstream
+    // of a correction is still the correction's problem.
+    //
+    // Universal, not scoped: a project that HAS an ATS posts `atsAmpRating` from `config.atsId`
+    // (app/engineering/page.tsx:4160 and five siblings), so every real transfer switch is unaffected
+    // on every brand. This removes an invention, not a capability.
+    // ═══════════════════════════════════════════════════════════════════════
+    const _atsAmpRating = body.atsAmpRating ? Number(body.atsAmpRating) : undefined;
 
     // ── Run computeSystem() — single call, all electrical values derived here ──
     let cs: ComputedSystem | null = null;
