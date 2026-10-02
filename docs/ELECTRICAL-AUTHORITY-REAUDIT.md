@@ -263,3 +263,125 @@ gate, and it is the only gate in that state.
   `topologyReachesEveryOutput`, `topologyAuthoredThenAgreesEverywhere.postgres`
 - Full regression — see the session report
 - **Live acceptance — NEEDS RAY.**
+
+---
+
+# Addendum — Ray's live acceptance found real defects (2026-10-02)
+
+The first re-audit closed with `NEEDS RAY — LIVE PROJECT ACCEPTANCE`. He ran it, and it **failed**.
+The SLD showed Enphase; he changed the ecosystem to Tesla to clear it; SolarPro then drew a STRING
+INVERTER sheet with a "Tesla Solar Inverter 5.7kW" he never selected, no generation panels, and 50 A
+OCPD on every Powerwall.
+
+This addendum records what that proved, including the parts that were **my own defects introduced by
+the authority work itself**.
+
+## A-1 — A saved instance was a frozen copy of the catalogue
+
+`topologyAuthoring.ts:242` resolves manufacturer facts onto an instance when it is BUILT. Correct, and
+it is what keeps the graph catalogue-free. What was missing: **nothing ever re-resolved them**. One
+cause, two faces:
+
+- `ocpdA` stayed 50. Repairing "the canonical equipment authority, not SLD text" achieves nothing if
+  the authority is never consulted again.
+- `pvInputLimits` was **absent** — the field postdates the project, and the parser omits it
+  all-or-none. `takesPvOnDc` tests exactly that field, so the model could **never** derive
+  `dc-coupled-storage` for a legacy project, and fell through to "an inverter is selected ⇒
+  ac-coupled". It also emitted a canonicalization patch, so generating once would have **recorded the
+  wrong architecture permanently**.
+
+Fixed by `lib/electrical/hydrateInstances.ts`, applied in the one read path.
+
+## A-2 — The ecosystem picker auto-selected an inverter nobody chose
+
+Traced end to end with the sizing engine executed: `EcosystemPicker.tsx:152` auto-selects
+`kit.stringInverters[0]` with no click → `tesla-solar-inverter-3p8k` → `sizingEngine.ts:1129` silently
+upsizes it to 2 × 5.7 kW = 11.40 kW → written to config → autosaved. The picker file already stated the
+rule, for the Envoy: *"a default recorded by an apply would read as the installer's decision on every
+sheet."*
+
+## A-3 — Branch ordering decided the architecture
+
+`else if (hasExternalInverter)` sat **above** the DC branch, so when both were true the ORDER decided
+it. Now a conflict with no patch, proven symmetric in six adversarial cases.
+
+## A-4 — 🚨 The canonical migration CAUSED a defect
+
+`sld/route.ts` read `atsAmpRating ?? mainPanelAmps`. Projecting the graph's service rating onto
+`mainPanelAmps` meant that fallback fired on every project with a graph — manufacturing a 400 A
+transfer switch, sizing its feeder, failing ampacity, and printing `ATS_TO_MSP_RUN … ✗ FAIL` for a
+device nobody has. **A fabrication downstream of a correction is the correction's problem.**
+
+## A-5 — The calculation blocks described a different system than the drawing
+
+`AC OUTPUT 11.40 kW`, `AC Output Amps 24 A`, `DC/AC 1.43`, `Tap OCPD 60 A FUSED DISCO` — all from the
+phantom inverter, on a sheet whose title block read PV DC COUPLED TO POWERWALL 3. Found in **three**
+places, one at a time, by re-reading the rendered sheet after each fix; the subtitle was last.
+
+**DC/AC ratio was retired, not re-based.** It measures clipping at a dedicated PV inverter; there is
+none. It now reads `N/A — DC COUPLED`, with the governing limit stated beneath it:
+`PV vs ESS DC input — 16.28 kW / 80.0 kW published`.
+
+## A-6 — Two more found only by rendering the sheet and reading it
+
+- The conductor schedule listed `DC DISCONNECT → STRING INVERTER → AC DISCONNECT` (a **second**
+  schedule, fed by the sizing engine, which had not learned about coupling). Excluding those left it
+  with ONE row, so the storage-side runs are now built from the graph — and a conductor SolarPro has
+  not sized reads `SIZE FOR 200 A — NOT EVALUATED` rather than borrowing the PV circuit's #6 AWG.
+- The equipment schedule still listed `DC Disconnect — 25A Fused`, one line away from the AC
+  disconnect the DC-coupled block already removed.
+
+## A-7 — A claimed landing with no panel
+
+`storageConnection: 'der-aggregation-panel'` makes the busbar check PASS because the storage "left".
+Nothing checked that it **arrived**. Reachable in production: the wizard creates the panels with the
+answer, but the inspector and the panel let an operator set the arrangement alone — which is the path
+an EXISTING project takes. Now a FAIL naming what is missing.
+
+## Provenance — the four classes
+
+`parseServiceTopology(raw, mode)` where mode is `'active' | 'as-issued' | 'as-sent'`:
+
+| mode | manufacturer facts | why |
+|---|---|---|
+| `active` (default) | refreshed, and itemised in `refreshes` | a correction must reach the editable project |
+| `as-issued` | untouched | an issued drawing stays traceable to the data it was issued with |
+| `as-sent` | untouched | validating a payload and storing something else is a different act |
+
+Proven both directions on the same stored bytes: as-issued returns `ocpdA 50` with no `pvInputLimits`;
+active returns `60` with the limits restored and itemises `ocpdA 50→60` four times.
+
+## Blast radius — measured, after Ray's "must not change other brands and other scenarios"
+
+Exactly **one** catalogue row publishes `pvInput` / `outputConfigurations` / `internalPanelboard`: the
+Tesla Powerwall 3 (and Gateway 3). The conflict branch is PW3-only by construction; the numeric refresh
+is gated on a verified manufacturer TABLE (a bare scalar does not outrank a saved value); the gateway
+refresh is purely additive; the picker prop defaults undefined; the renderer changes are gated on
+`_couplingIsDc`. The ATS fix is universal and removes an invention, not a capability.
+
+## Guards proven by restoring the defect
+
+| defect restored | result |
+|---|---|
+| ATS fabricated from the service rating | red — "contains 'ATS_TO_MSP_RUN' for a project with no transfer switch" |
+| calc band's coupling flag forced false | red — all three calculation guards together |
+| `pvInputLimits` hydration removed | red — **16 tests**, the entire live failure returns |
+| numeric refresh gate forced false | red — "the stale 50 A OCPD reached the drawing" |
+| `hasExternalInverter` precedence restored | red — incl. "expected 'written' to be 'nothing-to-do'" (the poisoning resumes) |
+| ecosystem auto-select restored | red — names `tesla-solar-inverter-3p8k` |
+| wizard radio stops creating panels | red — 2 |
+| landing check removed | red — "a design whose storage lands nowhere reported no failure at all" |
+| BOM identity match → partNumber only | red — "expected 8 to be 4" |
+| service-rating projection removed | red — 40 A breaker where 80 A belongs |
+
+## Still open
+
+- **§11 root.** The architecture DECISIONS now come from the canonical model (interconnection, ATS,
+  service rating, storage counts and backfeed). `computeSystem` still *computes* a PV-inverter chain
+  for a DC-coupled job; its outputs are suppressed or replaced at the point of use rather than never
+  produced. Honest statement: the symptoms are cut, the root is not.
+- **Ray's project still has no generation panels in its graph.** The wizard now asks the question
+  properly and the inspector can set it, and A-7 makes the half-answered state fail loudly — but the
+  panels appear only when he answers. A migration that created them would be inventing equipment.
+- `EcosystemPicker`'s battery default (visible, toggleable, no demonstrated defect) — recorded, not
+  changed.
