@@ -125,9 +125,23 @@ export async function POST(req: NextRequest) {
       // project. A read that fails leaves it absent, which draws the legacy single-service tail —
       // the honest outcome, because a half-read graph is worse than no graph.
       try {
-        const { readServiceTopology } = await import('@/lib/db/serviceTopology');
-        const _stored2 = await readServiceTopology(String(body.projectId), _auth.user.id);
-        if (_stored2) {
+        // 🚨 ONE ASSEMBLY, NOT THIS ROUTE'S OWN. `loadElectricalProject` reads the graph, the
+        // catalogue selection, the engineering overrides and the module count in one query and
+        // composes them with `resolveElectricalProject` — the SAME composition the engineering
+        // page, the permit route and the BOM route consume.
+        //
+        // This route used to read the graph itself and then hand the resolver an `inverterId`
+        // taken from the POST BODY. That is how the live defect survived its first repair: the
+        // page posts whatever its React state held, so the coupling could resolve one way on the
+        // Diagram tab and another way in the plan set, from the same project, on the same day.
+        // Ray: "They must consume the same canonical composition used by the engineering page and
+        // SLD. One project. Multiple projections."
+        const { loadElectricalProject, persistElectricalCanonicalization } =
+          await import('@/lib/electrical/loadElectricalProject');
+        const _loaded = await loadElectricalProject(String(body.projectId), _auth.user.id);
+        if (_loaded?.model.topology) {
+          const _model = _loaded.model;
+          const _stored2 = { topology: _model.topology };
           // ── 🚨 THE CANONICAL ELECTRICAL MODEL DECIDES THE ARCHITECTURE ────────
           //
           // Not the renderer, and not whatever the equipment picker was last left on. Ray, after
@@ -144,25 +158,37 @@ export async function POST(req: NextRequest) {
           // inverter and a DC-coupled graph, the resolver returns no patch and the sheet keeps
           // whatever was recorded, with the conflict reported — because picking a side silently is
           // how one drawing came to contain two architectures.
-          const { resolveElectricalProject } = await import('@/lib/electrical/projectModel');
-          const _model = resolveElectricalProject({
-            topology: _stored2.topology,
-            selectedEquipment: {
-              inverterId: (body as Record<string, unknown>).inverterId as string ?? null,
-              moduleCount: Number((body as Record<string, unknown>).totalModules ?? 0) || null,
-            },
-          });
           body.serviceTopology = _model.canonicalizationPatch
             ? { ..._stored2.topology, ..._model.canonicalizationPatch }
             : _stored2.topology;
+
+          // 🚨 THE SHEET CARRIES THE REVISION IT WAS DRAWN FROM.
+          //
+          // Ray: "Generated electrical artifacts must carry the project/electrical revision they
+          // were generated from… Do not silently display revision A as current revision B." The
+          // stamp travels with the response and onto the stored artifact, so the Diagram tab can
+          // compare what it is showing against what the project now is.
+          body.electricalRevision = _loaded.revision;
+
           console.log('[sld/POST] electrical model:'
+            + ` revision=${_loaded.revision}`
             + ` coupling=${_model.solarCoupling ?? 'UNRESOLVED'}`
             + ` (${_model.solarCouplingProvenance.source})`
+            + ` service=${_model.serviceRatedAmps ?? 'NOT ESTABLISHED'}`
+            + ` storage=${_model.storage.invertingUnitCount}`
+            + ` gateways=${_model.storage.gatewayCount}`
+            + ` genPanels=${_model.storage.perSystemGenerationPanelCount}`
             + ` conflicts=${_model.conflicts.length}`);
           for (const c of _model.conflicts) {
             console.warn(`[sld/POST] ELECTRICAL CONFLICT — ${c.fact}: `
               + c.claims.map(x => `${x.source} says ${x.says}`).join(' | '));
           }
+
+          // ── The one-time canonicalization, persisted ──────────────────────
+          // A migration, not a mirror: once `solarCoupling` is recorded the model stops emitting a
+          // patch, so this runs once per project and then never again. Ray: "Resolve once. Persist
+          // canonical decision + provenance. Do not infer forever on every read."
+          void persistElectricalCanonicalization(_loaded, _auth.user.id);
         }
       } catch (e) {
         console.warn('[sld/POST] service topology unreadable; drawing the legacy service tail', e);

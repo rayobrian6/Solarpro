@@ -107,6 +107,15 @@ export interface ElectricalProjectModel {
   serviceRatedAmps: number | null;
   serviceProvenance: ElectricalProvenance;
   storage: ResolvedStorage;
+  /**
+   * 🚨 HOW MANY PV MODULES THE DESIGN PLACES — exposed because the model READS it.
+   *
+   * It decides the storage-only case below, and it is a real electrical fact besides: the DC string
+   * sizing and the array table on the sheet both move with it. A value the resolver consumes but
+   * hides is a value `electricalRevision` cannot fingerprint, which would let a 72-module sheet
+   * survive a 36-module project with a green CURRENT badge. `null` ⇒ no design has been read.
+   */
+  moduleCount: number | null;
   /** Real persisted disagreements. Empty ⇒ the project is internally consistent. */
   conflicts: ElectricalConflict[];
   /**
@@ -333,6 +342,7 @@ export function resolveElectricalProject(
     serviceRatedAmps,
     serviceProvenance,
     storage,
+    moduleCount,
     conflicts,
     // 🚨 NEVER WRITE A CANONICALISATION AWAY FROM A CONFLICT. If the stores disagree, the decision
     // belongs to a human, and persisting a derived value would make the disagreement invisible.

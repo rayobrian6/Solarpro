@@ -761,6 +761,95 @@ export async function POST(req: NextRequest) {
       body.system.inverters = [];
     }
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // 🚨 THE CANONICAL ELECTRICAL MODEL — READ ONCE, HERE, BEFORE ANYTHING
+    //    DOWNSTREAM GETS TO INFER AN ARCHITECTURE FOR ITSELF.
+    //
+    // `docs/ELECTRICAL-AUTHORITY-MAP.md` found this route holding the largest share of the problem:
+    // it had ZERO references to the service graph, and `PermitInput.project.serviceTopology` had
+    // two readers and NO writer. That is not a dormant feature — it means
+    // `renderServiceTopologySchedule` returned '' on every real package ever generated, so a 400 A
+    // service with two 200 A MSPs, two gateways and four Powerwalls printed through the legacy
+    // single-panel path while a perfectly good schedule page sat unreachable behind a null check.
+    //
+    // It also means this route resolved the PV architecture itself: `engineering_config.inverters`,
+    // then `layouts.design_electrical`, then `type === 'micro' ? … : 'string'`, beside a
+    // `topology: 'microinverter'` default a few lines above. Three stores and a guess, none of them
+    // the project's recorded coupling.
+    //
+    // Ray: "permit deriving service facts independently" is on the adversarial-attack list, and
+    // "They must consume the same canonical composition used by the engineering page and SLD."
+    // So the graph and the coupling arrive here from `loadElectricalProject` — the same assembly,
+    // the same resolver, the same answer — and the backfill below becomes what it always claimed to
+    // be: a repair for a stale POST, not an architecture decision.
+    //
+    // Non-fatal by design: a project with no graph generates exactly as it did before. Absence of a
+    // graph is a legacy project, not an error.
+    // ═══════════════════════════════════════════════════════════════════════
+    let _electrical: Awaited<ReturnType<
+      typeof import('@/lib/electrical/loadElectricalProject')['loadElectricalProject']
+    >> = null;
+    if (projectId && isValidUUID(projectId)) {
+      try {
+        const { loadElectricalProject } = await import('@/lib/electrical/loadElectricalProject');
+        _electrical = await loadElectricalProject(projectId, user.id);
+        const _m = _electrical?.model;
+        if (_m?.topology) {
+          // 🚨 THE GRAPH REACHES THE PACKAGE. The one write this field has ever had.
+          //
+          // The canonicalised coupling travels with it: a project saved before `solarCoupling`
+          // existed must not reach the plan set with a null the sheet then fills by guessing. A
+          // CONFLICT is never canonicalised — the package keeps what was recorded and the conflict
+          // is logged and refused below.
+          body.project.serviceTopology = _m.canonicalizationPatch
+            ? { ..._m.topology, ..._m.canonicalizationPatch }
+            : _m.topology;
+
+          // 🚨 THE PACKAGE CARRIES THE ELECTRICAL REVISION IT WAS BUILT FROM.
+          (body.project as { electricalRevision?: string }).electricalRevision = _electrical!.revision;
+
+          console.log('[permit/POST] canonical electrical model:'
+            + ` revision=${_electrical!.revision}`
+            + ` coupling=${_m.solarCoupling ?? 'UNRESOLVED'}`
+            + ` (${_m.solarCouplingProvenance.source})`
+            + ` service=${_m.serviceRatedAmps ?? 'NOT ESTABLISHED'} A`
+            + ` storage=${_m.storage.invertingUnitCount}`
+            + ` expansions=${_m.storage.expansionUnitCount}`
+            + ` gateways=${_m.storage.gatewayCount}`
+            + ` genPanels=${_m.storage.perSystemGenerationPanelCount}`
+            + ` conflicts=${_m.conflicts.length}`);
+        } else {
+          console.log('[permit/POST] no service graph on this project —'
+            + ' the legacy single-service path draws it, as before.');
+        }
+      } catch (e) {
+        console.warn('[permit/POST] canonical electrical read skipped (non-fatal):', (e as Error)?.message);
+      }
+    }
+
+    // 🚨 AN ELECTRICAL CONFLICT REFUSES THE PACKAGE.
+    //
+    // This is the one surface where surfacing-and-continuing is the wrong answer. The Diagram tab
+    // is a working view and can show a conflict beside the drawing; a permit package is a sealed
+    // assertion submitted to an AHJ, and asserting an architecture the project itself contradicts is
+    // precisely what the audit was called to stop. Ray: "Do not silently choose either side."
+    // Refusing names both claims and the question, so the operator knows exactly what to settle.
+    if (_electrical && _electrical.model.conflicts.length > 0) {
+      const _cs = _electrical.model.conflicts;
+      for (const c of _cs) {
+        console.error(`[permit/POST] ELECTRICAL CONFLICT — ${c.fact}: `
+          + c.claims.map(x => `${x.source} says ${x.says}`).join(' | '));
+      }
+      return NextResponse.json({
+        success: false,
+        error: 'This project holds contradictory electrical facts. Resolve them before generating a '
+          + 'permit package.',
+        code: 'ELECTRICAL_CONFLICT',
+        electricalRevision: _electrical.revision,
+        conflicts: _cs.map(c => ({ fact: c.fact, claims: c.claims, question: c.question })),
+      }, { status: 409 });
+    }
+
     // ── Backfill inverters/strings from the PERSISTED design when the POSTed
     // payload is empty or a single-string placeholder ────────────────────────
     // The planset is built from the Engineering page's live React state at click
@@ -770,11 +859,32 @@ export async function POST(req: NextRequest) {
     // which GUARANTEES a complete shape (every field the renderer reads), so a
     // partial/stale record can never feed malformed data into generation. Any
     // failure → keep the original payload (never breaks the permit).
+    // 🚨 AND IT MAY NOT RUN AT ALL WHEN THE PROJECT HAS NO SEPARATE AC INVERTER.
+    //
+    // This is the exact path by which a legacy mirror beats the canonical model. On a DC-coupled
+    // Tesla job there IS no AC inverter: the strings terminate on the Powerwalls' own DC inputs. But
+    // `engineering_config.inverters` can still hold the Enphase array from before the design changed
+    // — nothing deletes it — and this block reads that store, finds it "richer than the
+    // placeholder", and writes 37 microinverters plus `topology: 'microinverter'` onto a package
+    // whose graph says DC-coupled storage. That is the live defect, arriving through the permit door
+    // rather than the sidebar's.
+    //
+    // The canonical coupling closes it. `dc-coupled-storage` and `storage-only` both mean "no
+    // separate inverter exists", so there is nothing for a backfill to repair, and a store that
+    // claims otherwise is stale by definition. `ac-coupled-inverter` and an unresolved coupling both
+    // leave the backfill working exactly as it did — a legitimate AC-coupled Tesla job still gets
+    // its inverters, because Tesla storage does not delete Enphase.
+    const _coupling = _electrical?.model.solarCoupling ?? null;
+    const _noExternalInverter = _coupling === 'dc-coupled-storage' || _coupling === 'storage-only';
     try {
       const invs = (body.system.inverters as any[]) || [];
       const postedStrings = invs.reduce((s, inv) => s + ((inv?.strings?.length) ?? 0), 0);
       const placeholder = invs.length === 0 || (invs.length === 1 && ((invs[0]?.strings?.length ?? 0) <= 1));
-      if (placeholder && projectId && isValidUUID(projectId)) {
+      if (_noExternalInverter) {
+        console.log('[permit/POST] inverter backfill SKIPPED —'
+          + ` canonical coupling is '${_coupling}', so this project has no separate AC inverter.`
+          + ' A legacy engineering_config inverter array cannot reach the package.');
+      } else if (placeholder && projectId && isValidUUID(projectId)) {
         const sql = await getDbReady();
         let derived: ReturnType<typeof normalizeToPermitInverters> = null;
 

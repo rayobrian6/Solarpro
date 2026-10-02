@@ -165,6 +165,62 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json();
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // 🚨 HOW MANY DEVICES ARE THERE? THE GRAPH ANSWERS, NOT THE POST BODY.
+    //
+    // `docs/ELECTRICAL-AUTHORITY-MAP.md` found `lib/bom-engine-v4.ts` with zero references to the
+    // service graph, and this route taking `batteryCount` straight off the request — a scalar the
+    // Engineering page computed from `selected_equipment`. Ray's standing ruling on this exact
+    // class: "Device COUNT = capacity, never array/brand count", and on the attack list: "price
+    // engine counting catalog selection rather than physical instances."
+    //
+    // A catalogue selection says WHICH Powerwall. It cannot say how many are installed, which
+    // Gateway each pair lands in, or that there are two generation panels — those are relationships,
+    // and relationships live in the graph. So the canonical model supplies the counts and the posted
+    // scalar becomes what it should always have been: a fallback for a project with no graph.
+    //
+    // 🚨 AND THE COUNT IS NOT COPIED BETWEEN SURFACES. Ray prohibited "copying ServiceTopology
+    // values into System Config". This is not that: nothing is written back, the override is
+    // in-memory for this one generation, and `reconcileQuantities` below PROVES the lines agree with
+    // the graph rather than trusting that they do.
+    // ═══════════════════════════════════════════════════════════════════════
+    let _electrical: Awaited<ReturnType<
+      typeof import('@/lib/electrical/loadElectricalProject')['loadElectricalProject']
+    >> = null;
+    if (isReadableProjectId(body?.projectId)) {
+      try {
+        const { loadElectricalProject } = await import('@/lib/electrical/loadElectricalProject');
+        _electrical = await loadElectricalProject(String(body.projectId), _auth.user.id);
+        const _m = _electrical?.model;
+        if (_m?.topology) {
+          const _posted = Number(body.batteryCount) || 0;
+          // Inverting units are the AC-producing cabinets; expansions are energy only and are
+          // emitted as their own lines by `bomFromServiceTopology` (with their harnesses), so they
+          // must NOT be added here or the engine would order a Powerwall per expansion.
+          const _canonical = _m.storage.invertingUnitCount;
+          if (_canonical !== _posted) {
+            console.warn('[bom/POST] battery count corrected from the service graph:'
+              + ` posted=${_posted} canonical=${_canonical}`
+              + ` (${_m.storage.provenance.source}) — the graph owns physical multiplicity.`);
+          }
+          body.batteryCount = _canonical;
+          console.log('[bom/POST] canonical electrical model:'
+            + ` revision=${_electrical!.revision}`
+            + ` coupling=${_m.solarCoupling ?? 'UNRESOLVED'}`
+            + ` storage=${_canonical} expansions=${_m.storage.expansionUnitCount}`
+            + ` gateways=${_m.storage.gatewayCount}`
+            + ` genPanels=${_m.storage.perSystemGenerationPanelCount}`
+            + ` conflicts=${_m.conflicts.length}`);
+          for (const c of _m.conflicts) {
+            console.warn(`[bom/POST] ELECTRICAL CONFLICT — ${c.fact}: `
+              + c.claims.map(x => `${x.source} says ${x.says}`).join(' | '));
+          }
+        }
+      } catch (e) {
+        console.warn('[bom/POST] canonical electrical read skipped (non-fatal):', (e as Error)?.message);
+      }
+    }
+
     // ── The RECORDED combiner, from the project store ─────────────────────────
     // The page posts its own copy of the installer's pick, and its read of the
     // store fails open — one dropped GET and it posts nothing. The permit route
@@ -458,6 +514,97 @@ export async function POST(req: NextRequest) {
 
     // ── STEP 1: V4 BOM — electrical only (STAGE 5b removed) ──
     const v4Result = generateBOMV4(input);
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // 🚨 THE SERVICE-GRAPH EQUIPMENT, AND THE RECONCILIATION THAT PROVES IT.
+    //
+    // `generateBOMV4` builds racking, conductors, conduit and the PV equipment it knows about. It
+    // has never known about a backup gateway, a per-system generation/combiner panel or an inline
+    // utility isolation switch, because those are relationships in the graph rather than catalogue
+    // picks on a project. `bomFromServiceTopology` has existed for exactly this and had ZERO
+    // production callers — Ray: "The test named topologyReachesEveryOutput is not allowed to remain
+    // a helper-level fiction."
+    //
+    // 🚨 THEN IT IS RECONCILED, NOT TRUSTED. `reconcileQuantities` compares what the lines say
+    // against what the graph says, product by product. Ray's output-consistency law: "There must not
+    // be drawing = 2, BOM = 1 ever again." A disagreement is REPORTED with both numbers — not
+    // rounded toward the graph, not warned about once and forgotten — and travels in the response so
+    // the BOM tab can show it.
+    //
+    // Deduplicated by part number: where the engine already emitted a product the graph also names,
+    // the graph's instance count wins, because it counts things that exist.
+    let _topologyBomLines = 0;
+    const _quantityDisagreements: Array<{ productId: string; topology: number; consumer: number }> = [];
+    if (_electrical?.model.topology) {
+      try {
+        const { bomFromServiceTopology, pricedQuantitiesFromBom } = await import('@/lib/bom/topologyBom');
+        const { reconcileQuantities } = await import('@/lib/electrical/topologyEquipment');
+        const _t = _electrical.model.topology;
+        const _tBom = bomFromServiceTopology(_t);
+
+        // 🚨 MATCHED ON PRODUCT IDENTITY, NOT ON THE PART-NUMBER STRING.
+        //
+        // Found by probing the real route output, and it was a double count I had just introduced:
+        // `lib/bom-engine-v4.ts` keys its storage line by the CATALOGUE part number ('PW3-US') while
+        // `lib/bom/topologyBom.ts` keys by the PRODUCT ID ('tesla-powerwall-3'). Comparing
+        // partNumber to partNumber found no collision, so the sheet got four Powerwalls as PW3-US
+        // AND four as tesla-powerwall-3 — eight cabinets on one BOM, both priced. That is exactly
+        // the "duplicate battery counts" failure on Ray's own attack list, arriving through the fix
+        // for it.
+        //
+        // Both sides fill `manufacturer` and `model` from the same catalogue, so that pair IS the
+        // product identity and it bridges the two keying schemes.
+        //
+        // WHICH LINE SURVIVES: the ENGINE's. It carries the orderable catalogue part number and the
+        // pricing hooks a distributor row matches on. The graph supplies the COUNT and the basis —
+        // ownership exactly as Ray set it: the catalogue says which product, the graph says how many.
+        const identity = (i: { partNumber: string; manufacturer?: string; model?: string }): string =>
+          `${String(i.manufacturer ?? '').trim().toLowerCase()}|${String(i.model ?? '').trim().toLowerCase()}`;
+        const _byPart = new Map(v4Result.items.map(i => [i.partNumber, i]));
+        const _byIdentity = new Map<string, typeof v4Result.items[number]>();
+        for (const i of v4Result.items) {
+          const key = identity(i);
+          // Only a real identity counts — a line with no manufacturer/model must not match another.
+          if (key !== '|' && !_byIdentity.has(key)) _byIdentity.set(key, i);
+        }
+
+        const _added: typeof _tBom.items = [];
+        for (const line of _tBom.items) {
+          const prior = _byPart.get(line.partNumber)
+            ?? (identity(line) !== '|' ? _byIdentity.get(identity(line)) : undefined);
+          if (!prior) { _added.push(line); continue; }
+          if (prior.partNumber !== line.partNumber) {
+            console.log('[bom/POST] service-graph line folded into the engine\'s catalogue line:'
+              + ` ${line.partNumber} → ${prior.partNumber}`
+              + ` (same product: ${line.manufacturer} ${line.model})`);
+          }
+          if (prior.quantity !== line.quantity) {
+            console.warn('[bom/POST] quantity corrected from the service graph:'
+              + ` ${prior.partNumber} engine=${prior.quantity} graph=${line.quantity}`);
+            prior.quantity = line.quantity;
+            prior.derivedFrom = line.derivedFrom;
+          }
+        }
+        if (_added.length > 0) {
+          v4Result.items.push(..._added);
+          v4Result.totalLineItems = v4Result.items.length;
+          _topologyBomLines = _added.length;
+          console.log('[bom/POST] service-graph equipment added:', _added.length, 'line(s) —',
+            _added.map(i => `${i.partNumber}×${i.quantity}`).join(', '));
+        }
+
+        // 🚨 THE PROOF. Pricing multiplies these exact quantities, so if they disagree with the
+        // graph, pricing disagrees with the drawing.
+        _quantityDisagreements.push(...reconcileQuantities(_t, pricedQuantitiesFromBom(_tBom)));
+        if (_quantityDisagreements.length > 0) {
+          console.error('[bom/POST] 🚨 QUANTITY DISAGREEMENT — the BOM and the service graph do not'
+            + ' agree:', _quantityDisagreements
+              .map(d => `${d.productId}: graph=${d.topology} bom=${d.consumer}`).join('; '));
+        }
+      } catch (e) {
+        console.warn('[bom/POST] service-graph BOM skipped (non-fatal):', (e as Error)?.message);
+      }
+    }
 
     // ── STEP 2: Structural BOM — fence/ground geometry (if applicable) ──
     // MASTER TASK: Inject structural items directly into V4 result, preserving
@@ -769,6 +916,20 @@ export async function POST(req: NextRequest) {
         complianceNotes: finalResult.complianceNotes,
         warnings: [...finalResult.warnings, ...validation.warnings],
       },
+      // 🚨 THE ELECTRICAL STATE THIS BOM WAS BUILT FROM, and whether it agrees with the graph.
+      // `quantityDisagreements` is empty on a healthy project; non-empty it is a failure somebody
+      // has to resolve, which is why it is reported rather than silently corrected.
+      electrical: _electrical ? {
+        revision: _electrical.revision,
+        coupling: _electrical.model.solarCoupling,
+        storageUnits: _electrical.model.storage.invertingUnitCount,
+        expansionUnits: _electrical.model.storage.expansionUnitCount,
+        gateways: _electrical.model.storage.gatewayCount,
+        generationPanels: _electrical.model.storage.perSystemGenerationPanelCount,
+        topologyBomLines: _topologyBomLines,
+        quantityDisagreements: _quantityDisagreements,
+        conflicts: _electrical.model.conflicts,
+      } : undefined,
       merge: (sysType !== 'roof' || hybridPartition) ? {
         v4ItemCount: v4Result.totalLineItems,
         structuralItemCount: structuralCount,
