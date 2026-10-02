@@ -1126,6 +1126,16 @@ export async function POST(req: NextRequest) {
           'X-System-Model':      systemModel ? 'computed' : 'fallback',
           'X-Layout-Source':     sizingResult ? (layoutCandidate ? 'layoutCandidate' : 'sizingResult') : 'body',
           'X-Sld-Degraded':      sldDegraded ? 'true' : 'false',
+          // 🚨 THE REVISION TRAVELS ON THE RAW-SVG PATH TOO.
+          //
+          // The JSON path carries `electricalRevision` in the body, and the Diagram tab's raw-SVG
+          // branch was already written to read this header — but nothing set it, so a sheet fetched
+          // as SVG arrived UNSTAMPED and the staleness badge could only ever say "generated before
+          // revision tracking". Two response shapes, one of them silently unstamped, is the same
+          // class of gap as a field with readers and no writer.
+          ...((body as { electricalRevision?: string }).electricalRevision
+            ? { 'X-Electrical-Revision': String((body as { electricalRevision?: string }).electricalRevision) }
+            : {}),
         },
       });
     }

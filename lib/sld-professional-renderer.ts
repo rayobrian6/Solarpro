@@ -3260,7 +3260,25 @@ export function renderTopologyServiceSection(opts: {
       highest = Math.min(highest, gwBox.top);
       lowest = Math.max(lowest, gwBox.bottom);
 
-      const feederLabel = `${branch.label} — ${amps(panel?.mainBreakerA ?? branch.ratedAmps)} FEEDER`;
+      // ═══════════════════════════════════════════════════════════════════
+      // 🚨 THIS CONDUCTOR IS THE BACKUP FEEDER, NOT THE SERVICE BRANCH.
+      //
+      // It used to read `${branch.label} — 200 A FEEDER`, which named the SERVICE PATH on a run that
+      // is downstream of the gateway's contactor. Tesla's Gateway 3 manual is explicit: "All loads
+      // and Tesla equipment breakers are downstream of the Gateway 3 contactor", and the load panel
+      // lands on the Gateway's BACKUP terminals. The service branch is the conductor on the OTHER
+      // side of the gateway — the one running out to the distribution, with the utility isolation
+      // switch in line on it.
+      //
+      // So the old label asserted that the MSP sat on the service branch, i.e. that the gateway was
+      // beside the path rather than in it. The geometry was right all along; the words contradicted
+      // it, and words on a permit drawing are read by an inspector.
+      //
+      // Shorter than what it replaces, deliberately: this callout is wrapped into the column gap and
+      // has already overrun it once. Which branch it belongs to is unambiguous from the panel box it
+      // terminates on and from the equipment schedule.
+      // ═══════════════════════════════════════════════════════════════════
+      const feederLabel = `BACKUP FEEDER — ${amps(panel?.mainBreakerA ?? branch.ratedAmps)}`;
 
       // GATEWAY → PANEL feeder
       if (panelBox) {
@@ -5998,8 +6016,31 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     // for exactly this reason (MICRO_FACTORY_LEAD_IDS); the schedule now agrees.
     // On a string/optimizer system ROOF_RUN is not emitted at all, so this is
     // scoped to isMicro and cannot hide a genuine DC string segment.
-    const _scheduleExcluded = new Set(
-      isMicro ? ['MSP_TO_UTILITY_RUN', 'ROOF_RUN'] : ['MSP_TO_UTILITY_RUN']);
+    // ═══════════════════════════════════════════════════════════════════
+    // 🚨 A DC-COUPLED JOB HAS NO INVERTER CHAIN, SO IT HAS NO INVERTER-CHAIN RUNS.
+    //
+    // Found by reading the sheet this route actually returned. The schedule below has TWO sources:
+    // the posted/derived `input.runs` (this branch) and the hand-built rows further down. The
+    // hand-built rows already learned about DC coupling; these did not — so the run table still
+    // listed `DC DISCONNECT → STRING INVERTER` and `STRING INVERTER → AC DISCONNECT` on a sheet
+    // whose own title block reads "PV DC COUPLED TO POWERWALL 3" and which draws no inverter at all.
+    // Those two rows were the last place the invented inverter survived.
+    //
+    // The run ids come from the sizing engine, which models a string-inverter chain because that is
+    // the only chain it knows; on a DC-coupled job the strings terminate on the cabinets' DC inputs
+    // and these segments do not exist to pull.
+    //
+    // 🚨 SCOPED TO `_couplingIsDc` AND NOTHING ELSE. Ray: "Must not change the SLD logic for other
+    // brands and other scenarios." Every micro, string and optimizer sheet gets the same rows it got
+    // before, byte for byte.
+    // ═══════════════════════════════════════════════════════════════════
+    const _dcCoupledInverterChainRuns = [
+      'DC_DISCO_TO_INV_RUN', 'INV_TO_DISCO_RUN', 'DISCO_TO_METER_RUN',
+    ];
+    const _scheduleExcluded = new Set([
+      ...(isMicro ? ['MSP_TO_UTILITY_RUN', 'ROOF_RUN'] : ['MSP_TO_UTILITY_RUN']),
+      ...(_couplingIsDc ? _dcCoupledInverterChainRuns : []),
+    ]);
     sRows = input.runs.filter(r=>!_scheduleExcluded.has(r.id)).map(r => {
       let cond = '';
       if (r.conductorBundle && r.conductorBundle.length > 0) {
@@ -6014,8 +6055,16 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
         const eg = r.egcGauge.replace('#','').replace(' AWG','');
         cond = `${r.conductorCount}×#${g} ${r.insulation} + 1×#${eg} GND`;
       }
+      // 🚨 ON A DC-COUPLED JOB THE STRINGS END AT THE CABINETS, NOT AT A DC DISCONNECT.
+      //
+      // The sizing engine labels this run's far end "DC DISCONNECT" because a string-inverter chain
+      // is the only chain it models. There is no DC disconnect on this sheet — the conductor drawn
+      // above this table runs from the roof J-box to the Powerwalls' PV inputs — so the schedule was
+      // naming a device the drawing does not contain. Scoped to `_couplingIsDc`; every other sheet
+      // keeps the engine's label verbatim.
+      const _to = _couplingIsDc && r.id === 'DC_STRING_RUN' ? 'ESS PV DC INPUTS' : r.to;
       return {
-        id:r.id, from:r.from, to:r.to, conductors:cond,
+        id:r.id, from:r.from, to:_to, conductors:cond,
         conduit:r.isOpenAir?'OPEN AIR':`${r.conduitType} ${r.conduitSize}`,
         fill:r.conduitFillPct??0,
         amp:Math.round((r.continuousCurrent??0)*100)/100,

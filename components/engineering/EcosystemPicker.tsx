@@ -108,6 +108,26 @@ export interface EcosystemPickerProps {
    *  A host that reads the store is the host that writes it; one prop, so the
    *  two cannot be wired apart. */
   currentCombinerId?: string | null;
+  /**
+   * 🚨 DOES THIS PROJECT'S STORAGE TAKE THE PV ON ITS OWN DC INPUTS?
+   *
+   * True ⇒ the strings terminate on the batteries and there is NO standalone PV inverter. The
+   * picker then offers inverters but selects NONE by default, because on such a project an
+   * auto-selected inverter is not a suggestion — it is an invention.
+   *
+   * This exists because of a live failure on Ray's real job. Changing the ecosystem to Tesla
+   * auto-selected `tesla-solar-inverter-3p8k` here with no click, the sizing engine silently
+   * "upsized" it to 2 × 5.7 kW = 11.40 kW, it was written to config and autosaved to
+   * `engineering_config` — and the canonical model then derived `ac-coupled-inverter` from an
+   * inverter nobody chose, so the sheet drew a string-inverter chain across a four-Powerwall job.
+   *
+   * The principle is already stated ten lines above for the Envoy: "a default recorded by an apply
+   * would read as the installer's decision on every sheet". The inverter broke the rule its own
+   * neighbour documents.
+   *
+   * Undefined/false ⇒ unchanged behaviour for every other brand and every other project.
+   */
+  pvCoupledToStorage?: boolean;
 }
 
 export default function EcosystemPicker({
@@ -115,6 +135,7 @@ export default function EcosystemPicker({
   appliedBrand,
   hidden,
   currentCombinerId,
+  pvCoupledToStorage,
 }: EcosystemPickerProps) {
   const [expandedBrand, setExpandedBrand] = useState<string | null>(null);
   const [selectedInverter, setSelectedInverter] = useState<string>('');
@@ -149,14 +170,24 @@ export default function EcosystemPicker({
   // decision on every sheet (`combinerBasis: 'project-selected'`).
   const autoSelections = useMemo(() => {
     if (!expandedBrand || !kit) return { inverter: '', battery: '', evCharger: '' };
-    const firstInv =
+    // 🚨 NO INVERTER DEFAULT WHEN THE STORAGE TAKES THE PV ON DC.
+    //
+    // Same reasoning the Envoy row already carries: a default recorded by an apply reads as the
+    // installer's decision on every sheet. On a DC-coupled project there is no standalone inverter
+    // to decide about, so defaulting one does not express a preference — it invents equipment, and
+    // the canonical model then derives the whole architecture from it.
+    //
+    // The inverters stay LISTED and selectable: a legitimately AC-coupled Tesla install is real,
+    // and this removes the default, not the choice.
+    const firstInv = pvCoupledToStorage ? '' : (
       kit.microinverters[0]?.id ||
       kit.stringInverters[0]?.id ||
       kit.optimizers[0]?.id ||
-      '';
+      ''
+    );
     const firstBattery = includeBattery ? (kit.batteries[0]?.id || '') : '';
     return { inverter: firstInv, battery: firstBattery, evCharger: '' };
-  }, [expandedBrand, kit, includeBattery]);
+  }, [expandedBrand, kit, includeBattery, pvCoupledToStorage]);
 
   // Sync selections from auto-selection when not in expert mode
   useMemo(() => {

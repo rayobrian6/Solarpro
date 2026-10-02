@@ -64,17 +64,59 @@ describe('🚨 CASE A — unambiguous evidence canonicalises once, with provenan
     expect(m.canonicalizationPatch).toEqual({ solarCoupling: 'dc-coupled-storage' });
   });
 
-  it('a project that HAS chosen an inverter resolves to AC coupled — Tesla does not delete Enphase', () => {
-    // Ray: "Do not assume Tesla storage always eliminates Enphase because legitimate AC-coupled
-    // Tesla installations exist." Storage present, inverter present, no coupling recorded.
+  // ══════════════════════════════════════════════════════════════════════════
+  // 🚨 THIS TEST USED TO PIN THE LIVE DEFECT, AND IT PASSED ALL THE WAY TO RAY'S SCREEN.
+  //
+  // It asserted that a legacy graph holding four Powerwall 3 plus a selected Enphase inverter
+  // resolves to `ac-coupled-inverter`, with NO conflict, and emits a patch persisting that. Every
+  // one of those assertions was green while the live sheet drew an Enphase chain beside Tesla
+  // hardware — and the patch meant the first generate would have RECORDED the wrong architecture
+  // permanently.
+  //
+  // The old branch was `else if (hasExternalInverter)` checked BEFORE the DC case, so the ORDERING
+  // decided it. An ordering is not evidence. Ray: "That is a real persisted conflict. Do not
+  // silently choose either side."
+  //
+  // What the comment below got right and the assertions got wrong: Tesla storage does NOT delete
+  // Enphase. The answer to that is to ASK, not to pick Enphase by default — and the AC case still
+  // resolves cleanly whenever the storage cannot take the strings (the next test).
+  // ══════════════════════════════════════════════════════════════════════════
+  it('🚨 an inverter BESIDE PV-capable storage is a conflict, not a silent AC answer', () => {
     const m = resolveElectricalProject({
       topology: legacyNoCoupling(),
       selectedEquipment: { inverterId: 'enphase-iq8plus', inverterType: 'micro', moduleCount: 37 },
     });
-    expect(m.solarCoupling).toBe('ac-coupled-inverter');
+    expect(m.solarCoupling, 'the ordering of two branches decided a real engineering question')
+      .toBeNull();
     expect(m.hasExternalInverter).toBe(true);
+
+    const c = m.conflicts.find(x => x.fact === 'How the PV is coupled')!;
+    expect(c, 'contradictory evidence produced no conflict').toBeTruthy();
+    expect(c.claims.map(x => x.source).sort())
+      .toEqual(['selected-equipment', 'service-topology']);
+    expect(c.question).toContain('DC inputs');
+
+    // 🚨 AND NOTHING IS WRITTEN. A patch here is what would have made the wrong architecture
+    // permanent on Ray's project the moment he generated a sheet.
+    expect(m.canonicalizationPatch).toBeNull();
+  });
+
+  it('an inverter with NO PV-capable storage still resolves to AC coupled, cleanly', () => {
+    // The legitimate AC-coupled case, and the proof the fix above is not "Tesla always wins". Strip
+    // the DC inputs: now nothing contradicts the inverter and the evidence settles it.
+    const t = legacyNoCoupling();
+    const noDcInputs: ServiceTopology = {
+      ...t, storage: t.storage.map(u => ({ ...u, pvInputLimits: null })),
+    };
+    const m = resolveElectricalProject({
+      topology: noDcInputs,
+      selectedEquipment: { inverterId: 'enphase-iq8plus', inverterType: 'micro', moduleCount: 37 },
+    });
+    expect(m.solarCoupling).toBe('ac-coupled-inverter');
     expect(m.conflicts).toEqual([]);
     expect(m.canonicalizationPatch).toEqual({ solarCoupling: 'ac-coupled-inverter' });
+    // Four Powerwalls and 37 micros still coexist — the storage did not vanish.
+    expect(m.storage.invertingUnitCount).toBe(4);
   });
 
   it('no modules at all resolves to storage-only', () => {

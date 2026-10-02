@@ -10877,6 +10877,23 @@ function EngineeringPageInner() {
                     <EcosystemPicker
                       appliedBrand={(config as any).ecosystemBrand}
                       currentCombinerId={projectCombinerId}
+                      // 🚨 THE PROJECT'S STORAGE TAKES THE PV ON DC — SO DO NOT DEFAULT AN INVERTER.
+                      //
+                      // Read from the canonical model, never from the brand profile:
+                      // `lib/system/brandProfiles/tesla.ts` declares `topology: 'string'` and lists
+                      // four PV string inverters, and `solarCoupling` does not appear anywhere in
+                      // `lib/system/` — so the ecosystem layer CANNOT express "PV into the Powerwall
+                      // DC inputs". Asking it would get the same wrong answer that produced the
+                      // defect.
+                      //
+                      // `takesPvOnDc` is true only where the catalogue publishes `pvInput`, which
+                      // today is the Tesla Powerwall 3 alone. Every other brand's picker is
+                      // unchanged.
+                      pvCoupledToStorage={
+                        electrical?.solarCoupling === 'dc-coupled-storage'
+                        || (svcTopology?.storage ?? []).some(
+                             u => u.role === 'inverter-unit' && !!u.pvInputLimits)
+                      }
                       onApply={(payload: EcosystemApplyPayload) => {
                         const updates: any = { ecosystemBrand: payload.brand };
                         if (payload.selections.inverterId) {

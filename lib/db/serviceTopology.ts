@@ -58,6 +58,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { getDbReady, isValidUUID } from '@/lib/db-neon';
+import { hydrateTopologyFromCatalogue } from '@/lib/electrical/hydrateInstances';
 import type {
   ServiceTopology, ServiceBranch, PanelBoard, BackupDomain, StorageUnit,
   ProtectiveDevice, GatewayInstance, DeviceRole,
@@ -450,7 +451,7 @@ export function parseServiceTopology(raw: unknown): StoredServiceTopology | null
 
   const phase = t.service && isObj(t.service) ? t.service.phase : null;
 
-  return {
+  const parsed: StoredServiceTopology = {
     schemaVersion: numOrNull(v.schemaVersion) ?? SERVICE_TOPOLOGY_SCHEMA_VERSION,
     updatedAt: str(v.updatedAt),
     topology: {
@@ -511,6 +512,39 @@ export function parseServiceTopology(raw: unknown): StoredServiceTopology | null
       },
     },
   };
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // 🚨 REFRESH THE MANUFACTURER FACTS ON EVERY INSTANCE, ON EVERY READ.
+  //
+  // This is the one read path, so this is the one place it can be done once.
+  //
+  // `topologyAuthoring.ts` resolves the catalogue onto an instance when it is BUILT — correctly,
+  // because that is what keeps `serviceTopology.ts` free of catalogue reach and lets
+  // `projectModel.ts` give the same answer on the server and in the browser. But nothing ever
+  // re-resolved them, so a project kept whatever the catalogue said on the day it was authored.
+  //
+  // That froze two things onto Ray's real project and produced the live failure:
+  //   · `ocpdA: 50` on every Powerwall 3, from before the catalogue was corrected to Tesla's
+  //     published 60 A. Repairing "the canonical equipment authority, not SLD text" changes nothing
+  //     if the authority is never consulted again.
+  //   · NO `pvInputLimits` at all, because the field postdates the project. `projectModel.ts` tests
+  //     exactly that field to decide whether a unit takes PV on its DC inputs, so the model could
+  //     never derive `dc-coupled-storage` for it — and fell through to "an inverter is selected ⇒
+  //     ac-coupled", which is how four Powerwall 3 came to be drawn with an Enphase chain and then
+  //     an invented Tesla string inverter.
+  //
+  // Design decisions are untouched: which product, which output configuration, every id, label,
+  // role, host attachment and relationship. Only the numbers the manufacturer owns are refreshed.
+  // See `lib/electrical/hydrateInstances.ts` for the full argument, including why a differing value
+  // is NOT treated as a deliberate override.
+  // ═══════════════════════════════════════════════════════════════════════
+  const { topology: hydrated, refreshes } = hydrateTopologyFromCatalogue(parsed.topology);
+  if (refreshes.length > 0) {
+    console.log('[serviceTopology] refreshed', refreshes.length,
+      'manufacturer fact(s) from the catalogue on read:',
+      refreshes.map(r => `${r.instanceId}.${r.field} ${r.was}→${r.now}`).join(', '));
+  }
+  return { ...parsed, topology: hydrated };
 }
 
 /** Serialise for storage. Whole graph, no projection, no scalars. */

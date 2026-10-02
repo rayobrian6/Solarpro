@@ -220,13 +220,55 @@ export function resolveElectricalProject(
           + 'inverter".',
       });
     }
+  } else if (hasExternalInverter && pvCapableUnits.length > 0) {
+    // ══════════════════════════════════════════════════════════════════════
+    // 🚨 CASE B, IN THE DERIVATION PATH — AND THIS WAS THE LIVE DEFECT.
+    //
+    // A separate inverter is selected AND the storage publishes its own PV inputs. BOTH placements
+    // are physically possible, so the persisted evidence does not settle where the strings land.
+    //
+    // This branch used to be `else if (hasExternalInverter)` ALONE, checked before the DC case — so
+    // the ordering decided it, silently, every time. On Ray's real project that produced the
+    // reported failure: a graph holding four Powerwall 3 resolved to `ac-coupled-inverter` because
+    // an inverter was selected, the sheet drew an AC chain beside the Tesla hardware, and the
+    // derivation emitted a canonicalization patch that would have PERMANENTLY RECORDED the wrong
+    // architecture on the first generate.
+    //
+    // Ray drew this line himself: "If the persisted evidence is sufficient and non-contradictory,
+    // canonicalize… That is a real persisted conflict. Do not silently choose either side." An
+    // ordering is not evidence.
+    //
+    // 🚨 AND IT IS NOT "TESLA WINS" EITHER. A legitimately AC-coupled Tesla install is real — Ray:
+    // "Do not assume Tesla storage always eliminates Enphase." Preferring the storage here would be
+    // the same sin facing the other way. Neither side is chosen; the designer is asked, exactly as
+    // `derArrangement` asks. Once they record it, the recorded value wins and this never fires again.
+    // ══════════════════════════════════════════════════════════════════════
+    conflicts.push({
+      fact: 'How the PV is coupled',
+      claims: [
+        { source: 'selected-equipment',
+          says: `A separate PV inverter is selected: '${explicitInverterId}'.` },
+        { source: 'service-topology',
+          says: `${pvCapableUnits.length} storage unit(s) publish their own PV DC inputs, so the `
+            + 'strings could terminate there instead.' },
+      ],
+      question: 'Does the PV run through the separate inverter on AC, or land on the batteries\' DC '
+        + 'inputs? Record the coupling on the project, or remove the inverter selection if the '
+        + 'strings go to the batteries.',
+    });
+    solarCouplingProvenance = {
+      source: 'none',
+      basis: 'A separate inverter is selected and the storage also takes PV on DC. Both are '
+        + 'possible, so nothing is derived — see the conflict.',
+    };
   } else if (hasExternalInverter) {
-    // ── CASE A(i) — unambiguous: the project owns an inverter, so the PV is AC coupled ─────
+    // ── CASE A(i) — unambiguous: an inverter, and no storage that could take the strings ────
     solarCoupling = 'ac-coupled-inverter';
     solarCouplingProvenance = {
       source: 'derived',
-      basis: `Derived: the project has selected a separate PV inverter ('${explicitInverterId}'), `
-        + 'so the PV reaches the premises on AC. Nothing recorded a coupling before this.',
+      basis: `Derived: the project has selected a separate PV inverter ('${explicitInverterId}') `
+        + 'and no storage in this project takes PV on its DC inputs, so the PV reaches the premises '
+        + 'on AC. Nothing recorded a coupling before this.',
     };
     canonicalizationPatch = { solarCoupling: 'ac-coupled-inverter' };
   } else if (moduleCount === 0) {
