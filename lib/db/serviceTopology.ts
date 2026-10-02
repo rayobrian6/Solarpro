@@ -630,6 +630,20 @@ export async function writeServiceTopology(
 
 export async function readServiceTopology(
   projectId: string, userId: string,
+  /**
+   * 🚨 PASS `'as-issued'` WHEN YOU ARE ABOUT TO WRITE THE GRAPH BACK.
+   *
+   * The default `'active'` HYDRATES: it re-resolves manufacturer facts from today's catalogue, which
+   * is exactly right for reading and exactly wrong before a write. A read-modify-write through the
+   * active mode bakes today's derived values into the stored bytes, and the row stops being the
+   * graph that was authored — `parseServiceTopology(raw, 'as-issued')` then returns the correction
+   * too, so an issued drawing can no longer be reproduced.
+   *
+   * Found by a test that resolved an architecture and then asked for the as-issued OCPD: it had
+   * become 60 A, on a row that was issued at 50 A. Ray drew this line himself: "Do not solve
+   * current-project correctness by destroying historical reproducibility."
+   */
+  mode: ServiceTopologyReadMode = 'active',
 ): Promise<StoredServiceTopology | null> {
   if (!isValidUUID(projectId) || !isValidUUID(userId)) return null;
   const sql = await getDbReady();
@@ -641,5 +655,5 @@ export async function readServiceTopology(
   `;
   const raw = (rows as Array<{ service_topology: unknown }>)[0]?.service_topology;
   if (raw == null) return null;
-  return parseServiceTopology(raw);
+  return parseServiceTopology(raw, mode);
 }
