@@ -376,6 +376,16 @@ export function ServiceTopologyWizard({
                   A physical question with a different code rule behind each answer. Required —
                   unanswered, the busbar check cannot be evaluated.
                 </span>
+                {/* 🚨 SAY WHAT THE CONTROL DOES TO HOW MANY SYSTEMS. Ray: "independently for each
+                    system or through a clearly stated apply-to-both action." This control IS the
+                    apply-to-both; stating the count is what makes it the second option rather than an
+                    invisible one. The per-system control is the point-of-connection select below. */}
+                {draft.domains.length > 1 ? (
+                  <span className="mb-1 block text-[11px] font-bold text-sky-300">
+                    Applies to all {draft.domains.length} systems. To answer per system, use the
+                    point-of-connection select for each system below.
+                  </span>
+                ) : null}
                 {([
                   ['der-aggregation-panel',
                     'External generation / combiner panel — one per system',
@@ -588,14 +598,49 @@ export function ServiceTopologyWizard({
               : draft.domains.map(d => (
               <label key={d.id} className="block rounded-lg border border-slate-700 p-2 text-xs text-slate-200">
                 <span className="font-bold">{d.label}</span> — point of connection
+                {/* ══════════════════════════════════════════════════════════
+                    🚨 THIS SELECT COULD NOT EXPRESS THE ANSWER IT WAS SHOWING.
+
+                    It offered three of the four `storageConnection` values and omitted
+                    `der-aggregation-panel` — the one Ray's real job needs. Two consequences, both
+                    live:
+
+                      1. PER-SYSTEM CHOICE WAS IMPOSSIBLE. Ray: "he must be able to select … [X]
+                         External generation panel … independently for each system". The site-wide
+                         radio above was the only way to say it, so one system with a generation panel
+                         and one without could not be built at all.
+                      2. IT SILENTLY ORPHANED PANELS. With the radio set to the generation panel, this
+                         select held a value it had no `<option>` for, so it rendered as the first
+                         option; touching it wrote `unresolved` or `gateway-panelboard` onto the domain
+                         while the built `aggregationPanels` STAYED in the graph. That is the mirror of
+                         the defect `d1f5c3b1` closed — there an arrangement named a panel that did not
+                         exist; here a panel existed that no arrangement claimed. Both leave the busbar
+                         check pointed at the wrong bus.
+
+                    So the option exists, and changing it BUILDS or REMOVES that system's panel — the
+                    same authoring function the radio calls, scoped to this domain.
+                    ══════════════════════════════════════════════════════════ */}
                 <select data-testid={`wizard-${d.id}-connection`} value={d.storageConnection}
                         className={`mt-1 block w-full ${box}`}
-                        onChange={e => setDraft(setInterconnection(
-                          updateDomain(draft, d.id, {
-                            storageConnection: e.target.value as typeof d.storageConnection,
-                          }),
-                          { meterCollarSelected: false }))}>
+                        onChange={e => {
+                          const value = e.target.value as typeof d.storageConnection;
+                          let next = draft;
+                          if (value === 'der-aggregation-panel') {
+                            const r = applyPerSystemGenerationPanels(next, [d.id]);
+                            setNotes(prev => [...new Set([...prev, ...r.created])]);
+                            next = r.topology;
+                          } else {
+                            // Only this system's panel goes; the other system keeps its answer.
+                            next = clearPerSystemGenerationPanels(next, [d.id]);
+                          }
+                          setDraft(setInterconnection(
+                            updateDomain(next, d.id, { storageConnection: value }),
+                            { meterCollarSelected: false }));
+                        }}>
                   <option value="unresolved">Not established</option>
+                  <option value="der-aggregation-panel">
+                    External generation / combiner panel — this system’s batteries land here
+                  </option>
                   <option value="backed-up-panel-busbar">
                     Load side — backed-up panel busbar (NEC 705.12(B))
                   </option>
@@ -603,6 +648,12 @@ export function ServiceTopologyWizard({
                     Gateway panelboard — manufacturer-approved gateway topology
                   </option>
                 </select>
+                {(draft.aggregationPanels ?? []).filter(p => p.domainId === d.id).map(p => (
+                  <span key={p.id} className="mt-1 block text-[11px] text-sky-300">
+                    {p.label}: {p.busbarRatingA ?? '—'} A bus · {p.outputOcpdA ?? '—'} A output ·{' '}
+                    {p.inputs.length} breaker{p.inputs.length === 1 ? '' : 's'} → {d.gateway.label}
+                  </span>
+                ))}
               </label>
             ))}
 

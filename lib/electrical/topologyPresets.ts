@@ -523,18 +523,34 @@ export interface GenerationPanelResult {
  * standard device is 125 A — which is the number `recommendAggregationRatings` returns from the
  * instances. Change the configuration to 10 kW and it moves on its own.
  */
-export function applyPerSystemGenerationPanels(t: ServiceTopology): GenerationPanelResult {
+export function applyPerSystemGenerationPanels(
+  t: ServiceTopology,
+  /**
+   * 🚨 WHICH SYSTEMS. Omitted ⇒ every domain, which is the site-wide "apply to both" the wizard's
+   * radio performs. Passed ⇒ only those domains, which is how one system can take a generation panel
+   * while the other does not.
+   *
+   * Ray: "he must be able to select … independently for each system or through a clearly stated
+   * apply-to-both action." Those are the two call shapes; there is no third arrangement hiding here.
+   */
+  domainIds?: string[],
+): GenerationPanelResult {
   const created: string[] = [];
   const recommendations: AggregationRecommendation[] = [];
   let next = t;
+  const scoped = (id: string) => !domainIds || domainIds.includes(id);
 
   // Replace any per-system panels already built, so re-running the step does not accumulate them.
   // A site-wide panel (no domainId) belongs to the other arrangement and is left alone.
-  for (const existing of (t.aggregationPanels ?? []).filter(p => p.domainId)) {
+  //
+  // 🚨 AND ONLY THE SCOPED SYSTEMS' PANELS ARE REPLACED. Rebuilding Domain A must not delete the
+  // panel Domain B already has — that would make answering the question for one system silently
+  // unanswer it for the other.
+  for (const existing of (t.aggregationPanels ?? []).filter(p => p.domainId && scoped(p.domainId))) {
     next = removeAggregationPanel(next, existing.id);
   }
 
-  for (const d of next.domains) {
+  for (const d of next.domains.filter(x => scoped(x.id))) {
     const units = d.storageUnitIds
       .map(id => next.storage.find(u => u.id === id))
       .filter((u): u is NonNullable<typeof u> => !!u && u.role === 'inverter-unit');
@@ -606,14 +622,17 @@ export function applyPerSystemGenerationPanels(t: ServiceTopology): GenerationPa
  * reverting them to the gateway or to the panel busbar would answer it on the operator's behalf —
  * and one of those two answers FAILS 705.12(B) on this job.
  */
-export function clearPerSystemGenerationPanels(t: ServiceTopology): ServiceTopology {
+export function clearPerSystemGenerationPanels(
+  t: ServiceTopology, domainIds?: string[],
+): ServiceTopology {
   let next = t;
-  for (const p of (t.aggregationPanels ?? []).filter(x => x.domainId)) {
+  const scoped = (id: string) => !domainIds || domainIds.includes(id);
+  for (const p of (t.aggregationPanels ?? []).filter(x => x.domainId && scoped(x.domainId))) {
     next = removeAggregationPanel(next, p.id);
   }
   return {
     ...next,
-    domains: next.domains.map(d => d.storageConnection === 'der-aggregation-panel'
+    domains: next.domains.map(d => scoped(d.id) && d.storageConnection === 'der-aggregation-panel'
       ? { ...d, storageConnection: 'unresolved' as const } : d),
     pointsOfInterconnection: (next.pointsOfInterconnection ?? []).map(poi =>
       poi.derNodeId === null && poi.relationship === 'manufacturer-integrated'
