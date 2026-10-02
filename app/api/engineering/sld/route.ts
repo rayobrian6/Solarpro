@@ -104,6 +104,15 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
+    // 🚨 THE CANONICAL COUPLING, hoisted so the sizing engine can be TOLD the architecture rather
+    // than re-deriving it. Set from `loadElectricalProject` below; null until then, which is exactly
+    // today's behaviour for a request that carries no project.
+    let _canonicalCoupling: import('@/lib/computed-system').ComputedSolarCoupling | null = null;
+    // 🚨 WHAT THE PAGE ACTUALLY SENT, captured BEFORE anything overwrites it. The architecture
+    // projection below mutates `body` in place, so reading `body.topologyType` afterwards reports
+    // the override rather than the request — which would make the response claim agreement that
+    // never happened.
+    const _postedTopologyType = body.topologyType != null ? String(body.topologyType) : null;
 
     // ── The RECORDED combiner, from the project store ─────────────────────────
     // The page posts its own copy of the installer's pick, and its read of the
@@ -313,6 +322,7 @@ export async function POST(req: NextRequest) {
           // 🚨 ONE DERIVATION, SHARED WITH THE SIZING ROUTE — `lib/electrical/dcStringLimits`.
           // This was inline here. The Electrical Sizing tab needed the same window, and writing it
           // twice is how two surfaces come to disagree about the same device.
+          _canonicalCoupling = _model.solarCoupling;
           const { dcStringLimits, dcStringLimitsNote } =
             await import('@/lib/electrical/dcStringLimits');
           const _dcLim = dcStringLimits(_model.topology, _model.solarCoupling);
@@ -1007,6 +1017,13 @@ export async function POST(req: NextRequest) {
 
       const csInput: ComputedSystemInput = {
         topology:                      isMicro ? 'micro' : (isOptimizer ? 'optimizer' : 'string'),
+        // 🚨 THE ARCHITECTURE REACHES THE ENGINE. The route held the canonical model and then called
+        // computeSystem with only `topology: 'string' | 'micro' | 'optimizer'` — three words that
+        // all describe a standalone PV inverter. The engine built that inverter's conductor runs,
+        // its disconnects and its schedule rows, and consumers deleted them afterwards if they
+        // happened to know to. `lib/plan-set/permit-system-model.ts` did not, so the sealed package
+        // carried the AC conductor of equipment that is not in the design.
+        solarCoupling:                 _canonicalCoupling,
         optimizerMaxOutputCurrent,
         totalPanels:                   totalModules,
         // Pass resolved string count so computeSystem() uses the same
@@ -1340,6 +1357,26 @@ export async function POST(req: NextRequest) {
       // revision would make an unstamped sheet look stamped.
       electricalRevision: (body as { electricalRevision?: string }).electricalRevision ?? null,
       systemModelUsed: systemModel ? 'computed' : 'fallback',
+      // 🚨 WHAT THE DRAWING'S ARCHITECTURE CAME FROM — Ray's RULE ELEVEN, made observable.
+      //
+      // "The Generate SLD request may identify projectId and artifact options. It may not be allowed
+      // to override topologyType, inverterId, batteryCount, serviceAmps, solarCoupling,
+      // interconnectionMethod."
+      //
+      // The override itself was unprovable: a DC-coupled sheet looked right whether or not the body
+      // was overridden, because the RENDERER also suppresses the inverter — which is precisely the
+      // "suppress it downstream" pattern Ray forbade. Reporting the resolved architecture beside
+      // what was posted makes the rule testable, and makes a disagreement visible to any caller
+      // instead of only to the server log.
+      architecture: {
+        resolved: _canonicalCoupling,
+        source: _canonicalCoupling ? 'canonical-model' : 'request-body',
+        topologyTypeUsed: input.topologyType,
+        topologyTypePosted: _postedTopologyType,
+        overrodeRequestBody: _canonicalCoupling != null
+          && _postedTopologyType != null
+          && _postedTopologyType !== String(input.topologyType),
+      },
       // Phase B3: report layout source in API response for debugging
       layoutSource: sizingResult ? (layoutCandidate ? 'layoutCandidate' : 'sizingResult') : 'body',
       sldDegraded,

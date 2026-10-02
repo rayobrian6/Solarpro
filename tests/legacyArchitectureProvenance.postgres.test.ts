@@ -1326,3 +1326,228 @@ describe('🚨 NO EQUIPMENT MAY APPEAR FROM ABSENCE — still live until now', (
     expect(svg).toContain('INVERTER NOT SELECTED');
   });
 });
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 🚨 RULE THIRTEEN — "Do not suppress it. The objects DO NOT EXIST."
+//
+// For a DC-coupled job the standalone inverter's calculation object, conductor run, AC disconnect
+// and tap calculation must never be CONSTRUCTED. They were — and two renderer overlays deleted them
+// afterwards, which is why `lib/plan-set/permit-system-model.ts` (which never heard of the overlays)
+// read `INV_TO_DISCO_RUN` as the permit package's AC wiring.
+//
+// Asserted on `computeSystem` directly, because the point is the ABSENCE of objects in its output,
+// not what a renderer does with them.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('🚨 THE PHANTOM INVERTER PIPELINE IS NOT BUILT', () => {
+  const run = async (coupling: 'dc-coupled-storage' | 'ac-coupled-inverter' | undefined) => {
+    const { computeSystem } = await import('@/lib/computed-system');
+    return computeSystem({
+      topology: 'string',
+      solarCoupling: coupling,
+      totalPanels: 37, panelWatts: 440, panelVoc: 52.7, panelIsc: 13.7,
+      panelVmp: 43.6, panelImp: 12.9, panelTempCoeffVoc: -0.25, panelTempCoeffIsc: 0.05,
+      panelManufacturer: 'Philadelphia Solar', panelModel: 'PS-MNB108(HCBF)-440W',
+      inverterManufacturer: 'Tesla', inverterModel: 'Solar Inverter 5.7kW',
+      inverterAcKw: 5.7, inverterMaxDcV: 600, inverterMpptMinV: 60, inverterMpptMaxV: 480,
+      mainPanelAmps: 400, mainPanelBrand: 'Siemens', mainPanelBusRating: 400,
+      systemVoltage: 240, ambientTempC: 35, rooftopTempAdderC: 30, designTempMinC: -23,
+      conduitType: 'EMT', maxACVoltageDropPct: 3, maxDCVoltageDropPct: 2,
+      systemType: 'roof',
+      runLengths: {},
+    } as never) as unknown as {
+      topology: string;
+      runs: Array<{ id: string }>;
+      equipmentSchedule: Array<{ tag: string; description: string }>;
+      bomQuantities: Record<string, number>;
+    };
+  };
+
+  it('🚨 the inverter conductor runs are NEVER CREATED on a DC-coupled job', async () => {
+    const cs = await run('dc-coupled-storage');
+    const ids = cs.runs.map(r => r.id);
+    expect(ids, 'the DC disconnect-to-inverter run was built').not.toContain('DC_DISCO_TO_INV_RUN');
+    expect(ids, 'the inverter-to-AC-disconnect run was built — the one the PERMIT reads')
+      .not.toContain('INV_TO_DISCO_RUN');
+    expect(ids, 'the AC disconnect-to-meter run was built').not.toContain('DISCO_TO_METER_RUN');
+    // The run that IS real: the strings reach the storage's PV inputs.
+    expect(ids).toContain('DC_STRING_RUN');
+  });
+
+  it('🚨 the equipment schedule has no inverter, no DC disconnect, no AC disconnect', async () => {
+    const cs = await run('dc-coupled-storage');
+    const tags = cs.equipmentSchedule.map(e => e.tag);
+    expect(tags).not.toContain('INV-1');
+    expect(tags).not.toContain('DC-DISC-1');
+    expect(tags).not.toContain('AC-DISC-1');
+    expect(tags).not.toContain('METER-1');
+    // The modules and the service panel are real and stay.
+    expect(tags).toContain('PV-1');
+    expect(tags).toContain('MSP-1');
+  });
+
+  it('🚨 the BOM does not order an AC disconnect for an inverter that is not there', async () => {
+    const cs = await run('dc-coupled-storage');
+    expect(cs.bomQuantities.acDisconnect).toBe(0);
+    expect(cs.bomQuantities.dcDisconnect).toBe(0);
+    expect(cs.bomQuantities.productionMeter).toBe(0);
+    expect(cs.bomQuantities.dcOcpd).toBe(0);
+  });
+
+  it('🚨 the engine REPORTS the architecture instead of calling it STRING_INVERTER', async () => {
+    expect((await run('dc-coupled-storage')).topology).toBe('DC_COUPLED_BATTERY');
+  });
+
+  it('🚨 and an AC-coupled job is COMPLETELY unchanged', async () => {
+    // Blast radius: every job that actually has a standalone inverter keeps every object it had.
+    for (const coupling of ['ac-coupled-inverter', undefined] as const) {
+      const cs = await run(coupling);
+      const ids = cs.runs.map(r => r.id);
+      expect(ids, `coupling=${coupling}`).toContain('DC_DISCO_TO_INV_RUN');
+      expect(ids, `coupling=${coupling}`).toContain('INV_TO_DISCO_RUN');
+      expect(ids, `coupling=${coupling}`).toContain('DISCO_TO_METER_RUN');
+      const tags = cs.equipmentSchedule.map(e => e.tag);
+      expect(tags).toContain('INV-1');
+      expect(tags).toContain('AC-DISC-1');
+      expect(cs.bomQuantities.acDisconnect).toBe(1);
+      expect(cs.topology).toBe('STRING_INVERTER');
+    }
+  });
+
+  it('🚨 the permit system model can no longer find an inverter run to call AC wiring', async () => {
+    // The specific failure: permit-system-model.ts reads DISCO_TO_METER_RUN / INV_TO_DISCO_RUN and
+    // uses whichever it finds as the package's AC conductor. With neither constructed it falls to
+    // its own explicit default rather than quoting an inverter's conductor as fact.
+    const cs = await run('dc-coupled-storage');
+    const acRun = cs.runs.find(r =>
+      r.id === 'DISCO_TO_METER_RUN' || r.id === 'INV_TO_DISCO_RUN' || r.id === 'COMBINER_TO_DISCO_RUN');
+    expect(acRun, 'the permit would still read a phantom inverter run as its AC wiring')
+      .toBeUndefined();
+  });
+});
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 🚨 THE OTHER HALF OF THE PAIR: A DESIGNER'S ANSWER MUST RECORD ITSELF.
+//
+// The model now re-tests a coupling that carries no decision. That is only safe if the HUMAN path
+// records one — otherwise every designer who answers the wizard gets their own answer questioned
+// back at them, which is a worse failure than the one it fixes.
+//
+// Driven through the real PUT handler, because the recording happens there.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('🚨 THE SERVICE TOPOLOGY PUT RECORDS THE DESIGNER DECISION', () => {
+  const putTopology = async (topology: unknown) => {
+    const { PUT } = await import('@/app/api/projects/[id]/service-topology/route');
+    const { NextRequest } = await import('next/server');
+    const res = await PUT(
+      new NextRequest(`http://localhost/api/projects/${PROJECT}/service-topology`, {
+        method: 'PUT', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ topology }),
+      }),
+      { params: Promise.resolve({ id: PROJECT }) },
+    );
+    return { status: res.status, json: await res.json().catch(() => ({})) as Record<string, unknown> };
+  };
+
+  it('🚨 answering the coupling records WHO answered, so the model obeys it', async () => {
+    await writeRaysLiveRow({ generationPanels: true });
+    const before = (await load())!.model;
+    // The legacy row: an inverter nobody chose beside storage that takes PV on DC.
+    expect(before.architectureResolutionRequired).toBe(true);
+
+    // The designer answers in the wizard: this really is AC coupled.
+    const t = { ...before.topology!, solarCoupling: 'ac-coupled-inverter' };
+    const put = await putTopology(t);
+    expect(put.status).toBe(200);
+
+    const { se } = await readRow();
+    expect(se.provenance?.architecture?.kind,
+      'the designer answer was stored with no record of who made it').toBe('USER_SELECTED');
+    expect(se.provenance.architecture.by).toBe('service-topology-wizard');
+
+    const after = (await load())!.model;
+    expect(after.solarCoupling).toBe('ac-coupled-inverter');
+    expect(after.solarCouplingProvenance.source).toBe('service-topology');
+    expect(after.architectureResolutionRequired,
+      'a designer who answered the question was asked it again').toBe(false);
+  });
+
+  it('🚨 a save that does NOT change the coupling records no decision', async () => {
+    // Re-saving a topology for an unrelated edit must not manufacture a decision the designer did
+    // not make on that request — that would be the same fabrication, with better manners.
+    await writeRaysLiveRow({ recordedCoupling: 'ac-coupled-inverter', generationPanels: true });
+    const m = (await load())!.model;
+    const t = { ...m.topology!, solarCoupling: 'ac-coupled-inverter' };
+    expect((await putTopology(t)).status).toBe(200);
+    const { se } = await readRow();
+    expect(se.provenance?.architecture,
+      'an unrelated save invented a designer decision').toBeUndefined();
+    // So the conflict is still open — which is correct, nobody has answered it.
+    expect((await load())!.model.architectureResolutionRequired).toBe(true);
+  });
+
+  it('🚨 and it does not clobber an existing provenance block', async () => {
+    await writeRaysLiveRow({
+      generationPanels: true,
+      provenance: { inverter: {
+        kind: 'USER_SELECTED', recordedAt: '2026-08-01T00:00:00.000Z',
+        basis: 'The installer picked it.', by: 'equipment-picker',
+      } },
+    });
+    const m = (await load())!.model;
+    await putTopology({ ...m.topology!, solarCoupling: 'dc-coupled-storage' });
+    const { se } = await readRow();
+    expect(se.provenance.inverter.by, 'the inverter provenance was lost').toBe('equipment-picker');
+    expect(se.provenance.architecture.by).toBe('service-topology-wizard');
+  });
+});
+
+
+describe('🚨 RULE ELEVEN — the drawing takes NO architecture from the UI', () => {
+  const generateSldJson = async () => {
+    const { POST } = await import('@/app/api/engineering/sld/route');
+    const { NextRequest } = await import('next/server');
+    const res = await POST(new NextRequest('http://localhost/api/engineering/sld', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        projectId: PROJECT, format: 'json',
+        projectName: 'Hussey Ethos', clientName: 'Hussey Ethos', address: '238 N Warwick Ave',
+        drawingDate: '2026-07-29', drawingNumber: 'SLD-001', revision: 'A',
+        // 🚨 THE WRONG ARCHITECTURE, POSTED — exactly as the page did.
+        topologyType: 'STRING', inverterModel: 'Tesla Solar Inverter 5.7kW',
+        inverterManufacturer: 'Tesla', inverterId: RAYS_INVERTER,
+        totalModules: 37, totalStrings: 4,
+        panelModel: 'Philadelphia Solar PS-MNB108(HCBF)-440W',
+        panelWatts: 440, panelVoc: 52.7, panelIsc: 13.7,
+        acOutputKw: 11.4, acOutputAmps: 24, acOCPD: 60, mainPanelAmps: 400,
+        utilityName: 'Local Utility', interconnection: 'SUPPLY_SIDE_TAP',
+        hasBattery: true, batteryModel: 'Powerwall 3', batteryCount: 4,
+      }),
+    }));
+    const ct = res.headers.get('content-type') || '';
+    if (ct.includes('svg') || ct.includes('xml')) return { status: res.status, json: null as never };
+    return { status: res.status, json: await res.json() as Record<string, any> };
+  };
+
+  it('🚨 the canonical model overrides the posted topologyType, and says it did', async () => {
+    await writeRaysLiveRow({ inverterId: null, generationPanels: true });
+    const { status, json } = await generateSldJson();
+    expect(status).toBe(200);
+    expect(json.architecture.resolved).toBe('dc-coupled-storage');
+    expect(json.architecture.source).toBe('canonical-model');
+    expect(json.architecture.topologyTypePosted).toBe('STRING');
+    expect(json.architecture.topologyTypeUsed,
+      'the page posted STRING and the drawing used it').toBe('DC_COUPLED_STORAGE');
+    expect(json.architecture.overrodeRequestBody).toBe(true);
+  });
+
+  it('a project with no graph still reports the request body as its source, honestly', async () => {
+    await db.query(`UPDATE projects SET service_topology = NULL WHERE id = $1`, [PROJECT]);
+    const { status, json } = await generateSldJson();
+    expect(status).toBe(200);
+    expect(json.architecture.resolved).toBeNull();
+    expect(json.architecture.source).toBe('request-body');
+    expect(json.architecture.overrodeRequestBody).toBe(false);
+  });
+});

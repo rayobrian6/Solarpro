@@ -54,6 +54,23 @@ import {
 
 // ─── Equipment Spec ──────────────────────────────────────────────────────────
 
+/**
+ * 🚨 THE ARCHITECTURE, AS AN INPUT. `ComputedSystemInput` had NO field for it.
+ *
+ * The only architecture signal this engine took was `topology: 'string' | 'micro' | 'optimizer'` —
+ * all three of which describe a standalone PV inverter. There was no way to TELL it that the PV
+ * lands on battery DC inputs, so it built a string-inverter chain for every non-micro job and the
+ * outputs were deleted downstream by whichever renderer remembered to.
+ *
+ * Ray: "Do not suppress it. For DC-coupled storage: standalone inverter calculation object DOES NOT
+ * EXIST — the sizing engine branches from canonical architecture before those objects are
+ * constructed."
+ */
+export type ComputedSolarCoupling =
+  | 'dc-coupled-storage'
+  | 'ac-coupled-inverter'
+  | 'storage-only';
+
 export type TopologyType =
   | 'MICROINVERTER'
   | 'STRING_INVERTER'
@@ -459,6 +476,15 @@ export interface BomQuantities {
 export interface ComputedSystemInput {
   // From ProjectConfig
   topology: 'string' | 'micro' | 'optimizer';
+  /**
+   * 🚨 THE CANONICAL COUPLING, when the caller has it. Absent ⇒ today's behaviour exactly.
+   *
+   * `'dc-coupled-storage'` means there is NO standalone PV inverter, so the inverter's
+   * conductor runs, its AC disconnect and its schedule rows are never built — rather than
+   * built and then removed by a consumer. A run that does not exist cannot be read as
+   * authoritative AC wiring by a permit builder that never heard about the suppression.
+   */
+  solarCoupling?: ComputedSolarCoupling | null;
   totalPanels: number;
   // Optional override: when provided, this explicit string count is used
   // instead of recalculating from physics (NEC 690.7 Voc/maxPanelsPerString).
@@ -1062,7 +1088,13 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     : (input.inverterBranchLimit || 16);
   const maxBranchOcpdA = _enphaseBranch?.maxBranchOcpdA ?? 30;
 
-  const topology: TopologyType = isMicro
+  // 🚨 ARCHITECTURE FIRST. This ternary could only ever produce a standalone-inverter topology, so
+  // a DC-coupled job was labelled STRING_INVERTER by the engine that then built its conductor runs.
+  // `DC_COUPLED_BATTERY` was already in the TopologyType union and nothing could reach it.
+  const _isDcCoupled = input.solarCoupling === 'dc-coupled-storage';
+  const topology: TopologyType = _isDcCoupled
+    ? 'DC_COUPLED_BATTERY'
+    : isMicro
     ? 'MICROINVERTER'
     : isOptimizer
     ? 'STRING_WITH_OPTIMIZER'
@@ -1986,7 +2018,11 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
           `${stringCount * 2}×#${_dcDiscoGaugeNum} THWN-2\n` +
           `1×#${_dcDiscoEgcNum} GRN EGC\n` +
           `IN ${dcDiscoWire.conduitSize} ${_dcDiscoCondAbbr} (${dcDiscoWire.conduitFillPct.toFixed(0)}% fill)`;
-        runs.push(makeRunSegment('DC_DISCO_TO_INV_RUN', 'DC DISCO TO INVERTER', 'DC DISCONNECT', 'STRING INVERTER', {
+        // 🚨 NOT BUILT ON A DC-COUPLED JOB. There is no DC disconnect and no inverter for this run
+        // to connect; the strings land on the storage's own PV inputs, which `DC_STRING_RUN` above
+        // already carries. Previously this was constructed and then deleted by the SLD renderer's
+        // exclusion list — which `lib/plan-set/permit-system-model.ts` never consulted.
+        if (!_isDcCoupled) runs.push(makeRunSegment('DC_DISCO_TO_INV_RUN', 'DC DISCO TO INVERTER', 'DC DISCONNECT', 'STRING INVERTER', {
           sourceTerminal: 'DISCO_LOAD',   // DC Disconnect LOAD (inverter) side
           destTerminal:   'DC_IN',        // String inverter DC input
           conductorCount: stringCount * 2,  // same bundle as DC_STRING_RUN
@@ -2030,7 +2066,11 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
       false,
       '#10 AWG'
     );
-    runs.push(makeRunSegment('INV_TO_DISCO_RUN', 'INVERTER TO AC DISCO', 'STRING INVERTER', 'AC DISCONNECT', {
+    // 🚨 NOT BUILT ON A DC-COUPLED JOB — and this is the one that reached a permit. The permit
+    // system model reads `INV_TO_DISCO_RUN` as the package's AC wiring
+    // (lib/plan-set/permit-system-model.ts), so a sealed drawing carried the conductor of an
+    // inverter that is not in the design.
+    if (!_isDcCoupled) runs.push(makeRunSegment('INV_TO_DISCO_RUN', 'INVERTER TO AC DISCO', 'STRING INVERTER', 'AC DISCONNECT', {
       sourceTerminal: 'AC_OUT',       // String inverter AC output lug (right side)
       destTerminal:   'DISCO_LOAD',   // AC Disconnect LOAD terminals (PV/inverter side)
       conductorCount: 3, // L1 + L2 + N — 120/240V split-phase; neutral required per NEC 200.3
@@ -2084,7 +2124,10 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     false,
     '#10 AWG'
   );
-  runs.push(makeRunSegment('DISCO_TO_METER_RUN',
+  // 🚨 NOT BUILT ON A DC-COUPLED JOB. This is the standalone inverter's AC disconnect feeding the
+  // service point. On a DC-coupled design the storage reaches the premises through its gateway, and
+  // that path is authored in the service topology — not derived here from an inverter.
+  if (!_isDcCoupled) runs.push(makeRunSegment('DISCO_TO_METER_RUN',
     _isSupplySideTap ? 'AC DISCO TO SUPPLY-SIDE TAP' : 'AC DISCO TO MSP',
     'AC DISCONNECT',
     _isSupplySideTap ? 'SUPPLY-SIDE TAP POINT' : 'MAIN SERVICE PANEL', {
@@ -2838,6 +2881,24 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
       { tag: 'METER-1', description: 'Production Meter', manufacturer: 'Utility', model: 'Revenue Grade Meter', qty: 1, rating: '240V AC', necReference: 'NEC 705.12' },
       { tag: 'MSP-1', description: 'Main Service Panel', manufacturer: input.mainPanelBrand, model: `${input.mainPanelAmps}A Panel`, qty: 1, rating: `${input.mainPanelAmps}A / 120/240V`, necReference: 'NEC 705.12(B)' },
     );
+  } else if (_isDcCoupled) {
+    // ═════════════════════════════════════════════════════════════
+    // 🚨 DC-COUPLED: THE INVERTER ROWS ARE NOT EMITTED AND THEN HIDDEN — THEY ARE NOT EMITTED.
+    //
+    // This branch used to be unreachable: the schedule had exactly two shapes, micro and
+    // string-inverter, so a DC-coupled job got INV-1 "String Inverter", DC-DISC-1 and AC-DISC-1 for
+    // hardware it does not contain. Two renderer overlays removed them afterwards — and anything
+    // that read `equipmentSchedule` without those overlays (the engineering page's own table, the
+    // permit system model) got the phantom rows.
+    //
+    // What a DC-coupled design HAS is the modules and the service panel. Its storage, gateways and
+    // generation panels are instances in the service topology graph and are emitted from there,
+    // because that is where they were authored — not inferred here from an inverter's absence.
+    // ═════════════════════════════════════════════════════════════
+    equipmentSchedule.push(
+      { tag: 'PV-1', description: 'PV Modules', manufacturer: input.panelManufacturer, model: input.panelModel, qty: input.totalPanels, rating: `${input.panelWatts}W`, necReference: 'NEC 690.4' },
+      { tag: 'MSP-1', description: 'Main Service Panel', manufacturer: input.mainPanelBrand, model: `${input.mainPanelAmps}A Panel`, qty: 1, rating: `${input.mainPanelAmps}A / 120/240V`, necReference: 'NEC 705.12(B)' },
+    );
   } else {
     equipmentSchedule.push(
       { tag: 'PV-1', description: 'PV Modules', manufacturer: input.panelManufacturer, model: input.panelModel, qty: input.totalPanels, rating: `${input.panelWatts}W`, necReference: 'NEC 690.4' },
@@ -2994,11 +3055,16 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     trunkCableTerminators: isMicro ? acBranchCount * 2 : 0,
     acBranchOcpd: isMicro ? acBranchCount : 0,
     // String-specific
-    dcDisconnect: isMicro ? 0 : 1,
-    dcOcpd: isMicro ? 0 : stringCount,
+    // 🚨 A DC-COUPLED JOB HAS NO DC DISCONNECT AND NO STRING OCPD — the strings terminate on the
+    // storage's own PV inputs, whose protection is internal to the listed equipment. Quoting one
+    // orders hardware the installer will not fit.
+    dcDisconnect: (isMicro || _isDcCoupled) ? 0 : 1,
+    dcOcpd: (isMicro || _isDcCoupled) ? 0 : stringCount,
     // Common
-    acDisconnect: 1,
-    productionMeter: 1,
+    // 🚨 AND NO AC DISCONNECT OR PRODUCTION METER FOR AN INVERTER THAT IS NOT IN THE DESIGN. These
+    // two were unconditional — `acDisconnect: 1` on every system SolarPro has ever quoted.
+    acDisconnect: _isDcCoupled ? 0 : 1,
+    productionMeter: _isDcCoupled ? 0 : 1,
     // Conduit — derived from segmentSchedule (canonical, 1.15 slack factor)
     conduitEMT: Math.round(segBOM.conduitByType['EMT'] ?? conduitQtyByType('EMT')),
     conduitPVC: Math.round((segBOM.conduitByType['PVC Sch 40'] ?? 0) + (segBOM.conduitByType['PVC Sch 80'] ?? 0) || conduitQtyByType('PVC Sch 40') + conduitQtyByType('PVC Sch 80')),

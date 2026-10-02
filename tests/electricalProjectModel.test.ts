@@ -303,9 +303,31 @@ describe('🚨 ordering cannot decide the architecture', () => {
     const m = resolveElectricalProject({
       topology: { ...t, solarCoupling: 'dc-coupled-storage' },
       selectedEquipment: { inverterId: null, moduleCount: 37 },
+      // 🚨 A HUMAN'S ANSWER NOW SAYS SO. `solarCoupling` alone could not: SolarPro's own
+      // canonicalization writes to the same field, so a recorded value and a derived one were the
+      // same bytes — which is how Ray's project asserted `ac-coupled-inverter` for two acceptance
+      // runs. `provenance.architecture` is what makes this a decision rather than an output.
+      equipmentProvenance: { architecture: {
+        kind: 'USER_SELECTED', recordedAt: '2026-09-01T00:00:00.000Z',
+        basis: 'The designer recorded the coupling.', by: 'service-topology-wizard',
+      } },
     });
     expect(m.solarCoupling).toBe('dc-coupled-storage');
     expect(m.solarCouplingProvenance.source).toBe('service-topology');
+    expect(m.conflicts).toEqual([]);
+  });
+
+  it('🚨 the same recording WITHOUT a decision reports itself as derived', () => {
+    const t = current();
+    const m = resolveElectricalProject({
+      topology: { ...t, solarCoupling: 'dc-coupled-storage' },
+      selectedEquipment: { inverterId: null, moduleCount: 37 },
+    });
+    expect(m.solarCoupling).toBe('dc-coupled-storage');
+    expect(m.solarCouplingProvenance.source).toBe('derived');
+    // It still stands — the evidence agrees with it. Only a derived value the evidence
+    // CONTRADICTS re-opens.
+    expect(m.architectureResolutionRequired).toBe(false);
     expect(m.conflicts).toEqual([]);
   });
 });
