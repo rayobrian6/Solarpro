@@ -390,6 +390,17 @@ describe('🚨 THE LIVE SHEET, through the real route, with the wrong architectu
     expect(svg).toContain('#1 AWG THWN-2');
   });
 
+  it('🚨 the equipment schedule lists no disconnect this design does not have', async () => {
+    // The DC-coupled block cleared "AC Disconnect" and left "DC Disconnect — 25A Fused" standing one
+    // line away, so the schedule listed a fused DC switch on a sheet whose only DC conductor runs
+    // from the roof J-box into the cabinets' integrated PV inputs. Found by reading the sheet.
+    const { svg } = await generateSld();
+    expect(svg.includes('A Fused'), 'the schedule lists a fused disconnect that is not installed')
+      .toBe(false);
+    // The DC side is governed by the published PV input limits, which the calc band states instead.
+    expect(svg).toContain('PV vs ESS DC input');
+  });
+
   it('🚨 every OCPD on the sheet names the device it protects', async () => {
     const { svg } = await generateSld();
     // The tap row used to borrow the PV inverter's breaker. It now names the generation panel's own

@@ -2977,6 +2977,15 @@ function overlayServiceTopologyRows(
     replace('AC Combiner', []);
     replace('Combiner', []);
     replace('AC Disconnect', []);
+    // 🚨 AND NO DC DISCONNECT EITHER. This block already removed the AC one and left "DC
+    // Disconnect — 25A Fused" standing one line away, so the equipment schedule still listed a fused
+    // DC disconnect on a sheet whose only DC conductor runs from the roof J-box into the cabinets'
+    // integrated PV inputs. `input.dcOCPD` is the string-inverter chain's device.
+    //
+    // The DC side of a DC-coupled job is governed by the manufacturer's PV input limits, which the
+    // calculation band now states, and there is no separate switch to schedule. Found by reading the
+    // finished sheet, not by any assertion.
+    replace('DC Disconnect', []);
     replace('MPPT Channels', limits
       ? [['MPPT Channels', `${inverting.length * limits.mppts} total`]] : []);
     replace('Monitoring Gateway', []);
