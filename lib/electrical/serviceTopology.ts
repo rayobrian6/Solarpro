@@ -1496,6 +1496,30 @@ export function evaluateServiceTopology(topology: ServiceTopology): TopologyEval
       // governing calculation moves to the aggregation panel's own check. Any OTHER generation
       // inside the domain is still on the busbar and is still checked.
       if (d.storageConnection === 'der-aggregation-panel') {
+        // ═══════════════════════════════════════════════════════════════════
+        // 🚨 AN ARRANGEMENT THAT NAMES A PANEL MUST HAVE THAT PANEL.
+        //
+        // This branch exists because the storage left the domain for a DER aggregation panel, and it
+        // reports a PASS on the busbar for exactly that reason — nothing is connected to it. If no
+        // such panel is recorded, that PASS is being granted for a device that does not exist, and
+        // the storage lands NOWHERE: the busbar check waves it through, the aggregation check has no
+        // panel to examine, and the drawing has nothing to draw.
+        //
+        // Reachable in production: the wizard's arrangement question creates the panels with the
+        // answer, but `ServiceNodeInspector` and `ServiceTopologyPanel` both let an operator change
+        // `storageConnection` on its own. Choosing this arrangement there left the graph claiming a
+        // landing it does not have, silently.
+        // ═══════════════════════════════════════════════════════════════════
+        const panelsForThisDomain = (topology.aggregationPanels ?? [])
+          .filter(a => a.domainId === d.id || a.domainId == null);
+        if (panelsForThisDomain.length === 0) {
+          checks.push(fail('aggregation.landing', scope, `${d.label} storage landing`,
+            `${d.label} is recorded as landing its storage in a DER aggregation panel, and no such `
+            + 'panel exists on this design. The storage has nowhere to land: the busbar allowance is '
+            + 'being waived for a panel that is not there.',
+            'NEC 705.12 — the governing busbar is the one the breaker is actually in'));
+        }
+
         const otherGenerationA = num(d.generationOutputA) ? d.generationOutputA : null;
         if (otherGenerationA === 0) {
           checks.push(pass('domain.busbar-705-12', scope, `${p.label} 120% busbar allowance`,

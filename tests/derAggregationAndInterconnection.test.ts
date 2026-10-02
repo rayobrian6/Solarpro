@@ -514,3 +514,58 @@ describe('🚨 service distribution and DER aggregation are not the same panel',
     }
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 🚨 AN ARRANGEMENT THAT NAMES A PANEL MUST HAVE THAT PANEL.
+//
+// `storageConnection: 'der-aggregation-panel'` makes the domain's busbar check PASS, on the grounds
+// that the storage left for an aggregation panel. With no such panel recorded, that PASS is granted
+// for a device that does not exist and the storage lands nowhere.
+//
+// Reachable in production: the wizard's arrangement question creates the panels with the answer, but
+// `ServiceNodeInspector` and `ServiceTopologyPanel` both let an operator change `storageConnection`
+// on its own — so choosing this arrangement there left the graph claiming a landing it did not have.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('🚨 a claimed DER aggregation landing must exist', () => {
+  it('fails when the arrangement names an aggregation panel and none is recorded', async () => {
+    const { buildRaysIntendedJob } = await import('@/lib/electrical/fixtures/tesla400aTwoGateway');
+    const { evaluateServiceTopology } = await import('@/lib/electrical/serviceTopology');
+    const t = buildRaysIntendedJob().topology;
+    const orphaned = {
+      ...t,
+      aggregationPanels: [],                                   // the panels are gone
+      domains: t.domains.map(d => ({ ...d, storageConnection: 'der-aggregation-panel' as const })),
+    };
+    const ev = evaluateServiceTopology(orphaned);
+    const landing = ev.checks.filter(c => c.id === 'aggregation.landing' && c.conclusion === 'FAIL');
+    expect(landing.length, 'the storage lands nowhere and nothing said so').toBeGreaterThan(0);
+    expect(landing[0].detail).toMatch(/nowhere to land|not there/i);
+  });
+
+  it('🚨 and the busbar is NOT quietly passed while that is true', async () => {
+    // The defect's real shape: the busbar check waves the panel through because the storage "left",
+    // while nothing checks that it arrived anywhere.
+    const { buildRaysIntendedJob } = await import('@/lib/electrical/fixtures/tesla400aTwoGateway');
+    const { evaluateServiceTopology } = await import('@/lib/electrical/serviceTopology');
+    const t = buildRaysIntendedJob().topology;
+    const orphaned = {
+      ...t,
+      aggregationPanels: [],
+      domains: t.domains.map(d => ({ ...d, storageConnection: 'der-aggregation-panel' as const })),
+    };
+    const ev = evaluateServiceTopology(orphaned);
+    expect(ev.checks.some(c => c.conclusion === 'FAIL'),
+      'a design whose storage lands nowhere reported no failure at all').toBe(true);
+  });
+
+  it('passes when the panels are there — the real job', async () => {
+    const { buildRaysIntendedJob } = await import('@/lib/electrical/fixtures/tesla400aTwoGateway');
+    const { evaluateServiceTopology } = await import('@/lib/electrical/serviceTopology');
+    const t = buildRaysIntendedJob().topology;
+    const ev = evaluateServiceTopology(t);
+    const landingFails = ev.checks.filter(
+      c => c.id === 'aggregation.landing' && c.conclusion === 'FAIL'
+        && /nowhere to land/i.test(c.detail));
+    expect(landingFails, 'the real job was reported as landing nowhere').toEqual([]);
+  });
+});
