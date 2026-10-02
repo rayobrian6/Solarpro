@@ -82,6 +82,26 @@ beforeAll(async () => {
   await db.exec(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS selected_equipment JSONB`);
   await db.exec(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS engineering_config JSONB`);
   await db.exec(`ALTER TABLE layouts ADD COLUMN IF NOT EXISTS total_panels INTEGER`);
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // 🚨 WARM THE ROUTE MODULES HERE, NOT INSIDE A 10-SECOND TEST.
+  //
+  // These suites drive REAL route handlers, and the SLD / permit / BOM / calculate modules pull in
+  // most of the engineering codebase. The first `await import(...)` of one of them is a cold module
+  // graph — cheap alone, but in the full suite (where module import is the single largest cost) it
+  // can exceed the 10 s test timeout on its own. The suite then reports a timeout on an `it()` whose
+  // assertions never ran, which reads as a broken guard and is not one.
+  //
+  // So the import happens in `beforeAll`, where the documented 60 s boot budget lives. The per-test
+  // timeout stays at 10 s and now measures the TEST — a genuinely hung handler still fails fast.
+  // ══════════════════════════════════════════════════════════════════════════
+  await Promise.all([
+    import('@/app/api/engineering/sld/route'),
+    import('@/app/api/engineering/permit/route'),
+    import('@/app/api/engineering/bom/route'),
+    import('@/lib/electrical/loadElectricalProject'),
+    import('@/lib/db/serviceTopology'),
+  ]);
 });
 afterAll(async () => { await db?.close(); });
 
@@ -444,8 +464,33 @@ describe('🚨 MUTATION 13 — the real 400 A job, through every production surf
       system: { totalPanels: 72, inverters: [] },
     });
     expect(status).toBe(409);
-    expect(json.code).toBe('ELECTRICAL_CONFLICT');
+    // 🚨 THE CODE CHANGED, AND THE REASON MATTERS. This project's conflict IS the coupling, so the
+    // architecture-specific refusal takes precedence over the permit's generic one — Ray: "SLD/BOM/
+    // permit should report ELECTRICAL ARCHITECTURE REQUIRES RESOLUTION." The generic
+    // `ELECTRICAL_CONFLICT` still guards the sealed package against every OTHER contradiction; the
+    // test below this one holds it.
+    expect(json.code).toBe('ELECTRICAL_ARCHITECTURE_REQUIRES_RESOLUTION');
+    expect(json.error).toBe('ELECTRICAL ARCHITECTURE REQUIRES RESOLUTION');
     expect(String(json.electricalRevision).startsWith('ELEC-')).toBe(true);
+  });
+
+  it('🚨 a NON-COUPLING conflict still refuses the package with the generic code', async () => {
+    // The architecture gate must not have REPLACED the broad refusal. A stale battery-count mirror
+    // is not an architecture question — it does not block a drawing — but it is still a
+    // contradiction, and a sealed package asserting it would be asserting something the project
+    // itself denies. Ray: a permit is "a sealed assertion submitted to an AHJ".
+    //
+    // No separate inverter ⇒ no coupling conflict; a wrong `batteryCount` ⇒ the mirror conflict.
+    await setSelectedEquipment({ batteryCount: 9 });
+    const { status, json } = await postPermit({
+      projectId: PROJECT,
+      project: { projectId: PROJECT, clientName: 'Ray', address: '1 Test St' },
+      system: { totalPanels: 72, inverters: [] },
+    });
+    expect(status).toBe(409);
+    expect(json.code).toBe('ELECTRICAL_CONFLICT');
+    const cs = json.conflicts as Array<{ fact: string }>;
+    expect(cs.some(c => /how many storage units/i.test(c.fact))).toBe(true);
   });
 
   it('the authority inspector reports the job, its owners and its revision', async () => {
@@ -664,7 +709,14 @@ describe('🚨 MUTATION 5 — contradictory legacy state produces an explicit co
       system: { totalPanels: 37, inverters: [] },
     });
     expect(status).toBe(409);
-    expect(json.code).toBe('ELECTRICAL_CONFLICT');
+    expect(json.code).toBe('ELECTRICAL_ARCHITECTURE_REQUIRES_RESOLUTION');
+    // 🚨 AND THE REFUSAL CARRIES THE ANSWERS, not just the complaint. A refusal that states a
+    // problem and offers no way to settle it is how Ray ended up being told to delete equipment by
+    // hand.
+    const choices = json.choices as Array<{ coupling: string; retiresExternalInverter: boolean }>;
+    expect(choices.map(c => c.coupling).sort())
+      .toEqual(['ac-coupled-inverter', 'dc-coupled-storage']);
+    expect(choices.find(c => c.coupling === 'dc-coupled-storage')!.retiresExternalInverter).toBe(true);
     const conflicts = json.conflicts as Array<{ fact: string; claims: unknown[]; question: string }>;
     expect(conflicts.length).toBeGreaterThan(0);
     expect(conflicts[0].claims.length).toBe(2);

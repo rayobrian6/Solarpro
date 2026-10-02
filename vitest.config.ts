@@ -8,7 +8,22 @@ export default defineConfig({
     environment: 'node',
     globals: true,
     testTimeout: 10000,
-    hookTimeout: 10000,
+    // ══════════════════════════════════════════════════════════════════════
+    // 🚨 THE `*.postgres.test.ts` SUITES BOOT A REAL POSTGRES EACH, IN PROCESS.
+    //
+    // Every one of them does `new PGlite()` plus the migration run inside `beforeAll`. That is a
+    // WASM Postgres starting from cold, and under the full suite's file-level parallelism a dozen of
+    // them start at once — at which point individual boots take longer than the 10 s hook timeout and
+    // the suite reports `Hook timed out in 10000ms` on a line that contains no logic at all.
+    //
+    // It is load, not a defect: the same files pass in isolation and in small groups, and WHICH ones
+    // fail changes between runs. Adding one more postgres suite tipped the full run over.
+    //
+    // So the boot gets a timeout that matches what it is doing. 10 s stays the rule for everything
+    // else, including every `it()` in these same files — a hung TEST still fails fast; only the
+    // documented cold start is allowed to be slow.
+    // ══════════════════════════════════════════════════════════════════════
+    hookTimeout: 60000,
     include: [
       'tests/**/*.test.ts',
       'tests/**/*.test.tsx',

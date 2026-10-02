@@ -413,3 +413,212 @@ across four cabinets.
 not run and the tab produces nothing. That is a silent absence rather than a wrong answer — strictly
 better than what the SLD was doing — but it means Electrical Sizing does not yet agree with the sheet,
 and it carries the same `?? 600` defaults for when it does run. Recorded, not changed.
+
+---
+
+# ADDENDUM B — THE SECOND LIVE ACCEPTANCE RUN (2026-10-02)
+
+Ray re-tested the same persisted Professional project, without cleaning or changing anything. Two of
+the previous round's repairs held:
+
+| surface | result |
+|---|---|
+| PW3 OCPD now 60 A | PASS |
+| Gateway→MSP labelled BACKUP FEEDER | PASS |
+| canonical solar architecture | **FAIL** |
+| sidebar architecture | **FAIL** |
+| System Config architecture | **FAIL** |
+| SLD architecture | **FAIL** |
+| generation panels persisted | **FAIL** |
+
+His ruling: *"Therefore persisted equipment existence alone does not prove installer intent. … Do not
+simply say: persisted inverter = intentional inverter, because this live project proves that
+statement false."*
+
+## B-1 — WHICH LAYER WAS WRONG. Proven before any code changed.
+
+Ray required the diagnosis first: *"If the canonical model is already reporting conflict but the
+sidebar is reducing that to STRING INVERTER, fix the projection. If the canonical model itself
+resolves to string … fix canonicalization/provenance. Prove which before changing code."*
+
+A diagnostic against his exact persisted row, through `loadElectricalProject`:
+
+```
+solarCoupling        : null
+provenance.source    : none
+conflicts            : 1  -> SOLAR_COUPLING_UNRESOLVED
+canonicalizationPatch: null
+```
+
+**The canonicalizer was already right.** It refuses to pick a side and emits no patch. Two
+projections then threw that away:
+
+1. **The badge.** `app/engineering/page.tsx` had
+   `couplingIsDc ? 'PV DC COUPLED' : isHybrid ? ... : 'STRING INVERTER'`. A `null` coupling — "the
+   project does not say" — fell through every arm to the last one. A refusal to answer was rendered
+   as one of the two answers it refused to give.
+2. **The routes never asked.** `body.topologyType` still said `'STRING'` from the page's React state,
+   so the SLD drew the losing side of a conflict as fact. The BOM would have quoted it and the permit
+   would have sealed it.
+
+The ternary lived in JSX, where nothing could test it. It is now
+`lib/electrical/architectureLabel.ts#topologyBadge` — a function with an exhaustive truth table over
+every input that used to be able to win.
+
+## B-2 — PROVENANCE, AND WHY IT CANNOT SETTLE INTENT ON A LEGACY ROW
+
+`lib/electrical/equipmentProvenance.ts` records how equipment came to be on a project:
+`USER_SELECTED` · `ARCHITECTURE_CREATED` · `AUTO_SUGGESTED_LEGACY` · `MIGRATED`, stored on
+`selected_equipment.provenance`. For rows written before it existed, evidence is classified instead.
+
+🚨 **The honest limit, stated as a law rather than a caveat: for a legacy row, "auto-picked" and
+"deliberately chosen" are the same bytes.** The auto-picker wrote an inverter id and no provenance; a
+deliberate click wrote an inverter id and no provenance. Nothing recovers a distinction that was never
+written down. So `AUTO_SUGGESTED_LEGACY` carries `settlesIntent: false` and routes to one explicit
+question — which is Ray's own fallback, and the only defensible path.
+
+### The predicate that would have cleared Ray's project
+
+`EcosystemPicker` auto-selected `kit.stringInverters[0]` = `tesla-solar-inverter-3p8k`.
+`lib/system/sizingEngine.ts` then found one unit insufficient for 37 modules and **upsized "to a
+bigger model in the same brand"**, landing on `tesla-solar-inverter-5p7k` x 2 — which is what his row
+holds. **An equality test against the auto-pick's id finds no match and declares the inverter
+deliberate.** The id on the row is the auto-pick's *output*, not the auto-pick.
+
+So the test is REACHABILITY: membership of the ecosystem's string-inverter list, which is the closed
+set the auto-pick plus a brand-internal upsize can produce. The asymmetry is deliberate —
+reachability convicts, non-reachability does not acquit, because catalogue membership changes over
+time and "not in the list today" cannot stand as "a human chose it".
+
+## B-3 — NO PRODUCTION SURFACE DRAWS A COMPETING SYSTEM
+
+`lib/electrical/architectureGate.ts` — one predicate, one code, one wording, consumed by the SLD, the
+SLD PDF, the BOM and the permit. 409 with `ELECTRICAL_ARCHITECTURE_REQUIRES_RESOLUTION`, the two
+answers, and the equipment's origin.
+
+409 rather than 200-with-a-banner: a permit-grade artefact that *exists* can be printed, attached and
+submitted by someone who never read the banner.
+
+🚨 **It blocks ONE conflict, not "conflicts".** A stale `batteryCount` mirror does not stop a drawing
+— Ray: *"Other unrelated project engineering may continue."* The permit's pre-existing broad
+`ELECTRICAL_CONFLICT` refusal is unchanged and still guards the sealed package against everything
+else.
+
+## B-4 — ONE EXPLICIT DECISION, PERSISTED PERMANENTLY
+
+`POST /api/engineering/electrical-architecture`, planned by the pure
+`lib/electrical/architectureResolution.ts`.
+
+- **DC** → the coupling is recorded on the graph; `inverter`/`inverterId` leave design authority;
+  `retiredInverter` keeps the full object, when, why, and what its origin was judged to be;
+  `provenance.architecture = USER_SELECTED` so the question can never be re-asked. The 37 modules are
+  not touched — this writes `projects`, and the module count lives in `layouts`.
+- **AC** → the inverter stays and `provenance.inverter = USER_SELECTED`. Recording only the coupling
+  would leave it reported as "suggested automatically — never confirmed" forever.
+- A second resolution on a settled project is refused (`NOTHING_TO_RESOLVE`), so a stale tab cannot
+  overwrite a recorded architecture.
+
+### 🚨 A defect this found in the previous round's own work
+
+The resolution first wrote back the graph it read — and `readServiceTopology` defaults to `'active'`,
+which **hydrates**. So a read-modify-write baked today's catalogue (60 A OCPD, today's
+`pvInputLimits`) into the stored bytes, and `parseServiceTopology(raw, 'as-issued')` then returned
+the correction too. The as-issued trace was destroyed by the very mechanism built to preserve it.
+Both write-back sites (`architectureResolution` route, `persistElectricalCanonicalization`) now read
+`'as-issued'`.
+
+Caught by a test that resolved an architecture and then asked for the as-issued OCPD: 60 A, on a row
+issued at 50 A.
+
+### And the stale page fleet
+
+There are two equipment stores. The server empties `selected_equipment.inverter`;
+`engineering_config.inverters` is the page's working fleet and the server does not touch it — and the
+browser composes the canonical model from the FLEET. Without clearing it, the recorded
+`dc-coupled-storage` would immediately hit `recorded === 'dc-coupled-storage' && hasExternalInverter`
+and the conflict would come back. Ray would have clicked an answer that un-answered itself. The fleet
+is corrected rather than the conflict suppressed — suppressing it would also hide a genuinely NEW
+inverter pick, which is a real conflict.
+
+## B-5 — GENERATION PANELS: a control that could not express its own value
+
+The per-domain point-of-connection select offered three of the four `storageConnection` values and
+omitted `der-aggregation-panel` — the one Ray's job needs. Two live consequences:
+
+1. **Per-system choice was impossible.** Ray: *"independently for each system or through a clearly
+   stated apply-to-both action."* Only the site-wide radio could say it.
+2. **It silently orphaned panels.** With the radio set to the generation panel, the select held a
+   value it had no `<option>` for, so it rendered as the first option; touching it wrote `unresolved`
+   onto the domain while the built `aggregationPanels` STAYED in the graph. That is the mirror of the
+   defect `d1f5c3b1` closed — there an arrangement named a panel that did not exist; here a panel
+   existed that no arrangement claimed.
+
+`applyPerSystemGenerationPanels` / `clearPerSystemGenerationPanels` now take an optional `domainIds`
+scope, and rebuilding one system no longer deletes the other system's panel.
+
+## B-6 — §11: the Electrical Sizing tab now agrees with the sheet
+
+Addendum A recorded this as "silent instead of wrong". Closed.
+
+The route had **no `projectId` at all** — everything it knew came from the page's POST body, and
+`if (firstStr && firstInv)` meant a DC-coupled job produced no NEC 690.7 check whatsoever while the
+drawing showed 5 strings of 9.
+
+- The page now sends `projectId` and a `pvArray` block (module specs + count) that does not live on an
+  inverter's string list, because the array is a fact about the design.
+- The DC window comes from `lib/electrical/dcStringLimits.ts` — **the same projection the SLD route
+  consumes**, extracted from where it was inline. Writing it twice is how two surfaces come to
+  disagree about one device.
+- Result: `totalStrings: 5`, `panelsPerString: 9`, `stringVoc: 531.2 V` against the published 550 V.
+  The same geometry the sheet draws. (The Voc figures differ between the two surfaces because they
+  use different NEC 690.7 methods — the sheet's fixed x1.25 multiplier vs the temperature-coefficient
+  method; both are admissible and both are inside the device limit.)
+- A mixed-model DC-coupled graph gets **no** projection rather than the first unit's window, so the
+  answer cannot depend on node ordering.
+
+## B-7 — PROOF
+
+16 mutations, each a byte-level restore of the defect, each confirmed to turn its guard red:
+
+| # | restored defect | guard |
+|---|---|---|
+| 1 | badge: conflict no longer outranks derived labels | badge truth table |
+| 2 | provenance: reachability narrowed to equality (the upsize blind spot) | origin classification |
+| 3 | SLD gate removed | SLD refusal |
+| 4 | write-back re-hydrated | as-issued read |
+| 5 | panel scoping removed | per-system independence |
+| 6 | retirement drops the history record | retirement |
+| 7 | unknown provenance kind accepted | unknown-kind guard |
+| 8 | settled-project guard removed | second resolution |
+| 9 | gate widened to every conflict | unrelated engineering continues |
+| 10 | stored provenance ignored | stored provenance read |
+| 11 | inverter not removed from design authority | retirement |
+| 12 | BOM gate removed | BOM refusal |
+| 13 | permit architecture gate removed | permit refusal |
+| 14 | sizing gate back to requiring an inverter | DC string config |
+| 15 | DC window back to the 600 V default | 550 V input |
+| 16 | mixed-model guard removed | node-order independence |
+
+`tests/legacyArchitectureProvenance.postgres.test.ts` — 35 tests against Ray's exact persisted row in
+a real PostgreSQL, through the real route handlers.
+
+### A harness fault this exposed, and the honest limit of it
+
+Adding one more `*.postgres.test.ts` tipped the full suite over: a dozen PGlite instances booting at
+once made individual `beforeAll` hooks exceed the 10 s hook timeout, and the suite reported
+`Hook timed out` on lines containing no logic. `hookTimeout` is now 60 s — `testTimeout` stays at
+10 s, so a hung test still fails fast — and the heavy route modules are imported in `beforeAll` rather
+than inside a 10 s test.
+
+Full regression: **16,290 passed / 16 failed in 4 files.** Three are the constant pre-existing set
+(`panelCompatibilityGate`, `mapSources`, `proposals-sign`). The fourth slot ROTATES between runs
+(`SignatureBlock`, then `rate-limiter-failmode`) with `Test timed out in 10000ms` on renders that pass
+in isolation — local load, not logic, and the same thing `vitest.config.ts` already documents about
+local Windows runs.
+
+## B-8 — STILL OPEN
+
+- **Ray's project still has no generation panels.** The wizard can now express the arrangement per
+  system; creating them in a migration would be inventing equipment he has not specified.
+- **Live acceptance on the authenticated project** — `NEEDS RAY`. This working copy has only
+  `.env.example`.
