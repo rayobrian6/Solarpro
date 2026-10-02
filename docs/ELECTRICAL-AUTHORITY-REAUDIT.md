@@ -385,3 +385,31 @@ refresh is purely additive; the picker prop defaults undefined; the renderer cha
   panels appear only when he answers. A migration that created them would be inventing equipment.
 - `EcosystemPicker`'s battery default (visible, toggleable, no demonstrated defect) — recorded, not
   changed.
+
+## A-8 — 🚨 The strings were sized against an inverter that is not in the design
+
+The worst finding of the addendum, and the only one that would have reached a roof.
+
+`computeSystem` takes its whole DC window from the request body with defaults —
+`inverterMaxDcV ?? 600`, `mpptVoltageMax ?? 600`, `maxInputCurrentPerMppt ?? 15`, `mpptChannels ?? 2`.
+On Ray's job that produced, on the sheet:
+
+    Number of Strings 2 · Panels per String 19 · String Voc × 1.25 = 1345.8 V
+
+against a Powerwall 3 whose published PV input is **60–550 V DC**. More than twice the device maximum,
+drawn, scheduled and printed with **no failure anywhere** — because the limits it was checked against
+belonged to an inverter that does not exist on the design. Same class as the phantom ATS and the
+phantom tap OCPD; this one is a safety defect rather than a cosmetic one.
+
+The real limits were already on the instances (`pvInputLimits` — 20 kW STC, 6 MPPTs, 60–550 V input,
+60–480 V MPPT, 15 A Imp / 19 A Isc per MPPT), restored on read by `hydrateInstances`. Feeding them
+re-sizes the array to **5 strings of 9 (last 2) at 418.7 V, ×1.25 = 523.4 V** on 24 MPPT channels
+across four cabinets.
+
+### Related, NOT fixed — the Electrical Sizing tab is silent instead of wrong
+
+`app/api/engineering/calculate/route.ts:116` gates the NEC 690.7 string generator on
+`if (firstStr && firstInv)`. A DC-coupled project has no standalone inverter, so the generator does
+not run and the tab produces nothing. That is a silent absence rather than a wrong answer — strictly
+better than what the SLD was doing — but it means Electrical Sizing does not yet agree with the sheet,
+and it carries the same `?? 600` defaults for when it does run. Recorded, not changed.
