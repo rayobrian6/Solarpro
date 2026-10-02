@@ -485,6 +485,94 @@ describe('🚨 the PDF export route, on the same legacy project', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
+// 🚨 EVERY SURFACE, ONE SYSTEM — on the same legacy project.
+//
+// Ray's §14: "Continue until equipment topology; conductor schedule; sizing/calculation blocks; BOM;
+// equipment schedule; permit; PDF all describe the same electrical system."
+//
+// The SLD and the PDF are covered above. These drive the BOM and permit routes against the SAME
+// legacy row — the one with no recorded coupling, no PV input limits and the stale 50 A OCPD.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('🚨 the BOM and the permit, on the same legacy project', () => {
+  beforeEach(async () => {
+    await writeLegacyRow({ withGenerationPanels: true });
+    await setSelectedEquipment(null);
+  });
+
+  it('the BOM route counts the graph, not the posted scalar, and orders no phantom equipment', async () => {
+    const { POST } = await import('@/app/api/engineering/bom/route');
+    const { NextRequest } = await import('next/server');
+    const res = await POST(new NextRequest('http://localhost/api/engineering/bom', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        projectId: PROJECT, batteryId: 'tesla-powerwall-3', batteryCount: 1,
+        panelId: 'qcell-q6', moduleCount: 37, totalPanels: 37, systemType: 'roof',
+      }),
+    }));
+    const json = await res.json() as Record<string, unknown>;
+    const elec = json.electrical as Record<string, unknown>;
+
+    expect(elec.storageUnits, 'the posted 1 beat the graph').toBe(4);
+    expect(elec.gateways).toBe(2);
+    expect(elec.generationPanels).toBe(2);
+    expect(elec.coupling, 'the BOM resolved a different architecture than the drawing')
+      .toBe('dc-coupled-storage');
+    expect(elec.quantityDisagreements, 'the BOM and the graph disagree').toEqual([]);
+
+    const bom = json.bom as { items: Array<{ partNumber: string; manufacturer?: string; model?: string }> };
+    const enphase = bom.items.filter(i =>
+      /enphase|iq8/i.test(`${i.partNumber} ${i.manufacturer ?? ''} ${i.model ?? ''}`));
+    expect(enphase.map(i => i.partNumber), 'the BOM ordered Enphase for a DC-coupled job').toEqual([]);
+    const solarInv = bom.items.filter(i => /solar inverter/i.test(String(i.model ?? '')));
+    expect(solarInv.map(i => i.partNumber), 'the BOM ordered the phantom inverter').toEqual([]);
+  });
+
+  it('🚨 the permit route receives the graph, with the corrected OCPD on it', async () => {
+    // Driven through the route's own electrical-conflict branch, which fires only AFTER the canonical
+    // load — so reaching it proves the load ran and the revision was stamped. With no inverter
+    // selected there is no conflict, so this project passes that gate; the proof it got the graph is
+    // the schedule rows the permit builds from it.
+    const { serviceTopologyScheduleRows } = await import('@/lib/permit/utils/serviceTopologySchedule');
+    const { loadElectricalProject } = await import('@/lib/electrical/loadElectricalProject');
+    const loaded = (await loadElectricalProject(PROJECT, USER_ID))!;
+    expect(loaded.model.conflicts).toEqual([]);
+
+    const rows = serviceTopologyScheduleRows(loaded.model.topology!);
+    const ess = rows.filter(r => r.deviceType === 'ess-ac-source');
+    expect(ess.length, 'the permit schedule lost the Powerwalls').toBe(4);
+    for (const r of ess) {
+      expect(r.ocpd, 'the permit schedule carries the stale 50 A OCPD').toContain('60');
+    }
+    expect(rows.filter(r => r.deviceType === 'backup-gateway').length).toBe(2);
+    // 🚨 THE GENERATION PANELS REACH THE PERMIT SCHEDULE AS PHYSICAL DEVICES, one per system.
+    // They are typed `der-aggregation-panel`, not named "generation" — an earlier version of this
+    // assertion searched for the word and failed against working code.
+    const aggs = rows.filter(r => r.deviceType === 'der-aggregation-panel');
+    expect(aggs.length, 'the generation panels are missing from the permit schedule').toBe(2);
+    // And each row says WHICH system it belongs to — blank, an inspector cannot tell AGG-1 from
+    // AGG-2 or match either to its gateway.
+    expect(new Set(aggs.map(r => r.domain)).size,
+      'the generation panel rows do not identify their systems').toBe(2);
+    for (const a of aggs) {
+      expect(a.domain, 'a generation panel row has no domain').not.toBe('');
+      expect(a.ocpd).toContain('125');
+    }
+  });
+
+  it('🚨 the equipment schedule and the BOM agree on the same four cabinets', async () => {
+    const { bomFromServiceTopology } = await import('@/lib/bom/topologyBom');
+    const { loadElectricalProject } = await import('@/lib/electrical/loadElectricalProject');
+    const loaded = (await loadElectricalProject(PROJECT, USER_ID))!;
+    const bom = bomFromServiceTopology(loaded.model.topology!);
+    expect(bom.quantities['tesla-powerwall-3']).toBe(4);
+    expect(bom.quantities['tesla-backup-gateway-3']).toBe(2);
+    expect(loaded.model.storage.invertingUnitCount).toBe(4);
+    expect(loaded.model.storage.usableKwh).toBeCloseTo(54, 1);
+    expect(loaded.model.storage.continuousOutputA).toBeCloseTo(192, 1);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
 describe('🚨 the ecosystem change must not be able to invent an architecture', () => {
   it('a selected standalone inverter beside PV-capable storage is a CONFLICT, not a silent AC sheet', async () => {
     await writeLegacyRow({ withGenerationPanels: true });

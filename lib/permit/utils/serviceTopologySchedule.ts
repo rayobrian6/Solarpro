@@ -214,7 +214,12 @@ export function serviceTopologyScheduleRows(t: ServiceTopology | null | undefine
       tag: agg.id.toUpperCase(),
       deviceType: 'der-aggregation-panel',
       manufacturer: '', model: '',
-      domain: '',
+      // 🚨 WHICH SYSTEM THIS PANEL BELONGS TO. It was blank, and on Ray's real job there are TWO
+      // generation panels — one per 200 A system — so a schedule row that does not name its domain
+      // leaves an inspector unable to tell AGG-1 from AGG-2 or to match either to its gateway.
+      // Every other row in this schedule already carries its domain.
+      domain: agg.domainId
+        ? (t.domains.find(d => d.id === agg.domainId)?.label ?? agg.domainId) : '',
       rating: agg.busbarRatingA === null
         ? 'NOT EVALUATED — BUSBAR RATING REQUIRED'
         : `${agg.busbarRatingA} A bus`
