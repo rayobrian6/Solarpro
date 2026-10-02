@@ -23,6 +23,25 @@ export default defineConfig({
     // else, including every `it()` in these same files — a hung TEST still fails fast; only the
     // documented cold start is allowed to be slow.
     // ══════════════════════════════════════════════════════════════════════
+    // 60 s FOR THE DOCUMENTED COLD START ONLY - NOT A GENERAL ALLOWANCE.
+    //
+    // `testTimeout` stays at 10 s, so a hung TEST still fails fast. This covers one thing: a WASM
+    // Postgres booting from cold inside `beforeAll`.
+    //
+    // AND IT IS NOT THE ANSWER TO THE FLAKY RUN. Measured 2026-10-02: the default parallel run
+    // fails a ROTATING set of 4-9 files that all pass in isolation, while
+    // `npm run test:deterministic` (--no-file-parallelism) fails EXACTLY THREE, every time:
+    //
+    //     lib/system/panelCompatibilityGate.test.ts
+    //     tests/mapSources.test.tsx
+    //     tests/proposals-sign.test.ts
+    //
+    // 15 tests, the same 15 - the known pre-existing set tracked in docs/CI-QUARANTINE.md. So the
+    // rotating failures are RESOURCE PRESSURE, not races: 834 files and ~16,800 tests saturate this
+    // machine and time out work that is merely slow.
+    //
+    // The parallel run is a fast smoke (~220 s). `test:deterministic` (~800 s) is the authority for
+    // "is the suite green?". Raising timeouts further would hide real hangs instead.
     hookTimeout: 60000,
     include: [
       'tests/**/*.test.ts',

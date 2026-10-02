@@ -301,7 +301,25 @@ export async function POST(req: NextRequest) {
     // v58.8 GUARD: if inverterId is an optimizer peripheral (e.g. 'se-p505'),
       // the frontend sent the wrong field. Resolve to correct central inverter via brand profile,
       // and use the peripheral as the optimizerId instead.
-      let resolvedInverterId: string = body.inverterId ?? 'fronius-primo-8.2';
+      // ════════════════════════════════════════════════════════════════
+      // 🚨 NO EQUIPMENT MAY APPEAR FROM ABSENCE — AND THIS ONE WAS ON THE PURCHASE ORDER.
+      //
+      // `?? 'fronius-primo-8.2'` put a real catalogue product on the BILL OF MATERIALS for any
+      // project that sent no inverter id. Not a drawing label an engineer might catch — a line on
+      // the list somebody orders from. A DC-coupled job, whose correct state is NO standalone
+      // inverter, would have had one quoted.
+      //
+      // Ray: outputs "must never guess missing equipment / invent an inverter". Absence stays
+      // absent; the engine already handles a project with no standalone inverter, and the BOM shows
+      // the gap rather than filling it.
+      // ════════════════════════════════════════════════════════════════
+      let resolvedInverterId: string = typeof body.inverterId === 'string' && body.inverterId.trim()
+        ? body.inverterId.trim()
+        : '';
+      if (!resolvedInverterId) {
+        console.warn('[BOM ROUTE] no inverter id was supplied — the parts list reports the absence '
+          + 'rather than quoting a product nobody selected.');
+      }
       let resolvedOptimizerId: string | undefined = body.optimizerId;
       {
         const { getRegistryEntryV4: _reg } = await import('@/lib/equipment-registry-v4');

@@ -7,6 +7,9 @@
  */
 
 import { Project, Layout } from '@/types';
+import {
+  readExternalInverterIdentity, mayBackfillExternalInverter,
+} from '@/lib/electrical/inverterIdentity';
 import { getDbReady, isValidUUID, assertUUID, rowToProject, rowToLayout } from './core';
 import {
   assertMirrorInvariant,
@@ -62,8 +65,26 @@ function enrichProjectRow(row: Record<string, unknown>): Project {
     if (!base.selectedPanel && prodDj.selectedPanel) {
       base.selectedPanel = prodDj.selectedPanel as import('@/types').SolarPanel;
     }
+    // ═══════════════════════════════════════════════════════════════
+    // 🚨 A RETIRED INVERTER MUST NOT COME BACK FROM A PRODUCTION SNAPSHOT.
+    //
+    // `!base.selectedInverter` treats "this project records NO separate inverter" and "nobody has
+    // said" as the same falsy thing — so a DC-coupled design whose inverter was deliberately retired
+    // gets one handed back from an old `productions.data_json`, a store the authority table does not
+    // list. That is a legacy mirror beating its owner, through a gap-filler.
+    //
+    // `readExternalInverterIdentity` separates the two: an explicit null in `selected_equipment` is
+    // a RECORDED NONE and is left alone; only a genuinely unstated project is backfilled, and then
+    // only from a value the installer actually saved.
+    // ═══════════════════════════════════════════════════════════════
     if (!base.selectedInverter && prodDj.selectedInverter) {
-      base.selectedInverter = prodDj.selectedInverter as import('@/types').Inverter;
+      const _identity = readExternalInverterIdentity(row.selected_equipment);
+      if (mayBackfillExternalInverter(_identity)) {
+        base.selectedInverter = prodDj.selectedInverter as import('@/types').Inverter;
+      } else {
+        console.log('[enrichProjectRow] not backfilling selectedInverter from the production '
+          + `snapshot: ${_identity.basis}`);
+      }
     }
   }
 
@@ -89,8 +110,15 @@ function enrichProjectRow(row: Record<string, unknown>): Project {
       if (!base.selectedPanel && snapshotProject.selectedPanel) {
         base.selectedPanel = snapshotProject.selectedPanel as import('@/types').SolarPanel;
       }
+      // 🚨 Same rule, one store further out — a proposal snapshot is older still.
       if (!base.selectedInverter && snapshotProject.selectedInverter) {
-        base.selectedInverter = snapshotProject.selectedInverter as import('@/types').Inverter;
+        const _identity2 = readExternalInverterIdentity(row.selected_equipment);
+        if (mayBackfillExternalInverter(_identity2)) {
+          base.selectedInverter = snapshotProject.selectedInverter as import('@/types').Inverter;
+        } else {
+          console.log('[enrichProjectRow] not backfilling selectedInverter from the proposal '
+            + `snapshot: ${_identity2.basis}`);
+        }
       }
       // Also recover layout from snapshot if not already set and no layout from layouts table
       if (!base.layout && snapshotProject.layout) {

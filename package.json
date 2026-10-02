@@ -12,6 +12,7 @@
     "type-check": "tsc --noEmit",
     "dev:debug": "NODE_OPTIONS=\"--inspect\" next dev -p 3000",
     "test": "vitest run",
+    "test:deterministic": "vitest run --no-file-parallelism",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:ci": "vitest run --reporter=verbose",

@@ -1927,3 +1927,103 @@ describe('🚨 UNRESOLVED INTERCONNECTION IS A STATE, NOT A GAP', () => {
       .toContain('Point of interconnection');
   });
 });
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 🚨 ONE INVERTER IDENTITY — NONE / UNKNOWN / SELECTED, and a recorded NONE cannot be backfilled.
+//
+// Three spellings mean "current active external PV inverter":
+//   selected_equipment.inverter.id  ·  selected_equipment.inverterId  ·  project.selectedInverter
+//
+// The third is promoted from `productions.data_json` by `enrichProjectRow` when the project has
+// none — and `!base.selectedInverter` cannot tell "recorded as NONE" from "nobody said". So a
+// DC-coupled design whose inverter was deliberately retired got one handed back from an old
+// production snapshot: a legacy mirror beating its owner, through a gap-filler.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('🚨 ONE INVERTER IDENTITY, WITH A REAL "NONE"', () => {
+  it('distinguishes the three states — and an explicit null is NOT a missing value', async () => {
+    const { readExternalInverterIdentity, mayBackfillExternalInverter } =
+      await import('@/lib/electrical/inverterIdentity');
+
+    const selectedObj = readExternalInverterIdentity({ inverter: { id: 'enphase-iq8plus' } });
+    expect(selectedObj.state).toBe('SELECTED');
+    expect(selectedObj.productId).toBe('enphase-iq8plus');
+    expect(selectedObj.readFrom).toBe('selected_equipment.inverter.id');
+
+    const selectedFlat = readExternalInverterIdentity({ inverterId: 'solaredge-se7600h-us' });
+    expect(selectedFlat.state).toBe('SELECTED');
+    expect(selectedFlat.readFrom).toBe('selected_equipment.inverterId');
+
+    // 🚨 THE DISTINCTION THAT MATTERS.
+    const none = readExternalInverterIdentity({ inverter: null, inverterId: null, batteryCount: 4 });
+    expect(none.state).toBe('NONE');
+    expect(none.basis).toContain('DC-coupled');
+
+    const unknown = readExternalInverterIdentity({ batteryCount: 4 });
+    expect(unknown.state).toBe('UNKNOWN');
+    expect(readExternalInverterIdentity(null).state).toBe('UNKNOWN');
+
+    // Only an unstated project may be backfilled. NONE is an answer.
+    expect(mayBackfillExternalInverter(none),
+      'a recorded NONE was treated as a gap to fill').toBe(false);
+    expect(mayBackfillExternalInverter(selectedObj)).toBe(false);
+    expect(mayBackfillExternalInverter(unknown)).toBe(true);
+  });
+
+  it('🚨 after the resolution the canonical model reports NONE, not a missing value', async () => {
+    await writeRaysLiveRow({ recordedCoupling: 'ac-coupled-inverter', generationPanels: true });
+    await resolveArchitecture('dc-coupled-storage');
+    const { se } = await readRow();
+    const { readExternalInverterIdentity } = await import('@/lib/electrical/inverterIdentity');
+    const id = readExternalInverterIdentity(se);
+    expect(id.state).toBe('NONE');
+    expect(id.productId).toBeNull();
+
+    const m = (await load())!.model;
+    expect(m.hasExternalInverter).toBe(false);
+    expect(m.externalInverterId).toBeNull();
+  });
+
+  it('🚨 a production snapshot cannot resurrect the retired inverter', async () => {
+    const { readExternalInverterIdentity, mayBackfillExternalInverter } =
+      await import('@/lib/electrical/inverterIdentity');
+    await writeRaysLiveRow({ recordedCoupling: 'ac-coupled-inverter', generationPanels: true });
+    await resolveArchitecture('dc-coupled-storage');
+    const { se } = await readRow();
+
+    // This is the exact predicate `enrichProjectRow` now consults before promoting
+    // `productions.data_json.selectedInverter` onto the project.
+    const id = readExternalInverterIdentity(se);
+    expect(mayBackfillExternalInverter(id),
+      'an old production snapshot would hand the retired inverter back').toBe(false);
+  });
+
+  it('🚨 the gap-filler is guarded at BOTH snapshot sources', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const src = readFileSync(join(ROOT, 'lib/db/projects.ts'), 'utf8');
+    // Two promotions: productions.data_json and the proposal snapshot.
+    const guards = src.split('mayBackfillExternalInverter').length - 1;
+    expect(guards, 'one of the two selectedInverter gap-fillers is unguarded')
+      .toBeGreaterThanOrEqual(3);   // 1 import + 2 call sites
+    expect(src).toContain('readExternalInverterIdentity');
+  });
+
+  it('🚨 the state dump reports no inverter mirror that could win, after resolution', async () => {
+    await writeRaysLiveRow({ recordedCoupling: 'ac-coupled-inverter', generationPanels: true });
+    await resolveArchitecture('dc-coupled-storage');
+    const { electricalStateDump } = await import('@/lib/electrical/stateDump');
+    const d = (await electricalStateDump(PROJECT, USER_ID))!;
+    expect(d.pv.externalInverter).toBe('NONE');
+    expect(d.mirrorsThatCouldWin.filter(r => r.field.includes('inverter')),
+      'an inverter mirror can still win').toEqual([]);
+  });
+
+  it('🚨 the BOM no longer quotes a Fronius for a project that sent no inverter', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const bom = stripComments(readFileSync(join(ROOT, 'app/api/engineering/bom/route.ts'), 'utf8'));
+    expect(bom, 'the parts list still invents an inverter')
+      .not.toContain("body.inverterId ?? 'fronius-primo-8.2'");
+  });
+});

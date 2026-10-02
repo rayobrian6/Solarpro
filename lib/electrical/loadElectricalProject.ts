@@ -38,6 +38,7 @@ import {
   parseStoredProvenance, type StoredEquipmentProvenance,
 } from '@/lib/electrical/equipmentProvenance';
 import { classifyLegacyInverter } from '@/lib/electrical/legacyInverterEvidence';
+import { readExternalInverterIdentity } from '@/lib/electrical/inverterIdentity';
 import { electricalRevision } from '@/lib/electrical/revision';
 import type { ServiceTopology } from '@/lib/electrical/serviceTopology';
 
@@ -102,11 +103,16 @@ const numOrNull = (v: unknown): number | null => {
 export function selectedEquipmentView(raw: unknown): SelectedEquipmentView | null {
   const se = asObject(raw);
   if (!se) return null;
+  // 🚨 ONE READER FOR THE THREE SPELLINGS — see `lib/electrical/inverterIdentity.ts`. This used to
+  // read `inverter.id` and fall through to `inverterId`, which is correct but was ONE of several
+  // such readers; the identity module is now the single place that knows the order and, crucially,
+  // the difference between a recorded NONE and an unstated project.
+  const _identity = readExternalInverterIdentity(raw);
   const inverter = asObject(se.inverter);
   const batteries = Array.isArray(se.batteries) ? se.batteries : null;
   const firstBattery = batteries && batteries.length ? asObject(batteries[0]) : null;
   return {
-    inverterId: inverter?.id != null ? String(inverter.id) : null,
+    inverterId: _identity.state === 'SELECTED' ? _identity.productId : null,
     inverterType: inverter?.type != null ? String(inverter.type) : null,
     batteryId: firstBattery?.id != null ? String(firstBattery.id) : null,
     // 🚨 `batteryCount` IS READ AND THEN CHECKED, NOT TRUSTED. The graph's instances answer "how
