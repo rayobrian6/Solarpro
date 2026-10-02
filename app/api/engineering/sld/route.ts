@@ -162,6 +162,26 @@ export async function POST(req: NextRequest) {
             ? { ..._stored2.topology, ..._model.canonicalizationPatch }
             : _stored2.topology;
 
+          // 🚨 THE SERVICE RATING IS PROJECTED FROM THE MODEL, NOT FABRICATED AS 200.
+          //
+          // Found in the adversarial sweep: `mainPanelAmps: Number(body.mainPanelAmps) || 200` draws
+          // a 200 A service on any sheet the page did not post a rating for — a second authority that
+          // disagrees with the graph and wins, because the renderer reads the scalar. Where a topology
+          // is present the scalar is a derived compatibility projection and nothing more
+          // (docs/SERVICE-TOPOLOGY-SCALAR-AUDIT.md), so it is projected here.
+          //
+          // A graph with NO recorded rating projects nothing: `serviceRatingLabel` prints
+          // "SERVICE RATING REQUIRED" on the sheet, which is the honest outcome Ray ruled for.
+          if (_model.serviceRatedAmps !== null) {
+            const _posted = Number(body.mainPanelAmps) || 0;
+            if (_posted !== _model.serviceRatedAmps) {
+              console.warn('[sld/POST] service rating corrected from the canonical model:'
+                + ` posted=${_posted || 'none'} canonical=${_model.serviceRatedAmps} A`
+                + ` (${_model.serviceProvenance.source})`);
+            }
+            body.mainPanelAmps = _model.serviceRatedAmps;
+          }
+
           // 🚨 THE SHEET CARRIES THE REVISION IT WAS DRAWN FROM.
           //
           // Ray: "Generated electrical artifacts must carry the project/electrical revision they
@@ -1095,6 +1115,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       svg,
+      // 🚨 THE ELECTRICAL REVISION THIS SHEET WAS DRAWN FROM.
+      //
+      // Ray: "If the project changes after SLD generation, the UI must identify the drawing as stale
+      // rather than silently presenting it as current." The Diagram tab keeps this beside the SVG and
+      // compares it against the project's live revision — so staleness is decided by comparing what
+      // the drawing was made FROM, never by comparing when it was made.
+      //
+      // Absent when the project has no graph: there is no electrical state to name, and an invented
+      // revision would make an unstamped sheet look stamped.
+      electricalRevision: (body as { electricalRevision?: string }).electricalRevision ?? null,
       systemModelUsed: systemModel ? 'computed' : 'fallback',
       // Phase B3: report layout source in API response for debugging
       layoutSource: sizingResult ? (layoutCandidate ? 'layoutCandidate' : 'sizingResult') : 'body',

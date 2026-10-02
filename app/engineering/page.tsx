@@ -33,6 +33,9 @@ import type { ServiceTopology as ServiceTopologyForPage } from '@/lib/electrical
 // renderer, the permit SLD adapter and the permit helpers. Reused rather than re-invented.
 import { INVERTER_UNSELECTED } from '@/lib/permit/utils/helpers';
 import { resolveElectricalProject, type ElectricalProjectModel } from '@/lib/electrical/projectModel';
+import {
+  electricalRevision, electricalArtifactFreshness, freshnessLabel,
+} from '@/lib/electrical/revision';
 import { useSubscription } from '@/hooks/useSubscription';
 import {
   Zap, Download, Printer, Plus, Trash2, Settings,
@@ -1695,7 +1698,20 @@ function EngineeringPageInner() {
           // diagram the user reviewed in Design Studio, not the fallback renderer.
           if (seed.sldSvg) {
             setSldSvg(seed.sldSvg);
-            console.log('[EngineeringPage] SLD restored from engineering_seed');
+            // 🚨 A SHEET OUT OF THE SEED CARRIES NO ELECTRICAL REVISION, AND MUST NOT BORROW ONE.
+            //
+            // Ray: "An old generated SLD must never become input authority for a new calculation."
+            // This drawing was rendered at some earlier moment nobody recorded, and it was found
+            // during the adversarial sweep still being presented as the current sheet. Clearing the
+            // stamp is what makes the Diagram tab say UNSTAMPED — "generated before revision
+            // tracking, regenerate to verify" — rather than silently showing it as current.
+            //
+            // It must also be cleared rather than left alone: a previous project's revision sitting
+            // in this state would make this sheet claim a revision it was never drawn from.
+            _sldRevisionRef.current = null;
+            setSldRevision(null);
+            console.log('[EngineeringPage] SLD restored from engineering_seed'
+              + ' — UNSTAMPED, no electrical revision recorded for it');
           }
 
         } else {
@@ -2908,6 +2924,20 @@ function EngineeringPageInner() {
   const [calcError, setCalcError] = useState<string | null>(null);
   const [engineeringMode, setEngineeringMode] = useState<'AUTO' | 'MANUAL'>('AUTO');
   const [sldSvg, setSldSvg] = useState<string | null>(null);
+  // ══════════════════════════════════════════════════════════════════════════
+  // 🚨 WHICH ELECTRICAL PROJECT THE DRAWING ON SCREEN CAME FROM.
+  //
+  // Ray: "generate SLD at revision A / change canonical electrical project → revision B / old SLD
+  // remains historical / UI says SLD OUT OF DATE / REGENERATE. Do not silently display revision A as
+  // current revision B. Do not use old generated artifacts as engineering inputs."
+  //
+  // The ref is written by the fetch (which is not a React event, and two fetches can land before a
+  // re-render); the state is what renders. `null` means the sheet is UNSTAMPED — drawn before this
+  // existed, or drawn for a project with no graph — and that is reported as its own state, never as
+  // current.
+  // ══════════════════════════════════════════════════════════════════════════
+  const _sldRevisionRef = useRef<string | null>(null);
+  const [sldRevision, setSldRevision] = useState<string | null>(null);
   const [sldLoading, setSldLoading] = useState(false);
   const [sldError, setSldError] = useState<string | null>(null);
   // Invalidate the cached SLD whenever the equipment it depicts changes, so a
@@ -2940,6 +2970,10 @@ function EngineeringPageInner() {
   useEffect(() => {
     if (_sldSigRef.current !== null && _sldSigRef.current !== _sldEquipSig) {
       setSldSvg(prev => (prev ? null : prev)); // equipment changed → stale SLD dropped
+      // The stamp goes with the sheet. A revision left behind would be attached to whatever is
+      // drawn next, which is the one thing a revision must never be: inherited.
+      _sldRevisionRef.current = null;
+      setSldRevision(null);
     }
     _sldSigRef.current = _sldEquipSig;
   }, [_sldEquipSig]);
@@ -3046,6 +3080,24 @@ function EngineeringPageInner() {
       },
     }));
   }, [svcTopology, config.inverters, totalPanels]);
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // 🚨 IS THE DRAWING ON SCREEN STILL THIS PROJECT'S?
+  //
+  // The live revision is computed in the BROWSER from the same canonical model the server composes,
+  // which is why `lib/electrical/revision.ts` reads no catalogue and imports no `crypto`: if the two
+  // sides could answer differently, the badge would read STALE on every page load and people would
+  // learn to ignore it.
+  //
+  // Three states, and UNSTAMPED is not a pass — see `electricalArtifactFreshness`.
+  // ══════════════════════════════════════════════════════════════════════════
+  const liveElectricalRevision = useMemo(
+    () => (electrical ? electricalRevision(electrical) : null), [electrical]);
+  const sldFreshness = useMemo(() => {
+    // Nothing drawn, or no electrical state to compare against: there is no claim to check.
+    if (!sldSvg || !liveElectricalRevision) return null;
+    return electricalArtifactFreshness(sldRevision, liveElectricalRevision);
+  }, [sldSvg, sldRevision, liveElectricalRevision]);
 
 
   // ─── MASTER TASK — SOURCE OF TRUTH for system panel count ─────────────
@@ -7244,9 +7296,15 @@ function EngineeringPageInner() {
         const ct = res.headers.get('content-type') || '';
         if (ct.includes('svg') || ct.includes('xml')) {
           const svgText = await res.text();
+          // The raw-SVG path carries the revision in a header rather than a body field.
+          _sldRevisionRef.current = res.headers.get('X-Electrical-Revision') || null;
           return svgText;
         } else {
           const data = await res.json();
+          // 🚨 KEEP THE REVISION THE SHEET WAS DRAWN FROM, beside the sheet. Without it, "is this
+          // drawing current?" can only be guessed from a timestamp, which says when the file was
+          // written and not what it was written FROM.
+          _sldRevisionRef.current = (data.electricalRevision as string | null) ?? null;
           return (data.svg || data.data?.svg || null);
         }
       } else {
@@ -7282,6 +7340,7 @@ function EngineeringPageInner() {
       if (_sldSigRef.current !== null && _sldSigRef.current !== sigAtRequest) return;
       if (svgResult) {
         setSldSvg(svgResult);
+        setSldRevision(_sldRevisionRef.current);
         logDecision('Generate SLD', `Professional SLD rendered`, 'auto');
       } else {
         setSldError('No SVG returned from SLD engine');
@@ -14675,6 +14734,45 @@ function EngineeringPageInner() {
                     <RefreshCw size={32} className="mx-auto mb-3 text-amber-400 animate-spin" />
                     <div className="text-sm text-slate-400">Rendering permit-grade SLD...</div>
                     <div className="text-xs text-slate-600 mt-1">Applying IEEE symbols · ARCH C sheet · Conductor callouts</div>
+                  </div>
+                ) : null}
+
+                {/* ══════════════════════════════════════════════════════════════
+                    🚨 IS THIS DRAWING STILL THIS PROJECT'S?
+
+                    Ray: "If the project changes after SLD generation, the UI must identify the
+                    drawing as stale rather than silently presenting it as current." So the banner
+                    states the comparison it made — the revision the sheet was drawn from against the
+                    project's revision now — rather than just colouring itself red. A badge that does
+                    not say WHY is a badge an engineer cannot act on.
+
+                    CURRENT is deliberately quiet: a green bar on every visit teaches people to stop
+                    reading the bar.
+                   ══════════════════════════════════════════════════════════════ */}
+                {sldSvg && !sldLoading && sldFreshness && sldFreshness !== 'CURRENT' ? (
+                  <div data-testid="sld-staleness-banner"
+                       data-freshness={sldFreshness}
+                       className="card p-3 mb-3 border-l-4 border-amber-500 bg-amber-500/10">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-xs font-bold text-amber-300">
+                          SLD {freshnessLabel(sldFreshness)}
+                        </div>
+                        <div className="text-[11px] text-slate-400 mt-1">
+                          {sldFreshness === 'STALE'
+                            ? <>This sheet was drawn from electrical revision{' '}
+                                <span className="font-mono text-slate-300">{sldRevision}</span>.
+                                The project is now{' '}
+                                <span className="font-mono text-slate-300">{liveElectricalRevision}</span>.
+                                It is kept as a historical drawing and is not the current one.</>
+                            : <>This sheet carries no electrical revision, so it cannot be shown to
+                                match the project. Regenerate to confirm what it depicts.</>}
+                        </div>
+                      </div>
+                      <button onClick={fetchSLD} className="btn-primary btn-sm shrink-0">
+                        <RefreshCw size={13} /> Regenerate
+                      </button>
+                    </div>
                   </div>
                 ) : null}
 

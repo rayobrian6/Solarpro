@@ -204,6 +204,36 @@ export async function POST(req: NextRequest) {
               + ` (${_m.storage.provenance.source}) — the graph owns physical multiplicity.`);
           }
           body.batteryCount = _canonical;
+
+          // 🚨 AND THE SERVICE RATING, WHICH WAS A SECOND AUTHORITY THAT COULD WIN.
+          //
+          // Found in the adversarial sweep. `mainPanelAmps: Number(body.mainPanelAmps) || 200` is a
+          // FABRICATED 200 A service whenever the page posts nothing — on a 400 A job that silently
+          // sizes conductors, the busbar allowance and the backfed breaker against half the real
+          // service. It is the "duplicate service ratings" case exactly: a scalar that can disagree
+          // with the graph and win, because the engine reads the scalar.
+          //
+          // Projecting the canonical rating onto it is the arrangement Ray already sanctioned for
+          // this field: "When a topology is present it is a DERIVED COMPATIBILITY PROJECTION of the
+          // primary panel — never a second authority." (docs/SERVICE-TOPOLOGY-SCALAR-AUDIT.md.)
+          //
+          // When the graph records NO rating, nothing is projected: the legacy fallback stands for
+          // projects that never had a graph, and a graph that is missing its rating is logged loudly
+          // rather than quietly handed a 200 — Ray's ruling that a missing fact must read
+          // "SERVICE RATING REQUIRED", never "pretend".
+          if (_m.serviceRatedAmps !== null) {
+            const _postedAmps = Number(body.mainPanelAmps) || 0;
+            if (_postedAmps !== _m.serviceRatedAmps) {
+              console.warn('[bom/POST] service rating corrected from the canonical model:'
+                + ` posted=${_postedAmps || 'none'} canonical=${_m.serviceRatedAmps} A`
+                + ` (${_m.serviceProvenance.source})`);
+            }
+            body.mainPanelAmps = _m.serviceRatedAmps;
+          } else {
+            console.warn('[bom/POST] 🚨 SERVICE RATING NOT ESTABLISHED on a project that has a'
+              + ' service graph — the legacy scalar fallback is sizing this BOM.'
+              + ` (${_m.serviceProvenance.basis})`);
+          }
           console.log('[bom/POST] canonical electrical model:'
             + ` revision=${_electrical!.revision}`
             + ` coupling=${_m.solarCoupling ?? 'UNRESOLVED'}`

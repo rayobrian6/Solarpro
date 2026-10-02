@@ -399,6 +399,39 @@ describe('🚨 MUTATION 13 — the real 400 A job, through every production surf
     }
   });
 
+  it('🚨 a POSTed 200 A does not beat the graph\'s 400 A service', async () => {
+    // FOUND IN THE ADVERSARIAL SWEEP. `mainPanelAmps: Number(body.mainPanelAmps) || 200` fabricated a
+    // 200 A service whenever the page posted nothing — and accepted a posted 200 over the graph's
+    // 400 — so conductors, the 120% busbar allowance and the backfed breaker were all sized against
+    // half the real service. A scalar that disagrees with the graph and wins is the whole defect
+    // class, arriving at the BOM.
+    // 🚨 THE OBSERVABLE, FOUND BY DIFFING THE REAL ROUTE AT 200 A AND AT 400 A. The first version of
+    // this test asserted on descriptions mentioning "200 A service" and passed WITH THE DEFECT
+    // RESTORED — nothing emits that phrase, so it proved nothing. What actually moves is the
+    // NEC 705.12(B) backfeed breaker: a 200 A busbar allows 40 A of backfeed and the BOM orders a
+    // QO40; the real 400 A busbar allows 80 A and it orders a QO80. Sizing that breaker from a stale
+    // scalar is a safety-relevant error, not a cosmetic one.
+    const { json } = await postBom({
+      projectId: PROJECT, batteryId: 'tesla-powerwall-3', panelId: 'qcell-q6',
+      moduleCount: 72, totalPanels: 72, systemType: 'roof',
+      mainPanelAmps: 200,                       // the stale scalar
+      acOCPD: 200, backfeedAmps: 200,
+    });
+    const bom = json.bom as { items: Array<{ partNumber: string; description?: string }> };
+    // The breaker line states the busbar it was sized against ("bus: 400A"); the warning-LABEL line
+    // also says "backfeed breaker" and states no busbar, so it is excluded by the `bus:` requirement
+    // rather than by name — a name filter would silently drift if the label text changed.
+    const backfeed = bom.items.filter(i =>
+      /backfeed breaker/i.test(String(i.description ?? '')) && /bus:/.test(String(i.description ?? '')));
+    expect(backfeed.length, 'no backfeed breaker line states the busbar it was sized against')
+      .toBeGreaterThan(0);
+    for (const line of backfeed) {
+      expect(line.description, 'the backfeed breaker was sized against the stale 200 A busbar')
+        .toContain('bus: 400A');
+      expect(line.description).not.toContain('bus: 200A');
+    }
+  });
+
   it('🚨 the PERMIT ROUTE receives the graph — the field that had two readers and no writer', async () => {
     // Proven through the production handler by its OWN behaviour: the permit route only reaches the
     // 409 below when it has loaded the canonical model, and the conflict payload it returns carries
