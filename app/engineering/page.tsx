@@ -3139,6 +3139,47 @@ function EngineeringPageInner() {
   }, [svcTopology, config.inverters, totalPanels]);
 
   // ══════════════════════════════════════════════════════════════════════════
+  // 🚨 DOES THE PV LAND ON THE STORAGE'S OWN DC INPUTS? ONE ANSWER, FOR EVERY CONSUMER.
+  //
+  // Ray: "Sld is ingesting the inverters from the auto equipment selector. Until you fix the
+  // inverters being applied on sys config. The problem will not resolve."
+  //
+  // Two consumers need this fact and they used to compute it separately — the equipment picker's
+  // `pvCoupledToStorage` prop, and nothing at all on the sizing path, which is why the sizing
+  // engine kept recommending a standalone PV inverter for a design whose array terminates on four
+  // Powerwalls.
+  //
+  // 🚨 THE DECIDED ARCHITECTURE, NOT THE CAPABILITY. THIS DISTINCTION IS THE WHOLE GUARD.
+  //
+  // Ray: "I'm telling you if you change the auto configuration. You are going to fuck up the slds
+  // that are working just to make this one scenario work... every auto pick selection works for
+  // installs that do not have batteries. Do not fuck my entire website up because we are getting
+  // 1 real world scenario to work."
+  //
+  // My first cut of this was `solarCoupling === 'dc-coupled-storage' || storage.some(takesPvOnDc)`,
+  // and the second half is a REGRESSION waiting to happen. `pvInput` exists on exactly one product
+  // in the catalogue — `tesla-powerwall-3` (lib/equipment-db.ts:2786, :2815). So:
+  //
+  //   · no battery          → storage is empty          → unaffected, which is most of the product;
+  //   · any OTHER battery   → no `pvInput` published    → unaffected;
+  //   · a Powerwall 3 that is legitimately AC-COUPLED with Enphase micros or a SolarEdge string
+  //     inverter → `.some(takesPvOnDc)` is TRUE, and that arm would have suppressed its inverter
+  //     sizing. That is a real design, and Ray named it himself: "Do not assume Tesla storage
+  //     always eliminates Enphase."
+  //
+  // A Powerwall 3 is CAPABLE of taking PV on DC. Whether this project's PV actually does is the
+  // ARCHITECTURE, and the architecture is decided — by the service graph or by one explicit answer
+  // from the installer — not inferred from what the hardware could do. So only the resolved
+  // coupling gates sizing.
+  //
+  // The equipment picker keeps its own broader expression on purpose: it is choosing whether to
+  // OFFER a default, and declining to preselect costs nothing. Declining to SIZE costs a design.
+  // ══════════════════════════════════════════════════════════════════════════
+  const pvOnStorageDc = useMemo(
+    () => electrical?.solarCoupling === 'dc-coupled-storage',
+    [electrical]);
+
+  // ══════════════════════════════════════════════════════════════════════════
   // 🚨 RESOLVING THE ARCHITECTURE — one click, recorded on the server, re-read from the store.
   //
   // Ray: "One explicit decision. Not hidden inference. … After Ray resolves it once, persist the
@@ -4035,6 +4076,14 @@ function EngineeringPageInner() {
           : undefined;
 
       const result = sizeSystemFromBrand({
+        // 🚨 THE ARCHITECTURE REACHES THE SIZING ENGINE.
+        //
+        // `SizingInput` carried seven battery fields and nothing that could say whether the PV is
+        // wired INTO that storage, so the engine sized a standalone PV inverter beside four
+        // Powerwall 3 — and the auto-apply watcher below then wrote it into `config.inverters`,
+        // where the SLD, the BOM and the permit all read it as real equipment. The engine returns
+        // an empty fleet for a DC-coupled design now, so there is nothing for any caller to apply.
+        pvCoupledToStorage: pvOnStorageDc,
         systemType: config.systemType,
         // SOURCE OF TRUTH: CAD → SystemDefinition → config fallback.
         // NEVER read directly from inverter.strings[].panelCount here.
@@ -5412,6 +5461,28 @@ function EngineeringPageInner() {
     if (currentProjectId && !isHydrated) return;
     if (!sizingAutoApply) return;
     if (!sizingRecommendation) return;
+    // ══════════════════════════════════════════════════════════════════════
+    // 🚨 AUTO-APPLY MAY SIZE EQUIPMENT. IT MAY NOT DECIDE THE ARCHITECTURE.
+    //
+    // This watcher is why clearing the inverter never stuck. On a design whose array terminates on
+    // the storage DC inputs the correct fleet is EMPTY — so an empty `config.inverters` reads as
+    // `countMismatch`, which makes it `structurallyStale`, and :5470 below then re-applies "despite
+    // user lock" because a structurally stale config is treated as a broken layout rather than a
+    // preference. The architecture resolution would empty the fleet server-side and this watcher
+    // would write a Tesla Solar Inverter straight back on the next render, which is exactly what
+    // Ray kept seeing on his sheet.
+    //
+    // The engine no longer recommends one (`pvCoupledToStorage` above), so in the normal case there
+    // is nothing to apply. This is the belt to that brace, and it is also the honest statement of
+    // the rule: whether a separate inverter exists is an ARCHITECTURE question, settled by the
+    // service graph or by one explicit answer from the installer — never by a sizing watcher
+    // noticing a count it does not like.
+    // ══════════════════════════════════════════════════════════════════════
+    if (pvOnStorageDc) {
+      console.log('[AUTO-APPLY] skipped — the PV lands on the storage DC inputs, so there is no '
+        + 'separate inverter for this watcher to size. Equipment stays as recorded.');
+      return;
+    }
     // Wave 6 — HYBRID systems never use the whole-project applySizingRecommendation
     // auto path: it sizes the ENTIRE array as one fleet and force-stamps it onto a
     // single sub-system (the "ground fleet = 81 panels / roof dropped" corruption).
@@ -5494,7 +5565,7 @@ function EngineeringPageInner() {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sizingAutoApply, sizingRecommendation, config.userHasEditedInverters, controlMode, configLocks, isHydrated, currentProjectId]);
+  }, [sizingAutoApply, sizingRecommendation, config.userHasEditedInverters, controlMode, configLocks, isHydrated, currentProjectId, pvOnStorageDc]);
 
   // ─── Wave 6 — HYBRID FLEET SELF-HEAL (design is the source of truth) ─────────
   // When a hybrid layout's per-sub fleets don't match the design (e.g. a saved

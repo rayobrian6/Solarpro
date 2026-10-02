@@ -1008,6 +1008,147 @@ describe("🚨 THE PHANTOM INVERTER ON RAY'S LIVE PROJECT", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
+describe('🚨 THE WRITER — auto-apply put the phantom inverter into System Config', () => {
+  // ═══════════════════════════════════════════════════════════════════════
+  // 🚨 THE LOOP RAY WAS POINTING AT ALL DAY, and it is upstream of every route.
+  //
+  //   1. `SizingInput` had SEVEN battery fields — batteryEnabled, batteryMode, batteryGoal,
+  //      batteryTargetKwh, selectedBatteryBrand, batteryUsePro, batteryDesiredUnits — and nothing
+  //      that could say whether the PV is wired INTO that storage. So the engine saw four
+  //      Powerwall 3 and still sized a standalone PV inverter: "is there a battery" and "does the
+  //      PV go through the battery" are different questions, and it was only ever asked the first.
+  //   2. The auto-apply watcher (app/engineering/page.tsx) compares the config against that
+  //      recommendation. An empty fleet reads as `countMismatch` ⇒ `structurallyStale`.
+  //   3. And a structurally stale config is re-applied "despite user lock", because the watcher
+  //      treats it as a broken layout rather than a preference.
+  //   4. So the architecture resolution emptied `config.inverters` server-side and the watcher
+  //      wrote a Tesla Solar Inverter straight back on the next render.
+  //
+  // Every server-side repair was downstream of this. By the time any route ran, the inverter was
+  // genuinely in the config — which is why the drawing never changed.
+  // ═══════════════════════════════════════════════════════════════════════
+
+  it('🚨 the sizing engine sizes NO standalone inverter for a DC-coupled design', async () => {
+    const { sizeSystemFromBrand } = await import('@/lib/system/sizingEngine');
+
+    const base = {
+      systemType: 'roof' as const,
+      panelCount: 37,
+      panelWattage: 440,
+      panelVoc: 52.7,
+      panelVmp: 43.6,
+      panelIsc: 13.7,
+      panelTempCoeffVoc: -0.25,
+      designTempMin: -18,
+      selectedBrand: 'tesla',
+      batteryEnabled: true,
+    };
+
+    // 🚨 THE CONTROL. Without the architecture, the engine recommends an inverter — which is the
+    // defect, and a test that only asserted the fixed case could not tell the two apart.
+    const blind = sizeSystemFromBrand({ ...base } as never);
+    expect(blind.inverterModels.length,
+      'the engine no longer recommends an inverter even when it was not told the architecture — '
+      + 'this test can no longer detect the defect it exists for').toBeGreaterThan(0);
+
+    // 🚨 TOLD THE ARCHITECTURE: nothing to size.
+    const told = sizeSystemFromBrand({ ...base, pvCoupledToStorage: true } as never);
+    expect(told.inverterModels,
+      'the engine still recommends a standalone PV inverter for a design whose array terminates '
+      + 'on the storage DC inputs').toEqual([]);
+    expect(told.inverterCount ?? 0).toBe(0);
+
+    // And it says why, rather than silently producing nothing.
+    const codes = (told.warnings ?? []).map((w: { code?: string }) => w.code);
+    expect(codes, 'the empty fleet carries no explanation')
+      .toContain('PV_DC_COUPLED_NO_INVERTER');
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // 🚨 THE BLAST RADIUS, ASSERTED — Ray: "Do not fuck my entire website up because we are getting
+  // 1 real world scenario to work... every auto pick selection works for installs that do not have
+  // batteries."
+  //
+  // `pvInput` exists on exactly ONE catalogue product, `tesla-powerwall-3`
+  // (lib/equipment-db.ts:2786, :2815). These cases pin that the suppression reaches NOTHING else,
+  // and in particular that it is driven by the DECIDED architecture rather than by what the
+  // hardware is capable of — because a Powerwall 3 beside Enphase micros is a real AC-coupled
+  // design and deleting its inverter would be the regression he is warning about.
+  // ═══════════════════════════════════════════════════════════════════════
+  it('🚨 every design that is NOT decided DC-coupled still sizes exactly as before', async () => {
+    const { sizeSystemFromBrand } = await import('@/lib/system/sizingEngine');
+
+    const run = (over: Record<string, unknown>) => sizeSystemFromBrand({
+      systemType: 'roof', panelCount: 24, panelWattage: 400,
+      panelVoc: 49.6, panelVmp: 41.8, panelIsc: 11.2, panelTempCoeffVoc: -0.27,
+      designTempMin: -18, ...over,
+    } as never);
+
+    // No battery at all — the majority of the product.
+    for (const brand of ['solaredge', 'enphase', 'tesla']) {
+      const r = run({ selectedBrand: brand });
+      expect(r.inverterModels.length,
+        `the flag leaked and suppressed sizing for a ${brand} design with no battery`)
+        .toBeGreaterThan(0);
+    }
+
+    // A battery install that is NOT DC-coupled — the flag is never set, so nothing changes.
+    for (const brand of ['solaredge', 'enphase']) {
+      const r = run({ selectedBrand: brand, batteryEnabled: true });
+      expect(r.inverterModels.length,
+        `the flag leaked and suppressed sizing for a ${brand} battery design`)
+        .toBeGreaterThan(0);
+    }
+
+    // 🚨 A POWERWALL 3 DESIGN THAT IS AC-COUPLED. The storage CAN take PV on DC and this one does
+    // not, so the inverter must still be sized. `pvCoupledToStorage` is absent, which is what the
+    // page now passes for any project whose resolved coupling is not 'dc-coupled-storage'.
+    const pw3AcCoupled = run({ selectedBrand: 'tesla', batteryEnabled: true });
+    expect(pw3AcCoupled.inverterModels.length,
+      'a Powerwall 3 beside an AC-coupled PV inverter lost its inverter — capability was treated '
+      + 'as architecture, which is the regression Ray warned about').toBeGreaterThan(0);
+  });
+
+  it('🚨 the page gates sizing on the DECIDED coupling, never on what the hardware can do', () => {
+    const page = src('app', 'engineering', 'page.tsx');
+    const live = page.split('\n').filter(l => !l.trim().startsWith('//'));
+
+    const idx = live.findIndex(l => l.includes('const pvOnStorageDc = useMemo'));
+    expect(idx, 'the memo is gone').toBeGreaterThan(-1);
+    const memo = live.slice(idx, idx + 4).join(' ');
+
+    expect(memo, 'the memo does not read the resolved coupling')
+      .toContain("solarCoupling === 'dc-coupled-storage'");
+    // 🚨 THE ARM THAT WOULD HAVE BROKEN A PW3 + ENPHASE DESIGN.
+    expect(memo.includes('pvInputLimits'),
+      'sizing is gated on storage CAPABILITY again — a Powerwall 3 beside Enphase micros would '
+      + 'lose its inverter').toBe(false);
+    expect(memo.includes('takesPvOnDc'),
+      'sizing is gated on storage capability again').toBe(false);
+  });
+
+  it('🚨 the auto-apply watcher refuses to decide the architecture', () => {
+    const page = src('app', 'engineering', 'page.tsx');
+    const live = page.split('\n').filter(l => !l.trim().startsWith('//'));
+
+    // ONE answer to "does the PV land on the storage DC inputs", shared by the picker and sizing.
+    expect(live.some(l => l.includes('const pvOnStorageDc = useMemo')),
+      'the page has no single answer for the DC-coupled question').toBe(true);
+
+    // The engine is told.
+    expect(live.some(l => l.includes('pvCoupledToStorage: pvOnStorageDc')),
+      'the sizing engine is still not told the architecture').toBe(true);
+
+    // And the watcher bails rather than writing one.
+    const wIdx = page.indexOf('if (!sizingAutoApply) return;');
+    expect(wIdx, 'the auto-apply watcher is gone').toBeGreaterThan(0);
+    const watcher = page.slice(wIdx, wIdx + 3000);
+    expect(watcher.includes('if (pvOnStorageDc) {'),
+      'auto-apply can still write an inverter onto a DC-coupled design').toBe(true);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
 describe('🚨 FIXTURE A — the ordinary house, which had no fixture at all', () => {
   it('200 A / 1 MSP / 1 Gateway is a real topology the engine accepts', async () => {
     const { buildNormalResidence200A } = await import('@/lib/electrical/fixtures/normalResidence200a');

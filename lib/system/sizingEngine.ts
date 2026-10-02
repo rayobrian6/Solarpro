@@ -135,6 +135,37 @@ export interface SizingInput {
   panelId?: string;
 
   /** Explicit battery enable flag (user-driven). Default: false. */
+  /**
+   * 🚨 DOES THE PV LAND ON THE STORAGE'S OWN DC INPUTS?
+   *
+   * Ray, 2026-10-02: "Sld is ingesting the inverters from the auto equipment selector. Until you
+   * fix the inverters being applied on sys config. The problem will not resolve."
+   *
+   * This is that fix, at the source. `SizingInput` carried SEVEN battery fields —
+   * `batteryEnabled`, `batteryMode`, `batteryGoal`, `batteryTargetKwh`, `selectedBatteryBrand`,
+   * `batteryUsePro`, `batteryDesiredUnits` — and nothing that could say whether the PV is wired
+   * INTO that storage. So the engine could see four Powerwall 3 on a project and still size a
+   * standalone PV inverter beside them, because "is there a battery" and "does the PV go through
+   * the battery" are different questions and it was only ever asked the first.
+   *
+   * Every caller then applied that recommendation into `config.inverters`, which is where the
+   * phantom Tesla Solar Inverter 5.7kW on Ray's single-line diagram came from. Fixing the SLD
+   * route could never remove it: the inverter was real in the config by the time any drawing ran.
+   *
+   * `true` ⇒ the array terminates on the storage DC inputs and there is NO separate PV inverter to
+   * size. The engine returns an empty fleet and says why, instead of recommending equipment the
+   * design does not have.
+   *
+   * 🚨 SET IT FROM THE DECIDED ARCHITECTURE, NEVER FROM WHAT THE HARDWARE CAN DO. A Powerwall 3 is
+   * CAPABLE of taking PV on its DC inputs; whether a given project's PV actually does is a
+   * decision. A Powerwall 3 beside Enphase micros is a real AC-coupled design, and passing `true`
+   * for it would delete its inverter. Callers pass `electrical.solarCoupling === 'dc-coupled-storage'`
+   * — not `storage.some(takesPvOnDc)`.
+   *
+   * Omitted or false ⇒ the engine sizes exactly as it always has, on every brand and topology.
+   */
+  pvCoupledToStorage?: boolean;
+
   batteryEnabled?: boolean;
 
   /** Battery mode: 'auto' sizes from DC kW, 'manual' uses batteryTargetKwh. */
@@ -2438,7 +2469,34 @@ export function sizeSystemFromBrand(input: SizingInput): SystemSizingResult {
   }
 
   // 3. Size inverters
-  const inverters = sizeInverters(brand, effectiveInput, totalDcKw, warnings);
+  // ══════════════════════════════════════════════════════════════════════════
+  // 🚨 A DC-COUPLED DESIGN HAS NO STANDALONE PV INVERTER TO SIZE.
+  //
+  // This is the WRITE that put the phantom inverter on Ray's project. The engine recommended one
+  // because nothing had ever told it the strings terminate on the Powerwalls' own DC inputs, and
+  // every caller — project load, the AUTO-mode heal, the ecosystem apply, the per-sub rebuild —
+  // faithfully applied the recommendation into `config.inverters`. From there it reached the SLD,
+  // the BOM and the permit as a real piece of equipment.
+  //
+  // Returning an EMPTY fleet is the honest answer, and it is not a failure: the storage IS the
+  // inverter on this architecture. The warning says so in the installer's terms so the Sizing tab
+  // explains itself rather than silently producing nothing.
+  //
+  // Scoped to the flag, so no other design changes: a project that does not set
+  // `pvCoupledToStorage` sizes exactly as before, on every brand and every topology.
+  // ══════════════════════════════════════════════════════════════════════════
+  if (effectiveInput.pvCoupledToStorage) {
+    warnings.push({
+      code: 'PV_DC_COUPLED_NO_INVERTER',
+      severity: 'info',
+      message: 'This design has no separate PV inverter: the array terminates on the storage\'s '
+        + 'own DC inputs, and the storage is what converts it. Nothing is sized here, and nothing '
+        + 'is missing.',
+    } as SizingWarning);
+  }
+  const inverters = effectiveInput.pvCoupledToStorage
+    ? []
+    : sizeInverters(brand, effectiveInput, totalDcKw, warnings);
   const inverterCount = inverters.reduce((s, i) => s + i.qty, 0);
 
   // 4. Distribute strings / micros
