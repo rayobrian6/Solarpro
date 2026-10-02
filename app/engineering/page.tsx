@@ -33,6 +33,7 @@ import type { ServiceTopology as ServiceTopologyForPage } from '@/lib/electrical
 // renderer, the permit SLD adapter and the permit helpers. Reused rather than re-invented.
 import { INVERTER_UNSELECTED } from '@/lib/permit/utils/helpers';
 import { resolveElectricalProject, type ElectricalProjectModel } from '@/lib/electrical/projectModel';
+import { topologyBadge } from '@/lib/electrical/architectureLabel';
 import {
   electricalRevision, electricalArtifactFreshness, freshnessLabel,
 } from '@/lib/electrical/revision';
@@ -1192,6 +1193,10 @@ function EngineeringPageInner() {
   // tab and reloading all produce the same electrical state, because none of them is what loads it.
   // The builder still edits the graph and still reports changes up; it is no longer the source.
   // ══════════════════════════════════════════════════════════════════════════
+  // 🚨 BUMPED BY A RESOLUTION, so the recorded architecture reaches the page from the STORE rather
+  // than being patched into React state. A local patch would make the badge agree with the server by
+  // coincidence; a re-read makes it agree because it is the same bytes.
+  const [_svcTopologyReloadKey, setSvcTopologyReloadKey] = useState(0);
   useEffect(() => {
     if (!currentProjectId) { setSvcTopology(null); setElectrical(null); return; }
     let cancelled = false;
@@ -1209,7 +1214,7 @@ function EngineeringPageInner() {
       }
     })();
     return () => { cancelled = true; };
-  }, [currentProjectId]);
+  }, [currentProjectId, _svcTopologyReloadKey]);
 
   const projectCombinerIdRef = useRef<string | null>(null);
   projectCombinerIdRef.current = projectCombinerId;
@@ -3080,6 +3085,88 @@ function EngineeringPageInner() {
       },
     }));
   }, [svcTopology, config.inverters, totalPanels]);
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // 🚨 RESOLVING THE ARCHITECTURE — one click, recorded on the server, re-read from the store.
+  //
+  // Ray: "One explicit decision. Not hidden inference. … After Ray resolves it once, persist the
+  // canonical architecture and provenance permanently."
+  //
+  // The page does NOT patch its own state with the chosen coupling. It posts the decision and
+  // re-reads the graph, so what the badge shows afterwards is what the database holds. The whole
+  // class of defect this slice is about — a surface that believes something the store does not say —
+  // is reachable again the moment a handler "optimistically" writes the answer into React.
+  // ══════════════════════════════════════════════════════════════════════════
+  /** Why the SLD route refused, when it did. Read by `fetchSLD` so the reason reaches the operator. */
+  const _sldBlockRef = useRef<string | null>(null);
+  const [_archResolving, setArchResolving] = useState<string | null>(null);
+  const [_archResolveError, setArchResolveError] = useState<string | null>(null);
+  /**
+   * The SERVER'S view of the conflict — provenance included.
+   *
+   * The browser composes the same canonical model, but it cannot classify the legacy evidence:
+   * that needs `selected_equipment.provenance` (which the page does not hold) and the catalogue's
+   * ecosystem list. Re-deriving it here from what the page happens to know would produce a SECOND
+   * answer to "where did this inverter come from", which is the thing this whole slice exists to
+   * stop. So the origin and its evidence are fetched from the one place that can answer.
+   */
+  const [_archDetail, setArchDetail] = useState<{
+    externalInverter: { id: string | null; origin: {
+      kind: string; label: string; basis: string; evidence: string[]; isInstallerDecision: boolean;
+    } | null } | null;
+  } | null>(null);
+
+  const resolveElectricalArchitecture = async (coupling: string) => {
+    if (!currentProjectId) return;
+    setArchResolving(coupling);
+    setArchResolveError(null);
+    try {
+      const res = await fetch('/api/engineering/electrical-architecture', {
+        method: 'POST', cache: 'no-store',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId: currentProjectId, coupling }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.success) {
+        setArchResolveError(String(data?.error || 'Could not record the architecture.'));
+        return;
+      }
+      logDecision('Electrical Architecture', String(data.summary ?? coupling), 'manual');
+
+      // ══════════════════════════════════════════════════════════════════════
+      // 🚨 THE RETIRED INVERTER MUST LEAVE THE PAGE'S FLEET TOO, OR THE CONFLICT COMES STRAIGHT BACK.
+      //
+      // There are two equipment stores. `selected_equipment` is canonical and the server just
+      // emptied its inverter slot; `engineering_config.inverters` is the page's working fleet and the
+      // server does not touch it. The browser composes its own copy of the canonical model from THAT
+      // fleet — so without this, the moment the recorded coupling arrived as `dc-coupled-storage` the
+      // model would hit `recorded === 'dc-coupled-storage' && hasExternalInverter`, raise the
+      // conflict again, and Ray would have clicked an answer that un-answered itself.
+      //
+      // Which is the same disease one level in: two stores, one question, and a surface reading the
+      // one that is not authoritative. The fleet is corrected rather than the conflict suppressed —
+      // suppressing it would also hide a genuinely NEW inverter pick on a DC-coupled project, and
+      // that one is a real conflict that must still be raised.
+      // ══════════════════════════════════════════════════════════════════════
+      if (data.retiredExternalInverter) {
+        const retiredId = electrical?.externalInverterId ?? null;
+        setConfig(prev => ({
+          ...prev,
+          inverters: (prev.inverters ?? []).filter(inv =>
+            retiredId ? inv.inverterId !== retiredId : false),
+        }) as typeof prev);
+      }
+
+      // The drawing on screen depicts an architecture that is no longer the project's.
+      setSldSvg(null);
+      setArchDetail(null);
+      setSvcTopologyReloadKey(k => k + 1);
+    } catch (e: unknown) {
+      setArchResolveError((e as Error).message);
+    } finally {
+      setArchResolving(null);
+    }
+  };
 
   // ══════════════════════════════════════════════════════════════════════════
   // 🚨 IS THE DRAWING ON SCREEN STILL THIS PROJECT'S?
@@ -6360,6 +6447,35 @@ function EngineeringPageInner() {
       : invType0 === 'optimizer' ? 'STRING_OPTIMIZER'
       : 'STRING';
 
+    // ══════════════════════════════════════════════════════════════════════
+    // 🚨 THE ARRAY, INDEPENDENT OF THE INVERTER FLEET.
+    //
+    // Every module spec this payload carried lived on `inverters[].strings[]`. A DC-coupled project
+    // has no inverter fleet — that is the point of it — so the compliance route received no panel
+    // Voc, no module count, and ran no NEC 690.7 check at all, while the drawing showed 5 strings of
+    // 9. The array is a fact about the design, not a property of an inverter, so it travels on its
+    // own and the route uses it when the canonical model says the strings land on storage.
+    //
+    // `canonicalPanelId` is `projects.selected_equipment` — the authoritative "which panel" — and
+    // `totalPanels` is the layout's count. Neither is defaulted here: an absent panel sends nothing
+    // and the route keeps its existing behaviour.
+    // ══════════════════════════════════════════════════════════════════════
+    const _arrayPanelId = canonicalPanelId
+      ?? config.inverters[0]?.strings[0]?.panelId ?? null;
+    const _arrayPanel = _arrayPanelId ? getPanelById(_arrayPanelId) as any : null;
+    const pvArray = _arrayPanel && totalPanels > 0 ? {
+      panelId: _arrayPanelId,
+      moduleCount: totalPanels,
+      panelVoc: _arrayPanel.voc,
+      panelVmp: _arrayPanel.vmp,
+      panelIsc: _arrayPanel.isc,
+      panelImp: _arrayPanel.imp,
+      panelWatts: _arrayPanel.watts,
+      tempCoeffVoc: _arrayPanel.tempCoeffVoc,
+      tempCoeffVmp: _arrayPanel.tempCoeffVmp,
+      maxSeriesFuseRating: _arrayPanel.maxSeriesFuseRating,
+    } : null;
+
     return {
       address: config.address,
       state: config.state || undefined,   // Explicit state code — overrides address parsing in API
@@ -6367,8 +6483,13 @@ function EngineeringPageInner() {
       ahjId: config.ahjId || undefined,          // AHJ ID — used by compliance engine
       topologyType: calcPayloadTopologyType,      // v57.5 — topology guard for NEC 690.7 optimizer bypass
       recommendedLayout: recommendedLayoutForApi,  // v47.409 — optimizer merge hint source
+      // 🚨 SO THE ROUTE CAN READ THE CANONICAL PROJECT. Without it the sizing tab is driven entirely
+      // by this payload, which is the page's React state — the same authority that produced the live
+      // failure.
+      projectId: currentProjectId || undefined,
       electrical: {
         inverters: electricalInverters,
+        pvArray,
         mainPanelAmps: config.mainPanelAmps,
         systemVoltage: 240,
         // Rooftop temp adder only for roof arrays (cells run hotter on a hot roof).
@@ -7309,6 +7430,15 @@ function EngineeringPageInner() {
         }
       } else {
         const err = await res.json().catch(() => ({ error: 'Unknown error' }));
+        // 🚨 A REFUSAL IS A RESULT, NOT A FAILED FETCH.
+        //
+        // This branch read the body and then discarded it, so every non-OK response surfaced as
+        // "No SVG returned from SLD engine". The architecture gate returns 409 with the reason and
+        // the two answers — reporting that as an engine fault would send the operator looking for a
+        // bug instead of at the question they have to settle.
+        _sldBlockRef.current = err?.code === 'ELECTRICAL_ARCHITECTURE_REQUIRES_RESOLUTION'
+          ? String(err.error || 'ELECTRICAL ARCHITECTURE REQUIRES RESOLUTION')
+          : (err?.error ? String(err.error) : null);
         return null;
       }
       return null;
@@ -7331,6 +7461,7 @@ function EngineeringPageInner() {
     }
     setSldLoading(true);
     setSldError(null);
+    _sldBlockRef.current = null;
     try {
       const sigAtRequest = _sldEquipSig;
       const svgResult = await fetchSLDSvg();
@@ -7343,7 +7474,7 @@ function EngineeringPageInner() {
         setSldRevision(_sldRevisionRef.current);
         logDecision('Generate SLD', `Professional SLD rendered`, 'auto');
       } else {
-        setSldError('No SVG returned from SLD engine');
+        setSldError(_sldBlockRef.current ?? 'No SVG returned from SLD engine');
       }
     } catch (e: unknown) {
       setSldError((e as Error).message);
@@ -9132,18 +9263,59 @@ function EngineeringPageInner() {
   // canonicalised value with its provenance, so a legacy Tesla project reads DC coupled here for
   // the same reason, and from the same function, as it does on the drawing.
   const _svcCouplingIsDc = electrical?.solarCoupling === 'dc-coupled-storage';
-  const topologyLabel = _svcCouplingIsDc ? 'PV DC COUPLED TO STORAGE'
-    : subSystemCounts.isHybrid ? 'HYBRID SYSTEM'
-    : config.inverters[0]?.type === 'micro' ? 'MICROINVERTER'
-    : config.inverters[0]?.type === 'optimizer' ? 'STRING + OPTIMIZER'
-    : 'STRING INVERTER';
-  const topologyColor = _svcCouplingIsDc ? 'text-emerald-400 border-emerald-500/40 bg-emerald-500/10'
-    : subSystemCounts.isHybrid ? 'text-amber-400 border-amber-500/40 bg-amber-500/10'
-    : config.inverters[0]?.type === 'micro' ? 'text-purple-400 border-purple-500/40 bg-purple-500/10'
-    : config.inverters[0]?.type === 'optimizer' ? 'text-blue-400 border-blue-500/40 bg-blue-500/10'
-    : 'text-amber-400 border-amber-500/40 bg-amber-500/10';
+  // ══════════════════════════════════════════════════════════════════════════
+  // 🚨 A CONFLICT IS NOT ONE OF THE COMPETING ANSWERS. THIS WAS THE SECOND LIVE FAILURE.
+  //
+  // Ray's live project, after everything below had been repaired, still printed STRING INVERTER on
+  // this badge. The canonical model was RIGHT — `solarCoupling` came back null with a
+  // `SOLAR_COUPLING_UNRESOLVED` conflict attached, refusing to pick a side — and this chain then
+  // reduced that null to the last arm of its own ternary, which is `'STRING INVERTER'`. The authority
+  // was correct and the projection converted "I will not say" into one of the two things it would not
+  // say. Proving the model right never reached the screen, because the screen never asked it.
+  //
+  // So the unresolved state is now its own label, ABOVE every equipment-derived arm — because any
+  // arm below it is a claim about an architecture nobody has settled.
+  // ══════════════════════════════════════════════════════════════════════════
+  const _archUnresolved = !!electrical?.architectureResolutionRequired;
+  // 🚨 ASK THE SERVER WHERE THE EQUIPMENT CAME FROM. See `_archDetail`: the browser can see THAT the
+  // architecture is unresolved, but only the server can say whether the inverter was ever a decision.
+  useEffect(() => {
+    if (!_archUnresolved || !currentProjectId) { return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/engineering/electrical-architecture?projectId=${encodeURIComponent(currentProjectId)}`,
+          { cache: 'no-store' });
+        const data = await res.json().catch(() => null);
+        if (cancelled || !data?.success) return;
+        setArchDetail({ externalInverter: data.externalInverter ?? null });
+      } catch { /* the dialog falls back to the client model's origin */ }
+    })();
+    return () => { cancelled = true; };
+  }, [_archUnresolved, currentProjectId]);
+  const _archOrigin = _archDetail?.externalInverter?.origin ?? electrical?.externalInverterOrigin ?? null;
+  // 🚨 THE ORDER LIVES IN `topologyBadge`, NOT IN A TERNARY HERE. A chain in JSX is a chain no test
+  // can reach, and this one spent a whole green slice printing STRING INVERTER over a conflict.
+  const _topoBadge = topologyBadge({
+    architectureResolutionRequired: _archUnresolved,
+    solarCoupling: electrical?.solarCoupling ?? null,
+    isHybrid: subSystemCounts.isHybrid,
+    firstInverterType: config.inverters[0]?.type ?? null,
+  });
+  const topologyLabel = _topoBadge.label;
+  const topologyColor = _topoBadge.tone;
   /** The one-line detail under the badge, when the graph is the authority for it. */
   const _svcTopologyDetail = (() => {
+    // 🚨 AN UNRESOLVED ARCHITECTURE STATES THE QUESTION, not a system description. Printing
+    // "2 inverters · 37 modules · 16.28 kW DC" under the badge is a second claim about the same
+    // undecided fact — and on Ray's live sheet that line was describing the inverter nobody chose.
+    if (_archUnresolved) {
+      const inv = electrical?.externalInverterId;
+      return `An external inverter${inv ? ` (${inv})` : ''} and `
+        + `${electrical?.storage.invertingUnitCount ?? 0} battery inverter(s) that take PV on DC are `
+        + 'both on this project. Choose the installed design to continue.';
+    }
     if (!electrical || !_svcCouplingIsDc) return null;
     // Every count here comes from the model's resolved storage, which counts physical instances in
     // the graph — not from `batteryCount`, which the audit found reporting 0 beside four of them.
@@ -11217,6 +11389,59 @@ function EngineeringPageInner() {
 
                     {/* Inverters & Strings Card */}
                     <div className="eng-panel">
+                      {/* ══════════════════════════════════════════════════════
+                          🚨 THIS CARD MUST NOT PRESENT A SUGGESTION AS A DECISION.
+
+                          Ray, on the live System Config: "System Config currently presents the
+                          auto-picked inverter as if Ray selected it: Tesla Solar Inverter 5.7 kW,
+                          Tesla Solar Inverter 5.7 kW. That is misleading. For legacy auto-created
+                          equipment, show its provenance/conflict and allow one intentional
+                          resolution."
+
+                          The rows below are the project's inverter fleet and they are drawn from
+                          `config.inverters` — which cannot distinguish a product an installer chose
+                          from one a picker default autosaved, because the record it came from never
+                          could either. So the card states the origin above the rows, where it cannot
+                          be missed, instead of silently captioning two units nobody picked.
+                          ══════════════════════════════════════════════════════ */}
+                      {/* 🚨 AND IT SHOWS FOR A SUSPECT ORIGIN, NOT FOR AN UNRECORDED ONE.
+                          `UNRECORDED` is true of EVERY project saved before provenance existed —
+                          an Enphase job from last year included. Banner-ing all of them would be a
+                          change to "other brands and other scenarios", which Ray ruled out, and it
+                          would say nothing: "we don't know how this was chosen" is not news on a
+                          legacy row. What IS news is an origin that cannot stand as a decision
+                          (`AUTO_SUGGESTED_LEGACY`) or an architecture nobody has settled. */}
+                      {electrical?.hasExternalInverter && _archOrigin
+                        && (_archUnresolved || _archOrigin.kind === 'AUTO_SUGGESTED_LEGACY') ? (
+                        <div data-testid="config-inverter-provenance"
+                             className="mb-3 rounded-lg border border-amber-500/50 bg-amber-950/30 p-2.5">
+                          <div className="text-xs font-black text-amber-300">
+                            {_archOrigin.label.toUpperCase()}
+                          </div>
+                          <div className="text-[11px] text-slate-300 mt-1">{_archOrigin.basis}</div>
+                          {(_archOrigin.evidence ?? []).map((e, i) => (
+                            <div key={i} className="text-[10px] text-slate-500 mt-0.5">• {e}</div>
+                          ))}
+                          {_archUnresolved ? (
+                            <div className="mt-2 flex flex-wrap gap-1.5">
+                              {(electrical?.architectureChoices ?? []).map(choice => (
+                                <button
+                                  key={choice.coupling}
+                                  data-testid={`config-resolve-${choice.coupling}`}
+                                  disabled={_archResolving !== null}
+                                  onClick={() => resolveElectricalArchitecture(choice.coupling)}
+                                  className="rounded border border-amber-500/60 bg-amber-500/15 hover:bg-amber-500/25 disabled:opacity-50 px-2 py-1 text-[11px] font-bold text-amber-200 transition-colors"
+                                >
+                                  {_archResolving === choice.coupling ? 'Recording…' : choice.label}
+                                </button>
+                              ))}
+                            </div>
+                          ) : null}
+                          {_archResolveError ? (
+                            <div className="mt-1.5 text-[10px] text-rose-300">{_archResolveError}</div>
+                          ) : null}
+                        </div>
+                      ) : null}
                       <div className="flex items-center justify-between mb-4">
                         <h3 className="text-sm font-bold text-white flex items-center gap-2">
                           <Zap size={14} className="text-amber-400" /> Inverters & Strings
@@ -18343,6 +18568,63 @@ function EngineeringPageInner() {
                     <div className="mt-1 text-[10px] text-slate-300">{c.question}</div>
                   </div>
                 ))}
+
+                {/* ══════════════════════════════════════════════════════════
+                    🚨 THE ONE EXPLICIT DECISION.
+
+                    Ray: "If deterministic evidence is insufficient, show: ELECTRICAL CONFIGURATION
+                    CONFLICT … Choose the actual installed design: [ PV connects directly to
+                    Powerwall 3 ] [ PV uses external Tesla Solar Inverter ]. One explicit decision.
+                    Not hidden inference."
+
+                    And the evidence is insufficient BY CONSTRUCTION, not by our giving up: a legacy
+                    row holds the same bytes whether the auto-picker wrote the inverter or an
+                    installer clicked it. Nothing recovers a distinction that was never written down,
+                    so the only honest resolution is to ask once and record the answer forever. The
+                    two buttons and their wording come from `electrical.architectureChoices` — the
+                    canonical model — so this dialog cannot offer a choice the server would refuse.
+                    ══════════════════════════════════════════════════════════ */}
+                {_archUnresolved ? (
+                  <div data-testid="architecture-resolution" className="mt-2 rounded-lg border border-rose-500/50 bg-rose-950/40 p-2.5">
+                    <div className="text-[11px] font-black text-rose-200">
+                      ELECTRICAL CONFIGURATION CONFLICT
+                    </div>
+                    {_archOrigin && !_archOrigin.isInstallerDecision ? (
+                      <div data-testid="inverter-origin" className="mt-1.5 rounded border border-slate-600/60 bg-slate-900/60 p-1.5">
+                        <div className="text-[10px] font-bold text-amber-300">
+                          {_archOrigin.label}
+                          {electrical?.externalInverterId ? ` — ${electrical.externalInverterId}` : ''}
+                        </div>
+                        <div className="text-[10px] text-slate-400 mt-0.5">{_archOrigin.basis}</div>
+                        {(_archOrigin.evidence ?? []).map((e, i) => (
+                          <div key={i} className="text-[9px] text-slate-500 mt-0.5">• {e}</div>
+                        ))}
+                      </div>
+                    ) : null}
+                    <div className="mt-2 text-[10px] text-slate-300">
+                      Choose the actual installed design:
+                    </div>
+                    <div className="mt-1.5 space-y-1.5">
+                      {(electrical?.architectureChoices ?? []).map(choice => (
+                        <button
+                          key={choice.coupling}
+                          data-testid={`resolve-${choice.coupling}`}
+                          disabled={_archResolving !== null}
+                          onClick={() => resolveElectricalArchitecture(choice.coupling)}
+                          className="w-full text-left rounded border border-slate-600 bg-slate-800/80 hover:bg-slate-700/80 disabled:opacity-50 px-2 py-1.5 transition-colors"
+                        >
+                          <div className="text-[10px] font-bold text-white">
+                            {_archResolving === choice.coupling ? 'Recording…' : choice.label}
+                          </div>
+                          <div className="text-[9px] text-slate-400 mt-0.5">{choice.consequence}</div>
+                        </button>
+                      ))}
+                    </div>
+                    {_archResolveError ? (
+                      <div className="mt-1.5 text-[10px] text-rose-300">{_archResolveError}</div>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
 
               {/* System Health */}
