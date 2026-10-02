@@ -164,6 +164,19 @@ export interface ApplySmartDefaultsInput {
   systemDefinition?: SystemDefinition | null;
   /** Optional panel wattage (used by the engine's DC kW math). */
   panelWattage?: number;
+  /**
+   * 🚨 DOES THE PV LAND ON THE STORAGE'S OWN DC INPUTS?
+   *
+   * Smart Defaults fires exactly when a project has NO inverters — which is the state an
+   * architecture resolution leaves behind on a DC-coupled design. Without this it seeded a
+   * standalone PV inverter straight back in, and because it writes `defaultsApplied` the seed then
+   * looked like a settled decision.
+   *
+   * Pass the DECIDED coupling, never storage capability: a Powerwall 3 is capable of taking PV on
+   * DC, and a Powerwall 3 beside Enphase micros is a real AC-coupled design that still needs its
+   * inverter sized. See `SizingInput.pvCoupledToStorage`.
+   */
+  pvCoupledToStorage?: boolean;
 }
 
 export interface ApplySmartDefaultsResult {
@@ -279,6 +292,10 @@ export function applySmartDefaultsOnce(
     panelWattage,
     selectedBrand: seedBrand,
     batteryEnabled: false, // defaults ALWAYS start without battery
+    // 🚨 THE ARCHITECTURE. On a design whose array terminates on the storage DC inputs the engine
+    // returns an empty fleet, so there is no seed inverter to hydrate — see the field's note on
+    // ApplySmartDefaultsInput.
+    pvCoupledToStorage: input.pvCoupledToStorage,
   });
 
   // ── Hydrate the config from the sizing result ───────────────────────

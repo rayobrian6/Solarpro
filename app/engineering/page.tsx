@@ -5355,6 +5355,9 @@ function EngineeringPageInner() {
 
     console.log('🚨 [SMART DEFAULTS] calling applySmartDefaultsOnce — systemPanelCount=', systemPanelCount, ', defaultsApplied=', config.defaultsApplied);
     const result = applySmartDefaultsOnce({
+      // 🚨 Smart Defaults fires precisely when there are NO inverters — the state an architecture
+      // resolution leaves behind — so it is the writer most able to put the phantom straight back.
+      pvCoupledToStorage: pvOnStorageDc,
       config: {
         systemType: config.systemType,
         inverters: config.inverters,

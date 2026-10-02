@@ -1127,6 +1127,29 @@ describe('🚨 THE WRITER — auto-apply put the phantom inverter into System Co
       'sizing is gated on storage capability again').toBe(false);
   });
 
+  it('🚨 Smart Defaults cannot re-seed an inverter onto a resolved DC-coupled design', async () => {
+    // Smart Defaults fires exactly when a project has NO inverters — which is the state an
+    // architecture resolution leaves behind. Without the architecture it seeded one straight back
+    // AND set `defaultsApplied`, so the seed then looked like a settled decision.
+    const { applySmartDefaultsOnce } = await import('@/lib/system/smartDefaults');
+    const cfg = {
+      systemType: 'roof', inverters: [], defaultsApplied: false,
+      userHasEditedInverters: false, isUserControlled: false,
+    } as never;
+
+    // CONTROL — without the architecture it still seeds, so this test can detect the defect.
+    const blind = applySmartDefaultsOnce({ config: cfg, systemPanelCount: 37, panelWattage: 440 });
+    expect(blind.applied, 'Smart Defaults no longer seeds at all — the control is dead').toBe(true);
+    expect((blind.patch.inverters ?? []).length).toBeGreaterThan(0);
+
+    // TOLD — nothing to seed.
+    const told = applySmartDefaultsOnce({
+      config: cfg, systemPanelCount: 37, panelWattage: 440, pvCoupledToStorage: true,
+    });
+    expect((told.patch.inverters ?? []),
+      'Smart Defaults re-seeded a standalone inverter onto a DC-coupled design').toEqual([]);
+  });
+
   it('🚨 the auto-apply watcher refuses to decide the architecture', () => {
     const page = src('app', 'engineering', 'page.tsx');
     const live = page.split('\n').filter(l => !l.trim().startsWith('//'));
