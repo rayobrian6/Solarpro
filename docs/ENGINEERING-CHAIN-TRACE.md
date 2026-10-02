@@ -2625,3 +2625,105 @@ Four existing guards went red on a correct change. Every one of them pinned a TO
 | `MICROINVERTERS[0]` as the seed for an inverter the user just ADDED | **OPEN, by judgment** | `page.tsx` `newInverter('micro')` and the topology switch need a starting model for a device the user explicitly created. That is a design-time seed on an explicit click, not an output filling an absence — so I left it and am telling you rather than quietly including it. |
 
 > A malformed compliance payload reports **503 DB_STARTING**: `normalizeGauge(undefined)` throws inside the engine and `handleRouteDbError` classifies everything non-config as "database starting". Found while writing Fixture A's test. Not fixed — it is a diagnosability defect, not an engineering one, and it is listed so it is not lost.
+
+<br>
+
+# PART IV — TWO CORRECTIONS AND THE ACTUAL ROOT CAUSE
+
+*Added 2026-10-02 after Ray regenerated his sheet and got the identical drawing, and after a 10-agent read-only trace of the Engineering UI with every finding handed to a checker.*
+
+> **Read this before §1.1 and before Part II's Pattern A table. Both contain claims that are wrong, and one of them is the central claim of the whole document.**
+
+---
+
+## 🚨 CORRECTION 1 — "System Config and Service Topology never meet" is FALSE
+
+Part I §1.1 said the two stages never meet and called it the answer to the central question. Ray said twice that the topology is "half built into the system config page." **He is right and the document is wrong.** Verified line by line:
+
+| Claim in §1.1 | What the source says |
+|---|---|
+| the two never meet | `svcTopology` is **page-level state** (`page.tsx:1173`), not tab state. The System Config tab reads it in nine places and WRITES it in two. |
+| only one link exists, and it only suppresses | the "Main Panel (A)" select calls `setPrimaryPanelMainAmps` (`page.tsx:9577`), which **PUTs the whole graph document** via `writeTopology` (`:9585`) — a write, not a suppression. |
+| equipment and topology never revisit each other | the architecture-resolution buttons inside System Config POST to `/api/engineering/electrical-architecture`, which writes `solarCoupling` onto the graph and clears `engineering_config.inverters`. |
+
+**And the overlap is visible on one card, in one screenful.** The 120% figure and the summary strip above it read DIFFERENT STORES:
+
+```
+page.tsx:11092   Bus:     {config.panelBusRating ?? config.mainPanelAmps}A      <- the CONFIG scalar
+page.tsx:11122   maxPV =  Math.floor(busRating * 1.2 - mainAmps)                <- computed from…
+page.tsx:9541    panelBusRatingForDisplay = _primaryPanel?.busbarRatingA ?? …    <- …the GRAPH panel
+page.tsx:9538    panelMainAmpsForDisplay  = _primaryPanel?.mainBreakerA  ?? …    <- …the GRAPH panel
+```
+
+So "Bus: 400A" can sit two inches above a "Max PV" computed from the graph's 200 A busbar. The code already knows they can disagree — `_panelMainDisagrees` at `:9544` exists to surface it — which is the clearest possible evidence that the two stages meet and that nobody owns the answer at the point of display.
+
+> The consolidation question Ray raised is therefore not "merge two tabs". **The merge already half-happened**, and the two halves read different stores on the same card.
+
+---
+
+## 🚨 CORRECTION 2 — there is no "Auto Configuration" button
+
+| Expected | Actual |
+|---|---|
+| one Auto Configuration button | **eight** Auto-labelled controls in three groups |
+| a server route behind it | `/api/engineering/auto-configure` is **fully implemented with ZERO callers** anywhere in the repo — no component, no hook, no test |
+| the control that matters | the **"Auto-apply recommendations"** checkbox (`SizingRecommendation.tsx:115`), backed by `sizingAutoApply` — **never persisted, never hydrated**, so it resets to `false` on every load |
+
+---
+
+## 🚨 THE ACTUAL ROOT CAUSE — the write, not the read
+
+Every repair in Parts I–III was downstream of this. Ray said it plainly and I kept fixing consumers:
+
+> *"Sld is ingesting the inverters from the auto equipment selector. Until you fix the inverters being applied on sys config. The problem will not resolve. I've already told you this."*
+
+**`SizingInput` carried seven battery fields** — `batteryEnabled`, `batteryMode`, `batteryGoal`, `batteryTargetKwh`, `selectedBatteryBrand`, `batteryUsePro`, `batteryDesiredUnits` — **and nothing that could say whether the PV is wired INTO that storage.** "Is there a battery" and "does the PV go through the battery" are different questions, and the engine was only ever asked the first. So it saw four Powerwall 3 and sized a standalone PV inverter beside them.
+
+Then **at least seven automatic writers** put that recommendation into `config.inverters`, which is the sole source of the SLD request's `inverterId`, `inverterModel`, `inverterManufacturer` and `topologyType`. By the time any route ran, the inverter was **genuinely in the config** — which is why no server-side repair ever changed the drawing.
+
+| Automatic writer | Trigger | Reaches a resolved DC-coupled project? | Status |
+|---|---|---|---|
+| the auto-apply watcher | `sizingAutoApply` checkbox arms a `useEffect` | yes — an empty fleet reads as `countMismatch` ⇒ `structurallyStale`, and a structurally stale config is re-applied **"despite user lock"** | **FIXED** |
+| **Smart Defaults** | `useEffect`; fires when there are **no** inverters | **yes — this is the state a resolution leaves behind.** It re-seeded an inverter AND set `defaultsApplied`, so the seed then looked like a settled decision | **FIXED** |
+| hydration string-distribution heal | project load, AUTO mode, **checks none of the locks** | no — gated on `inverters.length > 0`; it reshapes existing shells and introduces no identity | left alone, deliberately |
+| panel-compatibility auto-heal | `useEffect`, AUTO mode only | no — rewrites `strings[].panelId`, not the inverter | left alone |
+| hybrid fleet self-heal | `useEffect` → `rebuildFleetsPerSub('auto')` | no — hybrid designs only | left alone |
+| DC/AC auto-heal | `useEffect` | reshapes existing | left alone |
+| factory default `[newInverter('string')]` → `se-7600h` | module-level, first render | present from the first render of every project | left alone |
+
+**The four left alone are recorded rather than guarded, on purpose.** Guarding a writer that cannot fire is how a product accumulates conditions nobody can reason about. Each is listed with the reason it cannot reach this case, so the next person can check that reasoning rather than rediscover it.
+
+### The repair, and the regression Ray caught in it
+
+`SizingInput.pvCoupledToStorage` — the engine returns an empty fleet and a `PV_DC_COUPLED_NO_INVERTER` warning rather than recommending equipment the design does not have. Absent or false, it sizes exactly as it always has.
+
+My first version of the gate was:
+
+```ts
+solarCoupling === 'dc-coupled-storage' || storage.some(u => u.pvInputLimits)
+```
+
+**The second arm treats CAPABILITY as ARCHITECTURE, and Ray stopped it before it shipped:**
+
+> *"You are going to fuck up the slds that are working just to make this one scenario work… every auto pick selection works for installs that do not have batteries."*
+
+`pvInput` exists on exactly ONE catalogue product — `tesla-powerwall-3` (`equipment-db.ts:2786`, `:2815`). So that arm would have matched **a Powerwall 3 standing beside Enphase micros or a SolarEdge string inverter, and deleted its inverter.** That is a real design, and Ray had named it himself: *"Do not assume Tesla storage always eliminates Enphase."*
+
+Gated on the **decided** coupling only now. A Powerwall 3 *can* take PV on its DC inputs; whether a given project's PV actually does is a decision, not an inference from what the hardware could do. The equipment picker keeps the broader expression deliberately — declining to PRESELECT a default costs nothing, declining to SIZE costs a design.
+
+| Design | Sizes an inverter |
+|---|---|
+| no battery — SolarEdge / Enphase / Tesla | **yes**, unchanged |
+| battery, not DC-coupled — SolarEdge / Enphase | **yes**, unchanged |
+| **Powerwall 3, AC-coupled** | **yes** — the regression that was caught |
+| Powerwall 3, decided DC-coupled | none, and it says why |
+
+Both guards carry a **control assertion** that the un-told path still seeds an inverter. Without it neither could detect the defect it exists for — a test that exercises only the fixed branch proves the branch, not the repair.
+
+---
+
+## What this says about the document
+
+Part I was written by hand in one pass and got the central question wrong. Part II was a 56-agent trace that corrected Part I in three places and was itself wrong about `PermitSystemModel`. Part III's Pattern A table proposed wiring four owners that a later investigation returned **DO_NOT_WIRE** on.
+
+The pattern across all of it: **every pass that traced CONSUMERS found real defects and missed the WRITER.** The question "who reads this wrongly?" was asked over and over, and the question that mattered was "who put it there?"
