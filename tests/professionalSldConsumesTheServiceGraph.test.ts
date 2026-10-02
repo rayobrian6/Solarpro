@@ -226,3 +226,42 @@ describe('🚨 the sheet follows the edit', () => {
     for (const e of exp) expect(drawn.boxes.some(b => b.id === `exp-${e.id}`)).toBe(true);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 🚨 THE SHEET MUST NOT CONTRADICT ITSELF.
+//
+// Found by LOOKING at the rendered sheet, not by any assertion in this file. The conduit & conductor
+// schedule branched only on `isMicro`, so a DC-coupled job fell into the STRING rows and printed
+// "ROOF J-BOX → DC DISCO", "INVERTER → AC DISCO" and "AC DISCO → MSP" — three runs between four
+// devices that are nowhere on the drawing above it. The picture showed two 200 A systems landing in
+// generation panels; its own schedule described a single string inverter feeding a disconnect.
+//
+// Ray: "HYBRID SLD must not contradict… Do not maintain two electrical models." A sheet that
+// contradicts ITSELF is that failure with a shorter distance between the two claims.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('🚨 the conductor schedule describes the drawing above it', () => {
+  const dcJob = (): ServiceTopology => ({ ...raysJob(), solarCoupling: 'dc-coupled-storage' });
+
+  it('a DC-coupled sheet names no inverter run and no AC disconnect run', () => {
+    const svg = renderSLDProfessional(withTopology(dcJob()));
+    const sched = svg.slice(svg.indexOf('CONDUIT &amp; CONDUCTOR SCHEDULE') >= 0
+      ? svg.indexOf('CONDUIT &amp; CONDUCTOR SCHEDULE')
+      : svg.indexOf('CONDUIT'));
+    for (const phantom of ['AC DISCO', 'DC DISCO']) {
+      expect(sched.includes(`>${phantom}<`),
+        `the conductor schedule names '${phantom}', which is not on a DC-coupled sheet`).toBe(false);
+    }
+    // And it names what IS there.
+    expect(sched).toContain('ESS PV DC INPUTS');
+    expect(sched).toContain('GENERATION PANEL');
+    expect(sched).toContain('BACKUP GATEWAY');
+  });
+
+  it('🚨 an AC-coupled sheet still gets its inverter and disconnect runs', () => {
+    // The guard must not be a blanket ban: a real string job legitimately has an INVERTER run and an
+    // AC DISCO run, and deleting those would be a different defect wearing this fix's clothes.
+    const acJob: ServiceTopology = { ...raysJob(), solarCoupling: 'ac-coupled-inverter' };
+    const svg = renderSLDProfessional(withTopology(acJob));
+    expect(svg).toContain('AC DISCO');
+  });
+});

@@ -3391,7 +3391,14 @@ export function renderTopologyServiceSection(opts: {
         // the corridor the branch feeders jog down, and the 200 A conductor from this system's
         // knife switch ran through the last word of it. The audit called the sheet clean because a
         // conductor is a LINE and the audit compares boxes — the picture is what showed it.
-        const fx = gb.left - 6;
+        //
+        // 🚨 AND IT IS ANCHORED TO THE CONDUCTOR, NOT TO THE BOX EDGE. `gb.left - 6` put the callout
+        // half a box-width away from the line it names — about 130 uu of white space between the
+        // words and the conductor — so on the sheet it read as an orphan label nearer the service
+        // tag than the feeder. A conductor callout that is not beside its conductor is a callout for
+        // whichever line the reader guesses. Same side, same reason; it just stops short of the
+        // conductor instead of starting from the cabinet beneath it.
+        const fx = cxGw - 6;
         const fy = (stackTop + gb.top) / 2;
         p.push(txt(fx, +fy.toFixed(2), fLbl, { sz: F.tiny, anc: 'end' }));
         boxes.push({ id: `aggregation-feeder-label-${agg.id}`, x: fx - fw, y: fy - capUu(F.tiny),
@@ -6071,6 +6078,26 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       ..._homerunRow,
       {id:'A-1',from:'AC COMBINER',to:'AC DISCO',conductors:`${_feederInstalledN}×${resolvedAcWire} THWN-2 + 1×#${egcNum} GRN`,conduit:_feederConduit,fill:_fFill,amp:input.acOutputAmps,ocpd:resolvedAcOCPD,vdrop:0,len:0,pass:_fPass},
       {id:'A-2',from:'AC DISCO',to:'MSP',conductors:`${_acConductorCount}×${resolvedAcWire} THWN-2 + 1×#${egcNum} GRN`,conduit:_feederConduit,fill:_fFill,amp:input.acOutputAmps,ocpd:resolvedAcOCPD,vdrop:_fVd,len:_fLen,pass:_fPass},
+    ] : _couplingIsDc ? [
+      // ═══════════════════════════════════════════════════════════════════
+      // 🚨 A DC-COUPLED JOB HAS NO INVERTER RUN AND NO AC DISCONNECT RUN.
+      //
+      // Found by LOOKING at the rendered sheet. This schedule branched only on `isMicro`, so a
+      // DC-coupled job fell into the string rows and printed "ROOF J-BOX → DC DISCO",
+      // "INVERTER → AC DISCO" and "AC DISCO → MSP" — three runs between four devices that are not
+      // on the drawing above it. The picture showed two 200 A systems landing in generation panels;
+      // its own conductor schedule described a single string inverter feeding a disconnect.
+      //
+      // Ray: "Do not maintain two electrical models" and "HYBRID SLD must not contradict". A sheet
+      // that contradicts ITSELF is the same failure with a shorter distance between the two claims.
+      //
+      // The honest runs follow the drawing: the strings land on the cabinets' DC inputs, each
+      // cabinet's AC output lands in its generation panel, and the panel feeds its gateway.
+      // ═══════════════════════════════════════════════════════════════════
+      {id:'D-1',from:'PV ARRAY',to:'ROOF J-BOX',conductors:`${resolvedDcWire} USE-2 + 1×#${egcNum} GRN`,conduit:'OPEN AIR',fill:0,amp:0,ocpd:input.dcOCPD,vdrop:0,len:0,pass:true},
+      {id:'D-2',from:'ROOF J-BOX',to:'ESS PV DC INPUTS',conductors:`${resolvedDcWire} USE-2 + 1×#${egcNum} GRN`,conduit:`${input.dcConduitType??'EMT'} 3/4"`,fill:0,amp:0,ocpd:input.dcOCPD,vdrop:0,len:0,pass:true},
+      {id:'A-1',from:'ESS AC OUTPUT',to:'GENERATION PANEL',conductors:`${resolvedAcWire} THWN-2 + 1×#${egcNum} GRN`,conduit:`${resolvedAcCondType} ${resolvedAcConduit}`,fill:_fFill,amp:input.acOutputAmps,ocpd:resolvedAcOCPD,vdrop:0,len:0,pass:_fPass},
+      {id:'A-2',from:'GENERATION PANEL',to:'BACKUP GATEWAY',conductors:`${resolvedAcWire} THWN-2 + 1×#${egcNum} GRN`,conduit:`${resolvedAcCondType} ${resolvedAcConduit}`,fill:_fFill,amp:input.acOutputAmps,ocpd:resolvedAcOCPD,vdrop:_fVd,len:_fLen,pass:_fPass},
     ] : [
       {id:'D-1',from:'PV ARRAY',to:'ROOF J-BOX',conductors:`${resolvedDcWire} USE-2 + 1×#${egcNum} GRN`,conduit:'OPEN AIR',fill:0,amp:0,ocpd:input.dcOCPD,vdrop:0,len:0,pass:true},
       {id:'D-2',from:'ROOF J-BOX',to:'DC DISCO',conductors:`${resolvedDcWire} USE-2 + 1×#${egcNum} GRN`,conduit:`${input.dcConduitType??'EMT'} 3/4"`,fill:0,amp:0,ocpd:input.dcOCPD,vdrop:0,len:0,pass:true},
