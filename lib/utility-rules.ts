@@ -1235,6 +1235,14 @@ const METHOD_LABELS: Record<InterconnectionMethod, string> = {
   SUPPLY_SIDE_TAP: 'Supply-Side Tap (Line-Side)',
   MAIN_BREAKER_DERATE: 'Main Breaker Derate',
   PANEL_UPGRADE: 'Panel Upgrade',
+  // 🚨 The states that are not a choice of NEC article. `recommendInterconnection` never
+  // RECOMMENDS one of these — it only ever assigns the four above — but the map is exhaustive so
+  // that adding a member to `InterconnectionMethod` cannot produce an `undefined` label printed
+  // as blank on a drawing. The compiler required these the moment the union grew, which is the
+  // point of putting the states in the type.
+  UNRESOLVED: 'Interconnection Not Established',
+  MANUFACTURER_INTEGRATED: 'Manufacturer-Integrated Connection (Listed Assembly)',
+  METER_COLLAR: 'Meter-Collar Adapter (Utility Authorised)',
 };
 
 // ── 120% Rule Check ───────────────────────────────────────────

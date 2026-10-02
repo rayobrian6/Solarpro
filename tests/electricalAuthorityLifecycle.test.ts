@@ -51,28 +51,80 @@ function priorBytes(): string | null {
 const flat = (s: string) => s.replace(/\s+/g, ' ');
 
 describe('🚨 the page loads the electrical state itself, keyed on the PROJECT', () => {
+  // ═══════════════════════════════════════════════════════════════════════
+  // 🚨 THESE TWO GUARDS USED TO PIN THE EFFECT'S EXACT BYTES.
+  //
+  // One matched a regex containing `{ setSvcTopology(null); setElectrical(null); return; }`
+  // verbatim; the other looked for the literal `setSvcTopology(t);`. Both broke the moment the
+  // effect gained a third state — while the REQUIREMENT they exist to protect (the page loads the
+  // graph itself, keyed on the project, never on the tab) was still satisfied.
+  //
+  // A guard that fails on a correct change is as expensive as one that passes on a defect: it
+  // trains you to edit the test. So the effect is now LOCATED BY WHAT IT DOES — it is the effect
+  // that fetches `/service-topology` — and the assertions are about its dependencies and its
+  // writes, not its punctuation.
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /** The effect that fetches the service topology, found by its fetch rather than its shape. */
+  function topologyLoadEffect(): { body: string; deps: string } {
+    const fetchIdx = current.indexOf('}/service-topology`');
+    expect(fetchIdx, 'the page no longer fetches the service topology at all')
+      .toBeGreaterThan(0);
+    const start = current.lastIndexOf('useEffect(', fetchIdx);
+    expect(start, 'the service-topology fetch is not inside a useEffect').toBeGreaterThan(0);
+    const depsIdx = current.indexOf('}, [', fetchIdx);
+    const depsEnd = current.indexOf(']);', depsIdx);
+    expect(depsEnd, 'the topology load effect has no dependency array').toBeGreaterThan(depsIdx);
+    return {
+      body: current.slice(start, depsEnd + 3),
+      deps: current.slice(depsIdx, depsEnd + 3),
+    };
+  }
+
   it('the load effect depends on the project id and not on the active tab', () => {
-    // The effect that fetches the graph must be keyed on `currentProjectId`.
-    const effect = current.match(
-      /useEffect\(\(\) => \{\s*if \(!currentProjectId\) \{ setSvcTopology\(null\); setElectrical\(null\); return; \}[\s\S]*?\}, \[currentProjectId\]\);/,
-    );
-    expect(effect, 'the project-keyed topology load effect is gone').toBeTruthy();
-    expect(effect![0]).toContain('service-topology');
+    const { body, deps } = topologyLoadEffect();
+    expect(deps, 'the topology load is not keyed on the project').toContain('currentProjectId');
     // 🚨 AND IT MUST NOT MENTION THE TAB. A load that reads `activeTab` is a tab-conditional load
     // however it is written.
-    expect(effect![0], 'the topology load reads activeTab').not.toContain('activeTab');
+    expect(body, 'the topology load reads activeTab').not.toContain('activeTab');
+    expect(deps, 'the topology load is keyed on the active tab').not.toContain('activeTab');
   });
 
   it('🚨 the tab-mounted builder is NOT the only writer of the page\'s graph', () => {
     // `onTopologyChange` may still exist — the builder should report its edits. What must also exist
-    // is a writer that is not it.
+    // is a writer that is not it: the load effect itself.
     const writers = [...current.matchAll(/setSvcTopology\s*\(/g)].length;
     expect(writers, 'nothing writes the page\'s copy of the graph').toBeGreaterThan(0);
-    // The load effect writes it, and it is outside any `activeTab ===` conditional.
-    const loadEffectIdx = current.indexOf('}, [currentProjectId]);');
-    const firstWriteIdx = current.indexOf('setSvcTopology(t);');
-    expect(firstWriteIdx, 'the load effect does not write the graph').toBeGreaterThan(0);
-    expect(firstWriteIdx).toBeLessThan(loadEffectIdx);
+    const { body } = topologyLoadEffect();
+    expect(body, 'the load effect does not write the graph').toContain('setSvcTopology(');
+  });
+
+  it('🚨 the load distinguishes NO GRAPH AUTHORED from GRAPH LOAD FAILED, and fails SAFE', () => {
+    // Ray, 2026-10-02: "A failed authority read must never manufacture a contradictory equipment
+    // choice. Distinguish NO TOPOLOGY AUTHORED from TOPOLOGY LOAD FAILED. They are not the same
+    // state."
+    //
+    // `svcTopology === null` meant both, and `pvCoupledToStorage` — the ONE link between System
+    // Config and the service graph — read it as "not DC-coupled", which re-armed the
+    // string-inverter auto-pick on a DC-coupled Powerwall project. A dropped fetch decided the
+    // architecture.
+    const { body } = topologyLoadEffect();
+    expect(body, 'the load effect records no read state at all').toContain('setSvcTopologyRead(');
+    for (const st of ["'failed'", "'absent'", "'loaded'"]) {
+      expect(body, `the load effect never reports ${st}`).toContain(`setSvcTopologyRead(${st})`);
+    }
+    // A non-OK response must be a FAILURE, not an absence — `res.json().catch(() => null)` used to
+    // land a 500 in the same `null` a project with no graph produces.
+    expect(body, 'a non-OK response is not treated as a failure').toContain('res.ok');
+
+    // 🚨 AND THE GATE ITSELF MUST SUPPRESS ON IGNORANCE.
+    const gateIdx = current.indexOf('pvCoupledToStorage={');
+    expect(gateIdx, 'the System Config / topology link is gone').toBeGreaterThan(0);
+    const gate = current.slice(gateIdx, current.indexOf('}', current.indexOf('}', gateIdx) + 1) + 1);
+    expect(gate, 'the equipment gate does not suppress when the graph could not be read')
+      .toContain("svcTopologyRead === 'failed'");
+    expect(gate, 'the equipment gate does not suppress while the graph is still loading')
+      .toContain("svcTopologyRead === 'loading'");
   });
 
   it('the canonical model is composed from the loaded graph, not from a tab', () => {

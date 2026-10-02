@@ -206,23 +206,76 @@ describe('🚨 every file the registry names exists and does what it is said to 
       .toContain('project.serviceTopology');
   });
 
-  it('🚨 the SLD PDF route consumes the graph too — two renderers, one drawing', () => {
-    // F-3 in the re-audit, and it was the worst remaining gap: this route had ZERO references to the
-    // graph, so "Export PDF" drew the legacy single-service tail for Ray's 400 A job while the Diagram
-    // tab drew two 200 A systems from the same project. Two rendering entry points, two drawings.
-    const code = src('app', 'api', 'engineering', 'sld', 'pdf', 'route.ts');
-    expect(code, 'the PDF route no longer loads the canonical model')
-      .toContain('loadElectricalProject');
-    expect(code, 'the PDF route does not hand the graph to the renderer')
-      .toContain('serviceTopology:');
-    expect(code, 'the PDF route does not project the canonical service rating')
-      .toContain('buildInput.mainPanelAmps = ');
-    expect(code, 'the PDF route still defaults the interconnection method')
+  // ═══════════════════════════════════════════════════════════════════════
+  // 🚨 THESE TWO GUARDS USED TO PIN THE PROJECTION'S TOKENS *INLINE IN EACH ROUTE*.
+  //
+  // That assertion was satisfiable two ways, and the repo took the bad one: the SVG route held
+  // ~240 lines of projection and the PDF route held a PARTIAL COPY of it — enough tokens to pass
+  // (`loadElectricalProject`, `serviceTopology:`, `buildInput.mainPanelAmps = `,
+  // `interconnectionMethodScalar`) and missing the Rule Eleven architecture override, the DC
+  // string limits, the graph's battery count and the revision stamp. Both guards were GREEN while
+  // the exported PDF drew a string inverter for a DC-coupled project.
+  //
+  // A token-presence guard cannot see that two copies disagree. So the requirement is now
+  // expressed as the thing that makes disagreement impossible: ONE implementation, and every
+  // rendering route calls it.
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /** A surface projects canonically if it calls the shared projection, or does it itself. */
+  const projectsCanonically = (code: string) =>
+    code.includes('projectCanonicalArchitecture')
+    || (code.includes('loadElectricalProject') && code.includes('interconnectionMethodScalar'));
+
+  it('🚨 ONE canonical projection, and it does the whole job', () => {
+    const mod = src('lib', 'electrical', 'canonicalSldProjection.ts');
+    // The four the partial copy had.
+    expect(mod, 'the projection does not load the canonical model').toContain('loadElectricalProject');
+    expect(mod, 'the projection does not hand over the graph').toContain('input.serviceTopology =');
+    expect(mod, 'the projection does not set the service rating').toContain('input.mainPanelAmps =');
+    expect(mod, 'the projection does not consult the graph for the article')
       .toContain('interconnectionMethodScalar');
+    // 🚨 AND THE FOUR THE PARTIAL COPY WAS MISSING — the ones whose absence was invisible.
+    expect(mod, 'the projection does not perform the Rule Eleven architecture override')
+      .toContain("input.topologyType = 'DC_COUPLED_STORAGE'");
+    expect(mod, 'the projection does not delete the posted inverter identity')
+      .toContain('delete input.inverterId');
+    expect(mod, 'the projection does not take the DC string window from the storage')
+      .toContain('dcStringLimits');
+    expect(mod, 'the projection does not take the battery count from the graph')
+      .toContain('input.batteryCount = model.storage.invertingUnitCount');
+    expect(mod, 'the projection does not stamp the electrical revision')
+      .toContain('input.electricalRevision =');
+    expect(mod, 'the projection does not refuse an unresolved architecture')
+      .toContain('architectureRefusal');
+  });
+
+  it('🚨 BOTH SLD routes call the SAME projection — the defect that made this guard necessary', () => {
+    const svg = src('app', 'api', 'engineering', 'sld', 'route.ts');
+    const pdf = src('app', 'api', 'engineering', 'sld', 'pdf', 'route.ts');
+    // 🚨 LIVE LINES ONLY. `toContain` was satisfied by the COMMENT above each call that explains
+    // why the shared projection exists — so renaming the actual call left the guard green. A token
+    // in a comment is not the code consulting it.
+    const callsIt = (code: string) => code.split('\n')
+      .filter(l => !l.trim().startsWith('//') && !l.trim().startsWith('*'))
+      .some(l => /\bprojectCanonicalArchitecture\s*\(/.test(l));
+    expect(callsIt(svg), 'the SVG route does not CALL the shared canonical projection').toBe(true);
+    expect(callsIt(pdf),
+      'the PDF route does not CALL the shared canonical projection — it is drifting again')
+      .toBe(true);
+
+    // Neither may keep its own copy of the architecture override: that is how they diverged.
+    for (const [name, code] of [['sld/route.ts', svg], ['sld/pdf/route.ts', pdf]] as const) {
+      expect(code.includes("topologyType = 'DC_COUPLED_STORAGE'"),
+        `${name} performs its OWN architecture override instead of using the shared projection`)
+        .toBe(false);
+    }
+
+    // And the PDF must refuse an unresolved architecture, since it is the printable artefact.
+    expect(pdf, 'the PDF route can be exported from an unresolved architecture')
+      .toContain('_proj.refusal');
   });
 
   it('🚨 no migrated route fabricates a service rating or an interconnection article', () => {
-    // The two fabrications the sweep found, asserted as absent-or-guarded on every migrated surface.
     // `|| 200` may still appear as the LEGACY fallback for projects with no graph; what must also
     // appear is the canonical projection that outranks it.
     for (const p of [
@@ -232,10 +285,26 @@ describe('🚨 every file the registry names exists and does what it is said to 
     ]) {
       const code = src(...p);
       const file = p.join('/');
-      expect(code.includes('mainPanelAmps = '),
-        `${file} reads a mainPanelAmps scalar with no canonical projection over it`).toBe(true);
-      expect(code, `${file} does not consult the graph for the interconnection method`)
-        .toContain('interconnectionMethodScalar');
+      expect(projectsCanonically(code),
+        `${file} reads scalars with no canonical projection over them`).toBe(true);
+    }
+  });
+
+  it('🚨 neither SLD route defaults the interconnection to a NEC article', () => {
+    // Ray, 2026-10-02: absence is UNRESOLVED, never LOAD_SIDE. `?? 'LOAD_SIDE'` chose which
+    // article of the code applies for a project whose POI nobody had established.
+    for (const p of [
+      ['app', 'api', 'engineering', 'sld', 'route.ts'],
+      ['app', 'api', 'engineering', 'sld', 'pdf', 'route.ts'],
+      ['app', 'api', 'engineering', 'bom', 'route.ts'],
+    ]) {
+      const file = p.join('/');
+      const live = src(...p).split('\n')
+        .filter(l => !l.trim().startsWith('//'))
+        // a token→label map (`raw === 'LOAD_SIDE' ? 'Load Side'`) is not a default
+        .filter(l => /\?\?\s*'LOAD_SIDE'|\|\|\s*'LOAD_SIDE'/.test(l));
+      expect(live, `${file} still defaults the interconnection method to NEC 705.12(B):\n`
+        + live.join('\n')).toEqual([]);
     }
   });
 

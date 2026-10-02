@@ -47,6 +47,7 @@ import { describe, it, expect } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 import { roofProject } from '../test-fixtures/roofProject';
+import { permitInterconnectionToken } from '@/lib/permit/utils/interconnectionRule';
 import { groundProject } from '../test-fixtures/groundProject';
 import { generateCADLayout } from '@/lib/cad/cadEngine';
 import { buildSLDInputFromPermit } from '@/lib/permit/utils/sldAdapter';
@@ -151,7 +152,26 @@ describe('an existing design does not move', () => {
 
 // ── 2. The standalone package ───────────────────────────────────────────────
 describe('a standalone IQ Gateway design — every artefact names the panel AND the gateway', () => {
-  const over = { selectedCombinerId: STANDALONE };
+  // ═══════════════════════════════════════════════════════════════════════
+  // 🚨 THE INTERCONNECTION IS NOW STATED, NOT ASSUMED.
+  //
+  // This block is about the GATEWAY: which device is the panel, how the gateway lands, where the
+  // CTs clamp. It never meant to assert anything about interconnection defaults — but it depended
+  // on one. `roofProject` records no `interconnectionMethod`, and the CT authority places the
+  // consumption CTs RELATIVE to the point of interconnection, so with absence silently collapsed
+  // to `'LOAD_SIDE'` the CT drawing came out placed and the metering mode came out NET.
+  //
+  // Now that absence stays absent, that same design yields `boundary: 'unresolved'`, no consumption
+  // CT placement, and `CONS (MODE TBD)` — all of which is CORRECT for a design nobody has stated an
+  // interconnection for, and none of which is what this block is testing.
+  //
+  // So the precondition is written down. A test that relies on a default is a test that changes
+  // meaning when the default is removed, and this one did.
+  //
+  // The absence case has its own coverage in
+  // `tests/engineeringChainRepair.postgres.test.ts` — "no interconnection ⇒ no CT placement".
+  // ═══════════════════════════════════════════════════════════════════════
+  const over = { selectedCombinerId: STANDALONE, interconnectionMethod: 'LOAD_SIDE' };
 
   it('the plan the permit resolves is the standalone topology', () => {
     const p = job(over);
@@ -196,6 +216,9 @@ describe('a standalone IQ Gateway design — every artefact names the panel AND 
     });
     // The metering slice now carries gatewayPlacement: consumption is required
     // and drawn, the production CT clamps L1 in the PV panel, both leads exist.
+    //
+    // NET because the design above STATES a load-side connection. It used to read NET on a design
+    // that stated nothing, which is the default this repair removed.
     expect(sld.meteringChannels).toBe('PROD (CT) · CONS (NET)');
     expect(sld.meteringDrawing.production.where).toBe('landing-panel-field');
     expect(sld.meteringDrawing.consumption).toMatchObject({ ctCount: 2, supplied: 'order-separately' });
@@ -204,9 +227,17 @@ describe('a standalone IQ Gateway design — every artefact names the panel AND 
 
   it('E-1 states the same metering PV-4A states (PV-4A hands the composer the whole plan)', () => {
     const p = job(over);
+    // 🚨 THE SAME INTERCONNECTION ON BOTH SIDES, THROUGH THE SAME NORMALISER.
+    //
+    // This hardcoded `'LOAD_SIDE'` while the other side of the comparison reads the PROJECT. It
+    // only agreed because the product also defaulted an absent interconnection to LOAD_SIDE, so
+    // the test was comparing two copies of the same guess. Now that absence stays absent, a
+    // hardcoded token here would make a CONSISTENCY test fail over a value the test itself
+    // invented — which would say nothing about whether E-1 and PV-4A agree.
     const pv4a = resolveDesignMetering({
       plan: buildIntegratedEquipment(p, cadOf(p)),
-      interconnectionRaw: 'LOAD_SIDE',
+      interconnectionRaw: permitInterconnectionToken(
+        (p as any).project?.interconnectionMethod),
       consumptionCtLocation: null,
       systemVoltage: 240,
     });
@@ -234,7 +265,9 @@ describe('a standalone IQ Gateway design — every artefact names the panel AND 
     const f = sldCombinerFields({
       inverterManufacturer: 'Enphase', inverterModel: 'IQ8M', isMicro: true,
       totalDevices: devices, branchCount: auth.microBranches.length, hasBattery: false,
-      selectedCombinerId: STANDALONE, interconnectionRaw: 'LOAD_SIDE',
+      selectedCombinerId: STANDALONE,
+      // 🚨 Same reason as above — one normaliser, both sides of the comparison.
+      interconnectionRaw: permitInterconnectionToken((p as any).project?.interconnectionMethod),
       ungroundedConductorCount: 2,
     });
     const permitPlan = buildIntegratedEquipment(p, cad);

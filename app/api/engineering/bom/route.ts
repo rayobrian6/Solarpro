@@ -526,7 +526,12 @@ export async function POST(req: NextRequest) {
       requiresRapidShutdown:   body.requiresRapidShutdown   ?? true,
       requiresWarningLabels:   body.requiresWarningLabels   ?? true,
       // Interconnection method — controls whether backfed breaker appears in BOM
-      interconnectionMethod:   body.interconnectionMethod ?? body.interconnection ?? 'LOAD_SIDE',
+      // 🚨 ABSENCE IS 'UNRESOLVED', NEVER 'LOAD_SIDE'. The canonical projection claims this field from
+      // the service graph's POI for every project whose relationship IS established, so what reaches
+      // this `??` is a request about a project where nobody has said — and handing that NEC 705.12(B)
+      // prints a code basis the design has not earned. The evaluator now has an explicit
+      // NOT_EVALUATED branch for it (lib/electrical-calc.ts).
+      interconnectionMethod:   body.interconnectionMethod ?? body.interconnection ?? 'UNRESOLVED',
       consumptionCtLocation:   typeof body.consumptionCtLocation === 'string' ? body.consumptionCtLocation : undefined,
       panelBusRating:          Number(body.panelBusRating) || Number(body.mainPanelAmps) || 200,
       runs:                    body.runs,

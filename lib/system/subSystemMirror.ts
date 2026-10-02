@@ -287,7 +287,29 @@ export function subSystemEntryFromFlatEquipmentPatch(
     updatedAt: nowIso,
   };
   if (idOrNull(patch.panelId as string)) out.panelId = patch.panelId;
-  if (idOrNull(patch.inverterId as string)) out.inverterId = patch.inverterId;
+  // ═══════════════════════════════════════════════════════════════════════
+  // 🚨 AN INVERTER MUST BE CLEARABLE, OR A RETIREMENT CANNOT REACH THIS MIRROR.
+  //
+  // This was `if (idOrNull(patch.inverterId)) out.inverterId = patch.inverterId;` — a truthy
+  // GUARD, not a write-back. That reads as safe and is the opposite: an architecture resolution
+  // that retires the external PV inverter writes `inverterId: null`, `idOrNull(null)` is falsy,
+  // so `out.inverterId` was never set and the `subSystems` entry KEPT THE RETIRED INVERTER. The
+  // page then re-synthesised a fleet from that map (`synthesizeFleetFromSubEquipment`) and the
+  // retired device came back on the next render and the next autosave.
+  //
+  // `batteryId` three lines down has had explicit-clear semantics all along, which is why a
+  // battery retirement worked and an inverter retirement did not. Ray: "Implement explicit clear
+  // semantics for inverter identity just as battery identity already has explicit clear
+  // semantics."
+  //
+  // `'inverterId' in patch` is the whole distinction: a patch that does not mention the inverter
+  // leaves it alone, and a patch that says `null`/`''` MEANS none.
+  // ═══════════════════════════════════════════════════════════════════════
+  if ('inverterId' in patch && (patch.inverterId === null || patch.inverterId === '')) {
+    out.inverterId = null; // explicit clear — a retirement, not an omission
+  } else if (idOrNull(patch.inverterId as string)) {
+    out.inverterId = patch.inverterId;
+  }
   if (idOrNull(patch.mountingId as string)) out.mountingId = patch.mountingId;
   if (patch.batteryId === '' || (patch.batteryId == null && patch.batteryCount === 0 && 'batteryCount' in patch)) {
     out.batteryId = null; // explicit clear

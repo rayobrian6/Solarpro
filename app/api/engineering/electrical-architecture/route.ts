@@ -197,6 +197,39 @@ export async function POST(req: NextRequest) {
           }));
           const retiredModuleCount = retiredStrings.reduce((n, inv) =>
             n + inv.strings.reduce((m, st) => m + (Number(st.panelCount) || 0), 0), 0);
+          // ═══════════════════════════════════════════════════════════════
+          // 🚨 AND THE SUBSYSTEM MAP, OR THE PAGE REBUILDS THE FLEET WE JUST RETIRED.
+          //
+          // Emptying `cfg.inverters` alone was not enough: `hybridFleetPlan` sees an empty fleet
+          // for a present sub-system and calls `synthesizeFleetFromSubEquipment(key,
+          // cfg.subSystems[key], count)`, which recreates a one-inverter fleet FROM THE MAP. So
+          // the retired inverter reappeared on the next render — the retirement cleared the
+          // authority and left the mirror that regenerates it.
+          //
+          // The ids are kept in the retirement record built just below, so nothing historical is lost; what
+          // is removed is the ACTIVE pointer. Ray: "Historical information may remain historical.
+          // Active mirrors must not recreate the retired equipment on the next render/autosave."
+          // ═══════════════════════════════════════════════════════════════
+          const _subs = (cfg.subSystems ?? null) as Record<string, Record<string, unknown>> | null;
+          const _clearedSubs: Array<{ key: string; inverterId: string }> = [];
+          if (_subs && typeof _subs === 'object') {
+            for (const [k, v] of Object.entries(_subs)) {
+              if (!v || typeof v !== 'object') continue;
+              const had = v.inverterId;
+              if (had == null || had === '') continue;
+              _clearedSubs.push({ key: k, inverterId: String(had) });
+              // Explicit null, not delete: `subSystemEntryFromFlatEquipmentPatch` now reads
+              // `'inverterId' in patch && === null` as a decision, and a deleted key would be
+              // read as "nobody said" and refilled.
+              v.inverterId = null;
+            }
+          }
+          if (_clearedSubs.length > 0) {
+            console.warn('[electrical] cleared the retired inverter from '
+              + `${_clearedSubs.length} subSystems entr${_clearedSubs.length === 1 ? 'y' : 'ies'}: `
+              + _clearedSubs.map(c => `${c.key}=${c.inverterId}`).join(', '));
+          }
+
           cfg.retiredInverterFleet = {
             retiredAt: new Date().toISOString(),
             retiredBecause: 'The installer resolved the electrical architecture to PV DC coupled to '
@@ -205,6 +238,8 @@ export async function POST(req: NextRequest) {
               + 'against it. No module is added or removed.',
             moduleCount: retiredModuleCount,
             inverters: retiredStrings,
+            // 🚨 History, so the active clear above is reversible knowledge rather than a deletion.
+            subSystemInverterIds: _clearedSubs,
           };
           cfg.inverters = [];
           clearedFleetEntries = before;

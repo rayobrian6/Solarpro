@@ -11,6 +11,8 @@ import { readProductionMeterFlag, ungroundedConductorsForService } from '@/lib/e
 import { getUserFromRequest } from '@/lib/auth';
 // THE one NEC 240.6(A) ladder — never `Math.ceil(x / 5) * 5`.
 import { nextStandardOcpd } from '@/lib/electrical/stdSizes';
+import { unselectedInverterLabel } from '@/lib/permit/utils/helpers';
+import { TOPOLOGY_UNRESOLVED_TOKEN } from '@/lib/electrical/canonicalSldProjection';
 import { handleRouteDbError } from '@/lib/db-neon';
 import { renderSLDProfessional, SLDProfessionalInput } from '@/lib/sld-professional-renderer';
 import { sanitizeClientSourceBranches } from '@/lib/permit/utils/sldAdapter';
@@ -172,60 +174,31 @@ export async function POST(req: NextRequest) {
     // Same assembly as every other surface. Non-fatal: a project with no graph exports exactly as
     // before.
     // ═══════════════════════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════════════════════════
+    // 🚨 THE EXPORTED SHEET IS BUILT FROM THE SAME ENGINEERED PROJECT AS THE DIAGRAM.
+    //
+    // This route carried a PARTIAL copy of the SVG route's canonical projection: it had the
+    // refusal gate, the service rating and the interconnection, and it was missing the Rule
+    // Eleven architecture override, the DC string limits, the graph's battery count and the
+    // revision stamp. The on-screen diagram therefore drew a DC-coupled Powerwall design and
+    // the PDF of the same project, in the same session, drew a string inverter — and the
+    // printable one was the wrong one.
+    //
+    // `projectCanonicalArchitecture` is now the ONLY implementation, called here with the same
+    // arguments the SVG route uses. A field cannot be projected on one surface and missed on
+    // the other, because there is no second copy to fall behind.
+    // ═══════════════════════════════════════════════════════════════════
     let _electricalRevision: string | null = null;
+    let _pdfCanonicalApplied = false;
     if (user?.id && isReadableProjectId(buildInput?.projectId)) {
       try {
-        const { loadElectricalProject, interconnectionMethodScalar } =
-          await import('@/lib/electrical/loadElectricalProject');
-        const _loaded = await loadElectricalProject(String(buildInput.projectId), user.id);
-        const _m = _loaded?.model;
-        // 🚨 AND THE PDF IS THE PRINTABLE ONE. Gating the SVG route and not this one would leave the
-        // exact artefact that gets attached to a submission reachable.
-        {
-          const { architectureRefusal } = await import('@/lib/electrical/architectureGate');
-          const _refusal = architectureRefusal(_m, _loaded?.revision ?? null);
-          if (_refusal) {
-            console.warn('[sld/pdf] REFUSED: electrical architecture requires resolution'
-              + ` (project ${buildInput.projectId})`);
-            return NextResponse.json(_refusal, { status: 409 });
-          }
-        }
-        if (_m?.topology) {
-          _electricalRevision = _loaded!.revision;
-          // A conflict is never canonicalised away — the sheet keeps what was recorded.
-          buildInput.serviceTopology = _m.canonicalizationPatch
-            ? { ..._m.topology, ..._m.canonicalizationPatch }
-            : _m.topology;
-
-          if (_m.serviceRatedAmps !== null) {
-            const _posted = Number(buildInput.mainPanelAmps) || 0;
-            if (_posted !== _m.serviceRatedAmps) {
-              console.warn('[sld/pdf/POST] service rating corrected from the canonical model:'
-                + ` posted=${_posted || 'none'} canonical=${_m.serviceRatedAmps} A`);
-            }
-            buildInput.mainPanelAmps = _m.serviceRatedAmps;
-          }
-
-          const _ic = interconnectionMethodScalar(_m.topology);
-          if (_ic) {
-            buildInput.interconnection = _ic.value;
-            buildInput.interconnectionType = _ic.value;
-            buildInput.interconnectionMethod = _ic.value;
-          }
-
-          console.log('[sld/pdf/POST] canonical electrical model:'
-            + ` revision=${_loaded!.revision}`
-            + ` coupling=${_m.solarCoupling ?? 'UNRESOLVED'}`
-            + ` service=${_m.serviceRatedAmps ?? 'NOT ESTABLISHED'} A`
-            + ` storage=${_m.storage.invertingUnitCount}`
-            + ` gateways=${_m.storage.gatewayCount}`
-            + ` genPanels=${_m.storage.perSystemGenerationPanelCount}`
-            + ` conflicts=${_m.conflicts.length}`);
-          for (const c of _m.conflicts) {
-            console.warn(`[sld/pdf/POST] ELECTRICAL CONFLICT — ${c.fact}: `
-              + c.claims.map(x => `${x.source} says ${x.says}`).join(' | '));
-          }
-        }
+        const { projectCanonicalArchitecture } =
+          await import('@/lib/electrical/canonicalSldProjection');
+        const _proj = await projectCanonicalArchitecture(
+          buildInput, String(buildInput.projectId), user.id, 'sld/pdf/POST');
+        if (_proj.refusal) return NextResponse.json(_proj.refusal, { status: 409 });
+        _electricalRevision = _proj.revision;
+        _pdfCanonicalApplied = _proj.applied;
       } catch (e) {
         console.warn('[sld/pdf/POST] canonical electrical read skipped (non-fatal):',
           (e as Error)?.message);
@@ -250,12 +223,31 @@ export async function POST(req: NextRequest) {
       inverterManufacturer = parts[0];
       inverterModel = parts.slice(1).join(' ');
     }
-    // Default manufacturer based on topology
-    const topoForDefaultPdf = String(body.topologyType ?? 'STRING_INVERTER');
-    if (!inverterManufacturer) {
-      inverterManufacturer = topoForDefaultPdf === 'MICROINVERTER' ? 'Enphase' : 'Fronius';
+    // ════════════════════════════════════════════════════════════════════
+    // 🚨 NO EQUIPMENT MAY APPEAR FROM ABSENCE — AND THIS IS THE SHEET THAT LEAVES THE BUILDING.
+    //
+    // What stood here printed a real FRONIUS PRIMO 8.2-1, or an ENPHASE, in the nameplate
+    // position of the EXPORTED PDF for any project that sent no inverter model. The SVG route's
+    // identical fabrication was removed; this one was not, so the repair held for the diagram
+    // on screen and failed for the artefact that gets attached to a submission.
+    //
+    // It was also reading the WRONG OBJECT. `buildInput = body.buildInput ?? body` (line 139),
+    // so whenever the client wrapped its payload — which it does — `body.topologyType` was
+    // `undefined`, the default fired, and `topoForDefaultPdf` was ALWAYS 'STRING_INVERTER'.
+    // A microinverter job was therefore given a Fronius, not even the Enphase the branch
+    // intended. The guess could not get its own guess right.
+    //
+    // `unselectedInverterLabel()` is the repo's existing answer: the fail-loud
+    // '⚠ INVERTER NOT SELECTED' marker the renderer detects and prints in red
+    // (`isInverterUnselectedMarker`). Absence is a state with a representation.
+    // ════════════════════════════════════════════════════════════════════
+    if (!inverterModel) {
+      inverterModel = unselectedInverterLabel();
+      inverterManufacturer = '';
+      console.warn('[sld/pdf/POST] no inverter model was supplied — the exported sheet says '
+        + 'INVERTER NOT SELECTED rather than naming a product nobody chose.'
+        + (_pdfCanonicalApplied ? ' (canonical architecture was applied)' : ''));
     }
-    if (!inverterModel) inverterModel = 'Primo 8.2-1';
 
     const acOutputAmps = Number(buildInput.acOutputAmps) || Math.round(acOutputKw * 1000 / 240);
     // 🚨 `Math.ceil(x / 5) * 5` — the formula lib/electrical/stdSizes.ts forbids in its
@@ -272,7 +264,11 @@ export async function POST(req: NextRequest) {
     // literal 'IQ Combiner' and — because `combinerProvidesAcDisconnect` arrived
     // undefined — the PDF silently withheld the NEC integral-disconnect
     // statement that the on-screen diagram asserted for the same project.
-    const _topo = String(buildInput.topologyType ?? 'STRING_INVERTER');
+    // 🚨 Same token as the SVG route — never `?? 'STRING_INVERTER'`, which is the guess that
+    // used to select the product above.
+    const _topo = buildInput.topologyType != null && String(buildInput.topologyType).trim()
+      ? String(buildInput.topologyType)
+      : TOPOLOGY_UNRESOLVED_TOKEN;
     const _isMicro = /MICRO/i.test(_topo);
     const _combiner = sldCombinerFields({
       inverterManufacturer: String(buildInput.inverterManufacturer ?? ''),
@@ -311,7 +307,7 @@ export async function POST(req: NextRequest) {
       drawingDate:             String(buildInput.drawingDate ?? buildInput.date ?? new Date().toLocaleDateString()),
       drawingNumber:           String(buildInput.drawingNumber           ?? 'SLD-001'),
       revision:                String(buildInput.revision                ?? 'A'),
-      topologyType:            String(buildInput.topologyType            ?? 'STRING_INVERTER'),
+      topologyType:            _topo,
       combinerLabel:                _combiner.combinerLabel,
       combinerModel:                _combiner.combinerModel,
       combinerHasIntegratedGateway: _combiner.combinerHasIntegratedGateway,
@@ -367,7 +363,12 @@ export async function POST(req: NextRequest) {
       utilityName:             String(buildInput.utilityName ?? buildInput.utilityCompany ?? buildInput.utility ?? 'Local Utility'),
       // Map interconnection method to renderer-friendly string
       interconnection:         (() => {
-        const raw = String(buildInput.interconnection ?? buildInput.interconnectionType ?? 'LOAD_SIDE');
+        // 🚨 ABSENCE IS 'UNRESOLVED', NEVER 'LOAD_SIDE'. The canonical projection claims this field from
+        // the service graph's POI for every project whose relationship IS established, so what reaches
+        // this `??` is a request about a project where nobody has said — and handing that NEC 705.12(B)
+        // prints a code basis the design has not earned. The evaluator now has an explicit
+        // NOT_EVALUATED branch for it (lib/electrical-calc.ts).
+        const raw = String(buildInput.interconnection ?? buildInput.interconnectionType ?? 'UNRESOLVED');
         if (raw === 'LOAD_SIDE' || raw.toLowerCase().includes('load')) return 'Load Side Tap';
         if (raw === 'SUPPLY_SIDE_TAP' || raw.toLowerCase().includes('supply')) return 'Supply Side Tap';
         if (raw === 'MAIN_BREAKER_DERATE' || raw.toLowerCase().includes('derate')) return 'Load Side Tap';

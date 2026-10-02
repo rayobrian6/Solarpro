@@ -455,8 +455,17 @@ export async function POST(req: NextRequest) {
     const structuralErrors = (structuralResult as any)?.errors?.filter((e: any) => e.severity === 'error') ?? [];
 
     const _overall = resolveOverallStatus({
+      // 🚨 AN ENGINE THAT COULD NOT EVALUATE THE INTERCONNECTION DID NOT EVALUATE THE DESIGN.
+      //
+      // `electricalResult.status` is folded from the issues the engine raised, so an engine that
+      // refused NEC 705.12(B) for want of a point of interconnection still returned PASS or
+      // WARNING here — the exact "no errors therefore PASS" Ray named. `inputs-unresolved` is
+      // already the repo's reason for "governing data the engine requires is unresolved, so it
+      // could not run", and it makes `overallStatus` null rather than a verdict.
       electrical: electricalResult
-        ? { evaluated: true, status: electricalResult.status, errorCount: electricalErrors.length }
+        ? (electricalResult.interconnection?.conclusion === 'NOT_EVALUATED'
+            ? notEvaluated('inputs-unresolved')
+            : { evaluated: true, status: electricalResult.status, errorCount: electricalErrors.length })
         : notEvaluated(electrical ? 'engine-error' : 'no-input'),
       structural: structuralResult
         ? { evaluated: true, status: (structuralResult as any).status, errorCount: structuralErrors.length }

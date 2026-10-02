@@ -27,7 +27,8 @@ export interface ElectricalCompliance {
   busbar?: {
     backfeedBreakerRequired?: number;  // backfeed breaker amps
     passes?: boolean;                   // 120% rule pass/fail
-    busbarRule?: '120%' | 'supply-side';
+    /** 🚨 'not-evaluated' when the governing article was never established — see electrical-calc. */
+    busbarRule?: '120%' | 'supply-side' | 'not-evaluated';
     busRating?: number;
     mainBreaker?: number;
     solarBreakerRequired?: number;

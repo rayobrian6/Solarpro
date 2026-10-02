@@ -1171,6 +1171,24 @@ function EngineeringPageInner() {
    * MICROINVERTER beside a Tesla topology on the next tab.
    */
   const [svcTopology, setSvcTopology] = useState<ServiceTopologyForPage | null>(null);
+  // ══════════════════════════════════════════════════════════════════════════
+  // 🚨 "NO TOPOLOGY AUTHORED" AND "TOPOLOGY LOAD FAILED" ARE DIFFERENT STATES.
+  //
+  // `svcTopology === null` meant both, and the one consumer that matters read it as the first.
+  // `pvCoupledToStorage` (the single link between System Config and the service graph) is
+  // `electrical?.solarCoupling === 'dc-coupled-storage' || (svcTopology?.storage ?? []).some(…)`
+  // — so a DROPPED FETCH evaluated to `false`, meaning "PV is not coupled to storage", which
+  // re-enabled the string-inverter auto-pick on a DC-coupled Powerwall project. The guard against
+  // the original live failure was armed by a successful network call.
+  //
+  // Ray, 2026-10-02: "A failed authority read must never manufacture a contradictory equipment
+  // choice. Distinguish NO TOPOLOGY AUTHORED from TOPOLOGY LOAD FAILED. They are not the same
+  // state." And: "Auto Apply may continue working when authority is genuinely absent during a new
+  // design workflow" — so 'absent' still permits the picker's default, and only ignorance
+  // suppresses it.
+  // ══════════════════════════════════════════════════════════════════════════
+  const [svcTopologyRead, setSvcTopologyRead] =
+    useState<'loading' | 'absent' | 'failed' | 'loaded'>('loading');
   /** The canonical electrical model, composed from the stores that own its parts. */
   const [electrical, setElectrical] = useState<ElectricalProjectModel | null>(null);
   // 🚨 THE PROJECT'S RECORDED COMBINER SELECTION — the installer's answer, read
@@ -1204,19 +1222,47 @@ function EngineeringPageInner() {
   // coincidence; a re-read makes it agree because it is the same bytes.
   const [_svcTopologyReloadKey, setSvcTopologyReloadKey] = useState(0);
   useEffect(() => {
-    if (!currentProjectId) { setSvcTopology(null); setElectrical(null); return; }
+    if (!currentProjectId) {
+      setSvcTopology(null); setElectrical(null); setSvcTopologyRead('absent'); return;
+    }
     let cancelled = false;
+    setSvcTopologyRead('loading');
     (async () => {
       try {
         const res = await fetch(`/api/projects/${currentProjectId}/service-topology`,
           { cache: 'no-store' });
-        const data = await res.json().catch(() => null);
+        // 🚨 A NON-OK RESPONSE IS A FAILURE, NOT AN ABSENCE. `res.json()` on a 500 used to fall
+        // through `.catch(() => null)` into the same `null` a project with no graph produces.
+        if (!res.ok) {
+          if (!cancelled) {
+            setSvcTopology(null); setSvcTopologyRead('failed');
+            console.warn('[engineering] service-topology read FAILED '
+              + `(HTTP ${res.status}) — the electrical architecture is UNAVAILABLE, not absent. `
+              + 'Equipment auto-selection is suppressed until it can be read.');
+          }
+          return;
+        }
+        const data = await res.json().catch(() => undefined);
         if (cancelled) return;
-        const t = data?.success && data.available
-          ? (data.topology as ServiceTopologyForPage) : null;
-        setSvcTopology(t);
-      } catch {
-        if (!cancelled) setSvcTopology(null);
+        if (data === undefined || data?.success !== true) {
+          setSvcTopology(null); setSvcTopologyRead('failed');
+          console.warn('[engineering] service-topology read FAILED (unreadable payload) — '
+            + 'the electrical architecture is UNAVAILABLE, not absent.');
+          return;
+        }
+        if (!data.available) {
+          // Genuinely nothing authored yet. This is a new design, and Auto Apply may proceed.
+          setSvcTopology(null); setSvcTopologyRead('absent');
+          return;
+        }
+        setSvcTopology(data.topology as ServiceTopologyForPage);
+        setSvcTopologyRead('loaded');
+      } catch (e) {
+        if (!cancelled) {
+          setSvcTopology(null); setSvcTopologyRead('failed');
+          console.warn('[engineering] service-topology read THREW — the electrical architecture '
+            + 'is UNAVAILABLE, not absent. Equipment auto-selection is suppressed.', e);
+        }
       }
     })();
     return () => { cancelled = true; };
@@ -7686,11 +7732,57 @@ function EngineeringPageInner() {
           // plumbing lands the priced BOM still resolves without it. `|| undefined`
           // sends nothing when there is none, so no other project's input changes.
           combinerId: config.combinerId || undefined,
-          // REGRESSION FIX: for micro topology, ensure we send a valid micro inverterId
-          // firstInv.inverterId may be stale (e.g. 'se-7600h') if topology switch didn't update it
-          inverterId: firstInv?.type === 'micro'
-            ? (MICROINVERTERS.find(m => m.id === firstInv.inverterId)?.id ?? MICROINVERTERS[0]?.id ?? 'enphase-iq8plus')
-            : (firstInv?.inverterId || 'fronius-primo-8.2'),
+          // ══════════════════════════════════════════════════════════════════
+          // 🚨 THE BROWSER MUST BE ABLE TO SAY "THERE IS NO STANDALONE INVERTER".
+          //
+          // What stood here was:
+          //
+          //   inverterId: firstInv?.type === 'micro'
+          //     ? (MICROINVERTERS.find(m => m.id === firstInv.inverterId)?.id
+          //        ?? MICROINVERTERS[0]?.id ?? 'enphase-iq8plus')
+          //     : (firstInv?.inverterId || 'fronius-primo-8.2'),
+          //
+          // and it made the server's repair UNREACHABLE. `/api/engineering/bom` was changed to
+          // keep absence absent — `typeof body.inverterId === 'string' && .trim() ? … : ''`,
+          // with a warning when nothing was supplied and the comment "absence stays absent". That
+          // branch can never run, because this line guarantees `body.inverterId` is always a
+          // non-empty catalogue id. A DC-coupled Powerwall design — whose correct state is NO
+          // standalone inverter — therefore still had a Fronius Primo 8.2 quoted on the parts
+          // list somebody orders from, exactly as before the repair.
+          //
+          // I verified that repair by reading the route and by a test that posts no inverter id.
+          // The real browser never posts no inverter id. A guard exercised only by a caller that
+          // does not exist in production has never run.
+          //
+          // Ray: "Make the real UI caller capable of sending that absence."
+          //
+          // So: send the id the project actually holds, and send NOTHING when it holds none.
+          // `undefined` is dropped by JSON.stringify, so the field is absent on the wire and the
+          // route's own absence path — the one that reports the gap instead of filling it — is
+          // what runs.
+          //
+          // The micro arm keeps its real purpose (a stale 'se-7600h' left behind by a topology
+          // switch must not be sent as a microinverter) and loses its substitution: an id that is
+          // not a microinverter becomes ABSENCE, not `MICROINVERTERS[0]`, because shipping
+          // whatever sits at index 0 of the catalogue is the same defect wearing a different
+          // product name.
+          // ══════════════════════════════════════════════════════════════════
+          inverterId: ((): string | undefined => {
+            const _id = firstInv?.inverterId ? String(firstInv.inverterId).trim() : '';
+            if (!_id) {
+              console.warn('[BOM payload] this design records no standalone PV inverter — sending '
+                + 'ABSENCE so the parts list reports the gap instead of quoting a product nobody '
+                + 'chose.');
+              return undefined;
+            }
+            if (firstInv?.type === 'micro' && !MICROINVERTERS.some(m => m.id === _id)) {
+              console.warn(`[BOM payload] '${_id}' is not a microinverter but the fleet entry is `
+                + 'micro — sending ABSENCE rather than substituting the catalogue\'s first '
+                + 'microinverter.');
+              return undefined;
+            }
+            return _id;
+          })(),
             // v58.6: Use optimizerPeripheralId (e.g. 'se-p505') for BOM Stage 1 optimizer line.
             // inverterId now holds the central string inverter (e.g. 'se-11400h') for sizing/brand.
             // Fallback to firstInv.inverterId only if optimizerPeripheralId is not set (legacy configs).
@@ -11230,8 +11322,17 @@ function EngineeringPageInner() {
                       // `takesPvOnDc` is true only where the catalogue publishes `pvInput`, which
                       // today is the Tesla Powerwall 3 alone. Every other brand's picker is
                       // unchanged.
+                      // 🚨 FAIL SAFE, NOT FAIL OPEN. Both operands below are optional-chained, so
+                      // when the canonical model AND the graph are both unreadable this expression
+                      // used to answer `false` — "there is no DC-coupled storage" — and that is
+                      // the answer that re-arms the auto-pick which produced the original live
+                      // failure. A dropped fetch must not manufacture an architecture.
+                      //
+                      // 'loading' and 'failed' therefore SUPPRESS the default (true), 'absent'
+                      // permits it (a genuinely new design), and 'loaded' uses the real answer.
                       pvCoupledToStorage={
-                        electrical?.solarCoupling === 'dc-coupled-storage'
+                        svcTopologyRead === 'failed' || svcTopologyRead === 'loading'
+                        || electrical?.solarCoupling === 'dc-coupled-storage'
                         || (svcTopology?.storage ?? []).some(
                              u => u.role === 'inverter-unit' && !!u.pvInputLimits)
                       }

@@ -6046,7 +6046,42 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   const _frame3 = parts.push('') - 1;
   parts.push(txt(PX3+PCW/2, PY3+10, 'EQUIPMENT SCHEDULE', {sz:PFH, bold:true, anc:'middle', fill:WHT}));
   const md2 = input.deviceCount ?? input.totalModules;
-  const pp2 = input.panelsPerString ?? Math.round(input.totalModules/Math.max(input.totalStrings,1));
+  // `pp2` (panelsPerString, or totalModules/totalStrings rounded) is GONE: it was the scalar
+  // that could not express 10/9/9/9, and deriving it here is what let the schedule state a
+  // layout the design does not have. `_stringsCell` below reads the real array instead.
+  // ═══════════════════════════════════════════════════════════════════════
+  // 🚨 THE SCHEDULE STATES THE ACTUAL ASSIGNMENT, NOT A SCALAR TIMES A COUNT.
+  //
+  // The Strings row was `${input.totalStrings} × ${pp2} panels`. Two rows above it the same
+  // schedule prints `Total Modules 37`, and `4 × 9 panels` is 36 — so the sheet contradicted
+  // itself, on a permit, with no way for the reader to know which number the installer meant.
+  // `panelsPerString` is ONE scalar and cannot express 10/9/9/9 at all.
+  //
+  // Ray: "Do not render 4 STRINGS × 9 under 37 MODULES when that is not the actual assignment.
+  // Use an explicit per-string array wherever a layout is displayed." And where there is no
+  // active assignment yet, say that instead of multiplying two numbers together.
+  //
+  // `stringPanelCounts` is already carried end to end by the SLD route for exactly this.
+  const _spc = (input.stringPanelCounts ?? []).filter(n => typeof n === 'number' && n > 0);
+  const _spcSum = _spc.reduce((a, b) => a + b, 0);
+  const _stringsCell: string = (() => {
+    // No assignment at all, on a design that should have one: say so rather than inventing it.
+    if (_spc.length === 0) {
+      return input.totalStrings > 0
+        ? `${input.totalStrings} — ASSIGNMENT REQUIRES RE-DERIVATION`
+        : 'STRING ASSIGNMENT REQUIRES RE-DERIVATION';
+    }
+    // 🚨 An assignment that does not sum to the module count is reported, not reconciled.
+    const _mismatch = _spcSum !== input.totalModules
+      ? ` ⚠ SUMS TO ${_spcSum}, DESIGN HAS ${input.totalModules}`
+      : '';
+    const _uniform = _spc.every(n => n === _spc[0]);
+    // A genuinely uniform layout still reads best as "4 × 9"; a mixed one must be itemised.
+    return _uniform
+      ? `${_spc.length} × ${_spc[0]} panels${_mismatch}`
+      : `${_spc.length}: ${_spc.join(' / ')} panels${_mismatch}`;
+  })();
+  // ═══════════════════════════════════════════════════════════════════════
   const eqRows: [string,string][] = isMicro ? [
     ['PV Module',esc(input.panelModel)],
     ['Module Wattage',`${input.panelWatts} W`],
@@ -6080,7 +6115,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     ['PV Module',esc(input.panelModel)],
     ['Module Wattage',`${input.panelWatts} W`],
     ['Total Modules',`${input.totalModules}`],
-    ['Strings',`${input.totalStrings} × ${pp2} panels`],
+    ['Strings', _stringsCell],
     ['MPPT Channels',input.mpptAllocation??`${input.mpptChannels??1} ch`],
     // NOT qualified, deliberately: on a string system this cell is 'Direct' /
     // a DC combiner box, not the brand BOS combiner `combinerSelectionIsDecided`

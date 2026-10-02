@@ -30,7 +30,66 @@ export type InterconnectionMethod =
   | 'LOAD_SIDE'           // NEC 705.12(B) — load-side breaker, 120% rule applies
   | 'SUPPLY_SIDE_TAP'     // NEC 705.11  — line-side tap, 120% rule NOT applicable
   | 'MAIN_BREAKER_DERATE' // NEC 705.12(B) — derate main breaker to allow solar breaker
-  | 'PANEL_UPGRADE';      // Upgrade bus rating to satisfy 120% rule
+  | 'PANEL_UPGRADE'       // Upgrade bus rating to satisfy 120% rule
+  // ═══════════════════════════════════════════════════════════════════════
+  // 🚨 THE STATES THAT ARE NOT A CHOICE OF NEC ARTICLE. Below this line the 120% rule is not
+  // "passed" or "failed" — it CANNOT BE RUN, and saying so is the engineering answer.
+  //
+  // Ray, 2026-10-02: "For relationships where SolarPro deliberately cannot map to one generic
+  // NEC scalar, preserve that state… Do not force them through a LOAD_SIDE/SUPPLY_SIDE
+  // compatibility field merely because an old engine only understands two choices."
+  //
+  // They exist in the type so the evaluator must handle them. Before this, `'UNRESOLVED'`
+  // reached `icMethod` as an untyped string, matched none of the four branches, and fell out of
+  // the if/else chain with `passes:false`, `maxAllowedSolarBreaker:0` and — the dangerous part —
+  // EMPTY `message`/`necReference` and NOT ONE ISSUE PUSHED. A silent refusal that any consumer
+  // reading "no errors" interpreted as approval.
+  // ═══════════════════════════════════════════════════════════════════════
+  /** The POI relationship has not been established. Unknown is not approval. */
+  | 'UNRESOLVED'
+  /** The connection is inside a listed assembly (e.g. a Powerwall 3 / gateway), not a field tap. */
+  | 'MANUFACTURER_INTEGRATED'
+  /** A meter-collar / meter-socket adapter, governed by the utility's own authorisation. */
+  | 'METER_COLLAR';
+
+/**
+ * 🚨 THE METHODS THE 120% BUSBAR ARITHMETIC CAN ACTUALLY BE RUN ON.
+ *
+ * Named as a set rather than tested inline so a NEW member of the union cannot quietly inherit
+ * the LOAD_SIDE branch by being absent from an `if`. Adding a method to the type without adding
+ * it here makes it NOT_EVALUATED, which is the safe direction.
+ */
+export const NEC_EVALUABLE_INTERCONNECTION_METHODS = [
+  'LOAD_SIDE', 'SUPPLY_SIDE_TAP', 'MAIN_BREAKER_DERATE', 'PANEL_UPGRADE',
+] as const;
+
+export type NecEvaluableInterconnectionMethod =
+  typeof NEC_EVALUABLE_INTERCONNECTION_METHODS[number];
+
+export const isNecEvaluableInterconnection = (
+  m: InterconnectionMethod | string | null | undefined,
+): m is NecEvaluableInterconnectionMethod =>
+  !!m && (NEC_EVALUABLE_INTERCONNECTION_METHODS as readonly string[]).includes(String(m));
+
+/**
+ * Why the interconnection could not be evaluated, in the four parts Ray required: the reason,
+ * the input that would resolve it, WHO owns that input, and which calculation stays blocked.
+ *
+ * An indeterminate result that cannot say what would resolve it is a dead end — the same rule
+ * `EngineeringCheck.requires` already enforces.
+ */
+export interface InterconnectionNotEvaluated {
+  /** The recorded state, verbatim — never remapped to a NEC article. */
+  state: 'UNRESOLVED' | 'MANUFACTURER_INTEGRATED' | 'METER_COLLAR' | 'UNRECOGNISED';
+  /** One sentence an engineer reads. */
+  reason: string;
+  /** The inputs or decisions that would let this run. Never empty. */
+  requires: string[];
+  /** Who answers it — the stage or role that owns the decision. */
+  authority: string;
+  /** The calculation that remains blocked, by name and citation. */
+  blockedCalculation: string;
+}
 
 export interface InterconnectionInput {
   method: InterconnectionMethod;
@@ -42,6 +101,15 @@ export interface InterconnectionInput {
 export interface InterconnectionResult {
   method: InterconnectionMethod;
   methodLabel: string;
+  /**
+   * 🚨 THE FIELD A CONSUMER MUST READ INSTEAD OF INFERRING FROM `passes` OR FROM AN EMPTY ISSUE
+   * LIST. `passes:false` cannot distinguish "the 120% rule was run and the design exceeds it"
+   * from "the rule could not be run at all", and that collapse is how an unestablished
+   * interconnection reached outputs as a clean section.
+   */
+  conclusion: import('@/lib/engineering/engineeringStatus').EngineeringConclusion;
+  /** Present ⇔ `conclusion === 'NOT_EVALUATED'`. */
+  notEvaluated?: InterconnectionNotEvaluated;
   busRating: number;
   mainBreaker: number;
   solarBreakerRequired: number;
@@ -218,7 +286,12 @@ export interface BusbarCalcResult {
   mainPanelAmps: number;
   totalAcOutputAmps: number;
   backfeedBreakerRequired: number;
-  busbarRule: '120%' | 'supply-side';
+  /**
+   * 🚨 'not-evaluated' IS A REAL VALUE HERE. This field is read as the CODE BASIS, so an
+   * interconnection nobody established must not be labelled '120%' — that asserts NEC 705.12(B)
+   * applies when the article governing the connection is not known.
+   */
+  busbarRule: '120%' | 'supply-side' | 'not-evaluated';
   maxAllowedBackfeed: number;
   passes: boolean;
   issues: CalcIssue[];
@@ -1105,6 +1178,90 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
     interconnectionPasses = false;
   }
 
+  // ═══════════════════════════════════════════════════════════════════════
+  // 🚨 A METHOD THE 120% ARITHMETIC CANNOT BE RUN ON IS NOT_EVALUATED — EXPLICITLY, LOUDLY.
+  //
+  // The four branches above are an if/else chain with no `else`. Anything else — 'UNRESOLVED',
+  // 'MANUFACTURER_INTEGRATED', 'METER_COLLAR', or a spelling from an older client — simply fell
+  // through them, leaving `interconnectionPasses = false` from its initialiser, `maxAllowed = 0`,
+  // empty `message`/`necReference`/`label`, and ZERO issues. Every surface that renders the issue
+  // list saw a clean interconnection section, and the permit route's
+  // `overallStatus: 'PASS'`-when-nothing-arrives read the silence as success.
+  //
+  // Ray: "Unknown is not approval… It must never become LOAD_SIDE, SUPPLY_SIDE, PASS, or
+  // no-errors-therefore-PASS."
+  //
+  // So the state is preserved (never remapped to an article), the conclusion is NOT_EVALUATED,
+  // and the refusal travels with what would resolve it and who owns that answer.
+  // ═══════════════════════════════════════════════════════════════════════
+  let interconnectionNotEvaluated: InterconnectionNotEvaluated | undefined;
+  if (!isNecEvaluableInterconnection(icMethod)) {
+    const _m = String(icMethod);
+    interconnectionNotEvaluated =
+      _m === 'MANUFACTURER_INTEGRATED'
+        ? {
+            state: 'MANUFACTURER_INTEGRATED',
+            reason: 'The PV source connects inside a listed assembly rather than by a field tap '
+              + 'or a breaker on a panelboard busbar, so NEC 705.12(B) has no busbar to apply to. '
+              + 'This is a real design, not a missing answer — but it is not this calculation.',
+            requires: ['the assembly listing / manufacturer interconnection instructions',
+                       'the gateway or combiner that performs the connection'],
+            authority: 'Service Topology — the point-of-interconnection relationship',
+            blockedCalculation: 'NEC 705.12(B) 120% busbar allowance (not applicable as recorded)',
+          }
+        : _m === 'METER_COLLAR'
+        ? {
+            state: 'METER_COLLAR',
+            reason: 'A meter-collar / meter-socket adapter is authorised by the serving utility, '
+              + 'not by the 120% busbar rule, and the utility authorisation is not recorded here.',
+            requires: ['the utility meter-collar authorisation', 'the adapter product listing'],
+            authority: 'Service Topology — interconnection context (utility)',
+            blockedCalculation: 'NEC 705.12(B) 120% busbar allowance (superseded by utility terms)',
+          }
+        : _m === 'UNRESOLVED'
+        ? {
+            state: 'UNRESOLVED',
+            reason: 'Nobody has established how this system connects to the service, so the code '
+              + 'article that governs it is not known. NEC 705.11 (supply-side) and NEC 705.12(B) '
+              + '(load-side) give different answers, and guessing either one would print a code '
+              + 'basis the design has not earned.',
+            requires: ['the point of interconnection on the service graph',
+                       'the panelboard busbar rating and main breaker where it lands'],
+            authority: 'Service Topology — point of interconnection',
+            blockedCalculation: 'NEC 705.12(B) 120% busbar allowance',
+          }
+        : {
+            state: 'UNRECOGNISED',
+            reason: `The interconnection method '${_m}' is not one this engine evaluates. It was `
+              + 'not silently treated as a load-side breaker.',
+            requires: [`a recognised interconnection method (got '${_m}')`],
+            authority: 'Service Topology — point of interconnection',
+            blockedCalculation: 'NEC 705.12(B) 120% busbar allowance',
+          };
+
+    interconnectionLabel = `Interconnection — ${interconnectionNotEvaluated.state.replace(/_/g, ' ')}`;
+    interconnectionNecRef = '';
+    maxAllowedSolarBreaker = 0;
+    interconnectionPasses = false;
+    interconnectionMessage = `NOT EVALUATED — ${interconnectionNotEvaluated.reason}`;
+
+    // 🚨 AN ISSUE IS PUSHED, so the list is no longer empty and "no errors" can no longer be
+    // read as approval. Severity follows the repo's own mapping
+    // (`conclusionSeverity('NOT_EVALUATED') === 'warning'`): loud, and never a FAIL the design
+    // did not earn.
+    const _ne: CalcIssue = {
+      code: 'E-INTERCONNECTION-NOT-EVALUATED',
+      severity: 'warning',
+      message: `NEC 705.12(B) was NOT evaluated: ${interconnectionNotEvaluated.reason}`,
+      value: interconnectionNotEvaluated.state,
+      necReference: 'NEC 705.11 / 705.12(B)',
+      suggestion: `Resolve via ${interconnectionNotEvaluated.authority}. Required: `
+        + interconnectionNotEvaluated.requires.join('; ') + '.',
+    };
+    interconnectionIssues.push(_ne);
+    allWarnings.push(_ne);
+  }
+
   // Build alternatives list (shown when LOAD_SIDE fails)
   const interconnectionAlternatives: InterconnectionAlternative[] = [];
   if (icMethod === 'LOAD_SIDE' && !interconnectionPasses) {
@@ -1145,6 +1302,11 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
     recommendedMainBreaker,
     alternatives: interconnectionAlternatives.length > 0 ? interconnectionAlternatives : undefined,
     issues: interconnectionIssues,
+    // 🚨 NOT_EVALUATED is a third answer, not a flavour of false.
+    conclusion: interconnectionNotEvaluated
+      ? 'NOT_EVALUATED'
+      : (interconnectionPasses ? 'PASS' : 'FAIL'),
+    notEvaluated: interconnectionNotEvaluated,
   };
 
   // Legacy busbar result (for backward compatibility)
@@ -1152,7 +1314,11 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
     mainPanelAmps: icBusRating,
     totalAcOutputAmps,
     backfeedBreakerRequired: icSolarBreaker,
-    busbarRule: icMethod === 'SUPPLY_SIDE_TAP' ? 'supply-side' : '120%',
+    // 🚨 NOT '120%' WHEN THE 120% RULE DID NOT RUN. This field is read as the code basis, and
+    // labelling an unevaluated interconnection '120%' asserts an article nobody established.
+    busbarRule: interconnectionNotEvaluated
+      ? 'not-evaluated'
+      : (icMethod === 'SUPPLY_SIDE_TAP' ? 'supply-side' : '120%'),
     maxAllowedBackfeed: maxAllowedSolarBreaker === 9999 ? icBusRating * 0.2 : maxAllowedSolarBreaker,
     passes: interconnectionPasses,
     issues: interconnectionIssues,

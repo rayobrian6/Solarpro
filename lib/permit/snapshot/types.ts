@@ -1681,7 +1681,16 @@ export interface PermitDesignSnapshot {
       localAmendments: string[];
       recordCapturedAtIso: string;
     };
-    interconnection: { method: string; rule: '705.12(B)' | '705.11' };
+    /**
+     * 🚨 `rule: 'not-established'` IS A REAL STATE ON A SEALED RECORD.
+     *
+     * This was a two-value union, so `interconnectionRuleOf` — which collapsed everything not
+     * matching /SUPPLY|LINE/ — stamped `'705.12(B)'` on the immutable permit record for a project
+     * whose point of interconnection nobody had established. The digest then carried a code
+     * citation the design never earned, and the record could not be distinguished from a real
+     * load-side job.
+     */
+    interconnection: { method: string; rule: '705.12(B)' | '705.11' | 'not-established' };
     /** W4 §1 — reference to the canonical code-authority record's edition
      *  projection. adoptedCodes are DERIVED from snapshot.codeAuthority (single
      *  source); a null adoption prints '—'/PENDING, never a fabricated year. */

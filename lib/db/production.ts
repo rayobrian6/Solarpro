@@ -5,6 +5,9 @@
 
 import { getDbReady, isValidUUID, assertUUID, rowToLayout, parseDbFloat, hydrateCanonicalEquipment } from './core';
 import { hydrateBillData } from '@/lib/bill/hydrateBillData';
+import {
+  readExternalInverterIdentity, mayBackfillExternalInverter,
+} from '@/lib/electrical/inverterIdentity';
 
 // ============================================================
 // PRODUCTION — save/load calculated production results
@@ -276,7 +279,25 @@ export async function getProjectWithDetails(
     // Canonical column wins; productions.data_json is the fallback for projects
     // that predate the canonical store.
     selectedPanel:     canonEq.selectedPanel     ?? selectedPanel,
-    selectedInverter:  canonEq.selectedInverter  ?? selectedInverter,
+    // ═══════════════════════════════════════════════════════════════════
+    // 🚨 THE THIRD GAP-FILLER, AND THE ONE THAT WAS STILL UNGUARDED.
+    //
+    // `canonEq.selectedInverter ?? selectedInverter` promotes `productions.data_json`'s inverter
+    // whenever the canonical column is empty — and `??` cannot tell "this project records NO
+    // separate inverter" from "nobody has said". So a DC-coupled design whose inverter was
+    // deliberately retired got one handed back from an old production snapshot, through a read
+    // path the authority table does not list.
+    //
+    // Two sibling promotions in `lib/db/projects.ts` were guarded with this exact predicate; this
+    // one was missed, which is how the repair held on one read path and failed on another.
+    // `readExternalInverterIdentity` separates a recorded NONE (leave it alone) from an unstated
+    // project (a saved value may be promoted).
+    // ═══════════════════════════════════════════════════════════════════
+    selectedInverter:  canonEq.selectedInverter
+      ?? (mayBackfillExternalInverter(
+            readExternalInverterIdentity((row as Record<string, unknown>).selected_equipment))
+          ? selectedInverter
+          : undefined),
     selectedMounting:  canonEq.selectedMounting,
     selectedBatteries: canonEq.selectedBatteries,
     batteryCount:      canonEq.batteryCount,

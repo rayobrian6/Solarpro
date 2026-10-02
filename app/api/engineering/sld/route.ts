@@ -23,6 +23,7 @@ import { sanitizeClientSourceBranches } from '@/lib/permit/utils/sldAdapter';
 import { microBranchCount } from '@/lib/permit/utils/branching';
 import { getThermalDesignBasis } from '@/lib/permit/utils/designTemps';
 import { unselectedInverterLabel } from '@/lib/permit/utils/helpers';
+import { TOPOLOGY_UNRESOLVED_TOKEN } from '@/lib/electrical/canonicalSldProjection';
 // The adopted NEC edition (canonical authority) and the ONE rooftop-adder gate that
 // turns on it. NEC 310.15(B)(3)(c) was deleted for PV by NEC 2017 690.31(A).
 import { getJurisdictionInfo } from '@/lib/jurisdiction';
@@ -135,247 +136,29 @@ export async function POST(req: NextRequest) {
       // project. A read that fails leaves it absent, which draws the legacy single-service tail —
       // the honest outcome, because a half-read graph is worse than no graph.
       try {
-        // 🚨 ONE ASSEMBLY, NOT THIS ROUTE'S OWN. `loadElectricalProject` reads the graph, the
-        // catalogue selection, the engineering overrides and the module count in one query and
-        // composes them with `resolveElectricalProject` — the SAME composition the engineering
-        // page, the permit route and the BOM route consume.
+        // ═══════════════════════════════════════════════════════════════
+        // 🚨 ONE CANONICAL PROJECTION, SHARED WITH THE PDF ROUTE.
         //
-        // This route used to read the graph itself and then hand the resolver an `inverterId`
-        // taken from the POST BODY. That is how the live defect survived its first repair: the
-        // page posts whatever its React state held, so the coupling could resolve one way on the
-        // Diagram tab and another way in the plan set, from the same project, on the same day.
-        // Ray: "They must consume the same canonical composition used by the engineering page and
-        // SLD. One project. Multiple projections."
-        const { loadElectricalProject, persistElectricalCanonicalization } =
-          await import('@/lib/electrical/loadElectricalProject');
-        const _loaded = await loadElectricalProject(String(body.projectId), _auth.user.id);
-        if (_loaded?.model.topology) {
-          const _model = _loaded.model;
-          const _stored2 = { topology: _model.topology };
-
-          // ══════════════════════════════════════════════════════════════════
-          // 🚨 AN UNRESOLVED ARCHITECTURE DOES NOT GET DRAWN.
-          //
-          // Ray, after the second live acceptance run:
-          //   "Until the conflict is resolved, downstream production surfaces must not pretend
-          //    STRING INVERTER is authoritative. Do not generate a permit-grade SLD from an
-          //    unresolved architecture conflict. SLD/BOM/permit should report ELECTRICAL
-          //    ARCHITECTURE REQUIRES RESOLUTION rather than drawing one of the competing systems."
-          //
-          // The model already refused to pick a side — `solarCoupling` comes back null with the
-          // conflict attached. What it could not do is stop this route from rendering the OTHER
-          // authority: `body` still held `topologyType: 'STRING'` and an inverter model from the
-          // page's React state, so the sheet drew the losing side of a conflict as fact. Proving
-          // the model was right never mattered to the sheet, because the sheet never asked it.
-          //
-          // 409 CONFLICT, not 200 with a banner: a permit-grade sheet that exists can be printed,
-          // attached and submitted. The only safe artefact here is no artefact, plus the question.
-          // ══════════════════════════════════════════════════════════════════
-          const { architectureRefusal } = await import('@/lib/electrical/architectureGate');
-          const _refusal = architectureRefusal(_model, _loaded.revision);
-          if (_refusal) {
-            console.warn('[sld] REFUSED: electrical architecture requires resolution'
-              + ` (project ${body.projectId})`);
-            return NextResponse.json(_refusal, { status: 409 });
-          }
-          // ── 🚨 THE CANONICAL ELECTRICAL MODEL DECIDES THE ARCHITECTURE ────────
-          //
-          // Not the renderer, and not whatever the equipment picker was last left on. Ray, after
-          // the authority audit: "SLD may not infer system architecture independently. It consumes
-          // the canonical electrical model."
-          //
-          // This is what fixes the reported sheet. A project saved before `solarCoupling` existed
-          // reloads with it null, the renderer's `_couplingIsDc` never fires, and the Enphase chain
-          // is drawn beside the Tesla one. `resolveElectricalProject` canonicalises that ONCE from
-          // the persisted evidence — no separate inverter selected, storage that publishes its own
-          // PV inputs — and the drawing is handed the answer rather than a gap to fill.
-          //
-          // 🚨 AND A CONFLICT IS NOT CANONICALISED. Where the project holds BOTH an explicit
-          // inverter and a DC-coupled graph, the resolver returns no patch and the sheet keeps
-          // whatever was recorded, with the conflict reported — because picking a side silently is
-          // how one drawing came to contain two architectures.
-          body.serviceTopology = _model.canonicalizationPatch
-            ? { ..._stored2.topology, ..._model.canonicalizationPatch }
-            : _stored2.topology;
-
-          // 🚨 THE SERVICE RATING IS PROJECTED FROM THE MODEL, NOT FABRICATED AS 200.
-          //
-          // Found in the adversarial sweep: `mainPanelAmps: Number(body.mainPanelAmps) || 200` draws
-          // a 200 A service on any sheet the page did not post a rating for — a second authority that
-          // disagrees with the graph and wins, because the renderer reads the scalar. Where a topology
-          // is present the scalar is a derived compatibility projection and nothing more
-          // (docs/SERVICE-TOPOLOGY-SCALAR-AUDIT.md), so it is projected here.
-          //
-          // A graph with NO recorded rating projects nothing: `serviceRatingLabel` prints
-          // "SERVICE RATING REQUIRED" on the sheet, which is the honest outcome Ray ruled for.
-          if (_model.serviceRatedAmps !== null) {
-            const _posted = Number(body.mainPanelAmps) || 0;
-            if (_posted !== _model.serviceRatedAmps) {
-              console.warn('[sld/POST] service rating corrected from the canonical model:'
-                + ` posted=${_posted || 'none'} canonical=${_model.serviceRatedAmps} A`
-                + ` (${_model.serviceProvenance.source})`);
-            }
-            body.mainPanelAmps = _model.serviceRatedAmps;
-          }
-
-          // 🚨 AND THE INTERCONNECTION METHOD. This route defaults it to 'LOAD_SIDE' in four places;
-          // the graph's POI relationship is the authority, and an unresolved POI projects nothing
-          // rather than being assigned NEC 705.12(B) by a `??`.
-          const { interconnectionMethodScalar } =
-            await import('@/lib/electrical/loadElectricalProject');
-          const _ic = interconnectionMethodScalar(_model.topology);
-          if (_ic) {
-            const _postedIc = String(body.interconnection ?? body.interconnectionType
-              ?? body.interconnectionMethod ?? '');
-            if (_postedIc && _postedIc.toUpperCase() !== _ic.value) {
-              console.warn('[sld/POST] interconnection method corrected from the service graph:'
-                + ` posted=${_postedIc} canonical=${_ic.value} (${_ic.basis})`);
-            }
-            body.interconnection = _ic.value;
-            body.interconnectionMethod = _ic.value;
-            body.interconnectionType = _ic.value;
-          }
-
-          // ═══════════════════════════════════════════════════════════════
-          // 🚨 THE STORAGE FACTS COMPUTESYSTEM SIZES WITH COME FROM THE GRAPH.
-          //
-          // Ray's §11: "computeSystem / sizing are still evidently reconstructing an older electrical
-          // architecture. They must consume canonical architecture rather than independently
-          // deriving… Derived arithmetic stays in the sizing engine. Architecture does not."
-          //
-          // `batteryCount` was a posted scalar — the same class as the BOM's, and wrong for the same
-          // reason: a catalogue pick cannot say how many cabinets are installed.
-          //
-          // 🚨 AND `batteryBackfeedA` IS AN ARCHITECTURE QUESTION, NOT A SUM. NEC 705.12(B) adds the
-          // backfeed breakers ON A GIVEN BUSBAR. Where each system's cabinets land in their own
-          // generation panel and that panel feeds the gateway, NOTHING of the storage lands on the
-          // MSP's busbar — `evaluateServiceTopology` already says exactly this ("No source is
-          // connected to {panel}'s busbar: the storage lands in a DER aggregation panel"). Feeding
-          // the sum anyway would size the MSP against 240 A of backfeed that is not there.
-          //
-          // So the number follows the recorded connection, which is the installer's decision, and is
-          // left untouched when that decision has not been made.
-          body.batteryCount = _model.storage.invertingUnitCount;
-
-          // ══════════════════════════════════════════════════════════════
-          // 🚨 RULE ELEVEN — THE DRAWING TAKES NO ARCHITECTURE FROM THE UI.
-          //
-          // Ray: "The Generate SLD request may identify projectId and artifact options. It may not be
-          // allowed to override topologyType, inverterId, batteryCount, serviceAmps, solarCoupling,
-          // interconnectionMethod. Those come from loadElectricalProject(projectId) only."
-          //
-          // Everything above this line projects ONE field at a time, which is how the live sheet kept
-          // finding a new way to be wrong: `topologyType: 'STRING'` and `inverterModel: 'Tesla Solar
-          // Inverter 5.7kW' rode in from the page's React state and were used verbatim at 373/395,
-          // because nothing had claimed those two.
-          //
-          // So the architecture fields are OVERWRITTEN as a set, from the canonical model, and what
-          // the page sent is logged rather than silently discarded — a disagreement here means a
-          // surface is still deriving architecture, and that is worth seeing in the server log.
-          // ══════════════════════════════════════════════════════════════
-          if (_model.solarCoupling === 'dc-coupled-storage') {
-            const _postedTopo = String(body.topologyType ?? '');
-            const _postedInv = String(body.inverterModel ?? '');
-            // There is no separate PV inverter on this design. Not an unknown one — none.
-            body.topologyType = 'DC_COUPLED_STORAGE';
-            delete body.inverterModel;
-            delete body.inverterManufacturer;
-            delete body.inverterId;
-            if (_postedTopo && _postedTopo !== 'DC_COUPLED_STORAGE') {
-              console.warn('[sld/POST] the page posted an architecture the project does not have:'
-                + ` topologyType=${_postedTopo}`
-                + (_postedInv ? ` inverterModel=${_postedInv}` : '')
-                + ' — overridden from the canonical model (dc-coupled-storage).');
-            }
-          } else if (_model.solarCoupling === 'ac-coupled-inverter') {
-            // The architecture IS a separate inverter — but WHICH one is still the project's answer,
-            // not the page's. Only project an identity the model actually holds.
-            if (_model.externalInverterId) body.inverterId = _model.externalInverterId;
-          } else if (_model.solarCoupling === 'storage-only') {
-            body.topologyType = 'STORAGE_ONLY';
-            delete body.inverterModel;
-            delete body.inverterManufacturer;
-            delete body.inverterId;
-          }
-
-          // ═══════════════════════════════════════════════════════════════
-          // 🚨 ON A DC-COUPLED JOB THE STRINGS ARE SIZED AGAINST THE CABINETS, NOT A PHANTOM
-          //    INVERTER'S DEFAULTS. THIS ONE WAS PRINTING AN IMPOSSIBLE DESIGN.
-          //
-          // `computeSystem` takes the DC input window from `body.inverterMaxDcV ?? 600`,
-          // `mpptVoltageMax ?? 600`, `maxInputCurrentPerMppt ?? 15`, `mpptChannels ?? 2` — a
-          // standalone PV inverter's specs, defaulted. On this project it produced, on the sheet:
-          //
-          //     Number of Strings 2 · Panels per String 19 · String Voc × 1.25 = 1345.8 V
-          //
-          // against a Powerwall 3 whose published PV input is 60–550 V DC. A string more than twice
-          // the device's maximum, drawn, scheduled and printed with no failure anywhere — because
-          // the limits it was checked against belonged to an inverter that is not in the design.
-          //
-          // The real limits are already on the instances (`pvInputLimits`, resolved from the
-          // catalogue and restored on read by `hydrateInstances`). Ray's §11: architecture comes from
-          // the canonical model; derived arithmetic stays in the sizing engine. These are the
-          // manufacturer's numbers for the device the strings actually land on.
-          //
-          // Scoped to DC-coupled and to units that publish limits; every other job keeps the posted
-          // inverter's specs exactly as before.
-          // 🚨 ONE DERIVATION, SHARED WITH THE SIZING ROUTE — `lib/electrical/dcStringLimits`.
-          // This was inline here. The Electrical Sizing tab needed the same window, and writing it
-          // twice is how two surfaces come to disagree about the same device.
-          _canonicalCoupling = _model.solarCoupling;
-          const { dcStringLimits, dcStringLimitsNote } =
-            await import('@/lib/electrical/dcStringLimits');
-          const _dcLim = dcStringLimits(_model.topology, _model.solarCoupling);
-          if (_dcLim) {
-            body.inverterMaxDcV = _dcLim.maxDcVoltage;
-            body.maxDcVoltage = _dcLim.maxDcVoltage;
-            body.mpptVoltageMin = _dcLim.mpptVoltageMin;
-            body.mpptVoltageMax = _dcLim.mpptVoltageMax;
-            body.maxInputCurrentPerMppt = _dcLim.maxInputCurrentPerMppt;
-            body.mpptChannels = _dcLim.mpptChannels;
-            console.log('[sld/POST] DC string limits taken from the storage, not an inverter: '
-              + dcStringLimitsNote(_dcLim));
-          }
-          const _doms = _model.topology.domains;
-          if (_doms.length > 0 && _doms.every(d => d.storageConnection === 'der-aggregation-panel')) {
-            body.batteryBackfeedA = 0;
-            console.log('[sld/POST] storage backfeed on the service panel busbar = 0 —'
-              + ' every system lands in its own generation panel, which feeds its gateway.');
-          } else if (_doms.length > 0 && _doms.every(d => d.storageConnection !== 'unresolved')) {
-            const _units = _model.topology.storage.filter(u => u.role === 'inverter-unit');
-            if (!_units.some(u => u.ocpdA == null)) {
-              body.batteryBackfeedA = _units.reduce((n, u) => n + (u.ocpdA as number), 0);
-            }
-          }
-
-          // 🚨 THE SHEET CARRIES THE REVISION IT WAS DRAWN FROM.
-          //
-          // Ray: "Generated electrical artifacts must carry the project/electrical revision they
-          // were generated from… Do not silently display revision A as current revision B." The
-          // stamp travels with the response and onto the stored artifact, so the Diagram tab can
-          // compare what it is showing against what the project now is.
-          body.electricalRevision = _loaded.revision;
-
-          console.log('[sld/POST] electrical model:'
-            + ` revision=${_loaded.revision}`
-            + ` coupling=${_model.solarCoupling ?? 'UNRESOLVED'}`
-            + ` (${_model.solarCouplingProvenance.source})`
-            + ` service=${_model.serviceRatedAmps ?? 'NOT ESTABLISHED'}`
-            + ` storage=${_model.storage.invertingUnitCount}`
-            + ` gateways=${_model.storage.gatewayCount}`
-            + ` genPanels=${_model.storage.perSystemGenerationPanelCount}`
-            + ` conflicts=${_model.conflicts.length}`);
-          for (const c of _model.conflicts) {
-            console.warn(`[sld/POST] ELECTRICAL CONFLICT — ${c.fact}: `
-              + c.claims.map(x => `${x.source} says ${x.says}`).join(' | '));
-          }
-
-          // ── The one-time canonicalization, persisted ──────────────────────
-          // A migration, not a mirror: once `solarCoupling` is recorded the model stops emitting a
-          // patch, so this runs once per project and then never again. Ray: "Resolve once. Persist
-          // canonical decision + provenance. Do not infer forever on every read."
-          void persistElectricalCanonicalization(_loaded, _auth.user.id);
-        }
+        // This block used to live inline here — ~240 lines of body mutation — and was COPIED,
+        // partially, into `app/api/engineering/sld/pdf/route.ts`. The copy had the refusal gate,
+        // the service rating and the interconnection, and was missing the Rule Eleven
+        // architecture override, the DC string limits, the graph's battery count and the
+        // revision stamp. So this route drew a DC-coupled Powerwall design while the EXPORTED
+        // PDF of the same project drew a string inverter with a fabricated Fronius Primo 8.2-1.
+        //
+        // Ray: "SVG and PDF are two renderings of the same engineered project. They must not
+        // independently determine architecture, inverter, battery count, OCPD, service data,
+        // interconnection."
+        //
+        // Two copies of a projection do not stay equal. There is one now, and the PDF route
+        // calls the same function with the same arguments.
+        // ═══════════════════════════════════════════════════════════════
+        const { projectCanonicalArchitecture } =
+          await import('@/lib/electrical/canonicalSldProjection');
+        const _proj = await projectCanonicalArchitecture(
+          body, String(body.projectId), _auth.user.id, 'sld/POST');
+        if (_proj.refusal) return NextResponse.json(_proj.refusal, { status: 409 });
+        _canonicalCoupling = _proj.coupling;
       } catch (e) {
         console.warn('[sld/POST] service topology unreadable; drawing the legacy service tail', e);
       }
@@ -460,7 +243,12 @@ export async function POST(req: NextRequest) {
           // OCPDs summed across subs + battery). Fallback: Σ lane values.
           backfeedAmps:            Number(body.backfeedAmps) || _sumLaneBackfeed,
           utilityName:             String(body.utilityName ?? body.utilityCompany ?? body.utility ?? 'Local Utility'),
-          interconnection:         String(body.interconnection ?? body.interconnectionType ?? body.interconnectionMethod ?? 'LOAD_SIDE'),
+          // 🚨 ABSENCE IS 'UNRESOLVED', NEVER 'LOAD_SIDE'. The canonical projection claims this field from
+          // the service graph's POI for every project whose relationship IS established, so what reaches
+          // this `??` is a request about a project where nobody has said — and handing that NEC 705.12(B)
+          // prints a code basis the design has not earned. The evaluator now has an explicit
+          // NOT_EVALUATED branch for it (lib/electrical-calc.ts).
+          interconnection:         String(body.interconnection ?? body.interconnectionType ?? body.interconnectionMethod ?? 'UNRESOLVED'),
           rapidShutdownIntegrated: !!(body.rapidShutdownIntegrated || body.rapidShutdown),
           // 🚨 THE UI CONTROL REACHED NOTHING. The engineering page posts
           // `productionMeter`; this read `body.hasProductionMeter`, which was
@@ -597,7 +385,13 @@ export async function POST(req: NextRequest) {
     // the user has since switched to SolarEdge optimizer).
     // After sizeSystemFromBrand() runs, we override with sizingResult.topology
     // (the canonical brand-profile topology). See _canonicalTopologyType below.
-    const _bodyTopologyType = String(body.topologyType ?? 'STRING_INVERTER');
+    // 🚨 NOT `?? 'STRING_INVERTER'`. A request that states no architecture used to be given one,
+    // and on the PDF route that guess then selected a Fronius. The canonical projection above
+    // claims this field for every project that HAS an architecture; what is left here is the
+    // genuinely unstated case, and it says so. Same token on both routes.
+    const _bodyTopologyType = body.topologyType != null && String(body.topologyType).trim()
+      ? String(body.topologyType)
+      : TOPOLOGY_UNRESOLVED_TOKEN;
     // Temporary booleans from body — will be re-derived after sizingResult
     let topologyType  = _bodyTopologyType;
     let isMicro       = _bodyTopologyType === 'MICROINVERTER';
@@ -1029,6 +823,81 @@ export async function POST(req: NextRequest) {
         // Pass resolved string count so computeSystem() uses the same
         // count as the SLD renderer (avoids conductor count mismatch).
         totalStrings:                  !isMicro ? resolvedTotalStrings : undefined,
+        // ═══════════════════════════════════════════════════════════════
+        // 🚨 THE DISTRIBUTION, NOT JUST THE COUNT. THIS HANDOFF ALREADY EXISTED AND THIS
+        //    ROUTE WAS THE ONE CALLER THAT SKIPPED IT.
+        //
+        // `configStringPanelCounts` shipped as v61.7: `lib/computed-system.ts:1254-1257` promotes
+        // it to `authStringCounts` and `:1292-1294` prefers it per string, and
+        // `lib/string-generator.ts:546-554` replaces its own partition with it. Two callers pass
+        // it — `app/engineering/page.tsx` and `app/api/engineering/calculate/route.ts`. This
+        // route passed only `totalStrings`, so `computeSystem` EQUAL-DIVIDED the distribution
+        // (`panelsPerString = floor(totalPanels / stringCount)`, :1270) while the renderer was
+        // separately handed the sizing engine's real array. One route, one request, two
+        // partitions of the same modules — 37 printed as 4 × 9.
+        //
+        // Ray: "Wire that handoff. Do not invent another partitioner."
+        //
+        // 🚨 AND IT ONLY CARRIES AN ASSIGNMENT THAT IS ACTIVE AND ADDS UP.
+        //
+        // Ray: "ACTIVE compatible assignment may travel through configStringPanelCounts. RETIRED
+        // assignment is history only and may not become active by being passed to computeSystem."
+        // An architecture retirement empties `engineering_config.inverters`, so the page posts no
+        // assignment and `stringPanelCounts` here is whatever the sizing/stringing path derived
+        // against the REAL endpoint (the Powerwall 3 DC window, via `dcStringLimits`). A sum that
+        // disagrees with the module count is not a compatible assignment and is refused rather
+        // than reconciled — silently passing it would make the engine agree with a layout that
+        // does not describe this array.
+        // ═══════════════════════════════════════════════════════════════
+        configStringPanelCounts:       (() => {
+          if (isMicro || stringPanelCounts.length === 0) return undefined;
+          const _sum = stringPanelCounts.reduce((a, b) => a + b, 0);
+          if (_sum !== totalModules) {
+            console.warn('[sld/POST] NOT passing configStringPanelCounts: the assignment '
+              + `[${stringPanelCounts.join('/')}] sums to ${_sum} but the design has `
+              + `${totalModules} modules. The engine derives its own rather than being handed an `
+              + 'assignment that does not describe this array.');
+            return undefined;
+          }
+          // ═════════════════════════════════════════════════════════════
+          // 🚨 AND IT MUST FIT THE DEVICE THE STRINGS ACTUALLY LAND ON.
+          //
+          // Ray, 2026-10-02: "Do not blindly resurrect Ray's retired 10/9/9/9 assignment. That
+          // assignment belonged to the previous standalone-inverter architecture and has already
+          // been determined incompatible with the current PW3 endpoint… ACTIVE compatible
+          // assignment may travel through configStringPanelCounts. RETIRED assignment is history
+          // only and may not become active by being passed to computeSystem."
+          //
+          // Checking only the SUM was not enough, and the existing guard in
+          // `tests/liveSldFailure.postgres.test.ts` caught it: the 10-module first string of the
+          // old assignment adds up to 37 perfectly and prints **672.9 V** on the sheet against a
+          // Powerwall 3's published 550 V PV input maximum. A string that cannot be built is not
+          // made acceptable by summing correctly.
+          //
+          // `maxDcVoltage` is the window the canonical projection established — taken from the
+          // STORAGE on a DC-coupled job (`dcStringLimits`), not from a phantom inverter's
+          // defaults. The 1.25 factor is the same NEC 690.7 basis the sheet prints and the guard
+          // asserts, so this refuses exactly what that guard would fail.
+          //
+          // Refused ⇒ the engine derives its own against the real limits, and the schedule says
+          // so. It does NOT silently keep the incompatible one.
+          // ═════════════════════════════════════════════════════════════
+          const _vocCold = panelVoc * 1.25;
+          const _overLimit = stringPanelCounts.filter(n => n * _vocCold > maxDcVoltage);
+          if (maxDcVoltage > 0 && _overLimit.length > 0) {
+            console.warn('[sld/POST] STRING ASSIGNMENT REQUIRES RE-DERIVATION — the recorded '
+              + `assignment [${stringPanelCounts.join('/')}] has `
+              + `${_overLimit.length} string(s) above the ${maxDcVoltage} V DC input maximum `
+              + `(${_overLimit.map(n => `${n}×${panelVoc}V×1.25 = ${(n * _vocCold).toFixed(1)}V`).join(', ')}). `
+              + 'It is NOT passed to the engine: it belongs to a different endpoint and is '
+              + 'history, not an active design. The engine re-derives against the real limits.');
+            return undefined;
+          }
+          console.log('[sld/POST] string assignment handed to computeSystem: '
+            + `[${stringPanelCounts.join('/')}] = ${_sum} modules, every string within `
+            + `${maxDcVoltage} V`);
+          return stringPanelCounts;
+        })(),
         panelWatts:                    panelWatts,
         panelVoc:                      panelVoc,
         panelIsc:                      panelIsc,
@@ -1080,7 +949,12 @@ export async function POST(req: NextRequest) {
         mainPanelAmps:                 Number(body.mainPanelAmps ?? 200),
         mainPanelBrand:                String(body.mainPanelBrand ?? 'Square D'),
         panelBusRating:                Number(body.panelBusRating ?? body.mainPanelAmps ?? 200),
-        interconnectionMethod:         String(body.interconnection ?? body.interconnectionType ?? body.interconnectionMethod ?? 'LOAD_SIDE'),
+        // 🚨 ABSENCE IS 'UNRESOLVED', NEVER 'LOAD_SIDE'. The canonical projection claims this field from
+        // the service graph's POI for every project whose relationship IS established, so what reaches
+        // this `??` is a request about a project where nobody has said — and handing that NEC 705.12(B)
+        // prints a code basis the design has not earned. The evaluator now has an explicit
+        // NOT_EVALUATED branch for it (lib/electrical-calc.ts).
+        interconnectionMethod:         String(body.interconnection ?? body.interconnectionType ?? body.interconnectionMethod ?? 'UNRESOLVED'),
         branchCount:                   isMicro ? (Number(body.microBranches) || Number(body.branchCount) || undefined) : undefined,
         maxACVoltageDropPct:           Number(body.maxACVoltageDropPct ?? 2),
         maxDCVoltageDropPct:           Number(body.maxDCVoltageDropPct ?? 3),
@@ -1122,7 +996,12 @@ export async function POST(req: NextRequest) {
         mainPanelBusAmps:      Number(body.panelBusRating ?? body.mainPanelAmps ?? 200),
         mainPanelBreakerAmps:  Number(body.mainPanelAmps ?? 200),
         interconnectionMethod: (() => {
-          const raw = String(body.interconnection ?? body.interconnectionType ?? body.interconnectionMethod ?? 'LOAD_SIDE');
+          // 🚨 ABSENCE IS 'UNRESOLVED', NEVER 'LOAD_SIDE'. The canonical projection claims this field from
+          // the service graph's POI for every project whose relationship IS established, so what reaches
+          // this `??` is a request about a project where nobody has said — and handing that NEC 705.12(B)
+          // prints a code basis the design has not earned. The evaluator now has an explicit
+          // NOT_EVALUATED branch for it (lib/electrical-calc.ts).
+          const raw = String(body.interconnection ?? body.interconnectionType ?? body.interconnectionMethod ?? 'UNRESOLVED');
           return (raw === 'SUPPLY_SIDE_TAP' || raw.toLowerCase().includes('supply')) ? 'supply-side' : 'load-side';
         })(),
         dcConduitType: String(body.dcConduitType ?? body.conduitType ?? '3/4" EMT'),
@@ -1192,7 +1071,12 @@ export async function POST(req: NextRequest) {
       panelBusRating:          Number(body.panelBusRating ?? body.mainPanelAmps) || 200,  // C1: busbar rating for the 120% rule
       utilityName:             String(body.utilityName ?? body.utilityCompany ?? body.utility ?? 'Local Utility'),
       interconnection:         (() => {
-        const raw = String(body.interconnection ?? body.interconnectionType ?? 'LOAD_SIDE');
+        // 🚨 ABSENCE IS 'UNRESOLVED', NEVER 'LOAD_SIDE'. The canonical projection claims this field from
+        // the service graph's POI for every project whose relationship IS established, so what reaches
+        // this `??` is a request about a project where nobody has said — and handing that NEC 705.12(B)
+        // prints a code basis the design has not earned. The evaluator now has an explicit
+        // NOT_EVALUATED branch for it (lib/electrical-calc.ts).
+        const raw = String(body.interconnection ?? body.interconnectionType ?? 'UNRESOLVED');
         if (raw === 'LOAD_SIDE' || raw.toLowerCase().includes('load')) return 'Load Side Tap';
         if (raw === 'SUPPLY_SIDE_TAP' || raw.toLowerCase().includes('supply')) return 'Supply Side Tap';
         if (raw === 'MAIN_BREAKER_DERATE' || raw.toLowerCase().includes('derate')) return 'Load Side Tap';

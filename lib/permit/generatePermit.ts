@@ -1036,9 +1036,23 @@ export function generatePermitHTML(
           mainBreaker:             electricalInput.interconnection?.mainBreaker,
           solarBreakerRequired:    elecResult.busbar.backfeedBreakerRequired,
           maxAllowedSolarBreaker:  elecResult.busbar.maxAllowedBackfeed,
-          method:                  elecResult.busbar.busbarRule === 'supply-side' ? 'Supply-Side Tap (NEC 705.11)' : 'Load-Side Connection (NEC 705.12(B))',
-          necReference:            elecResult.busbar.busbarRule === 'supply-side' ? 'NEC 705.11' : 'NEC 705.12(B)',
-          message:                 elecResult.busbar.passes ? 'Busbar rule satisfied' : 'Busbar rule NOT satisfied — review required',
+          // 🚨 A THREE-WAY, NOT A BINARY. `=== 'supply-side' ? 705.11 : 705.12(B)` assigned NEC
+          // 705.12(B) to EVERYTHING that was not a supply-side tap — including an interconnection
+          // whose governing article was never established. The permit then printed a specific code
+          // citation for a rule the engine had refused to run, and a `passes:false` with no reason
+          // read as "reviewed and failed" rather than "never evaluated".
+          method:                  elecResult.busbar.busbarRule === 'not-evaluated'
+            ? 'Interconnection Not Established — NEC article not determined'
+            : elecResult.busbar.busbarRule === 'supply-side'
+              ? 'Supply-Side Tap (NEC 705.11)'
+              : 'Load-Side Connection (NEC 705.12(B))',
+          necReference:            elecResult.busbar.busbarRule === 'not-evaluated'
+            ? ''
+            : elecResult.busbar.busbarRule === 'supply-side' ? 'NEC 705.11' : 'NEC 705.12(B)',
+          message:                 elecResult.busbar.busbarRule === 'not-evaluated'
+            ? 'NOT EVALUATED — the point of interconnection has not been established, so neither '
+              + 'NEC 705.11 nor NEC 705.12(B) can be applied.'
+            : elecResult.busbar.passes ? 'Busbar rule satisfied' : 'Busbar rule NOT satisfied — review required',
         };
       }
 
@@ -1183,7 +1197,11 @@ export function generatePermitHTML(
     input.compliance.electrical = mapComputedSystemToCompliance(csFull, {
       busRatingA: input.project.panelBusRating ?? input.project.mainPanelAmps ?? null,
       mainBreakerA: input.project.mainPanelAmps ?? null,
-      interconnectionMethod: input.project.interconnectionMethod ?? 'LOAD_SIDE',
+      // 🚨 THE DECIDING ENGINE'S INPUT. `?? 'LOAD_SIDE'` here chose the article that
+      // `mapComputedSystemToCompliance` evaluates, for the compliance block that is actually
+      // stamped (computeSystem, not the shadow). An unestablished connection now arrives as
+      // UNRESOLVED and the evaluator refuses it explicitly instead of passing a 120% check.
+      interconnectionMethod: permitInterconnectionToken(input.project.interconnectionMethod),
     });
     // Engine-owned scalars (P0-1, now computeSystem's): backfeed breaker.
     const engineBackfeedA = csFull.backfeedBreakerAmps;

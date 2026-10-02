@@ -195,7 +195,8 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
   // for a record the snapshot calls 705.11. A load-side record that names no
   // side keeps its own text (MAIN_BREAKER_DERATE / PANEL_UPGRADE draw the
   // backfed breaker they always drew).
-  const rawInterconnection = project.interconnectionMethod ?? 'LOAD_SIDE';
+  // 🚨 NOT `?? 'LOAD_SIDE'` — an unestablished connection must not be DRAWN as a load-side tap.
+  const rawInterconnection = permitInterconnectionToken(project.interconnectionMethod);
   const interconnection = interconnectionRuleOf(project.interconnectionMethod) === '705.11' ? 'Supply Side Tap'
     : rawInterconnection === 'LOAD_SIDE' || rawInterconnection.toLowerCase().includes('load') ? 'Load Side Tap'
     : rawInterconnection;

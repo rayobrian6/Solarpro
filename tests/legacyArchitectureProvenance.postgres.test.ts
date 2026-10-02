@@ -881,11 +881,24 @@ describe('🚨 THE SIZING TAB AGREES WITH THE SHEET — Rays §11', () => {
     // about one device, which is the disease this whole slice treats.
     const src = readFileSync(join(ROOT, 'app/api/engineering/calculate/route.ts'), 'utf8');
     const sldSrc = readFileSync(join(ROOT, 'app/api/engineering/sld/route.ts'), 'utf8');
+    const projSrc = readFileSync(
+      join(ROOT, 'lib/electrical/canonicalSldProjection.ts'), 'utf8');
+    const pdfSrc = readFileSync(join(ROOT, 'app/api/engineering/sld/pdf/route.ts'), 'utf8');
     expect(src).toContain("@/lib/electrical/dcStringLimits");
-    expect(sldSrc).toContain("@/lib/electrical/dcStringLimits");
-    // And neither route reconstructs the window from `pvInputLimits` itself any more.
-    expect(sldSrc.includes('u.pvInputLimits!'),
-      'the SLD route still has its own copy of the DC window').toBe(false);
+    // 🚨 THE SLD ROUTES NOW REACH IT THROUGH THE SHARED CANONICAL PROJECTION, which is strictly
+    // stronger than each importing it: the SVG route and the PDF route cannot read DIFFERENT
+    // windows, because there is one call site for both. (The PDF route used to read none at all —
+    // it held a partial copy of the projection and this derivation was one of the parts missing.)
+    expect(projSrc, 'the shared projection does not take the DC window from the storage')
+      .toContain("@/lib/electrical/dcStringLimits");
+    for (const [name, code] of [['sld/route.ts', sldSrc], ['sld/pdf/route.ts', pdfSrc]] as const) {
+      const reaches = code.includes('@/lib/electrical/dcStringLimits')
+        || code.includes('projectCanonicalArchitecture');
+      expect(reaches, `${name} does not reach the one DC-window derivation`).toBe(true);
+      // And no route reconstructs the window from `pvInputLimits` itself.
+      expect(code.includes('u.pvInputLimits!'),
+        `${name} still has its own copy of the DC window`).toBe(false);
+    }
   });
 
   it('a mixed-model DC-coupled graph gets NO projection rather than the first units window', async () => {

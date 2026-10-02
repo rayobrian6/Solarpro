@@ -2374,3 +2374,165 @@ Not a redesign — an order. Nothing here adds a source of truth or removes an e
 ---
 
 *Part II ends here. Nothing in it has been implemented. Seven items in section 11 are live defects I previously reported as repaired, and they are the only part of this document I would act on without discussing first.*
+
+<br>
+
+# PART III — THE REPAIR LEDGER
+
+*Opened 2026-10-02, when Ray said: "Stop auditing — execute the engineering chain repair."*
+
+Status vocabulary, as specified:
+
+| Status | Means |
+|---|---|
+| **OPEN** | Not started, or started and not landed. |
+| **IMPLEMENTED** | The code change is in and `tsc` is clean. Proves nothing on its own. |
+| **PRODUCTION PATH PROVEN** | A test drives the real caller — the route handler, with the body the browser actually sends — and the artefact it returns is asserted. |
+| **ADVERSARIAL PROVEN** | The defect was restored byte-for-byte and the guard turned RED. |
+| **LIVE ACCEPTED** | Ray saw it correct in his own browser. **I do not set this.** |
+
+> **Nothing below is marked LIVE ACCEPTED.** Every row stops at ADVERSARIAL PROVEN, which is as far as I am allowed to take it.
+
+## Phase 1 — the seven live repairs
+
+| # | Repair | Status | Adversarial proof |
+|---|---|---|---|
+| 11.1 | The exported PDF fabricated a `Fronius Primo 8.2-1` and defaulted `topologyType` to `STRING_INVERTER`. Both SLD routes now call ONE `projectCanonicalArchitecture`. | **ADVERSARIAL PROVEN** | ✅ guard went RED (+1) |
+| 11.2 | `UNRESOLVED` matched no branch of the 705.12(B) evaluator and refused in silence. Now an explicit `NOT_EVALUATED` with reason / required input / authority / blocked calculation. | **ADVERSARIAL PROVEN** | ✅ guard went RED (+1) |
+| 11.2b | The permit's own normaliser collapsed every unmappable state into `LOAD_SIDE`. `UNRESOLVED` / `MANUFACTURER_INTEGRATED` / `METER_COLLAR` are now preserved. | **ADVERSARIAL PROVEN** | ✅ guard went RED (+1) |
+| 11.3 | `pvCoupledToStorage` failed OPEN — a dropped fetch re-armed the auto-pick. The read is now tri-state and suppresses on ignorance. | **ADVERSARIAL PROVEN** | ✅ guard went RED (+1) |
+| 11.4 | The subsystem mirror had no explicit clear for an inverter, so a retirement left it in place. | **ADVERSARIAL PROVEN** | ✅ guard went RED (+1) |
+| 11.4b | The retirement route cleared `engineering_config.inverters` but not `.subSystems`, which the page re-synthesises a fleet from. | **ADVERSARIAL PROVEN** | ✅ guard went RED (+1) |
+| 11.4c | A THIRD snapshot promotion (`lib/db/production.ts`) was unguarded. | **ADVERSARIAL PROVEN** | ✅ guard went RED (+1) |
+| 11.5 | The equipment schedule printed `4 × 9 panels` under `Total Modules 37`. It now states the real per-string array, or says `REQUIRES RE-DERIVATION`. | **ADVERSARIAL PROVEN** | ✅ guard went RED (+1) |
+| 11.5b | The SLD route was the one caller that did not pass `configStringPanelCounts`, so `computeSystem` equal-divided while the renderer got the real array. Now gated on the assignment being ACTIVE, summing to the module count **and fitting the DC window** — see §1 below, where my first version shipped the retired assignment. | **ADVERSARIAL PROVEN** | ✅ guard went RED (+1) |
+| 11.6 | `?? 'LOAD_SIDE'` closed at the SLD/PDF/BOM input builders, `generatePermit`, `sldAdapter` and the normaliser. **The three sealed-snapshot sites are deliberately FROZEN** — closing them rotates `meta.digest` and retires live PE approvals. See §2 below. | **PARTLY — see §2** | covered by 11.2b's mutation |
+| 11.7 | The browser refilled the absence the BOM route had been taught to keep, making the server guard unreachable. | **ADVERSARIAL PROVEN** | ✅ guard went RED (+1) |
+
+And the invariant that the whole of 11.1 exists to hold:
+
+| Invariant | Status | Adversarial proof |
+|---|---|---|
+| The SVG route and the PDF route call the SAME canonical projection — a partial second copy cannot exist. | **ADVERSARIAL PROVEN** | ✅ guard went RED (+1) |
+
+**Mutation run: 11 restored defects, 11 turned the guard red.** All repairs verified back in place afterwards (9/9).
+
+## 🚨 THREE THINGS THE REGRESSION RUN CAUGHT, AFTER THE MUTATION RUN WAS GREEN
+
+The seven repairs were implemented, production-path proven and adversarially proven. Then the
+wider suite ran, and three existing guards failed. All three were right.
+
+### 1. I passed the retired 10/9/9/9 assignment to the engine — the exact thing you forbade
+
+`tests/liveSldFailure.postgres.test.ts` failed with:
+
+```
+String Voc × 1.25 is 672.9 V, above the Powerwall 3's 550 V PV input maximum
+```
+
+Wiring `configStringPanelCounts` (11.5b) handed `computeSystem` the recorded assignment, and my
+guard checked only that it **summed to 37**. It does — 10+9+9+9 — and its first string is a
+10-module string that prints 672.9 V against a 550 V DC input. You said it in the instruction:
+
+> "RETIRED assignment → history only → may not become active by being passed to computeSystem."
+
+A sum is not compatibility. The gate now also checks every string against the DC window the
+canonical projection established — from the **storage** on a DC-coupled job, via `dcStringLimits`,
+on the same NEC 690.7 `× 1.25` basis the sheet prints. An assignment with any string over the
+limit is refused, logged as `STRING ASSIGNMENT REQUIRES RE-DERIVATION`, and the engine re-derives
+against the real endpoint. **Status: ADVERSARIAL PROVEN** — the pre-existing guard is the proof,
+and it went red before the gate and green after.
+
+### 2. Closing `?? 'LOAD_SIDE'` in the SEALED SNAPSHOT moves `meta.digest` — and that retires every live PE approval
+
+`tests/permitStandaloneGateway.test.ts` lost three of its four HEAD digests. The fourth, which
+records `SUPPLY_SIDE_TAP`, did not move — so only designs that **never stated an interconnection**
+are affected, which is exactly the population whose sealed record is currently wrong.
+
+`canonicalDigestBody` hashes everything except `meta.digest`, `meta.snapshotId` and
+`resolverAttemptEvidence`. `findActiveApproval` matches on an EXACT digest. So the same unchanged
+design rebuilds to a new hash, finds no approval row, and drops to **PENDING ENGINEERING REVIEW**.
+
+Your own rule on this is explicit: accept a one-time global digest rotation **and** plan the
+approval-ledger migration deliberately — *never as a side effect of another repair.*
+
+**So I stopped.** Three sites in `lib/permit/snapshot/build.ts` now call a local
+`digestFrozenInterconnectionToken` that reproduces the pre-repair bytes, with the whole reason
+written into the source above it. Everything else is closed.
+
+| Surface | `?? 'LOAD_SIDE'` | Status |
+|---|---|---|
+| `sld/route.ts` (×4), `sld/pdf/route.ts`, `bom/route.ts` | closed | **ADVERSARIAL PROVEN** |
+| `permitInterconnectionToken` — the normaliser all permit consumers ask | closed | **ADVERSARIAL PROVEN** |
+| `generatePermit.ts` → `mapComputedSystemToCompliance` (the deciding engine's input) | closed | **PRODUCTION PATH PROVEN** |
+| `generatePermit.ts` → the `=== 'supply-side' ? 705.11 : 705.12(B)` binary | closed (three-way) | **IMPLEMENTED** |
+| `sldAdapter.ts` — what the permit DRAWS | closed | **PRODUCTION PATH PROVEN** |
+| **`snapshot/build.ts` ×3 — the sealed, digested record** | **FROZEN** | **OPEN — needs your decision** |
+
+> **The consequence, stated plainly: a released permit for a design with no recorded point of
+> interconnection still reads LOAD_SIDE and still cites NEC 705.12(B).** Nothing downstream of
+> that file believes it any more. The sealed record does. Closing it is a one-line change plus a
+> digest rotation and an approval-ledger migration, and that is your call, not mine.
+
+### 3. Removing the default changed what the permit DRAWS, not just what it says
+
+Three more assertions in the same file failed with `CONS (MODE TBD)` where they expected
+`CONS (NET)`, and then with a null consumption-CT placement.
+
+Both are correct, and both were **unreachable** before. The consumption CTs clamp *relative to the
+point of interconnection*, so `lib/equipment/designMetering.ts:257` refuses to place them when the
+boundary is `'unresolved'`, and `currentTransformers.ts:712` has the sentence written for it —
+*"the interconnection side is not established, so no metering mode follows from it."* With absence
+collapsed to `LOAD_SIDE`, the CTs were drawn at a **guessed** location carrying the label
+`DEFAULT PER INTERCONNECTION — FIELD VERIFY`, and the schedule asserted NET.
+
+I did not edit those expectations to go green. That test's subject is the standalone gateway, and
+it depended on a default it never meant to assert — so its precondition is now **written down**
+(`interconnectionMethod: 'LOAD_SIDE'`), it tests the gateway again, and the absence case got its
+own test in the repair suite instead. Two other assertions there hardcoded
+`interconnectionRaw: 'LOAD_SIDE'` on one side of a *consistency* comparison while the other side
+read the project — agreeing only because both were the same guess. Both sides now go through one
+normaliser.
+
+**Still OPEN from this:** a design with no recorded interconnection now draws no consumption CT
+and prints `MODE TBD`, which is honest but silent. Your standard is that every NEEDS INPUT
+explains what, why, who and what it blocks — so this should print a NEEDS-INPUT row rather than an
+absence. Not done.
+
+## What the repair actually changed, in one place
+
+| New / changed | Why |
+|---|---|
+| `lib/electrical/canonicalSldProjection.ts` *(new)* | The ONE projection. The SVG route lost 211 inline lines; the PDF route lost its partial copy. Both now call it with the same arguments. |
+| `lib/electrical/fixtures/normalResidence200a.ts` *(new)* | **SolarPro had no fixture for an ordinary house.** `lib/electrical/fixtures/` held one file — the 400 A job — and its only one-domain shape is documented "Set true to reproduce the defect". Every electrical guard was written against the hardest site in the product. |
+| `tests/engineeringChainRepair.postgres.test.ts` *(new)* | 21 tests through real route handlers on real PostgreSQL, with the body the browser sends. |
+| `InterconnectionMethod` + `isNecEvaluableInterconnection` | The unmappable states are in the TYPE, so an evaluator cannot silently inherit the LOAD_SIDE branch. Widening it made the compiler name four consumers that had assumed two code bases. |
+| `InterconnectionResult.conclusion` / `.notEvaluated` | `passes: false` cannot distinguish "the rule ran and failed" from "the rule could not run". |
+| `busbarRule: 'not-evaluated'` | This field is read as the CODE BASIS. Labelling an unevaluated interconnection `120%` asserts an article nobody established. |
+
+## Guards I had to CHANGE, and why that is not cheating
+
+Four existing guards went red on a correct change. Every one of them pinned a TOKEN'S LOCATION rather than the requirement:
+
+| Guard | What it pinned | Why it broke | What it asserts now |
+|---|---|---|---|
+| `electricalAuthorityInspector` — PDF consumes the graph | `loadElectricalProject`, `serviceTopology:`, `buildInput.mainPanelAmps = `, `interconnectionMethodScalar` **inline in the PDF route** | the tokens moved into the shared module | the shared module does the whole job (ten assertions, including the four the partial copy was missing) **and** both routes call it |
+| `electricalAuthorityInspector` — no route fabricates | the same tokens per route | same | each surface either calls the projection or does it itself |
+| `electricalAuthorityLifecycle` — the load effect | a regex containing `{ setSvcTopology(null); setElectrical(null); return; }` verbatim, and the literal `setSvcTopology(t);` | the effect gained a third state | the effect is LOCATED by its fetch, and asserted on its dependencies and its writes |
+| `legacyArchitectureProvenance` — one DC-window derivation | `@/lib/electrical/dcStringLimits` imported **by the SLD route** | it is imported by the projection now | the projection imports it and both routes reach it |
+
+> **The first two of those were GREEN while the exported PDF drew a string inverter for a DC-coupled project.** A token-presence guard cannot see that two copies of a projection disagree. That is the lesson, and it is why the replacements assert ONE implementation rather than N copies of a token.
+
+## Still OPEN
+
+| Item | Status | Note |
+|---|---|---|
+| Phase 2 — wire the remaining Pattern A owners | **OPEN** | `TopologyEvaluation`, `legacyServiceScalars`, `acSourcesFromTopology`, `buildServiceTopologyGraph`, `PermitSystemModel`, `ComputedSystem.bomQuantities`, `electricalRevision`, the canonical module count. `configStringPanelCounts` is DONE (11.5b). |
+| Phase 3 — the remaining permissive collapses | **OPEN** | missing compliance block → PASS; missing DC run → PASS; inapplicable → `✓ PASS`; VAL-1 printing ALL CHECKS PASSED. |
+| Phase 4 — `aggregateServiceRatingA` / `panelBusbarRatingA` / `panelMainBreakerA` | **OPEN** | the `mainPanelAmps` collision is still live at `sld/route.ts` — the busbar still falls back to it. Fixture A records all three separately so the repair has something to prove against. |
+| Phase 5 — make the renderers dumb | **OPEN** | deliberately after Phase 2. Removing the renderer's compensation before the conclusions reach it makes the sheets worse, not better. |
+| Phase 6 — the normal 200 A experience | **PARTLY** | the fixture exists (Fixture A). The wizard's 400 A/two-panel default, the ungated multi-system question, the tri-state isolation flag on a checkbox, service-derived disconnect ratings, and "Create this service" not persisting are all still OPEN. |
+| `page.tsx` — ~15 remaining `config.interconnectionMethod ?? 'LOAD_SIDE'` payload sites | **OPEN** | these read a field that now defaults to `'UNRESOLVED'`, so the `??` fires only for legacy configs. Lower risk than the output-authority sites already closed, and next. |
+| `MICROINVERTERS[0]` as the seed for an inverter the user just ADDED | **OPEN, by judgment** | `page.tsx` `newInverter('micro')` and the topology switch need a starting model for a device the user explicitly created. That is a design-time seed on an explicit click, not an output filling an absence — so I left it and am telling you rather than quietly including it. |
+
+> A malformed compliance payload reports **503 DB_STARTING**: `normalizeGauge(undefined)` throws inside the engine and `handleRouteDbError` classifies everything non-config as "database starting". Found while writing Fixture A's test. Not fixed — it is a diagnosability defect, not an engineering one, and it is listed so it is not lost.

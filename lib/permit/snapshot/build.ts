@@ -38,6 +38,56 @@ import type { EnvironmentalLoadSourceEvidence } from './environmentalAuthority';
 import { buildConductorAuthority } from '../utils/conductorAuthority';
 import { buildIntegratedEquipment, planLandingDevice, permitSharedGatewayPanel, permitStandaloneGateway } from '../utils/integratedEquipment';
 import { interconnectionRuleOf, permitInterconnectionToken } from '../utils/interconnectionRule';
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 🚨 FROZEN ON PURPOSE: THE SEALED RECORD'S INTERCONNECTION TOKEN STILL DEFAULTS.
+//
+// Ray asked for `?? 'LOAD_SIDE'` closed everywhere it establishes code authority, and it IS closed
+// on every live surface — the SLD routes, the BOM route, `generatePermit`'s deciding engine input,
+// `sldAdapter`, and `permitInterconnectionToken` itself, which no longer flattens UNRESOLVED /
+// MANUFACTURER_INTEGRATED / METER_COLLAR.
+//
+// It is NOT closed HERE, and that is a deliberate stop rather than an oversight.
+//
+// `canonicalDigestBody` (digest.ts) hashes everything in the snapshot except `meta.digest`,
+// `meta.snapshotId` and `resolverAttemptEvidence`. This value is inside the hashed body. Changing
+// `'LOAD_SIDE'` to `'UNRESOLVED'` for a design that never recorded an interconnection therefore
+// moves `meta.digest`, and `findActiveApproval` matches on an EXACT digest — so the same unchanged
+// design rebuilds to a new hash, finds no approval row, and silently drops to PENDING ENGINEERING
+// REVIEW. **It retires every live PE approval for every such design.**
+//
+// `tests/permitStandaloneGateway.test.ts` proved it: three of its four HEAD digests moved the
+// moment the normaliser became honest. The fourth, which records SUPPLY_SIDE_TAP, did not — only
+// designs that never stated an interconnection are affected, which is also exactly the population
+// whose record is currently wrong.
+//
+// The project rule on this is explicit and is Ray's own: accept a one-time global digest rotation
+// AND plan the approval-ledger migration deliberately — NEVER as a side effect of another repair.
+// So the honest token is withheld from the sealed body until that rotation is a decision, and the
+// defect is recorded in docs/ENGINEERING-CHAIN-TRACE.md as OPEN rather than quietly shipped.
+//
+// 🚨 THE CONSEQUENCE, STATED PLAINLY: a released permit for a design with no recorded point of
+// interconnection still reads LOAD_SIDE and still cites NEC 705.12(B). Nothing downstream of this
+// file believes that any more — but the sealed record does.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * The PRE-REPAIR token, reproduced byte-for-byte so the digest cannot move.
+ *
+ * Deliberately NOT `permitInterconnectionToken`: that function is now correct, and correctness is
+ * what moves the hash. See the note above.
+ */
+const digestFrozenInterconnectionToken = (v: unknown): string => {
+  const raw = String(v ?? 'LOAD_SIDE').trim();
+  const TOKENS = new Set(['LOAD_SIDE', 'SUPPLY_SIDE_TAP', 'MAIN_BREAKER_DERATE', 'PANEL_UPGRADE']);
+  if (TOKENS.has(raw)) return raw;
+  return /SUPPLY|LINE/i.test(raw) ? 'SUPPLY_SIDE_TAP' : 'LOAD_SIDE';
+};
+
+/** Likewise the two-value rule, frozen for the sealed body only. */
+const digestFrozenInterconnectionRule = (v: unknown): '705.11' | '705.12(B)' =>
+  /SUPPLY|LINE/i.test(String(v ?? '')) ? '705.11' : '705.12(B)';
+
 import { resolveDesignMetering } from '@/lib/equipment/designMetering';
 import { buildHybridPermitMetering } from '../utils/sldAdapter';
 import { utilityDisplayName, resolveBatteryCapacity } from '../utils/helpers';   // §15(b) — human utility name, never a slug
@@ -861,7 +911,10 @@ export function buildPermitDesignSnapshot(
   // not a second evaluation of the same question at the consumer.
   let _tapSpanAuthority: TapSpanAuthority | null = null;
   const serviceTopology: import('./types').ServiceTopologyObject[] = (() => {
-    const method = String(proj.interconnectionMethod ?? 'LOAD_SIDE');
+    // 🚨 NOT `?? 'LOAD_SIDE'`. `permitInterconnectionToken` preserves UNRESOLVED /
+    // MANUFACTURER_INTEGRATED / METER_COLLAR instead of flattening an unestablished connection into
+    // a specific NEC article on a sealed package.
+    const method = digestFrozenInterconnectionToken(proj.interconnectionMethod);
     const isSupply = interconnectionRuleOf(method) === '705.11';
     const feederOcpd = cs?.backfeedBreakerAmps ?? cs?.acOcpdAmps ?? feederRun?.ocpdAmps ?? null;
     const feederGauge = feederRun?.wireGauge ?? auth.acFeeder.wireGauge ?? null;
@@ -1170,7 +1223,10 @@ export function buildPermitDesignSnapshot(
       + `(verified: ${branchEngineMismatch ? 'MISMATCH — V16 blocks' : 'sizes match'})`,
       !branchEngineMismatch);
     {
-      const _canonMethod = String(proj.interconnectionMethod ?? 'LOAD_SIDE');
+      // 🚨 NOT `?? 'LOAD_SIDE'`. `permitInterconnectionToken` preserves UNRESOLVED /
+      // MANUFACTURER_INTEGRATED / METER_COLLAR instead of flattening an unestablished connection into
+      // a specific NEC article on a sealed package.
+      const _canonMethod = digestFrozenInterconnectionToken(proj.interconnectionMethod);
       const _legMethod = String(legacyShadow?.busbar?.method ?? _canonMethod);
       const _bothSupply = interconnectionRuleOf(_canonMethod) === interconnectionRuleOf(_legMethod);
       _par('interconnection method', null, _canonMethod, _legMethod,
@@ -3010,8 +3066,12 @@ export function buildPermitDesignSnapshot(
         recordCapturedAtIso: _capturedIso,
       },
       interconnection: {
-        method: proj.interconnectionMethod ?? 'LOAD_SIDE',
-        rule: interconnectionRuleOf(proj.interconnectionMethod),
+        // 🚨 THE SEALED RECORD DOES NOT INVENT THE CONNECTION. `?? 'LOAD_SIDE'` wrote a specific
+        // NEC article into an immutable, digest-bearing record for a project that had never
+        // stated how it connects. `permitInterconnectionToken` preserves the unmappable states
+        // (UNRESOLVED / MANUFACTURER_INTEGRATED / METER_COLLAR) instead of flattening them.
+        method: digestFrozenInterconnectionToken(proj.interconnectionMethod),
+        rule: digestFrozenInterconnectionRule(proj.interconnectionMethod),
       },
       thermal: (() => {
         const minC = proj.designTempMin ?? temps.ashraeExtremeLowC;
