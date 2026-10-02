@@ -234,6 +234,25 @@ export async function POST(req: NextRequest) {
               + ' service graph — the legacy scalar fallback is sizing this BOM.'
               + ` (${_m.serviceProvenance.basis})`);
           }
+
+          // 🚨 AND THE INTERCONNECTION METHOD, which `?? 'LOAD_SIDE'` was choosing. LOAD_SIDE selects
+          // NEC 705.12(B), the 120% busbar allowance and a backfed breaker — a code article handed
+          // out by a default. The graph's recorded POI relationship decides it, and an UNRESOLVED POI
+          // projects nothing at all.
+          const { interconnectionMethodScalar } =
+            await import('@/lib/electrical/loadElectricalProject');
+          const _ic = interconnectionMethodScalar(_m.topology);
+          if (_ic) {
+            const _postedIc = String(body.interconnectionMethod ?? body.interconnection ?? '');
+            if (_postedIc && _postedIc.toUpperCase() !== _ic.value) {
+              console.warn('[bom/POST] interconnection method corrected from the service graph:'
+                + ` posted=${_postedIc} canonical=${_ic.value} (${_ic.basis})`);
+            }
+            body.interconnectionMethod = _ic.value;
+          } else if (_m.topology && _m.topology.pointsOfInterconnection.length > 0) {
+            console.warn('[bom/POST] 🚨 INTERCONNECTION ARRANGEMENT NOT RESOLVED on this project —'
+              + ' the graph declines to name one, so the legacy scalar is deciding the code article.');
+          }
           console.log('[bom/POST] canonical electrical model:'
             + ` revision=${_electrical!.revision}`
             + ` coupling=${_m.solarCoupling ?? 'UNRESOLVED'}`

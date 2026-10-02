@@ -303,6 +303,73 @@ describe('🚨 the key=value discipline neutralises sort + dedup + empty-drop', 
   });
 });
 
+// ═══════════════════════════════════════════════════════════════════════════
+// 🚨 THE INTERCONNECTION METHOD SCALAR — and the `unresolved` case it must refuse.
+//
+// Found in the adversarial sweep: `lib/bom-engine-v4.ts` and the SLD route both read a string scalar
+// and both default it to 'LOAD_SIDE', which SELECTS NEC 705.12(B), the 120% busbar allowance and a
+// backfed breaker. The graph has an explicit `'unresolved'` relationship whose entire purpose is to
+// refuse that guess, and a `??` was overriding it.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('🚨 the interconnection method is projected, never defaulted', () => {
+  const poi = (relationship: string) => ({
+    id: 'poi-1', label: 'POI', relationship, derNodeId: null, connectedToNodeId: null, ocpdA: 200,
+  });
+  const withPois = (...rels: string[]): ServiceTopology => ({
+    ...job(),
+    pointsOfInterconnection: rels.map((r, i) => ({ ...poi(r), id: `poi-${i + 1}` })),
+  } as ServiceTopology);
+
+  it('a load-side busbar POI projects LOAD_SIDE', async () => {
+    const { interconnectionMethodScalar } = await import('@/lib/electrical/loadElectricalProject');
+    expect(interconnectionMethodScalar(withPois('load-side-busbar'))?.value).toBe('LOAD_SIDE');
+  });
+
+  it('a supply-side POI projects SUPPLY_SIDE_TAP', async () => {
+    const { interconnectionMethodScalar } = await import('@/lib/electrical/loadElectricalProject');
+    expect(interconnectionMethodScalar(withPois('supply-side'))?.value).toBe('SUPPLY_SIDE_TAP');
+    expect(interconnectionMethodScalar(withPois('aggregation-to-supply-side'))?.value)
+      .toBe('SUPPLY_SIDE_TAP');
+  });
+
+  it('🚨 an UNRESOLVED POI projects NOTHING — it does not inherit a code article', async () => {
+    const { interconnectionMethodScalar } = await import('@/lib/electrical/loadElectricalProject');
+    expect(interconnectionMethodScalar(withPois('unresolved')),
+      'an unclassified POI was handed NEC 705.12(B) by a default').toBeNull();
+  });
+
+  it('a manufacturer-integrated POI projects nothing — its listing governs, not an article', async () => {
+    const { interconnectionMethodScalar } = await import('@/lib/electrical/loadElectricalProject');
+    expect(interconnectionMethodScalar(withPois('manufacturer-integrated'))).toBeNull();
+    expect(interconnectionMethodScalar(withPois('meter-collar'))).toBeNull();
+  });
+
+  it('🚨 MIXED relationships project nothing — one scalar cannot describe two arrangements', async () => {
+    const { interconnectionMethodScalar } = await import('@/lib/electrical/loadElectricalProject');
+    expect(interconnectionMethodScalar(withPois('load-side-busbar', 'supply-side'))).toBeNull();
+  });
+
+  it('two POIs of the SAME relationship do project, and say how many', async () => {
+    const { interconnectionMethodScalar } = await import('@/lib/electrical/loadElectricalProject');
+    const r = interconnectionMethodScalar(withPois('load-side-busbar', 'load-side-busbar'));
+    expect(r?.value).toBe('LOAD_SIDE');
+    expect(r?.basis).toContain('2 point(s)');
+  });
+
+  it('no graph, and no POI, project nothing', async () => {
+    const { interconnectionMethodScalar } = await import('@/lib/electrical/loadElectricalProject');
+    expect(interconnectionMethodScalar(null)).toBeNull();
+    expect(interconnectionMethodScalar({ ...job(), pointsOfInterconnection: [] })).toBeNull();
+  });
+
+  it('an unresolved POI beside a decided one does not block the decided one', async () => {
+    // A site part-way through classification still gets the arrangement it HAS recorded.
+    const { interconnectionMethodScalar } = await import('@/lib/electrical/loadElectricalProject');
+    expect(interconnectionMethodScalar(withPois('load-side-busbar', 'unresolved'))?.value)
+      .toBe('LOAD_SIDE');
+  });
+});
+
 describe('freshness', () => {
   it('matching revisions are CURRENT', () => {
     expect(electricalArtifactFreshness('ELEC-abc12345', 'ELEC-abc12345')).toBe('CURRENT');

@@ -186,6 +186,58 @@ export function composeElectricalProject(
 }
 
 /**
+ * 🚨 THE INTERCONNECTION METHOD, PROJECTED ONTO THE LEGACY SCALAR — and `null` when the graph has
+ * not decided.
+ *
+ * Found in the adversarial sweep. `lib/bom-engine-v4.ts` and the SLD route both read a string scalar
+ * and both default it: `String(input.interconnectionMethod ?? 'LOAD_SIDE')`. Meanwhile the canonical
+ * authority is `pointsOfInterconnection[].relationship`, which has an explicit `'unresolved'` member
+ * that exists precisely to refuse that guess — `serviceTopology.ts` says so in as many words:
+ * "without it, creating a POI would force a guess, and the guess would silently inherit that
+ * relationship's code article."
+ *
+ * `LOAD_SIDE` is not a harmless default. It selects NEC 705.12(B), the 120% busbar allowance and a
+ * backfed breaker. A project whose POI nobody has classified was being given that article by a `??`.
+ *
+ * So: a recorded relationship projects onto the scalar, and `'unresolved'` projects NOTHING — the
+ * caller leaves whatever it had and says so, rather than being handed an article.
+ *
+ * Returns null when there is no graph, no POI, or the relationship is unresolved.
+ */
+export function interconnectionMethodScalar(
+  topology: ServiceTopology | null,
+): { value: string; basis: string } | null {
+  const pois = topology?.pointsOfInterconnection ?? [];
+  if (pois.length === 0) return null;
+  // Every POI that has actually been classified.
+  const decided = pois.filter(p => p.relationship !== 'unresolved');
+  if (decided.length === 0) return null;
+
+  const map: Record<string, string | null> = {
+    'load-side-busbar': 'LOAD_SIDE',
+    'load-side-feeder-tap': 'LOAD_SIDE',
+    'supply-side': 'SUPPLY_SIDE_TAP',
+    'aggregation-to-supply-side': 'SUPPLY_SIDE_TAP',
+    // A manufacturer-integrated connection is governed by the listing, not by an NEC article, and
+    // `governingArticleFor` returns null for it. Projecting either scalar would assert an article the
+    // graph deliberately declines to name.
+    'manufacturer-integrated': null,
+    'meter-collar': null,
+  };
+
+  const values = [...new Set(decided.map(p => map[p.relationship] ?? null))];
+  // Mixed or unmappable: say nothing rather than picking one. A site whose POIs are genuinely
+  // different relationships cannot be described by one scalar, and that is the scalar's limitation,
+  // not a reason to choose for it.
+  if (values.length !== 1 || values[0] === null) return null;
+  return {
+    value: values[0]!,
+    basis: `${decided.length} point(s) of interconnection recorded as `
+      + `${[...new Set(decided.map(p => p.relationship))].join(', ')}`,
+  };
+}
+
+/**
  * Persist the one-time canonicalization the model asks for, if it asks for one.
  *
  * 🚨 THIS IS A MIGRATION, NOT A SYNCHRONIZATION. Ray: "If the persisted evidence is sufficient and

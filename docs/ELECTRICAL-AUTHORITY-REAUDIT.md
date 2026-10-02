@@ -1,0 +1,227 @@
+# Electrical authority — re-audit after implementation
+
+**Date:** 2026-10-01
+**Baseline:** `a0e28745` (`docs/ELECTRICAL-AUTHORITY-MAP.md`, the pre-implementation audit)
+**Head at re-audit:** `07f5503c` on `dev`
+**Commits in the correction:** `bc190bd9` · `cdebde10` · `411b8f70` · `27ce3e59` · `07f5503c`
+
+Ray's instruction: *"Re-run the electrical authority audit after implementation. For every electrical
+fact answer: 1. Who owns it? 2. Where is it persisted? 3. Who may write it? 4. Which production
+surfaces consume it? 5. Can another persisted field disagree and win? The acceptable answer to #5 is
+NO. If a legacy mirror still exists: identify it as legacy, prove it cannot win, document removal
+path."*
+
+This document is the written form of that answer. The **runtime** form is
+`GET /api/dev/electrical-authority?projectId=…`, which prints the same five answers from the live
+project — because a document can only go silently out of date, which is how three competing stores came
+to exist while `docs/SERVICE-TOPOLOGY-SCALAR-AUDIT.md` said otherwise.
+`tests/electricalAuthorityInspector.test.ts` holds the inspector's claims to the source.
+
+---
+
+## 1. The architecture, as it now stands
+
+| Store | Owns | May NOT answer |
+|---|---|---|
+| `projects.service_topology` | the connection graph: service rating, branches, panels, domains, gateways, storage instances, generation panels, devices, POIs, interconnection, `solarCoupling` | which catalogue product was picked for a non-graph item |
+| `projects.selected_equipment` | **which physical product** — panel, inverter, mounting, battery model | **how many** of anything; how it is connected |
+| `projects.engineering_config` | explicit engineering **overrides** | anything it is not an override of |
+| `layouts.total_panels` | how many PV modules the design places | anything electrical downstream of that |
+| `engineering_runs.config_snapshot`, permit snapshots | immutable **historical** records | current project truth |
+| `localStorage` | UI draft state | current project truth |
+
+`lib/electrical/projectModel.ts` composes these. It persists nothing, reads no catalogue, and imports
+no React — so the same inputs give the same answer on the server and in the browser, and no sequence of
+component mounts can change it.
+
+`lib/electrical/loadElectricalProject.ts` is the **assembly**: one query, one composition, one
+revision. This was the gap the first implementation left — a pure resolver with each caller assembling
+its own inputs is still three answers.
+
+---
+
+## 2. The five questions, per fact
+
+### Service rating
+
+1. **Owner:** `service_topology.service.ratedAmps`; `engineering_config.serviceRatedAmpsOverride` outranks it when explicitly set.
+2. **Persisted:** `projects.service_topology → topology.service.ratedAmps`.
+3. **Writers:** `app/api/projects/[id]/service-topology/route.ts`.
+4. **Consumers:** engineering page + sidebar, SLD route, permit route, BOM route (and pricing, through the BOM's lines).
+5. **Can another field disagree and win?** **No, now.** It could before: `mainPanelAmps ... || 200` in the BOM, SLD and SLD-PDF routes fabricated a 200 A service *and accepted a posted 200 over the graph's 400*. The canonical rating is projected onto the scalar in the BOM and SLD routes (`27ce3e59`, `07f5503c`), which is the arrangement `SERVICE-TOPOLOGY-SCALAR-AUDIT.md` already sanctions. **Not cosmetic:** diffing the real BOM route at 200 A vs 400 A moves the NEC 705.12(B) backfeed breaker from QO80 to QO40 — a stale scalar was sizing the breaker that protects the busbar. Guarded by *"a POSTed 200 A does not beat the graph's 400 A service"*, proven against the restored defect.
+   - **Legacy mirror:** `PermitInput.project.mainPanelAmps` and `app/api/engineering/sld/pdf/route.ts:288`. The first is a derived compatibility projection by design. **The PDF route is NOT yet migrated — see Finding F-3.**
+
+### Selected inverter architecture
+
+1. **Owner:** `selected_equipment.inverter` — and only *which product*.
+2. **Persisted:** `projects.selected_equipment.inverter`.
+3. **Writers:** the equipment route, save-config, the layout route on a designer change.
+4. **Consumers:** all four surfaces.
+5. **Disagree and win?** **No.** `cdebde10` removed the three load-path substitutions (`MICROINVERTERS[0]`, the seed's first-row-of-matching-catalogue, and the `'Enphase'/'IQ8+'` identity). "No separate inverter" is a state the model represents. A DC-coupled graph beside an explicit inverter raises a **conflict** rather than one side winning.
+   - **Legacy mirror:** `engineering_config.inverters[]` / `layouts.design_electrical.strings[]`, read by the permit route's backfill. **Cannot win:** the backfill is skipped entirely when the canonical coupling is `dc-coupled-storage` or `storage-only`. Proven by *"the PERMIT ROUTE does not backfill it onto the package"* (mutation 14), which was run against the restored defect and failed correctly. **Removal path:** the backfill exists to repair a stale POST from the Engineering page; once the page posts from the canonical model it has nothing to repair.
+
+### `solarCoupling`
+
+1. **Owner:** `service_topology.solarCoupling`.
+2. **Persisted:** `projects.service_topology → topology.solarCoupling`.
+3. **Writers:** the service-topology route; plus `persistElectricalCanonicalization`, which writes **once** per project and only when there is no conflict.
+4. **Consumers:** all four surfaces, and the renderer via the coupling it is handed.
+5. **Disagree and win?** **No.** Recorded coupling wins over derivation; derivation happens only when nothing is recorded and the evidence is sufficient; where evidence is insufficient **nothing is derived**. Mutation 4 proves the derivation **stops** once persisted (provenance flips from `derived` to `service-topology`, patch becomes null).
+
+### Storage unit / Gateway / generation-panel quantity
+
+1. **Owner:** `service_topology` — multiplicity is a property of the graph.
+2. **Persisted:** `topology.storage[]`, `topology.domains[].gateway`, `topology.aggregationPanels[]`.
+3. **Writers:** the service-topology route.
+4. **Consumers:** all four surfaces; `lib/bom/topologyBom.ts` → distributor pricing.
+5. **Disagree and win?** **No, now.** The BOM route took `batteryCount` off the request. It now takes `storage.invertingUnitCount` from the graph, and `reconcileQuantities` **proves** the lines agree rather than assuming it.
+   - **Legacy mirror:** `selected_equipment.batteryCount`. **Cannot win:** used only to raise a conflict against the graph's instance count. **Removal path:** migrate the proposal/production capacity readers onto `model.storage.invertingUnitCount`, then stop writing the column.
+
+### Interconnection method
+
+1. **Owner:** `pointsOfInterconnection[].relationship` + `interconnection.derArrangement`.
+2. **Persisted:** `topology.pointsOfInterconnection` / `topology.interconnection`.
+3. **Writers:** the service-topology route.
+4. **Consumers:** BOM route, SLD route, `governingArticleFor`.
+5. **Disagree and win?** **No, now — and this was a live finding.** `bom-engine-v4.ts` (3 sites) and the SLD route (4 sites) read a string scalar and defaulted it `?? 'LOAD_SIDE'`. **`LOAD_SIDE` is not a neutral default: it selects NEC 705.12(B), the 120% busbar allowance and a backfed breaker.** The graph has an explicit `'unresolved'` relationship whose stated purpose is to refuse exactly that guess, and a `??` was overriding it. `interconnectionMethodScalar()` now projects a recorded relationship and returns **null** for `unresolved`, for `manufacturer-integrated`/`meter-collar` (governed by a listing, not an article), and for **mixed** relationships — one scalar cannot describe two arrangements. Eight tests, including the unresolved refusal.
+
+### PV module count
+
+1. **Owner:** `layouts.total_panels`.
+2. **Persisted:** the newest `layouts` row.
+3. **Writers:** the layout route / Design Studio save.
+4. **Consumers:** all four surfaces (it decides the storage-only coupling case and enters the revision).
+5. **Disagree and win?** No. **Found during this work:** it was an input the resolver *consumed* and never *exposed*, so `electricalRevision` could not see it — 72 modules and 36 modules produced the same revision and a 72-module sheet kept a green CURRENT badge. The model returns it now.
+
+### Electrical revision / generated-SLD freshness
+
+1. **Owner:** derived — `lib/electrical/revision.ts`, a pure function of the model.
+2. **Persisted:** nowhere. There is nothing to forget to bump.
+3. **Writers:** nobody.
+4. **Consumers:** SLD route (stamps), permit route (stamps), BOM route (reports), engineering page (compares).
+5. **Disagree and win?** No. Freshness is decided by comparing **revisions**, never times.
+   - **Legacy mirror:** an artifact's `updated_at`. **Cannot win:** never consulted for freshness. A timestamp says when a file was written, not what it was written *from* — which is why a sheet can be newer than the change that invalidated it and still be wrong.
+
+---
+
+## 3. Findings still open, each with proof it cannot reach the canonical model
+
+Recorded rather than fixed, because each is outside the authority slice and Ray's standing instruction
+is *"Do not add unrelated features"* / *"Stop electrical expansion after acceptance."*
+
+### F-1 — The permit route's own `topology: 'microinverter'` default
+`app/api/engineering/permit/route.ts:757`. Reached only when the client POSTs **no** `system` object at
+all. **Cannot reach the canonical model:** the model never reads `body.system.topology`; it reads the
+graph and `selected_equipment`. The architecture on the sheet comes from `project.serviceTopology`,
+which is now written. **Removal path:** delete the synthesized default and refuse a payload with no
+system, once the page posts from the canonical model.
+
+### F-2 — Stale-micro-id substitution in the page
+`app/engineering/page.tsx` (4 sites): an inverter entry with `type: 'micro'` but a stale non-micro
+`inverterId` (e.g. `'se-7600h'` left by a topology switch) resolves to the catalogue default micro.
+Documented as deliberate — it was added because requiring the id to resolve hid the CT control on
+exactly those designs while the BOM substituted anyway. **Cannot reach the canonical model:** the model
+takes `inverterId` and asks only *is there one*; a stale micro id gives `hasExternalInverter: true`,
+which is correct either way. It affects display and BOM detail, not the architecture. **This is still a
+real defect of a different kind** — a type/id *mismatch* resolved by substitution instead of surfaced —
+and belongs with the CT/metering slice, not this one.
+
+### F-3 — `app/api/engineering/sld/pdf/route.ts` — **FOUND AND FIXED IN THIS RE-AUDIT**
+This route had **zero** references to the service graph, so "Export PDF" drew the legacy
+single-service tail for Ray's 400 A job while the Diagram tab — reading the same project — drew two
+200 A systems, two Gateways and four Powerwalls. **Two rendering entry points, one project, two
+drawings**, and the exported one is what reaches an AHJ. It also carried both fabrications the sweep
+found elsewhere (`mainPanelAmps ... || 200` and `?? 'LOAD_SIDE'`).
+
+Now migrated: it loads the canonical model, hands the graph to the renderer, projects the service
+rating and the interconnection method, and logs conflicts. Guarded by
+*"the SLD PDF route consumes the graph too — two renderers, one drawing"* and
+*"no migrated route fabricates a service rating or an interconnection article"*.
+
+### F-4 — `engineering_seed` still carries Enphase / 200 A / MICROINVERTER defaults
+`app/api/engineering/preliminary/route.ts:44-60`. It writes `projects.engineering_seed`. **Partly
+addressed:** the page's restore of `seed.sldSvg` no longer presents that sheet as current (it reports
+UNSTAMPED). **Not addressed:** the seed's equipment defaults themselves, for a *preliminary estimate* on
+a project with no design. **Cannot reach the canonical model:** the model never reads
+`engineering_seed`. **Removal path:** have the preliminary estimate carry its assumptions as labelled
+estimates rather than writing them where a later reader can mistake them for selections.
+
+### F-5 — `svcTopology` React state has two fill paths
+The project-keyed load and the builder's `onTopologyChange`. **Not a second authority:** both reflect
+the store, the builder also persists, and a reload re-reads. This is the UI draft state Ray explicitly
+permitted. Worth noting only because a builder edit can briefly lead the store.
+
+---
+
+## 4. What changed about the answer to question 5
+
+At `a0e28745` the answer was **yes** for the service rating, the inverter architecture, the coupling,
+the storage count and the interconnection method — five facts where a second persisted field could
+disagree and win, with no reconciliation and no precedence.
+
+At head the answer is **no** for all five, on every migrated production surface: engineering page +
+sidebar, SLD route, **SLD PDF route**, permit route, BOM route + pricing.
+
+The honest residue: F-1, F-2, F-4 and F-5 are still present, and each is shown above to be unable to
+reach the canonical model. None of them can make a second persisted field win a fact the model owns.
+
+---
+
+## 5. Mutation coverage
+
+| # | Mutation | Where proven |
+|---|---|---|
+| 1 | Pure Enphase stays pure Enphase | `electricalAuthorityProductionPaths.postgres` |
+| 2 | DC-coupled Tesla fabricates no inverter | same, + BOM route orders no Enphase |
+| 3 | Tesla + legitimate AC-coupled Enphase stays valid | same, + permit does not refuse it |
+| 4 | Unambiguous legacy canonicalises **once** and persists | same — derivation proven to STOP |
+| 5 | Contradictory legacy ⇒ explicit conflict | same, + permit returns 409 naming both claims |
+| 6 | Missing service rating preserves the graph | same, + BOM still orders correctly |
+| 7 | Tab switching cannot change the interpretation | `electricalAuthorityLifecycle` — source guard proven against the real `bc190bd9` bytes |
+| 8 | Save → reload unchanged | `…ProductionPaths` — whole model byte-compared, revision stable across a rewrite |
+| 9 | 4 PW3 → 2 PW3 everywhere | same — model, revision, BOM route, pricing, inspector |
+| 10 | DC-coupled → AC-coupled | same — and it is NOT a conflict when both stores move |
+| 11 | Generate, change, go stale | same + `electricalRevision` |
+| 12 | Delete / recreate duplicates nothing | same |
+| 13 | The real 400 A job through every surface | same — 400 A, 4 PW3, 2 GW, 2 gen panels, 54 kWh, 192 A, DC-coupled |
+| 14 | A stale legacy mirror cannot override canonical | same — three attack vectors |
+
+**Not proven in that file, and said so in the file itself:** mutation 13's rendered-sheet half
+(`professionalSldConsumesTheServiceGraph`) and the permit package's rendered schedule
+(`permitScheduleConsumesTheTopology`). A test that looks like it covers a mutation and does not is worse
+than an absent one, because it is believed.
+
+---
+
+## 6. Guards proven against restored defects
+
+Every guard written for this correction was run against the defect it exists for and seen to **fail**:
+
+| Guard | Defect restored | Result |
+|---|---|---|
+| permit backfill gate | `_noExternalInverter && false` | red — "backfilled a legacy Enphase array onto a DC-coupled Tesla job" |
+| BOM double count | identity match → partNumber-only | red — "expected 8 to be 4" |
+| service-rating projection | removed `body.mainPanelAmps = …` | red — "expected '40A 2-pole backfeed breaker…' to contain 'bus: 400A'" |
+| lifecycle source guard | n/a — asserted against real `bc190bd9` bytes | the prior file matches the defect patterns; the project-keyed load is absent there |
+
+**Two of these guards were blind when first written**, and restoring the defect is what found it:
+
+- Deleting the BOM's canonical count override did **not** fail the Powerwall-quantity assertion — the
+  service-graph merge corrected that line afterwards. The assertion now reads the engine's own
+  `batteryCount`-derived lines, where the override actually earns its place (`resolveBatteryBranch`
+  sizes the battery branch OCPD from it).
+- The service-rating test first asserted that no line *described* a "200 A service" — a phrase nothing
+  emits. Probing the real route at both ratings found the observable that moves.
+
+---
+
+## 7. Verification state
+
+- `npx tsc --noEmit` — **0 errors**
+- `npx eslint` on changed files — **0 errors** (pre-existing `no-console` warnings only)
+- Electrical suites — **215+ passing** across `electricalProjectModel`, `electricalRevision`,
+  `electricalAuthorityProductionPaths.postgres`, `electricalAuthorityInspector`,
+  `electricalAuthorityLifecycle`, `raysRealFourHundredAmpJob`, `noInventedEquipment`,
+  `topologyReachesEveryOutput`, `topologyAuthoredThenAgreesEverywhere.postgres`
+- Full regression — see the session report
+- **Live acceptance — NEEDS RAY.**

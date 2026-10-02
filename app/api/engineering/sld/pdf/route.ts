@@ -157,6 +157,70 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Missing buildInput' }, { status: 400 });
     }
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // 🚨 THE EXPORTED PDF DREW A DIFFERENT SERVICE THAN THE DIAGRAM TAB.
+    //
+    // Found in the re-audit (docs/ELECTRICAL-AUTHORITY-REAUDIT.md, F-3). This route had ZERO
+    // references to the service graph, so "Export PDF" rendered the legacy single-service tail for
+    // Ray's 400 A job while the Diagram tab — reading the same project — drew two 200 A systems, two
+    // Gateways and four Powerwalls. Two rendering entry points, one project, two drawings.
+    //
+    // It also carried both of the fabrications the sweep found elsewhere: `mainPanelAmps ... || 200`
+    // and `?? 'LOAD_SIDE'`, the second of which assigns NEC 705.12(B) to a project whose point of
+    // interconnection nobody has classified.
+    //
+    // Same assembly as every other surface. Non-fatal: a project with no graph exports exactly as
+    // before.
+    // ═══════════════════════════════════════════════════════════════════════
+    let _electricalRevision: string | null = null;
+    if (user?.id && isReadableProjectId(buildInput?.projectId)) {
+      try {
+        const { loadElectricalProject, interconnectionMethodScalar } =
+          await import('@/lib/electrical/loadElectricalProject');
+        const _loaded = await loadElectricalProject(String(buildInput.projectId), user.id);
+        const _m = _loaded?.model;
+        if (_m?.topology) {
+          _electricalRevision = _loaded!.revision;
+          // A conflict is never canonicalised away — the sheet keeps what was recorded.
+          buildInput.serviceTopology = _m.canonicalizationPatch
+            ? { ..._m.topology, ..._m.canonicalizationPatch }
+            : _m.topology;
+
+          if (_m.serviceRatedAmps !== null) {
+            const _posted = Number(buildInput.mainPanelAmps) || 0;
+            if (_posted !== _m.serviceRatedAmps) {
+              console.warn('[sld/pdf/POST] service rating corrected from the canonical model:'
+                + ` posted=${_posted || 'none'} canonical=${_m.serviceRatedAmps} A`);
+            }
+            buildInput.mainPanelAmps = _m.serviceRatedAmps;
+          }
+
+          const _ic = interconnectionMethodScalar(_m.topology);
+          if (_ic) {
+            buildInput.interconnection = _ic.value;
+            buildInput.interconnectionType = _ic.value;
+            buildInput.interconnectionMethod = _ic.value;
+          }
+
+          console.log('[sld/pdf/POST] canonical electrical model:'
+            + ` revision=${_loaded!.revision}`
+            + ` coupling=${_m.solarCoupling ?? 'UNRESOLVED'}`
+            + ` service=${_m.serviceRatedAmps ?? 'NOT ESTABLISHED'} A`
+            + ` storage=${_m.storage.invertingUnitCount}`
+            + ` gateways=${_m.storage.gatewayCount}`
+            + ` genPanels=${_m.storage.perSystemGenerationPanelCount}`
+            + ` conflicts=${_m.conflicts.length}`);
+          for (const c of _m.conflicts) {
+            console.warn(`[sld/pdf/POST] ELECTRICAL CONFLICT — ${c.fact}: `
+              + c.claims.map(x => `${x.source} says ${x.says}`).join(' | '));
+          }
+        }
+      } catch (e) {
+        console.warn('[sld/pdf/POST] canonical electrical read skipped (non-fatal):',
+          (e as Error)?.message);
+      }
+    }
+
     // Extract inverter data from inverterSpecs array if present
     const firstInvSpec = buildInput.inverterSpecs?.[0];
     const firstPanelSpec = buildInput.panelSpecs?.[0];
@@ -286,6 +350,9 @@ export async function POST(req: NextRequest) {
       acWireLength,
       backfeedAmps,
       mainPanelAmps:           Number(buildInput.mainPanelAmps)          || 200,
+      // 🚨 THE SERVICE GRAPH REACHES THE EXPORTED SHEET. Attached above from the canonical model, so
+      // the PDF and the Diagram tab draw the same service for the same project.
+      serviceTopology:         buildInput.serviceTopology ?? null,
       utilityName:             String(buildInput.utilityName ?? buildInput.utilityCompany ?? buildInput.utility ?? 'Local Utility'),
       // Map interconnection method to renderer-friendly string
       interconnection:         (() => {

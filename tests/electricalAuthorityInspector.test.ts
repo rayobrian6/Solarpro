@@ -204,6 +204,39 @@ describe('🚨 every file the registry names exists and does what it is said to 
       .toContain('project.serviceTopology');
   });
 
+  it('🚨 the SLD PDF route consumes the graph too — two renderers, one drawing', () => {
+    // F-3 in the re-audit, and it was the worst remaining gap: this route had ZERO references to the
+    // graph, so "Export PDF" drew the legacy single-service tail for Ray's 400 A job while the Diagram
+    // tab drew two 200 A systems from the same project. Two rendering entry points, two drawings.
+    const code = src('app', 'api', 'engineering', 'sld', 'pdf', 'route.ts');
+    expect(code, 'the PDF route no longer loads the canonical model')
+      .toContain('loadElectricalProject');
+    expect(code, 'the PDF route does not hand the graph to the renderer')
+      .toContain('serviceTopology:');
+    expect(code, 'the PDF route does not project the canonical service rating')
+      .toContain('buildInput.mainPanelAmps = ');
+    expect(code, 'the PDF route still defaults the interconnection method')
+      .toContain('interconnectionMethodScalar');
+  });
+
+  it('🚨 no migrated route fabricates a service rating or an interconnection article', () => {
+    // The two fabrications the sweep found, asserted as absent-or-guarded on every migrated surface.
+    // `|| 200` may still appear as the LEGACY fallback for projects with no graph; what must also
+    // appear is the canonical projection that outranks it.
+    for (const p of [
+      ['app', 'api', 'engineering', 'bom', 'route.ts'],
+      ['app', 'api', 'engineering', 'sld', 'route.ts'],
+      ['app', 'api', 'engineering', 'sld', 'pdf', 'route.ts'],
+    ]) {
+      const code = src(...p);
+      const file = p.join('/');
+      expect(code.includes('mainPanelAmps = '),
+        `${file} reads a mainPanelAmps scalar with no canonical projection over it`).toBe(true);
+      expect(code, `${file} does not consult the graph for the interconnection method`)
+        .toContain('interconnectionMethodScalar');
+    }
+  });
+
   it('🚨 the SLD route stamps the revision, and the page compares it', () => {
     expect(src('app', 'api', 'engineering', 'sld', 'route.ts'))
       .toContain('electricalRevision');

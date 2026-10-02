@@ -182,6 +182,24 @@ export async function POST(req: NextRequest) {
             body.mainPanelAmps = _model.serviceRatedAmps;
           }
 
+          // 🚨 AND THE INTERCONNECTION METHOD. This route defaults it to 'LOAD_SIDE' in four places;
+          // the graph's POI relationship is the authority, and an unresolved POI projects nothing
+          // rather than being assigned NEC 705.12(B) by a `??`.
+          const { interconnectionMethodScalar } =
+            await import('@/lib/electrical/loadElectricalProject');
+          const _ic = interconnectionMethodScalar(_model.topology);
+          if (_ic) {
+            const _postedIc = String(body.interconnection ?? body.interconnectionType
+              ?? body.interconnectionMethod ?? '');
+            if (_postedIc && _postedIc.toUpperCase() !== _ic.value) {
+              console.warn('[sld/POST] interconnection method corrected from the service graph:'
+                + ` posted=${_postedIc} canonical=${_ic.value} (${_ic.basis})`);
+            }
+            body.interconnection = _ic.value;
+            body.interconnectionMethod = _ic.value;
+            body.interconnectionType = _ic.value;
+          }
+
           // 🚨 THE SHEET CARRIES THE REVISION IT WAS DRAWN FROM.
           //
           // Ray: "Generated electrical artifacts must carry the project/electrical revision they
