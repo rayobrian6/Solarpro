@@ -2508,13 +2508,85 @@ consumer, remove the competing read, prove the old path cannot win.
 |---|---|---|
 | `configStringPanelCounts` | **ADVERSARIAL PROVEN** | 11.5b. The SLD route was the one caller that skipped it. Now gated on active + sums + **fits the DC window**. |
 | **canonical module count** (`ElectricalProjectModel.moduleCount`) | **ADVERSARIAL PROVEN** | Zero consumers anywhere in the repo while `/api/engineering/bom` sized the parts list from `body.moduleCount \|\| body.totalPanels`. The route already held the model. Both spellings are now projected from it, a disagreement is logged, and a project with no layout count has **nothing invented**. Proof posts a deliberately stale `20` against a 37-module design; the mutation that stops projecting turns it red (exit 1), and the repair green (exit 0). |
-| `TopologyEvaluation` | **OPEN — and my Part I claim was overstated** | Part I §2.1 said the topology's conclusions "reach no professional output". **Not accurate.** `lib/sld-professional-renderer.ts:4253` computes `evaluateServiceTopology` itself and uses it at `:5342`, `:6018` and `:6142` (the schedule-row overlay). What is true is narrower and still serious: the conclusions **gate nothing** — `architectureGate.ts:21` refuses only on the coupling conflict, so a FAIL on the busbar rule, on `service.branch-sum` or on DER isolation still produces an SLD, a BOM, a priced proposal and a permit. Making a FAIL block a drawing is a real behavioural decision, so it is not something I am doing unilaterally at the end of a repair pass. |
-| `PermitSystemModel` | **OPEN** | reported as reaching the renderer and never being read — the "single source of truth bridge". Next. |
-| `ComputedSystem.bomQuantities` | **OPEN** | produced, merged, posted, forwarded, declared; zero readers. |
+| `TopologyEvaluation` | **NEEDS_RAY — and my Part I claim was overstated** | Part I §2.1 said the topology's conclusions "reach no professional output". **Not accurate.** `lib/sld-professional-renderer.ts:4253` computes `evaluateServiceTopology` itself and uses it at `:5342`, `:6018` and `:6142` (the schedule-row overlay). What is true is narrower and still serious: the conclusions **gate nothing** — `architectureGate.ts:21` refuses only on the coupling conflict, so a FAIL on the busbar rule, on `service.branch-sum` or on DER isolation still produces an SLD, a BOM, a priced proposal and a permit. Making a FAIL block a drawing is a real behavioural decision, so it is not something I am doing unilaterally. **Measured on the production functions:** `buildRaysIntendedJob()` folds to `overall = NOT_EVALUATED` with **26 PASS / 23 NOT_EVALUATED / ZERO FAIL** — so gating on FAIL would not block Ray's job at all. It would change a drawn verdict on every authored storage graph including Enphase IQ Battery, which is the part that needs his ruling. |
+| `PermitSystemModel` | **DO_NOT_WIRE** | 🚨 **MY PART II ENTRY WAS WRONG.** "reaches the renderer and is never read — the entire bridge is dead" is half true and the half that is false inverts the repair. The OBJECT is dead: `systemModel` appears exactly ONCE in 8,869 lines of the renderer — line 649, its own type declaration. But the ROUTE reads NINE fields off the model and projects them into scalars the renderer does read (`sld/route.ts:1027-1034`, `:1184`). The bridge is live through a 9-field projection; only the object reference is redundant. Wiring the object in would make **every** design worse, because the model's micro degradations would become the sheet. |
+| `ComputedSystem.bomQuantities` | **DO_NOT_WIRE** | zero readers confirmed — but consuming it would make the parts list WORSE on every brand. The six declared buckets have no entry for #14, #12, #3, #2, #1, #1/0, #2/0, #3/0 or #4/0 AWG (`computed-system.ts:468-471`), so wiring it would DELETE those wire rows and under-order the service side. |
 | `electricalRevision` on the permit input | **OPEN — digest hazard** | zero readers, so a graph change cannot move the permit digest. Giving it a reader may itself rotate the digest — same constraint as §2 above. Needs the same deliberate decision. |
 | `legacyServiceScalars` | **OPEN — do not flatten** | the sanctioned graph→scalar projection, zero callers. Ray: `panelsNotRepresented > 0` must be respected; a 400 A / 2 × 200 A service **cannot** be described by one `mainPanelAmps`, so the consumer gets migrated rather than the graph flattened. |
-| `acSourcesFromTopology` | **OPEN** | zero callers; the Compliance path still uses `resolveBatteryBranch(batteryId, batteryCount)`. |
-| `buildServiceTopologyGraph` | **OPEN** | zero callers; documented replacement for the drawing's service half. |
+| `acSourcesFromTopology` | **NEEDS_RAY** | claim NOT verified as filed — it returns continuous AC current per BACKUP DOMAIN, which is not the per-busbar 705.12(B) contribution the finding wanted, so wiring it as filed would be the flattening Ray's constraint 2 names. A refuter also found the fatal detail: `electrical-calc.ts:1009` gates on `batteryBackfeedA > 0`, so a correctly-computed **0 A is indistinguishable from absent** and triggers a catalogue recovery that returns 60 A. |
+| `buildServiceTopologyGraph` | **DO_NOT_WIRE** | claim NOT verified. The job is already done by `renderTopologyServiceSection`, gated on the project HAVING a graph (`sld-professional-renderer.ts:5326`), which is why Ray's sheet draws MSP #1, MSP #2 and both isolation switches. The wire is the wrong direction. |
+
+## 🚨 THE SLD, MEASURED — Ray's job through the real route
+
+*"The milestone that matters to me is an accurate sld."*
+
+So the job was run through `POST /api/engineering/sld` and `POST /api/engineering/sld/pdf` with the
+body the page posts, and **every cell on the returned sheet was read back**. This is what it says.
+
+### Correct and traceable to the design
+
+| Sheet states | Source | |
+|---|---|---|
+| `PV DC COUPLED TO POWERWALL 3` | canonical `solarCoupling` | ✅ |
+| `Service Rating 400 A` | graph `service.ratedAmps` | ✅ |
+| `Total Modules 37` | `layouts.total_panels` via the canonical model | ✅ |
+| `Strings 5: 9 / 9 / 9 / 8 / 2 panels` | `generateStringConfig` against the PW3 DC window; sums to 37 | ✅ |
+| `Max System Voltage (690.7(A)) 538.3 V` | β-corrected, against the PW3's 550 V input | ✅ |
+| `MPPT Channels 24 total` | 4 units × 6, from the storage | ✅ |
+| `120% Rule PASS ✓` · `NEC Reference NEC 705.12(B)` | the GRAPH's per-domain busbar checks, via `overlayServiceTopologyRows` | ✅ |
+| MSP #1, MSP #2, System 1, System 2, Gateway 3 ×2, Powerwall 3 ×4, 2 generation panels, **both** utility isolation switches | drawn from the graph | ✅ |
+| no `Fronius`, no `Tesla Solar Inverter`, no `INVERTER NOT SELECTED` | the architecture override | ✅ |
+| the exported PDF — identical on architecture, modules, strings | one canonical projection + one string derivation | ✅ |
+
+**And a correction to something I said in this session:** I reported that the sheet's 120% allowance
+was `400 × 1.2 − 400 = 80 A` from the `mainPanelAmps` collision. **That is wrong.** The `480` I
+matched is the Powerwall 3's **MPPT maximum**, not `400 × 1.2`. `overlayServiceTopologyRows`
+*deletes* the scalar `Bus 120% Limit` row (`sld-professional-renderer.ts:2968`) and replaces the
+`120% Rule` row with the graph's own folded per-domain verdict (`:3014`). The 80 A figure
+`PermitSystemModel` computes never reaches a sheet that has a graph. The collision is still real in
+the model, and it is still worth closing — but it is not on Ray's drawing.
+
+### Honestly incomplete — and the incompleteness is the correct output
+
+The sheet carries **20 unresolved markers**. Every one was read and classified. None is a
+fabrication; all of them are SolarPro declining to state something it has not been given.
+
+| On the sheet | Why | Is "NOT EVALUATED" right? |
+|---|---|---|
+| `Fault-current compatibility — REQUIRES Available fault current at the service` | `availableFaultCurrentA: null` — nobody has measured it | **Yes.** SCCR coordination cannot be concluded without it. |
+| `Generation panel — System 1 / 2 interrupting rating — REQUIRES Interrupting rating (SCCR)` | not recorded for either panel | **Yes.** |
+| `Existing service equipment — confirmation that it was read on site, not assumed` | Ray's own note: the Eaton 400 A assembly's internals are unverified | **Yes**, and it is his own ruling. |
+| `SCCR NOT EVAL` on both 200 A isolation switches | follows from the fault current above | **Yes.** |
+| `Tesla Powerwall 3 #1–#4 PV input — REQUIRES Which PV strings land on which battery's DC inputs` ×4 | the engine derives 5 strings and the four units publish 24 MPPT channels, but **nothing in the model maps a string to a unit** | **Yes today** — it is an installer decision and there is nowhere to record it. This is the missing capability, below. |
+| `ESS AC OUTPUT (2 UNITS) → Generation panel — SIZE FOR 60 A — NOT EVALUATED` ×2 | no run length, conduit or ambient exists for this segment | **Yes.** |
+| `Tesla Backup Gateway 3 → MSP — SIZE FOR 200 A — NOT EVALUATED` ×2 | same | **Yes** — and printing a gauge here is the dangerous version. |
+
+**Why those four conductors cannot be sized today, precisely.** `RunSegmentId`
+(`lib/computed-system.ts:119-140`) has no segment for the Tesla chain: it carries
+`BATTERY_TO_BUI_RUN` and `BUI_TO_MSP_RUN`, which belong to a **Backup Interface** architecture, not
+to a Gateway-plus-generation-panel one. And `ServiceTopology` has **no length, conduit or ambient
+fields at all** — a grep for `lengthFt` / `conduitType` / `ambient` across
+`lib/electrical/serviceTopology.ts` returns nothing. So NEC 310.15 derating has no inputs.
+
+`wireGaugeForOcpd` (`lib/permit/utils/conductorAuthority.ts:177`) would hand back `#6 AWG` for 60 A
+and `#3/0 AWG` for 200 A, and the graph already uses it one line away for the generation panel's
+*output* (`serviceTopology.ts:1144`). **I did not use it for the other four.** It is a
+terminal-temperature ladder with no derating, and `#3/0` is exactly 200 A at 75 °C — zero headroom.
+Applying it to a 200 A backup feeder whose length, conduit fill and ambient nobody has recorded
+would print an under-sized conductor on a permit, which is the fabrication class this whole pass
+removed, pointed at a bigger wire.
+
+> **So: the SLD is accurate. It is not complete, and what is missing is INPUT, not arithmetic.**
+> Everything the sheet states is true and traceable; everything it cannot state, it names, with the
+> ampere target so an engineer can size it.
+
+### What would make it complete
+
+| Build | What it unlocks | Size |
+|---|---|---|
+| Run segments for the Tesla chain — `ESS_TO_GENERATION_RUN`, `GENERATION_TO_GATEWAY_RUN`, `GATEWAY_TO_BACKED_UP_PANEL_RUN` — plus length/conduit fields on the graph nodes that own them | the four `SIZE FOR … — NOT EVALUATED` rows become real conductor rows with gauge, conduit, fill, voltage drop and an ampacity verdict | **Large.** It changes the engine's run set, which feeds the permit schedule and the BOM — so it moves `meta.digest`. Needs the deliberate rotation. |
+| A string→unit assignment on the graph (which string lands on which Powerwall's DC inputs) | the four `PV input — REQUIRES` markers resolve, and the sheet can draw the DC home runs | **Medium**, and it is item 4 of the original gauntlet. No digest hazard if it stays out of the snapshot body. |
+| Fields for available fault current and per-panel SCCR | the SCCR chain and the isolation switches conclude | **Small** — these are survey inputs with nowhere to land. |
 
 ## What the repair actually changed, in one place
 
