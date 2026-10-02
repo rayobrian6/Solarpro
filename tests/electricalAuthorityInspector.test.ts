@@ -273,4 +273,40 @@ describe('the production gate on the dev inspector', () => {
     expect(devDiagnosticsAllowed({ VERCEL_ENV: 'development' } as unknown as NodeJS.ProcessEnv)).toBe(true);
     expect(devDiagnosticsAllowed({ NODE_ENV: 'test' } as unknown as NodeJS.ProcessEnv)).toBe(true);
   });
+
+  it('🚨 the DEV BRANCH deployment is not the production application', async () => {
+    // Vercel labels a project's own production-branch deployment `VERCEL_ENV=production`, so
+    // `solarpro-dev` — which builds `dev` and is the deployment Ray actually tests — served a 404 for
+    // every developer diagnostic. The question that matters is which BRANCH was built.
+    const { devDiagnosticsAllowed } = await import('@/lib/devDiagnostics');
+    const env = (o: Record<string, string>) => o as unknown as NodeJS.ProcessEnv;
+    expect(devDiagnosticsAllowed(env({ VERCEL_ENV: 'production', VERCEL_GIT_COMMIT_REF: 'dev' })))
+      .toBe(true);
+    // The release branches are still refused, on any casing.
+    expect(devDiagnosticsAllowed(env({ VERCEL_ENV: 'production', VERCEL_GIT_COMMIT_REF: 'master' })))
+      .toBe(false);
+    expect(devDiagnosticsAllowed(env({ VERCEL_ENV: 'production', VERCEL_GIT_COMMIT_REF: 'main' })))
+      .toBe(false);
+    expect(devDiagnosticsAllowed(env({ VERCEL_ENV: 'production', VERCEL_GIT_COMMIT_REF: 'MASTER' })))
+      .toBe(false);
+    // 🚨 AND AN UNIDENTIFIABLE PRODUCTION DEPLOYMENT GETS THE STRICT ANSWER. An absent ref must not
+    // read as "some feature branch, probably fine" — that is how a gate opens on the real site.
+    expect(devDiagnosticsAllowed(env({ VERCEL_ENV: 'production' }))).toBe(false);
+    expect(devDiagnosticsAllowed(env({ VERCEL_ENV: 'production', VERCEL_GIT_COMMIT_REF: '   ' })))
+      .toBe(false);
+    // Preview stays refused regardless of branch.
+    expect(devDiagnosticsAllowed(env({ VERCEL_ENV: 'preview', VERCEL_GIT_COMMIT_REF: 'dev' })))
+      .toBe(false);
+  });
+
+  it('🚨 the electrical state dump is gated and scoped the same way', () => {
+    const code = src('app', 'api', 'dev', 'electrical-state', 'route.ts');
+    expect(code).toContain('devDiagnosticsAllowed');
+    expect(code).toContain('getUserFromRequest');
+    expect(code).toContain('user.id');
+    // It must not write. A diagnostic that canonicalises changes the thing it is inspecting.
+    expect(code).not.toContain('persistElectricalCanonicalization');
+    expect(code).not.toContain('upsertSelectedEquipment');
+    expect(code).not.toContain('writeServiceTopology');
+  });
 });

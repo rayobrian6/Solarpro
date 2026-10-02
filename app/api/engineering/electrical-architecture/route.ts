@@ -19,7 +19,7 @@ export const maxDuration = 20;
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
-import { isValidUUID } from '@/lib/db-neon';
+import { isValidUUID, getDbReady } from '@/lib/db-neon';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 import { loadElectricalProject } from '@/lib/electrical/loadElectricalProject';
 import { planArchitectureResolution } from '@/lib/electrical/architectureResolution';
@@ -147,6 +147,66 @@ export async function POST(req: NextRequest) {
 
     await upsertSelectedEquipment(projectId, user.id, patch);
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // 🚨 THE SECOND STORE THAT CAN RESURRECT IT — RAY'S RULE SEVEN.
+    //
+    //   "it must clear/deprecate every current-state location that can resurrect the old inverter,
+    //    including whichever of these currently owns it: selected_equipment,
+    //    engineering_config.inverters, engineering seed/current config, component draft state..."
+    //
+    // `engineering_config` holds the page's inverter FLEET. Emptying `selected_equipment.inverter`
+    // and leaving the fleet behind is not a fix: the browser composes its copy of the canonical model
+    // from the fleet, so the conflict reappears the moment the page reloads — Ray would have clicked
+    // an answer that un-answered itself. Worse, the next autosave writes the fleet back out and the
+    // old architecture is live again.
+    //
+    // A previous pass did this filtering IN THE PAGE. That is the same mistake one level up: a
+    // component correcting a persisted store is a second writer for the same fact. The decision is
+    // made here, so the clearing happens here, and the page simply reloads what the server says.
+    // ═══════════════════════════════════════════════════════════════════════
+    let clearedFleetEntries = 0;
+    if (plan.retiredExternalInverter) {
+      try {
+        const sql = await getDbReady();
+        const rows = await sql`
+          SELECT engineering_config FROM projects
+          WHERE id = ${projectId} AND user_id = ${user.id} AND deleted_at IS NULL LIMIT 1
+        ` as Array<{ engineering_config: unknown }>;
+        const rawCfg = rows[0]?.engineering_config;
+        const cfg = (typeof rawCfg === 'string' ? JSON.parse(rawCfg) : rawCfg) as
+          Record<string, unknown> | null;
+        if (cfg && Array.isArray(cfg.inverters) && cfg.inverters.length > 0) {
+          const before = cfg.inverters.length;
+          // 🚨 EVERY standalone PV inverter goes, not only the one named in the retirement.
+          // A DC-coupled design has none of them. Removing the matching id and leaving a second
+          // fleet entry would hand the page another inverter to call the architecture from — which
+          // is this whole defect, with a different row.
+          const kept: unknown[] = [];
+          cfg.inverters = kept;
+          clearedFleetEntries = before;
+          await sql`
+            UPDATE projects
+               SET engineering_config = ${JSON.stringify(cfg)}::jsonb,
+                   engineering_updated_at = NOW()
+             WHERE id = ${projectId} AND user_id = ${user.id} AND deleted_at IS NULL
+          `;
+          console.log(`[electrical] cleared ${before} inverter fleet entr`
+            + `${before === 1 ? 'y' : 'ies'} from engineering_config (project ${projectId})`);
+        }
+      } catch (e) {
+        // 🚨 NOT SILENT. If the fleet survives, the architecture can come back — so this failure is
+        // reported to the caller rather than logged and forgotten.
+        console.error('[electrical] FAILED to clear the engineering_config inverter fleet:',
+          (e as Error)?.message);
+        return NextResponse.json({
+          success: false,
+          error: 'The architecture was recorded, but the old inverter could not be cleared from the '
+            + 'engineering configuration. Reload the project and try again — do not generate '
+            + 'drawings until this succeeds.',
+        }, { status: 500 });
+      }
+    }
+
     const after = await loadElectricalProject(projectId, user.id);
     console.log(`[electrical] ${plan.summary} (project ${projectId})`);
 
@@ -155,6 +215,7 @@ export async function POST(req: NextRequest) {
       summary: plan.summary,
       coupling: plan.coupling,
       retiredExternalInverter: plan.retiredExternalInverter,
+      clearedFleetEntries,
       // 🚨 THE STATE AFTER THE WRITE, read back through the SAME load path — so the caller does not
       // have to trust that the write did what the plan said.
       resolutionRequired: after?.model.architectureResolutionRequired ?? null,

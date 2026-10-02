@@ -92,9 +92,59 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
       }, { status: 400 });
     }
 
+    // ═════════════════════════════════════════════════════════════════════════
+    // 🚨 A SUBMITTED COUPLING IS A DECISION, AND IT HAS TO SAY SO.
+    //
+    // `solarCoupling` lives on the graph, and until now NOTHING recorded who put it there. That made
+    // a designer's answer in the wizard byte-identical to the value
+    // `persistElectricalCanonicalization` wrote from a derivation — which is how Ray's project came
+    // to assert `ac-coupled-inverter` as though he had stated it, and why the model now re-tests a
+    // recorded coupling that carries no decision.
+    //
+    // So the human half of that pair records itself. Written only when the coupling actually ARRIVES
+    // or CHANGES: re-saving a topology for an unrelated edit must not manufacture a decision the
+    // designer did not make on this request.
+    // ═════════════════════════════════════════════════════════════════════════
+    const _before = await readServiceTopology(id, user.id, 'as-issued');
+    const _couplingChanged =
+      !!checked.topology.solarCoupling
+      && checked.topology.solarCoupling !== (_before?.topology.solarCoupling ?? null);
+
     const ok = await writeServiceTopology(id, user.id, checked.topology);
     if (!ok) {
       return NextResponse.json({ success: false, error: 'Project not found' }, { status: 404 });
+    }
+
+    if (_couplingChanged) {
+      try {
+        const { provenanceRecord } = await import('@/lib/electrical/equipmentProvenance');
+        const { readProjectEquipmentStores } = await import('@/lib/reconciliation/reconcile');
+        const { upsertSelectedEquipment } = await import('@/lib/db/projects');
+        const _stores = await readProjectEquipmentStores(id);
+        const _priorProv = _stores?.selectedEquipment
+          && typeof _stores.selectedEquipment.provenance === 'object'
+          && _stores.selectedEquipment.provenance
+            ? _stores.selectedEquipment.provenance as Record<string, unknown>
+            : {};
+        await upsertSelectedEquipment(id, user.id, {
+          provenance: {
+            ..._priorProv,
+            architecture: provenanceRecord(
+              'USER_SELECTED', 'service-topology-wizard',
+              `The designer recorded the PV coupling as '${checked.topology.solarCoupling}' in the `
+                + 'service topology.',
+              new Date(),
+            ),
+          },
+        });
+        console.log(`[service-topology] coupling recorded by the designer: `
+          + `${checked.topology.solarCoupling} (project ${id})`);
+      } catch (e) {
+        // Non-fatal: the graph write already succeeded, and a missing provenance record makes the
+        // model ASK rather than assume — which is the safe direction for this failure.
+        console.warn('[service-topology] could not record architecture provenance (non-fatal):',
+          (e as Error)?.message);
+      }
     }
 
     const evaluation = evaluateServiceTopology(checked.topology);

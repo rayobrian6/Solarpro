@@ -504,6 +504,17 @@ export interface SLDProfessionalInput {
   acVoltageDropPct?:       number;
   panelsPerString?:        number;
   lastStringPanels?:       number;
+  /**
+   * 🚨 THE ACTUAL MODULE COUNT OF EVERY STRING, in order.
+   *
+   * `panelsPerString` + `lastStringPanels` is a LOSSY summary: it can say "first N-1 at P, last at
+   * L" and nothing else. Ray's real array is 10/9/9/9, which that pair cannot express — so the
+   * array box multiplied 4 × 10 and printed 40 modules under a 37-module heading.
+   *
+   * When this is present it is the layout. The two scalars stay for the many callers that only have
+   * them, and for the uniform case where they are exact.
+   */
+  stringPanelCounts?:      number[];
   designTempMin?:          number;
   vocCorrected?:           number;
   vmpCorrected?:           number;
@@ -4434,8 +4445,39 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     const _vocTxt = _sVocCorrected != null
       ? `Voc=${_sVocCorrected.toFixed(1)}V`
       : `Voc(STC)=${(input.panelVoc * _pps).toFixed(1)}V`;
-    // Line 1: string layout (e.g. "3 STRINGS × 12 MODULES")
-    parts.push(txt(pvCX, pvL0+LBL_PITCH, `${_ns} STRING${_ns>1?'S':''} × ${_pps} MODULES`, {sz:F.tiny, anc:'middle', bold:true}));
+    // ════════════════════════════════════════════════════════════════
+    // 🚨 "37 MODULES MEANS 37 MODULES" — AND THIS LINE SAID 40.
+    //
+    // `N STRINGS × P MODULES` multiplies, and a reviewer reads it as the array. `P` is the FULL
+    // string length, not an even division: a 37-module array packs as 10/9/9/9, so this printed
+    // "4 STRINGS × 10 MODULES" — 40 — three lines under "37 × 440W" on the same sheet. The
+    // distribution underneath was correct the whole time; the SUMMARY fabricated seven modules.
+    //
+    // Ray: "maxModulesPerString is a constraint. It is not an assignment." A product is only honest
+    // when the strings are uniform, so an uneven array prints its actual lengths instead. Nothing
+    // here changes what was designed — only what the sheet claims was designed.
+    // ════════════════════════════════════════════════════════════════
+    const _lsp = input.lastStringPanels ?? _pps;
+    // The real layout when the caller has it; otherwise the lossy pair, reconstructed.
+    const _counts = (input.stringPanelCounts && input.stringPanelCounts.length > 0)
+      ? input.stringPanelCounts
+      : Array.from({length: _ns}, (_, i) => (i === _ns - 1 ? _lsp : _pps));
+    const _realSum = _counts.reduce((n, c) => n + c, 0);
+    const _uniform = _counts.length <= 1 || _counts.every(c => c === _counts[0]);
+    const _layoutTxt = _uniform && _realSum === input.totalModules
+      ? `${_counts.length} STRING${_counts.length>1?'S':''} × ${_counts[0]} MODULES`
+      : `${_counts.length} STRING${_counts.length>1?'S':''} — ${_counts.join('/')} MODULES`;
+    parts.push(txt(pvCX, pvL0+LBL_PITCH, _layoutTxt, {sz:F.tiny, anc:'middle', bold:true}));
+    if (_realSum !== input.totalModules) {
+      // 🚨 THE STRINGS DO NOT ACCOUNT FOR THE ARRAY. Not a formatting choice — a design that has
+      // lost or gained modules. It is said on the sheet rather than rounded away, because a reviewer
+      // cannot check an assignment the drawing does not show.
+      parts.push(txt(pvCX, pvL0+1.6*LBL_PITCH,
+        `STRING ASSIGNMENT ACCOUNTS FOR ${_realSum} OF ${input.totalModules} MODULES — VERIFY`,
+        {sz:F.tiny, anc:'middle', bold:true, fill:'#C62828'}));
+      console.warn(`[SLD STRING SUMMARY] assignment sums to ${_realSum}, array is `
+        + `${input.totalModules} modules`);
+    }
     // Line 2: electrical parameters
     parts.push(txt(pvCX, pvL0+2*LBL_PITCH, `${_vocTxt}  Isc=${_sIsc.toFixed(2)}A`, {sz:F.tiny, anc:'middle', fill:'#B71C1C'}));
     console.log(`[SLD STRING SUMMARY] ${_ns} strings × ${_pps} modules, ${_vocTxt}, Isc=${_sIsc.toFixed(2)}A`);

@@ -647,8 +647,16 @@ describe('🚨 the ecosystem change must not be able to invent an architecture',
 
     const after = (await loadElectricalProject(PROJECT, USER_ID))!;
     expect(after.model.solarCoupling).toBe('dc-coupled-storage');
-    expect(after.model.solarCouplingProvenance.source).toBe('service-topology');
+    // 🚨 'derived', NOT 'service-topology'. The canonicalization WROTE this value — no human did —
+    // and reporting a derivation as the designer's word is the misstatement that let Ray's project
+    // assert `ac-coupled-inverter` for two acceptance runs with nothing able to question it. The
+    // value still stands (the evidence agrees with it) and it still stops the re-derivation; what
+    // changed is that the model no longer claims a person said it.
+    expect(after.model.solarCouplingProvenance.source).toBe('derived');
+    expect(after.model.solarCouplingProvenance.basis).toContain('nothing records who decided it');
     expect(after.model.canonicalizationPatch).toBeNull();
+    // And it does NOT re-open: a derived value the evidence supports is obeyed.
+    expect(after.model.architectureResolutionRequired).toBe(false);
   });
 });
 

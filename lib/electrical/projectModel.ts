@@ -323,12 +323,54 @@ export function resolveElectricalProject(
   let solarCouplingProvenance: ElectricalProvenance = NONE;
   let canonicalizationPatch: { solarCoupling: SolarCoupling } | null = null;
 
+  // ══════════════════════════════════════════════════════════════════════════
+  // 🚨 "RECORDED" IS NOT THE SAME AS "DECIDED" — AND THIS IS WHAT RAY'S THIRD RUN FOUND.
+  //
+  // His project failed acceptance for a THIRD time, on a build that refuses to draw an unresolved
+  // architecture. Both facts were true at once because the architecture is not unresolved on his
+  // row: `solarCoupling = 'ac-coupled-inverter'` is RECORDED on it.
+  //
+  // Nobody chose that. Three automatic steps wrote it:
+  //   1. `EcosystemPicker` auto-selected a Tesla string inverter with no click.
+  //   2. `projectModel` (at 921b23a7) reached `else if (hasExternalInverter)` BEFORE the DC-capable
+  //      check and returned `canonicalizationPatch = { solarCoupling: 'ac-coupled-inverter' }`.
+  //   3. `sld/route.ts` called `persistElectricalCanonicalization`, which WROTE it.
+  //
+  // So SolarPro derived an architecture from its own suggestion and stored it in the slot a designer
+  // writes to. This branch then read it back and called it "Recorded on the project by the designer"
+  // — and because the conflict check only questioned `dc-coupled-storage`, nothing ever asked again.
+  // A correction that writes a falsehood and then makes itself invisible is worse than the defect.
+  //
+  // 🚨 THE RULE, which is Ray's RULE FOUR: A PROJECTION MAY NEVER REPAIR, FILL OR OVERRIDE ITS
+  // OWNER. A derived coupling is a projection. Written into the owner's slot it became indistinguish-
+  // able from a decision — so the slot now has to say WHICH, and a value that is merely derived is
+  // re-tested against the evidence instead of outranking it.
+  //
+  // `provenance.architecture` is that record. It is written when a human answers: the resolution
+  // endpoint writes it, and the service-topology PUT writes it when a designer submits a coupling
+  // through the wizard. Its ABSENCE beside a recorded coupling means the value got there by
+  // derivation, because nothing else could have put it there without recording itself.
+  // ══════════════════════════════════════════════════════════════════════════
+  const architectureIsDecision = !!input.equipmentProvenance?.architecture;
+
   if (recorded) {
     solarCoupling = recorded;
-    solarCouplingProvenance = {
-      source: 'service-topology',
-      basis: 'Recorded on the project by the designer.',
-    };
+    solarCouplingProvenance = architectureIsDecision
+      ? {
+          source: 'service-topology',
+          basis: 'Recorded on the project by the designer'
+            + (input.equipmentProvenance!.architecture!.recordedAt
+                ? ` on ${input.equipmentProvenance!.architecture!.recordedAt.slice(0, 10)}`
+                : '')
+            + '.',
+        }
+      : {
+          // 🚨 NOT `service-topology`. Reporting a derivation as the designer's word is the
+          // misstatement that kept this alive through two acceptance runs.
+          source: 'derived',
+          basis: `The project records '${recorded}', but nothing records who decided it — so it was `
+            + 'written by a derivation rather than stated by a designer.',
+        };
     // ── CASE B — A REAL PERSISTED CONFLICT ────────────────────────────────
     //
     // The graph says the strings terminate on the batteries' DC inputs, and the equipment store
@@ -347,6 +389,60 @@ export function resolveElectricalProject(
         question: 'Does this project have a separate AC PV inverter, or does the PV land on the '
           + 'batteries? Remove the inverter selection, or change the coupling to "PV on its own AC '
           + 'inverter".',
+      });
+    } else if (
+      // ══════════════════════════════════════════════════════════════════════
+      // 🚨 THE COMBINATION NOTHING ASKED ABOUT — RAY'S LIVE ROW.
+      //
+      // A recorded `ac-coupled-inverter`, on a graph whose storage takes PV on its own DC inputs,
+      // where NO human recorded the architecture and the inverter the architecture rests on is not
+      // an installer decision either. Every link in that chain is automatic, so the recorded value
+      // carries no more authority than the derivation that produced it — and the derivation is the
+      // one `923b23a7` got wrong.
+      //
+      // Scoped tightly, because Ray's standing constraint is that other brands and other scenarios
+      // must not change:
+      //   · a designer who answers the wizard records `provenance.architecture` and never sees this;
+      //   · an inverter the installer actually chose (`USER_SELECTED`) never sees this;
+      //   · storage that publishes no PV input never sees this — only the PW3 class does today.
+      // ══════════════════════════════════════════════════════════════════════
+      !architectureIsDecision
+      && recorded === 'ac-coupled-inverter'
+      && pvCapableUnits.length > 0
+      // 🚨 AND THE EQUIPMENT MUST BE A SUGGESTION TOO — not merely "not proven to be a decision".
+      //
+      // The first cut of this tested `isInstallerDecision !== true`, which is also false for
+      // `UNRECORDED` — and `UNRECORDED` is every pre-provenance project. That immediately re-opened
+      // a legitimately AC-coupled Tesla job carrying Enphase micros beside four Powerwalls, which is
+      // a real design Ray named explicitly: "Do not assume Tesla storage always eliminates Enphase."
+      // Its own suite caught it.
+      //
+      // The claim this branch is entitled to make is narrow: BOTH links in the chain were automatic
+      // — a coupling no human recorded, derived from an inverter the ecosystem picker suggested.
+      // An Enphase inverter on a Tesla graph is not reachable from the Tesla auto-pick, so it is
+      // `INDETERMINATE`, and an unknown origin is not evidence of anything.
+      && externalInverterOrigin?.kind === 'AUTO_SUGGESTED_LEGACY'
+    ) {
+      conflicts.push({
+        code: 'SOLAR_COUPLING_UNRESOLVED',
+        fact: 'How the PV is coupled',
+        claims: [
+          { source: 'service-topology',
+            says: "The project records 'PV on its own AC inverter' — but nothing records who decided "
+              + 'it, so it was written by a derivation and not stated by a designer.' },
+          { source: 'selected-equipment',
+            says: hasExternalInverter
+              ? `The inverter that architecture rests on ('${explicitInverterId}') is not an `
+                + `installer decision either: ${externalInverterOrigin?.label.toLowerCase() ?? 'origin not recorded'}.`
+              : 'No separate PV inverter is on the project at all, so there is nothing for the PV to '
+                + 'be AC coupled through.' },
+          { source: 'service-topology',
+            says: `${pvCapableUnits.length} storage unit(s) publish their own PV DC inputs, so the `
+              + 'strings could terminate there instead.' },
+        ],
+        question: 'Nothing in this project states where the strings land — the recorded answer was '
+          + 'derived from an inverter nobody chose. Does the PV run through a separate inverter on '
+          + 'AC, or land on the batteries’ DC inputs?',
       });
     }
   } else if (hasExternalInverter && pvCapableUnits.length > 0) {

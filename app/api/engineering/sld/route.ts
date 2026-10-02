@@ -22,6 +22,7 @@ import { renderSLDProfessional, SLDProfessionalInput } from '@/lib/sld-professio
 import { sanitizeClientSourceBranches } from '@/lib/permit/utils/sldAdapter';
 import { microBranchCount } from '@/lib/permit/utils/branching';
 import { getThermalDesignBasis } from '@/lib/permit/utils/designTemps';
+import { unselectedInverterLabel } from '@/lib/permit/utils/helpers';
 // The adopted NEC edition (canonical authority) and the ONE rooftop-adder gate that
 // turns on it. NEC 310.15(B)(3)(c) was deleted for PV by NEC 2017 690.31(A).
 import { getJurisdictionInfo } from '@/lib/jurisdiction';
@@ -246,6 +247,47 @@ export async function POST(req: NextRequest) {
           // So the number follows the recorded connection, which is the installer's decision, and is
           // left untouched when that decision has not been made.
           body.batteryCount = _model.storage.invertingUnitCount;
+
+          // ══════════════════════════════════════════════════════════════
+          // 🚨 RULE ELEVEN — THE DRAWING TAKES NO ARCHITECTURE FROM THE UI.
+          //
+          // Ray: "The Generate SLD request may identify projectId and artifact options. It may not be
+          // allowed to override topologyType, inverterId, batteryCount, serviceAmps, solarCoupling,
+          // interconnectionMethod. Those come from loadElectricalProject(projectId) only."
+          //
+          // Everything above this line projects ONE field at a time, which is how the live sheet kept
+          // finding a new way to be wrong: `topologyType: 'STRING'` and `inverterModel: 'Tesla Solar
+          // Inverter 5.7kW' rode in from the page's React state and were used verbatim at 373/395,
+          // because nothing had claimed those two.
+          //
+          // So the architecture fields are OVERWRITTEN as a set, from the canonical model, and what
+          // the page sent is logged rather than silently discarded — a disagreement here means a
+          // surface is still deriving architecture, and that is worth seeing in the server log.
+          // ══════════════════════════════════════════════════════════════
+          if (_model.solarCoupling === 'dc-coupled-storage') {
+            const _postedTopo = String(body.topologyType ?? '');
+            const _postedInv = String(body.inverterModel ?? '');
+            // There is no separate PV inverter on this design. Not an unknown one — none.
+            body.topologyType = 'DC_COUPLED_STORAGE';
+            delete body.inverterModel;
+            delete body.inverterManufacturer;
+            delete body.inverterId;
+            if (_postedTopo && _postedTopo !== 'DC_COUPLED_STORAGE') {
+              console.warn('[sld/POST] the page posted an architecture the project does not have:'
+                + ` topologyType=${_postedTopo}`
+                + (_postedInv ? ` inverterModel=${_postedInv}` : '')
+                + ' — overridden from the canonical model (dc-coupled-storage).');
+            }
+          } else if (_model.solarCoupling === 'ac-coupled-inverter') {
+            // The architecture IS a separate inverter — but WHICH one is still the project's answer,
+            // not the page's. Only project an identity the model actually holds.
+            if (_model.externalInverterId) body.inverterId = _model.externalInverterId;
+          } else if (_model.solarCoupling === 'storage-only') {
+            body.topologyType = 'STORAGE_ONLY';
+            delete body.inverterModel;
+            delete body.inverterManufacturer;
+            delete body.inverterId;
+          }
 
           // ═══════════════════════════════════════════════════════════════
           // 🚨 ON A DC-COUPLED JOB THE STRINGS ARE SIZED AGAINST THE CABINETS, NOT A PHANTOM
@@ -473,13 +515,28 @@ export async function POST(req: NextRequest) {
       inverterManufacturer = parts[0];
       inverterModel = parts.slice(1).join(' ');
     }
-    // Default manufacturer based on topology
-    const topoForDefault = String(body.topologyType ?? 'STRING_INVERTER');
-    if (!inverterManufacturer) {
-      inverterManufacturer = topoForDefault === 'MICROINVERTER' ? 'Enphase' : 'Fronius';
-    }
+    // ════════════════════════════════════════════════════════════════════
+    // 🚨 NO EQUIPMENT MAY APPEAR FROM ABSENCE — AND THIS WAS STILL FABRICATING ONE.
+    //
+    // These eight lines printed a FRONIUS PRIMO 8.2-1 on the permit sheet of any project that sent
+    // no inverter model, and an ENPHASE IQ8+ on any project whose posted topology happened to say
+    // micro. Not a placeholder an engineer would notice — a real manufacturer and a real model
+    // number, in the nameplate position, on a drawing that goes to an AHJ.
+    //
+    // And the default it keyed off was itself invented: `body.topologyType ?? 'STRING_INVERTER'`,
+    // so a request that stated no architecture got "string", which then got Fronius. Two guesses
+    // stacked, ending in a specific product nobody had chosen.
+    //
+    // The codebase already HAS the right answer for this: `unselectedInverterLabel()` emits the
+    // fail-loud '⚠ INVERTER NOT SELECTED' marker that the renderer detects and prints in red
+    // (`isInverterUnselectedMarker`). Absence is a state with a representation — it did not need a
+    // product.
+    // ════════════════════════════════════════════════════════════════════
     if (!inverterModel) {
-      inverterModel = topoForDefault === 'MICROINVERTER' ? 'IQ8+' : 'Primo 8.2-1';
+      inverterModel = unselectedInverterLabel();
+      inverterManufacturer = '';
+      console.warn('[sld/POST] no inverter model was supplied — the sheet says INVERTER NOT '
+        + 'SELECTED rather than naming a product nobody chose.');
     }
 
     // Derive AC output amps if not provided — uses _bodyAcOutputKw here since acOutputKw
@@ -726,6 +783,10 @@ export async function POST(req: NextRequest) {
     let mpptAllocation = '';
     let panelsPerString = 1;
     let lastStringPanels = 1;
+    // 🚨 THE WHOLE LAYOUT, not its first and last entries. See `stringPanelCounts` on the renderer
+    // input: collapsing 10/9/9/9 to (first=10, last=9) is what printed 40 modules on a 37-module
+    // sheet. The array is carried end to end and the two scalars become its projections.
+    let stringPanelCounts: number[] = [];
 
     if (!isMicro) {
       const moduleSpecs = moduleSpecsFromRegistry({
@@ -773,6 +834,9 @@ export async function POST(req: NextRequest) {
       // Determine panels per string (may vary for last string)
       panelsPerString = stringResult.strings[0]?.panelsInString ?? Math.round(totalModules / Math.max(stringResult.totalStrings, 1));
       lastStringPanels = stringResult.strings[stringResult.strings.length - 1]?.panelsInString ?? panelsPerString;
+      stringPanelCounts = stringResult.strings
+        .map(st => st.panelsInString)
+        .filter((n2): n2 is number => typeof n2 === 'number' && n2 > 0);
 
       // Phase B3: Override layout-count fields from sizing engine.
       // generateStringConfig() above is kept for NEC 690.7 Voc/current math.
@@ -782,6 +846,8 @@ export async function POST(req: NextRequest) {
         const panelCounts = layoutStrings.map(s => s.panelCount);
         panelsPerString  = panelCounts[0] ?? panelsPerString;
         lastStringPanels = panelCounts[panelCounts.length - 1] ?? panelsPerString;
+        stringPanelCounts = panelCounts.filter(
+          (n2): n2 is number => typeof n2 === 'number' && n2 > 0);
 
         // Rebuild mpptAllocation from sizing engine strings
         const mpptGroups: Record<number, number> = {};
@@ -1158,6 +1224,8 @@ export async function POST(req: NextRequest) {
       // Auto string generation results
       panelsPerString:         isMicro ? 1 : panelsPerString,
       lastStringPanels:        isMicro ? 1 : lastStringPanels,
+      stringPanelCounts:       isMicro ? undefined
+                                 : (stringPanelCounts.length > 0 ? stringPanelCounts : undefined),
       designTempMin,
       vocCorrected:            stringResult?.vocCorrected,
       vmpCorrected:            stringResult?.vmpCorrected,

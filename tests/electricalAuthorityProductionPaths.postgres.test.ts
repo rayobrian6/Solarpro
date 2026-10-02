@@ -643,11 +643,20 @@ describe('🚨 MUTATION 4 — unambiguous legacy state canonicalises ONCE and pe
     const before = (await load())!;
     expect(await persistElectricalCanonicalization(before, USER_ID)).toBe('written');
 
-    // Read again: the coupling is now RECORDED, the provenance is the topology rather than a
-    // derivation, and there is nothing left to patch.
+    // Read again: the coupling is now RECORDED and there is nothing left to patch.
     const after = (await load())!;
     expect(after.model.solarCoupling).toBe('dc-coupled-storage');
-    expect(after.model.solarCouplingProvenance.source).toBe('service-topology');
+    // 🚨 AND IT STILL REPORTS ITSELF AS DERIVED, because it is. This assertion used to read
+    // 'service-topology' — "Recorded on the project by the designer" — which was a canonicalization
+    // describing its own output as a human's decision. That misstatement is how Ray's project came
+    // to assert `ac-coupled-inverter` through two acceptance runs with nothing able to question it.
+    //
+    // What persisting BUYS is the end of re-derivation (`canonicalizationPatch` is null below), not
+    // a promotion to somebody's word. The value stands because the EVIDENCE still supports it; a
+    // derived value the evidence contradicts is re-opened instead.
+    expect(after.model.solarCouplingProvenance.source).toBe('derived');
+    expect(after.model.architectureResolutionRequired,
+      'a derived value the evidence AGREES with was re-opened').toBe(false);
     expect(after.model.canonicalizationPatch,
       'the model is still deriving after the decision was persisted').toBeNull();
 

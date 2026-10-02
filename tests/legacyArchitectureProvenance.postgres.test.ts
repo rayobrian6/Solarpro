@@ -92,6 +92,9 @@ beforeAll(async () => {
   await db.exec(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS selected_equipment JSONB`);
   await db.exec(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS engineering_config JSONB`);
   await db.exec(`ALTER TABLE layouts ADD COLUMN IF NOT EXISTS total_panels INTEGER`);
+  // `save-config` ALTERs this column into existence on every write, so production always has it.
+  // The fixture writes `engineering_config` with raw SQL, so it has to stand the column up itself.
+  await db.exec(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS engineering_updated_at TIMESTAMPTZ`);
 
   // ══════════════════════════════════════════════════════════════════════════
   // 🚨 WARM THE ROUTE MODULES HERE, NOT INSIDE A 10-SECOND TEST.
@@ -140,10 +143,20 @@ async function writeRaysLiveRow(opts?: {
   inverterId?: string | null;
   provenance?: Record<string, unknown> | null;
   pvCapableStorage?: boolean;
+  /**
+   * 🚨 THE COUPLING SOLARPRO'S OWN CANONICALIZATION WROTE ONTO THE ROW.
+   *
+   * At `921b23a7` — the build Ray was running — `projectModel.ts:223` reached
+   * `else if (hasExternalInverter)` BEFORE the DC-capable check and returned
+   * `canonicalizationPatch = { solarCoupling: 'ac-coupled-inverter' }`, and `sld/route.ts:229`
+   * called `persistElectricalCanonicalization`, which WRITES it. Every Generate SLD click on that
+   * build recorded the wrong architecture on his project, permanently.
+   */
+  recordedCoupling?: string | null;
 }): Promise<void> {
   const o = {
     generationPanels: false, inverterId: RAYS_INVERTER, provenance: null,
-    pvCapableStorage: true, ...(opts ?? {}),
+    pvCapableStorage: true, recordedCoupling: null, ...(opts ?? {}),
   };
   const { buildRaysIntendedJob } = await import('@/lib/electrical/fixtures/tesla400aTwoGateway');
   const { serialiseServiceTopology } = await import('@/lib/db/serviceTopology');
@@ -152,6 +165,7 @@ async function writeRaysLiveRow(opts?: {
     { schemaVersion: number; topology: Record<string, any> };
 
   delete stored.topology.solarCoupling;
+  if (o.recordedCoupling) stored.topology.solarCoupling = o.recordedCoupling;
   stored.schemaVersion = 3;
   for (const u of stored.topology.storage ?? []) {
     delete u.pvInputLimits; delete u.pvDcStcKw; delete u.outputConfigKw;
@@ -168,8 +182,25 @@ async function writeRaysLiveRow(opts?: {
   }
   if (o.provenance) se.provenance = o.provenance;
 
-  await db.query(`UPDATE projects SET service_topology = $2, selected_equipment = $3 WHERE id = $1`,
-    [PROJECT, JSON.stringify(stored), JSON.stringify(se)]);
+  // 🚨 THE SECOND STORE, POPULATED — because it is where the fleet that resurrects the old
+  // architecture actually lives. A fixture that only writes `selected_equipment` cannot catch a
+  // resolution that leaves `engineering_config.inverters` behind, which is exactly what Ray's
+  // RULE SEVEN is about.
+  const engCfg = o.inverterId ? {
+    schemaVersion: 2,
+    inverters: [
+      { inverterId: o.inverterId, type: 'string',
+        strings: [{ panelId: 'ps-mnb108-440', panelCount: 10 }, { panelId: 'ps-mnb108-440', panelCount: 9 }] },
+      { inverterId: o.inverterId, type: 'string',
+        strings: [{ panelId: 'ps-mnb108-440', panelCount: 9 }, { panelId: 'ps-mnb108-440', panelCount: 9 }] },
+    ],
+    mainPanelAmps: 400,
+  } : { schemaVersion: 2, inverters: [], mainPanelAmps: 400 };
+
+  await db.query(
+    `UPDATE projects SET service_topology = $2, selected_equipment = $3, engineering_config = $4
+      WHERE id = $1`,
+    [PROJECT, JSON.stringify(stored), JSON.stringify(se), JSON.stringify(engCfg)]);
 }
 
 const load = async () => {
@@ -870,5 +901,428 @@ describe('🚨 THE SIZING TAB AGREES WITH THE SHEET — Rays §11', () => {
     expect(dcStringLimits(mixed, 'dc-coupled-storage'),
       'a mixed-model graph took the window of whichever unit came first, making the answer depend on node order')
       .toBeNull();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 🚨 THE STATE RAY'S PROJECT IS ACTUALLY IN — AND SOLARPRO PUT IT THERE.
+//
+// The second acceptance run still showed STRING INVERTER on a build that refuses to draw an
+// unresolved architecture. Both facts are true at once because the architecture is NOT unresolved on
+// his row any more: `solarCoupling = 'ac-coupled-inverter'` is RECORDED on it.
+//
+// Nobody chose that. `persistElectricalCanonicalization` wrote it, from a derivation that reached
+// `else if (hasExternalInverter)` before the DC-capable check, on an inverter the ecosystem picker
+// auto-selected. Three automatic steps and the project now asserts an architecture as though a
+// designer had stated it.
+//
+// 🚨 AND THE ROUND-2 CONFLICT DETECTOR EXEMPTS IT. `if (recorded)` takes the value and only questions
+// `dc-coupled-storage` + an inverter. A recorded `ac-coupled-inverter` beside storage that takes PV
+// on DC was the one combination nothing asked about — so the badge says STRING INVERTER, the sheet
+// draws the inverter, and the dialog that would let Ray fix it never appears.
+//
+// A correction that writes a falsehood and then makes itself invisible is worse than the defect.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('🚨 THE LIVE STATE: a coupling SolarPro recorded, that nobody decided', () => {
+  it('🚨 a DERIVED recorded coupling is re-opened, not obeyed', async () => {
+    await writeRaysLiveRow({ recordedCoupling: 'ac-coupled-inverter' });
+    const m = (await load())!.model;
+
+    // The row still says what SolarPro wrote on it — the model does not edit the graph to read it.
+    expect(m.solarCoupling).toBe('ac-coupled-inverter');
+    expect(m.storage.invertingUnitCount).toBe(4);
+    expect(m.hasExternalInverter).toBe(true);
+
+    // BEFORE: architectureResolutionRequired was FALSE here. The badge printed STRING INVERTER, the
+    // sheet drew the inverter, and the dialog that would let Ray fix it never appeared — because the
+    // conflict check only questioned a recorded `dc-coupled-storage`.
+    expect(m.architectureResolutionRequired).toBe(true);
+    expect(m.conflicts.map(c => c.code)).toContain('SOLAR_COUPLING_UNRESOLVED');
+
+    // 🚨 AND THE CONFLICT NAMES ALL THREE AUTOMATIC LINKS, so the operator can check the claim.
+    const c = m.conflicts.find(x => x.code === 'SOLAR_COUPLING_UNRESOLVED')!;
+    const said = c.claims.map(x => x.says).join(' ');
+    expect(said).toContain('nothing records who decided it');
+    expect(said).toContain('not an installer decision');
+    expect(said).toContain('publish their own PV DC inputs');
+
+    const { topologyBadge, ARCHITECTURE_UNRESOLVED_LABEL } =
+      await import('@/lib/electrical/architectureLabel');
+    expect(topologyBadge({
+      architectureResolutionRequired: m.architectureResolutionRequired,
+      solarCoupling: m.solarCoupling, isHybrid: false, firstInverterType: 'string',
+    }).label).toBe(ARCHITECTURE_UNRESOLVED_LABEL);
+  });
+
+  it('🚨 and it stops calling a derivation the designer word', async () => {
+    await writeRaysLiveRow({ recordedCoupling: 'ac-coupled-inverter' });
+    const m = (await load())!.model;
+    // BEFORE: 'service-topology' — "Recorded on the project by the designer." It was not.
+    expect(m.solarCouplingProvenance.source).toBe('derived');
+    expect(m.solarCouplingProvenance.basis).toContain('nothing records who decided it');
+    expect(m.externalInverterOrigin!.kind).toBe('AUTO_SUGGESTED_LEGACY');
+    expect(m.externalInverterOrigin!.isInstallerDecision).toBe(false);
+  });
+
+  it('🚨 the SLD route REFUSES it — a recorded falsehood no longer passes the gate', async () => {
+    await writeRaysLiveRow({ recordedCoupling: 'ac-coupled-inverter', generationPanels: true });
+    const { status, json, svg } = await generateSld();
+    // BEFORE: 200, with STRING INVERTER and a drawn Tesla Solar Inverter on the sheet.
+    expect(status).toBe(409);
+    expect(json.code).toBe('ELECTRICAL_ARCHITECTURE_REQUIRES_RESOLUTION');
+    expect(svg).toBe('');
+  });
+
+  it('🚨 A DESIGNER RECORDED ANSWER IS OBEYED — the re-test is scoped to derivations', async () => {
+    // Blast radius. Ray: must not change the SLD logic for other brands and other scenarios.
+    // The same row, with a human decision recorded beside the coupling, raises nothing.
+    await writeRaysLiveRow({
+      recordedCoupling: 'ac-coupled-inverter',
+      provenance: { architecture: {
+        kind: 'USER_SELECTED', recordedAt: '2026-09-01T00:00:00.000Z',
+        basis: 'The installer stated the coupling in the service topology wizard.',
+        by: 'service-topology-wizard',
+      } },
+    });
+    const m = (await load())!.model;
+    expect(m.architectureResolutionRequired).toBe(false);
+    expect(m.solarCoupling).toBe('ac-coupled-inverter');
+    expect(m.solarCouplingProvenance.source).toBe('service-topology');
+    expect(m.solarCouplingProvenance.basis).toContain('2026-09-01');
+  });
+
+  it('🚨 an inverter the installer CHOSE is obeyed too, even with no architecture record', async () => {
+    // The other scoping arm: the architecture rests on a real decision, so the derivation that
+    // produced the coupling rested on a real decision.
+    await writeRaysLiveRow({
+      recordedCoupling: 'ac-coupled-inverter',
+      provenance: { inverter: {
+        kind: 'USER_SELECTED', recordedAt: '2026-09-01T00:00:00.000Z',
+        basis: 'The installer picked this inverter.', by: 'equipment-picker',
+      } },
+    });
+    const m = (await load())!.model;
+    expect(m.externalInverterOrigin!.isInstallerDecision).toBe(true);
+    expect(m.architectureResolutionRequired).toBe(false);
+  });
+
+  it('🚨 a DERIVED dc-coupled recording is NOT re-opened — the evidence agrees with it', async () => {
+    // The re-test is not "distrust everything derived". A derived value the evidence supports
+    // stands; only a derived value the evidence contradicts re-opens.
+    await writeRaysLiveRow({ recordedCoupling: 'dc-coupled-storage', inverterId: null });
+    const m = (await load())!.model;
+    expect(m.solarCoupling).toBe('dc-coupled-storage');
+    expect(m.architectureResolutionRequired).toBe(false);
+  });
+});
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 🚨 RAY'S RULE SIXTEEN — THE REAL USER ACTION, END TO END, THEN RELOADED.
+//
+//   "load legacy Ray fixture -> open project -> architecture conflict visible -> choose 'PV connects
+//    directly to Powerwall 3' -> save -> reload. Then assert through actual production entry points."
+//
+// And RULE SEVEN: the mutation must clear EVERY current-state location that can resurrect the old
+// inverter, not just the one the previous pass happened to know about.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('🚨 THE WHOLE ROUND TRIP, on the row Ray actually has', () => {
+  const readEngCfg = async () => {
+    const r = (await db.query(
+      `SELECT engineering_config FROM projects WHERE id = $1`, [PROJECT])).rows[0] as
+      { engineering_config: unknown };
+    const v = r.engineering_config;
+    return (typeof v === 'string' ? JSON.parse(v) : v) as Record<string, any>;
+  };
+
+  it('🚨 conflict visible -> one click -> every store settled -> survives a reload', async () => {
+    // ── 1. THE ROW RAY HAS: a coupling SolarPro derived and wrote, plus the fleet in engineering_config
+    await writeRaysLiveRow({ recordedCoupling: 'ac-coupled-inverter', generationPanels: true });
+
+    const beforeCfg = await readEngCfg();
+    expect(beforeCfg.inverters.length, 'the fixture did not plant the second store').toBe(2);
+
+    // ── 2. OPEN THE PROJECT: the conflict is visible
+    const before = (await load())!.model;
+    expect(before.architectureResolutionRequired).toBe(true);
+    expect(before.architectureChoices.map(c => c.coupling).sort())
+      .toEqual(['ac-coupled-inverter', 'dc-coupled-storage']);
+
+    // ── 3. THE SHEET REFUSES until it is answered
+    expect((await generateSld()).status).toBe(409);
+
+    // ── 4. ONE CLICK
+    const res = await resolveArchitecture('dc-coupled-storage');
+    expect(res.status).toBe(200);
+    expect(res.json.retiredExternalInverter).toBe(true);
+    expect(res.json.clearedFleetEntries, 'the engineering_config fleet was not cleared').toBe(2);
+
+    // ── 5. EVERY CURRENT-STATE LOCATION
+    const { st, se } = await readRow();
+    expect(st.topology.solarCoupling).toBe('dc-coupled-storage');
+    expect(se.inverterId).toBeNull();
+    expect(se.inverter).toBeNull();
+    expect(se.provenance.architecture.kind).toBe('USER_SELECTED');
+    const afterCfg = await readEngCfg();
+    expect(afterCfg.inverters, 'engineering_config still holds a standalone inverter').toEqual([]);
+    // History survives.
+    expect(se.retiredInverter.id).toBe(RAYS_INVERTER);
+    expect(se.retiredInverterHistory.length).toBe(1);
+
+    // ── 6. RELOAD — the canonical model, read fresh
+    const after = (await load())!.model;
+    expect(after.solarCoupling).toBe('dc-coupled-storage');
+    expect(after.architectureResolutionRequired).toBe(false);
+    expect(after.hasExternalInverter).toBe(false);
+    expect(after.externalInverterOrigin).toBeNull();
+    expect(after.conflicts.filter(c => c.code === 'SOLAR_COUPLING_UNRESOLVED')).toEqual([]);
+    // 🚨 AND THE COUPLING IS NOW A DECISION, not a derivation — so it can never re-open.
+    expect(after.solarCouplingProvenance.source).toBe('service-topology');
+
+    // ── 7. THE BADGE
+    const { topologyBadge } = await import('@/lib/electrical/architectureLabel');
+    expect(topologyBadge({
+      architectureResolutionRequired: after.architectureResolutionRequired,
+      solarCoupling: after.solarCoupling, isHybrid: false, firstInverterType: null,
+    }).label).toBe('PV DC COUPLED TO STORAGE');
+
+    // ── 8. THE SHEET, from the real route — posting the WRONG architecture, as the page did
+    const sld = await generateSld();
+    expect(sld.status).toBe(200);
+    expect(sld.svg).toContain('DC COUPLED');
+    expect(sld.svg, 'the retired inverter is still drawn').not.toContain('Solar Inverter 5.7kW');
+    expect(sld.svg, 'a STRING INVERTER title block survived the resolution')
+      .not.toContain('STRING INVERTER');
+
+    // ── 9. SECOND RELOAD, same answers. Ray: "Then reload again and repeat."
+    const again = (await load())!.model;
+    expect(again.solarCoupling).toBe('dc-coupled-storage');
+    expect(again.architectureResolutionRequired).toBe(false);
+    expect(again.hasExternalInverter).toBe(false);
+    expect((await readEngCfg()).inverters).toEqual([]);
+    expect((await generateSld()).status).toBe(200);
+  });
+
+  it('🚨 the storage, the gateways and the modules are untouched by the resolution', async () => {
+    await writeRaysLiveRow({ recordedCoupling: 'ac-coupled-inverter', generationPanels: true });
+    const before = (await load())!.model;
+    await resolveArchitecture('dc-coupled-storage');
+    const after = (await load())!.model;
+
+    expect(after.storage.invertingUnitCount).toBe(before.storage.invertingUnitCount);
+    expect(after.storage.gatewayCount).toBe(before.storage.gatewayCount);
+    expect(after.storage.perSystemGenerationPanelCount)
+      .toBe(before.storage.perSystemGenerationPanelCount);
+    expect(after.serviceRatedAmps).toBe(400);
+    // 🚨 "37 modules means 37 modules."
+    expect(after.moduleCount).toBe(37);
+    const panels = (await db.query(
+      `SELECT total_panels FROM layouts WHERE project_id = $1`, [PROJECT])).rows[0] as
+      { total_panels: number };
+    expect(panels.total_panels).toBe(37);
+  });
+});
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 🚨 RULE FIFTEEN — "If mirrorsThatCouldWin is not empty, the gauntlet is still open."
+//
+// The existing authority inspector answers a REGISTRY question: is each known mirror documented as
+// disarmed? On Ray's row it would have returned an empty list while `engineering_config.inverters`
+// still held two Tesla Solar Inverters that the page composed its architecture from.
+//
+// This asks the ROW: given what is persisted right now, is there a value in a non-owning store that
+// a production surface would read as architecture? Only the data can answer that.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('🚨 THE ELECTRICAL STATE DUMP', () => {
+  const dump = async () => {
+    const { electricalStateDump } = await import('@/lib/electrical/stateDump');
+    return (await electricalStateDump(PROJECT, USER_ID))!;
+  };
+
+  it('🚨 reports the gauntlet OPEN on the row Ray has, and says exactly why', async () => {
+    await writeRaysLiveRow({ recordedCoupling: 'ac-coupled-inverter', generationPanels: true });
+    const d = await dump();
+
+    expect(d.architecture.coupling).toBe('ac-coupled-inverter');
+    expect(d.architecture.provenanceSource).toBe('derived');
+    expect(d.architecture.resolutionRequired).toBe(true);
+
+    // 🚨 RULE SIX: NONE / UNKNOWN / SELECTED / CONFLICT — never a bare null to infer from.
+    expect(d.pv.externalInverter).toBe(`CONFLICT(${RAYS_INVERTER})`);
+    expect(d.pv.externalInverterOrigin).toBe('AUTO_SUGGESTED_LEGACY');
+    expect(d.pv.modules).toBe(37);
+
+    const fields = d.mirrorsThatCouldWin.map(r => r.field);
+    expect(fields.length).toBeGreaterThan(0);
+    expect(fields).toContain('service_topology.solarCoupling');
+    for (const r of d.mirrorsThatCouldWin) {
+      // Every risk must name the surface that would read it. "Could win" with no mechanism is a
+      // worry, not a finding.
+      expect(r.howItWins.length).toBeGreaterThan(40);
+      expect(r.contradicts.length).toBeGreaterThan(5);
+    }
+  });
+
+  it('🚨 names the engineering_config fleet, which the registry check could not see', async () => {
+    await writeRaysLiveRow({ recordedCoupling: 'dc-coupled-storage', generationPanels: true });
+    const d = await dump();
+    expect(d.architecture.coupling).toBe('dc-coupled-storage');
+    const fleet = d.mirrorsThatCouldWin.find(r => r.field === 'engineering_config.inverters');
+    expect(fleet, 'the dump did not notice a standalone fleet on a DC-coupled project').toBeTruthy();
+    expect(fleet!.value).toContain('2 standalone inverter');
+    expect(fleet!.howItWins).toContain('autosave');
+  });
+
+  it('🚨 and it goes EMPTY after the resolution — which is the whole point', async () => {
+    await writeRaysLiveRow({ recordedCoupling: 'ac-coupled-inverter', generationPanels: true });
+    expect((await dump()).mirrorsThatCouldWin.length).toBeGreaterThan(0);
+
+    await resolveArchitecture('dc-coupled-storage');
+
+    const d = await dump();
+    expect(d.architecture.coupling).toBe('dc-coupled-storage');
+    expect(d.architecture.provenanceSource).toBe('service-topology');
+    expect(d.architecture.resolutionRequired).toBe(false);
+    expect(d.pv.externalInverter).toBe('NONE');
+    expect(d.pv.modules).toBe(37);
+    expect(d.storage.invertingUnits).toBe(4);
+    expect(d.storage.gateways).toBe(2);
+    expect(d.topology.serviceRatedAmps).toBe(400);
+    expect(d.topology.generationPanels).toBe(2);
+    expect(d.conflicts).toEqual([]);
+    expect(d.mirrorsThatCouldWin,
+      `the gauntlet is still open: ${d.mirrorsThatCouldWin.map(r => r.field).join(', ')}`)
+      .toEqual([]);
+  });
+
+  it('🚨 a stale batteryCount is reported even when the architecture is settled', async () => {
+    // "Other unrelated project engineering may continue" does not mean the mirror stops being a
+    // mirror. It does not block a drawing; it still shows up here.
+    await writeRaysLiveRow({ inverterId: null, generationPanels: true });
+    await db.query(
+      `UPDATE projects SET selected_equipment = $2 WHERE id = $1`,
+      [PROJECT, JSON.stringify({ batteryCount: 9 })]);
+    const d = await dump();
+    expect(d.architecture.resolutionRequired).toBe(false);
+    const bc = d.mirrorsThatCouldWin.find(r => r.field === 'selected_equipment.batteryCount');
+    expect(bc).toBeTruthy();
+    expect(bc!.value).toBe('9');
+    expect(bc!.contradicts).toContain('4 storage instance');
+  });
+});
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 🚨 RULE FOURTEEN — "37 MODULES MEANS 37 MODULES."
+//
+// The array box on Ray's live sheet read "4 STRINGS × 10 MODULES" three lines under "37 × 440W".
+// 4 × 10 is 40. The string DISTRIBUTION was right all along (10/9/9/9 = 37); the summary line
+// multiplied the full-string length by the string count and fabricated three modules on a drawing
+// an inspector reads.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('🚨 THE SHEET MAY NOT PRINT A MODULE COUNT IT DOES NOT HAVE', () => {
+  const renderArrayLabel = async (opts: {
+    totalModules: number; totalStrings: number; panelsPerString: number;
+    lastStringPanels?: number; stringPanelCounts?: number[];
+  }) => {
+    const { renderSLDProfessional } = await import('@/lib/sld-professional-renderer');
+    return renderSLDProfessional({
+      projectName: 'Hussey Ethos', clientName: 'Hussey Ethos', address: '238 N Warwick Ave',
+      drawingDate: '2026-07-29', drawingNumber: 'SLD-001', revision: 'A',
+      topologyType: 'STRING', totalModules: opts.totalModules,
+      totalStrings: opts.totalStrings, panelsPerString: opts.panelsPerString,
+      lastStringPanels: opts.lastStringPanels,
+      stringPanelCounts: opts.stringPanelCounts,
+      panelModel: 'Philadelphia Solar PS-MNB108(HCBF)-440W',
+      panelWatts: 440, panelVoc: 52.7, panelIsc: 13.7,
+      inverterModel: 'Tesla Solar Inverter 5.7kW', inverterManufacturer: 'Tesla',
+      acOutputKw: 11.4, acOutputAmps: 24, acOCPD: 60, mainPanelAmps: 400,
+      utilityName: 'Local Utility', interconnection: 'LOAD_SIDE',
+    } as never) as string;
+  };
+
+  it('🚨 an UNEVEN array prints its real lengths, not a product that overstates it', async () => {
+    // Ray's array: 37 modules as 10/9/9/9 — a layout the two scalars CANNOT express, which is why
+    // the renderer now takes the whole list.
+    const svg = await renderArrayLabel({
+      totalModules: 37, totalStrings: 4, panelsPerString: 10, lastStringPanels: 9,
+      stringPanelCounts: [10, 9, 9, 9],
+    });
+    expect(svg, 'the sheet still prints a product that implies 40 modules')
+      .not.toContain('4 STRINGS × 10 MODULES');
+    expect(svg).toContain('10/9/9/9');
+    expect(svg).toContain('37 × 440W');
+    expect(svg).not.toContain('ACCOUNTS FOR');
+  });
+
+  it('an EVEN array keeps the product form — this did not become noisier for everyone', async () => {
+    const svg = await renderArrayLabel({
+      totalModules: 36, totalStrings: 4, panelsPerString: 9, lastStringPanels: 9,
+    });
+    expect(svg).toContain('4 STRINGS × 9 MODULES');
+    // 'VERIFY' appears elsewhere on the sheet (the service-equipment box says CONFIGURATION TO
+    // VERIFY), so the assertion names THIS line rather than the word.
+    expect(svg).not.toContain('ACCOUNTS FOR');
+  });
+
+  it('🚨 strings that do not account for the array SAY SO on the sheet', async () => {
+    // Four strings of 9 is 36, on a 37-module array: a module with no home.
+    const svg = await renderArrayLabel({
+      totalModules: 37, totalStrings: 4, panelsPerString: 9, lastStringPanels: 9,
+      stringPanelCounts: [9, 9, 9, 9],
+    });
+    expect(svg).toContain('ACCOUNTS FOR 36 OF 37 MODULES');
+    expect(svg).toContain('VERIFY');
+  });
+
+  it('the string generator itself distributes 37 modules without losing one', async () => {
+    // The arithmetic underneath was never the defect — asserted so a future change to the packing
+    // cannot quietly become one, and so the summary line above is tested against a real layout.
+    const { generateStringConfig } = await import('@/lib/string-generator');
+    const cfg = generateStringConfig({
+      totalModules: 37,
+      moduleSpecs: { voc: 52.7, vmp: 43.6, isc: 13.7, imp: 12.9, watts: 440,
+        tempCoeffVoc: -0.25, maxSeriesFuseRating: 25 },
+      inverterSpecs: { maxDcVoltage: 550, mpptVoltageMin: 60, mpptVoltageMax: 480,
+        mpptChannels: 24, maxInputCurrent: 15, acOutputKw: 46.08 },
+      designTempMin: -23,
+    } as never) as { totalStrings: number; strings: Array<{ panelsInString: number }> };
+    const strings = cfg.strings ?? [];
+    expect(strings.length).toBe(cfg.totalStrings);
+    expect(strings.reduce((n, s2) => n + s2.panelsInString, 0),
+      'the generated strings do not sum to the array').toBe(37);
+  });
+});
+
+
+describe('🚨 NO EQUIPMENT MAY APPEAR FROM ABSENCE — still live until now', () => {
+  it('🚨 a sheet with no inverter model prints NOT SELECTED, never a Fronius Primo', async () => {
+    // `app/api/engineering/sld/route.ts` defaulted `inverterManufacturer`/`inverterModel` to
+    // 'Fronius' / 'Primo 8.2-1' — a real manufacturer and a real model number, in the nameplate
+    // position, on a drawing that goes to an AHJ, for a project that sent neither. The topology it
+    // keyed off was itself invented (`body.topologyType ?? 'STRING_INVERTER'`), so two guesses
+    // stacked and ended in a specific product nobody had chosen.
+    const { POST } = await import('@/app/api/engineering/sld/route');
+    const { NextRequest } = await import('next/server');
+    const res = await POST(new NextRequest('http://localhost/api/engineering/sld', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        projectName: 'No Inverter', clientName: 'X', address: '1 Test St',
+        drawingDate: '2026-07-29', drawingNumber: 'SLD-001', revision: 'A',
+        topologyType: 'STRING', totalModules: 20,
+        panelModel: 'Generic 400W', panelWatts: 400, panelVoc: 49.6, panelIsc: 10.18,
+        mainPanelAmps: 200, utilityName: 'Local Utility', interconnection: 'LOAD_SIDE',
+        // 🚨 NO inverterModel, NO inverterManufacturer.
+      }),
+    }));
+    const ct = res.headers.get('content-type') || '';
+    const svg = ct.includes('svg') || ct.includes('xml')
+      ? await res.text()
+      : String(((await res.json()) as Record<string, unknown>).svg ?? '');
+    expect(res.status).toBe(200);
+    expect(svg, 'the sheet still names a Fronius nobody chose').not.toContain('Fronius');
+    expect(svg, 'the sheet still names a Primo 8.2-1 nobody chose').not.toContain('Primo 8.2-1');
+    expect(svg).toContain('INVERTER NOT SELECTED');
   });
 });

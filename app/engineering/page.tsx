@@ -3148,13 +3148,14 @@ function EngineeringPageInner() {
       // suppressing it would also hide a genuinely NEW inverter pick on a DC-coupled project, and
       // that one is a real conflict that must still be raised.
       // ══════════════════════════════════════════════════════════════════════
+      // The server has ALREADY cleared engineering_config.inverters. What remains here is a stale
+      // React copy, and it is dangerous twice over: the browser composes its model from the fleet,
+      // so a stale entry re-raises the conflict Ray just answered; and the next autosave would WRITE
+      // THE STALE FLEET BACK OUT, resurrecting the architecture the server just retired. It mirrors
+      // the server's rule exactly — a DC-coupled design has NO standalone PV inverter — rather than
+      // dropping one matching id and leaving another entry the page could still read as authority.
       if (data.retiredExternalInverter) {
-        const retiredId = electrical?.externalInverterId ?? null;
-        setConfig(prev => ({
-          ...prev,
-          inverters: (prev.inverters ?? []).filter(inv =>
-            retiredId ? inv.inverterId !== retiredId : false),
-        }) as typeof prev);
+        setConfig(prev => ({ ...prev, inverters: [] }) as typeof prev);
       }
 
       // The drawing on screen depicts an architecture that is no longer the project's.
@@ -7174,11 +7175,29 @@ function EngineeringPageInner() {
 
       // Determine V4 topology type
       // v47.358: ecoflow → HYBRID_INVERTER (always has battery capability)
-      const topoType = firstInv?.type === 'micro' ? 'MICROINVERTER'
+      // ══════════════════════════════════════════════════════════════
+      // 🚨 THIS LINE POSTED THE ARCHITECTURE, AND IT WAS GUESSING — RAY'S RULE FIVE.
+      //
+      // Two inferences, both forbidden, both reaching the drawing as `topologyType`:
+      //   · `config.batteryBrand ? 'HYBRID_INVERTER'` — a BATTERY BRAND deciding how the PV is
+      //     converted. Those are unrelated facts.
+      //   · the final `: 'STRING_INVERTER'` — reached whenever `firstInv` is absent, which on a
+      //     DC-coupled job is the CORRECT state. "No microinverter, therefore string."
+      //
+      // The canonical coupling answers this, and the route overrides it from the model anyway; what
+      // this removes is the page's ability to assert a different one on the way there. The
+      // equipment-derived arms stay — micro and optimizer ARE properties of the chosen inverter —
+      // but they are reached only after the project's own architecture has had its say.
+      // ══════════════════════════════════════════════════════════════
+      const topoType = electrical?.solarCoupling === 'dc-coupled-storage' ? 'DC_COUPLED_STORAGE'
+        : electrical?.solarCoupling === 'storage-only' ? 'STORAGE_ONLY'
+        : firstInv?.type === 'micro' ? 'MICROINVERTER'
         : firstInv?.type === 'optimizer' ? 'STRING_WITH_OPTIMIZER'
         : firstInv?.type === 'ecoflow' ? 'HYBRID_INVERTER'
-        : config.batteryBrand ? 'HYBRID_INVERTER'
-        : 'STRING_INVERTER';
+        : firstInv ? 'STRING_INVERTER'
+        // 🚨 NO INVERTER AND NO RECORDED COUPLING. Not "string" — unknown. The route reads the
+        // canonical model and will say so; the page must not supply an answer it does not have.
+        : 'UNRESOLVED';
 
       // Use ComputedSystem for all engineering values — single source of truth
       const sc = compliance.stringConfig;
