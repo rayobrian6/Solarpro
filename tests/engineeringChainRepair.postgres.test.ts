@@ -168,6 +168,31 @@ async function writeFixtureB(opts?: { retired?: boolean }): Promise<void> {
     [PROJECT_B, JSON.stringify(stored), JSON.stringify(se), JSON.stringify(engCfg)]);
 }
 
+/**
+ * 🚨 RAY'S LIVE ROW, EXACTLY AS IT IS — the state that produced the phantom sheet.
+ *
+ * `service_topology.solarCoupling = 'ac-coupled-inverter'` (written by a derivation, with no
+ * `provenance.architecture` behind it) and NO inverter left in `selected_equipment`.
+ *
+ * The sheet he was looking at proves the second half: an inverter still ON the record classifies
+ * AUTO_SUGGESTED_LEGACY, raises the conflict and returns 409 — he got a drawing, so the record was
+ * already empty.
+ */
+async function writeRaysLiveRowAsItIs(): Promise<void> {
+  const { buildRaysIntendedJob } = await import('@/lib/electrical/fixtures/tesla400aTwoGateway');
+  const { serialiseServiceTopology } = await import('@/lib/db/serviceTopology');
+  const stored = JSON.parse(JSON.stringify(
+    serialiseServiceTopology(buildRaysIntendedJob().topology))) as any;
+  stored.topology.solarCoupling = 'ac-coupled-inverter';
+  await db.query(
+    `UPDATE projects SET service_topology = $2, selected_equipment = $3, engineering_config = $4
+      WHERE id = $1`,
+    [PROJECT_B, JSON.stringify(stored),
+     // No inverter on the record, and no provenance.architecture.
+     JSON.stringify({ batteryCount: 4, inverter: null, inverterId: null }),
+     JSON.stringify({ schemaVersion: 2, inverters: [], mainPanelAmps: 400 })]);
+}
+
 /** Fixture A — the ordinary house, with its POI left unresolved as a new job's would be. */
 async function writeFixtureA(opts?: { poi?: string }): Promise<void> {
   const { buildNormalResidence200A } = await import('@/lib/electrical/fixtures/normalResidence200a');
@@ -893,6 +918,92 @@ describe('🚨 FIXTURE B — the two sheets describe the SAME system', () => {
     expect(volts,
       `the sheet states ${volts} V against the storage's ${lim!.maxDcVoltage} V PV input maximum`)
       .toBeLessThanOrEqual(lim!.maxDcVoltage);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+describe("🚨 THE PHANTOM INVERTER ON RAY'S LIVE PROJECT", () => {
+  // ═══════════════════════════════════════════════════════════════════════
+  // 🚨 THE STATE NOTHING TESTED FOR, AND IT WAS THE LIVE ONE.
+  //
+  // Every architecture check looked for an inverter that CONTRADICTS the graph. Ray's row is the
+  // mirror image: the graph claims `'ac-coupled-inverter'` — a separate PV inverter — and the
+  // equipment record holds NONE. That produced
+  //
+  //     hasExternalInverter: false · conflicts: [] · architectureResolutionRequired: false
+  //
+  // so no refusal, a 200, and a drawing. And with no inverter in the model, the `ac-coupled` arm
+  // of the canonical override had nothing to project and did NOTHING — so `topologyType: 'STRING'`
+  // and `inverterModel: 'Tesla Solar Inverter 5.7kW'` rode in from the page's React state and were
+  // drawn as fact. A STRING INVERTER title block, a standalone inverter on the sheet, the PV wired
+  // to an AC disconnect, and four Powerwalls with nothing feeding them.
+  //
+  // He regenerated it and got the same sheet. This is that sheet, as a test.
+  // ═══════════════════════════════════════════════════════════════════════
+
+  it('🚨 an architecture that claims an inverter the project has not got is REFUSED', async () => {
+    await writeRaysLiveRowAsItIs();
+
+    const { loadElectricalProject } = await import('@/lib/electrical/loadElectricalProject');
+    const m = (await loadElectricalProject(PROJECT_B, USER_ID))!.model;
+
+    // The two stores disagree, and the model must say so.
+    expect(m.hasExternalInverter, 'the fixture is not in the live state').toBe(false);
+    expect(m.conflicts.map(c => c.code),
+      'an AC-coupled claim with no inverter behind it raised nothing')
+      .toContain('SOLAR_COUPLING_UNRESOLVED');
+    expect(m.architectureResolutionRequired,
+      'the architecture is contradictory and the model does not require a resolution').toBe(true);
+
+    // And the refusal carries the question a human can answer.
+    const { architectureRefusal } = await import('@/lib/electrical/architectureGate');
+    const refusal = architectureRefusal(m, 'rev-1');
+    expect(refusal, 'the gate did not fire on a contradictory architecture').toBeTruthy();
+    expect(String(refusal!.conflicts[0]?.question ?? ''),
+      'the refusal does not name both options').toMatch(/battery DC inputs/i);
+  });
+
+  it('🚨 the SLD route REFUSES rather than drawing the page\'s inverter', async () => {
+    await writeRaysLiveRowAsItIs();
+    const svg = await generateSld(PROJECT_B);
+
+    expect(svg.status,
+      'the route drew a sheet for an architecture that claims equipment the project has not got')
+      .toBe(409);
+    expect(String((svg.json as any)?.code ?? ''))
+      .toContain('ELECTRICAL_ARCHITECTURE_REQUIRES_RESOLUTION');
+  });
+
+  it('🚨 the EXPORTED PDF refuses too — it is the sheet that gets submitted', async () => {
+    await writeRaysLiveRowAsItIs();
+    const pdf = await exportPdfSheet(PROJECT_B);
+    expect(pdf.status, 'the exported PDF can still be produced from the contradiction').toBe(409);
+  });
+
+  it('🚨 and once resolved, the phantom is gone and the sheet is the real design', async () => {
+    await writeRaysLiveRowAsItIs();
+
+    // One explicit decision — the same route the resolution dialog posts to.
+    const { POST } = await import('@/app/api/engineering/electrical-architecture/route');
+    const { NextRequest } = await import('next/server');
+    const res = await POST(new NextRequest(
+      'http://localhost/api/engineering/electrical-architecture', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ projectId: PROJECT_B, coupling: 'dc-coupled-storage' }),
+      }));
+    expect(res.status, 'the resolution route refused').toBe(200);
+
+    const svg = await generateSld(PROJECT_B);
+    expect(svg.status, `the sheet failed after resolution: ${JSON.stringify(svg.json).slice(0, 300)}`)
+      .toBe(200);
+
+    // 🚨 THE EXACT THINGS THAT WERE WRONG ON HIS SCREEN.
+    expect(svg.svg, 'the sheet still names a Tesla Solar Inverter')
+      .not.toMatch(/Tesla Solar Inverter/i);
+    expect(svg.svg, 'the title block still says STRING INVERTER')
+      .not.toMatch(/STRING INVERTER/i);
+    expect(svg.svg, 'the sheet does not state the real architecture')
+      .toMatch(/DC COUPLED/i);
   });
 });
 

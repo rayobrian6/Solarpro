@@ -394,6 +394,55 @@ export function resolveElectricalProject(
     // The graph says the strings terminate on the batteries' DC inputs, and the equipment store
     // holds a separate AC inverter. Both are explicit; neither is a default. Nothing here picks a
     // winner, because picking one silently is how the drawing came to contain both.
+    // ══════════════════════════════════════════════════════════════════════
+    // 🚨 CASE A — THE ARCHITECTURE CLAIMS AN INVERTER THE PROJECT HAS NOT GOT.
+    //
+    // THIS IS THE DEFECT ON RAY'S LIVE PROJECT, and it is the one state nothing tested for.
+    //
+    // His row records `solarCoupling: 'ac-coupled-inverter'` — written by a derivation, not by
+    // him — and `selected_equipment` holds NO inverter. Every check below was looking for the
+    // opposite shape (an inverter that contradicts the graph), so this one produced:
+    //
+    //     hasExternalInverter: false · conflicts: [] · architectureResolutionRequired: false
+    //
+    // No conflict, no refusal, a 200 and a drawing. And because the model had no inverter to
+    // project, the `ac-coupled-inverter` arm of the canonical override did NOTHING — so
+    // `topologyType: 'STRING'`, `inverterModel: 'Tesla Solar Inverter 5.7kW'` and
+    // `inverterManufacturer: 'Tesla'` rode in from the page's React state and were drawn as fact.
+    // A STRING INVERTER title block, a standalone inverter on the sheet, the PV routed to an AC
+    // disconnect, and the Powerwalls left with nothing feeding them.
+    //
+    // 🚨 THE RULE: an architecture is a claim about equipment. `'ac-coupled-inverter'` asserts a
+    // separate PV inverter exists. If the equipment record holds none, the two stores disagree and
+    // SolarPro does not get to resolve that by drawing whatever the browser last had in memory.
+    //
+    // Scoped so a real design never sees it:
+    //   · a project WITH an inverter recorded is untouched — `hasExternalInverter` is true;
+    //   · a dc-coupled or storage-only project is untouched — `recorded` is not this value;
+    //   · a project whose coupling the designer actually decided is untouched —
+    //     `architectureIsDecision` is true, and the question was already answered by a human.
+    // What is left is exactly the contradictory state: a derived AC-coupled claim with no inverter
+    // behind it.
+    // ══════════════════════════════════════════════════════════════════════
+    if (!architectureIsDecision && recorded === 'ac-coupled-inverter' && !hasExternalInverter) {
+      conflicts.push({
+        code: 'SOLAR_COUPLING_UNRESOLVED',
+        fact: 'How the PV is coupled',
+        claims: [
+          { source: 'service-topology',
+            says: `The project records '${recorded}' — a separate PV inverter between the array `
+              + 'and the service. Nothing records who decided that, so it was written by a '
+              + 'derivation rather than stated by a designer.' },
+          { source: 'selected-equipment',
+            says: 'No separate PV inverter is selected on this project. The architecture names '
+              + 'equipment the equipment record does not contain.' },
+        ],
+        question: 'Does the PV land on the battery DC inputs, or is there a separate AC '
+          + 'PV inverter that has not been selected yet? Choosing "PV into the batteries" records '
+          + 'the design the storage is wired for; choosing the inverter means picking which one.',
+      });
+    }
+
     if (recorded === 'dc-coupled-storage' && hasExternalInverter) {
       conflicts.push({
         code: 'SOLAR_COUPLING_UNRESOLVED',

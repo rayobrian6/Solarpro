@@ -172,9 +172,44 @@ export async function projectCanonicalArchitecture(
         + ' — overridden from the canonical model (dc-coupled-storage).');
     }
   } else if (model.solarCoupling === 'ac-coupled-inverter') {
-    // The architecture IS a separate inverter — but WHICH one is still the project's answer,
-    // not the caller's. Only project an identity the model actually holds.
-    if (model.externalInverterId) input.inverterId = model.externalInverterId;
+    // ══════════════════════════════════════════════════════════════════
+    // 🚨 THIS ARM USED TO BE THE HOLE IN RULE ELEVEN.
+    //
+    // It set `inverterId` and nothing else — so `topologyType`, `inverterModel` and
+    // `inverterManufacturer` survived from the request. On Ray's project, where the model holds
+    // NO inverter at all, the whole arm was a no-op and the page's React state was drawn as fact:
+    // a STRING INVERTER title block and a Tesla Solar Inverter 5.7kW that is not on the project.
+    //
+    // Ray: "The Generate SLD request may identify projectId and artifact options. It may not be
+    // allowed to override topologyType, inverterId, batteryCount, serviceAmps, solarCoupling,
+    // interconnectionMethod."
+    //
+    // So the identity is asserted as a SET, exactly like the DC-coupled arm — and the NAME travels
+    // with the id, because a sheet that prints a model string the project does not hold is naming
+    // equipment from the browser whatever the id says.
+    // ══════════════════════════════════════════════════════════════════
+    const postedInv = String(input.inverterModel ?? '');
+    if (model.externalInverterId) {
+      input.inverterId = model.externalInverterId;
+      // The route resolves the display name from the id against the catalogue; clearing the posted
+      // pair stops a stale React-state name outliving the id it was supposed to describe.
+      delete input.inverterModel;
+      delete input.inverterManufacturer;
+      if (postedInv) {
+        console.warn(`[${tag}] the caller posted inverterModel='${postedInv}' — cleared; the name `
+          + `follows the project's recorded id '${model.externalInverterId}'.`);
+      }
+    } else {
+      // 🚨 AC-COUPLED WITH NO INVERTER ON THE RECORD. `resolveElectricalProject` now raises
+      // SOLAR_COUPLING_UNRESOLVED for this, so the gate above should already have refused — this
+      // is the belt to that brace. Nothing from the request may describe an inverter the project
+      // does not have.
+      delete input.inverterModel;
+      delete input.inverterManufacturer;
+      delete input.inverterId;
+      console.warn(`[${tag}] the project records an AC-coupled architecture but holds NO inverter; `
+        + `the caller's '${postedInv || 'equipment'}' is not drawn.`);
+    }
   } else if (model.solarCoupling === 'storage-only') {
     input.topologyType = 'STORAGE_ONLY';
     delete input.inverterModel;

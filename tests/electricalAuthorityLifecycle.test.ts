@@ -194,10 +194,22 @@ describe('🚨 the guard is not blind — it matches the REAL prior bytes', () =
 describe('🚨 the electrical interpretation is a function of the stores, not of a render', () => {
   it('the resolver is pure and reads no React state', async () => {
     const src = readFileSync(join(ROOT, 'lib', 'electrical', 'projectModel.ts'), 'utf8');
-    for (const forbidden of ['useState', 'useEffect', 'useMemo', 'react']) {
-      expect(src.toLowerCase(),
-        `the canonical model imports '${forbidden}' — it would then depend on a render`)
-        .not.toContain(forbidden.toLowerCase());
+    // 🚨 CODE, NOT PROSE. This was a substring scan of the WHOLE FILE, so the word "react"
+    // anywhere — including a comment explaining that the page's React state must not reach the
+    // drawing — failed it. A guard that a correct explanation can break teaches you to delete the
+    // explanation. The requirement is that this module does not IMPORT React or call a hook, so
+    // that is what is asserted, on live lines only.
+    const live = src.split('\n').filter(l => {
+      const t = l.trim();
+      return t.length > 0 && !t.startsWith('//') && !t.startsWith('*') && !t.startsWith('/*');
+    });
+    const importsReact = live.some(l =>
+      /(?:from|require\()\s*['"]react['"]/.test(l));
+    expect(importsReact,
+      'the canonical model imports React — it would then depend on a render').toBe(false);
+    for (const hook of ['useState', 'useEffect', 'useMemo', 'useRef', 'useCallback']) {
+      expect(live.some(l => l.includes(hook + '(')),
+        `the canonical model calls ${hook}() — it would then depend on a render`).toBe(false);
     }
   });
 

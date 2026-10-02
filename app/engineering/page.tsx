@@ -3151,6 +3151,27 @@ function EngineeringPageInner() {
   // ══════════════════════════════════════════════════════════════════════════
   /** Why the SLD route refused, when it did. Read by `fetchSLD` so the reason reaches the operator. */
   const _sldBlockRef = useRef<string | null>(null);
+  // ══════════════════════════════════════════════════════════════════════════
+  // 🚨 THE SERVER'S REFUSAL IS THE VERDICT. THE BROWSER DOES NOT GET A SECOND OPINION.
+  //
+  // The 409 was captured as a MESSAGE STRING and shown as an error, while the resolution dialog
+  // stayed gated on `_archUnresolved` — which the page derives from its OWN model, built from
+  // `config.inverters[0]?.inverterId` (engineering_config) rather than from `selected_equipment`.
+  //
+  // On Ray's live project those two stores disagree: the equipment record holds NO inverter, and
+  // `config.inverters` still holds the Tesla one. So the SERVER refused (an architecture claiming
+  // an inverter the project has not got) and the BROWSER saw an inverter and concluded there was
+  // nothing to resolve. The operator got "ELECTRICAL ARCHITECTURE REQUIRES RESOLUTION" as a dead
+  // error with no way to answer it.
+  //
+  // Rule Five: no architecture inference in consumers. The refusal payload already carries the
+  // conflicts, the two choices and the resolve path, so the page CONSUMES it.
+  // ══════════════════════════════════════════════════════════════════════════
+  const [sldArchRefusal, setSldArchRefusal] = useState<{
+    conflicts?: Array<{ fact?: string; question?: string; claims?: Array<{ source?: string; says?: string }> }>;
+    choices?: unknown;
+    externalInverter?: { id?: string | null; origin?: unknown } | null;
+  } | null>(null);
   const [_archResolving, setArchResolving] = useState<string | null>(null);
   const [_archResolveError, setArchResolveError] = useState<string | null>(null);
   /**
@@ -7507,9 +7528,14 @@ function EngineeringPageInner() {
         // "No SVG returned from SLD engine". The architecture gate returns 409 with the reason and
         // the two answers — reporting that as an engine fault would send the operator looking for a
         // bug instead of at the question they have to settle.
-        _sldBlockRef.current = err?.code === 'ELECTRICAL_ARCHITECTURE_REQUIRES_RESOLUTION'
+        const _isArchRefusal = err?.code === 'ELECTRICAL_ARCHITECTURE_REQUIRES_RESOLUTION';
+        _sldBlockRef.current = _isArchRefusal
           ? String(err.error || 'ELECTRICAL ARCHITECTURE REQUIRES RESOLUTION')
           : (err?.error ? String(err.error) : null);
+        // 🚨 AND THE QUESTION ITSELF, so the operator can answer it instead of reading about it.
+        setSldArchRefusal(_isArchRefusal
+          ? { conflicts: err.conflicts, choices: err.choices, externalInverter: err.externalInverter }
+          : null);
         return null;
       }
       return null;
@@ -7533,6 +7559,7 @@ function EngineeringPageInner() {
     setSldLoading(true);
     setSldError(null);
     _sldBlockRef.current = null;
+    setSldArchRefusal(null);
     try {
       const sigAtRequest = _sldEquipSig;
       const svgResult = await fetchSLDSvg();
@@ -9495,7 +9522,13 @@ function EngineeringPageInner() {
       `Service rating set to ${amps} A`);
   };
 
-  const _archUnresolved = !!electrical?.architectureResolutionRequired;
+  // 🚨 EITHER AUTHORITY OPENS THE QUESTION, and the SERVER's is the one that counts.
+  //
+  // `electrical` is the browser's own composition and is built from a NARROWER input set than the
+  // server's (`config.inverters[0]?.inverterId`, not `selected_equipment`), so it can miss a
+  // contradiction the server catches — which is exactly what happened on Ray's project. A refusal
+  // in hand means the question is open, whatever the browser thinks.
+  const _archUnresolved = !!electrical?.architectureResolutionRequired || !!sldArchRefusal;
   // 🚨 ASK THE SERVER WHERE THE EQUIPMENT CAME FROM. See `_archDetail`: the browser can see THAT the
   // architecture is unresolved, but only the server can say whether the inverter was ever a decision.
   useEffect(() => {
@@ -9530,6 +9563,17 @@ function EngineeringPageInner() {
     // "2 inverters · 37 modules · 16.28 kW DC" under the badge is a second claim about the same
     // undecided fact — and on Ray's live sheet that line was describing the inverter nobody chose.
     if (_archUnresolved) {
+      // 🚨 THE SERVER'S WORDING WINS when it refused, because it is the one that saw both stores.
+      // The browser's sentence assumed the conflict shape "an inverter AND DC-capable storage",
+      // which is only one of the two contradictions — Ray's is the other one, an architecture
+      // naming an inverter the project does not have, and that sentence would have described his
+      // project wrongly.
+      const _srvQ = sldArchRefusal?.conflicts?.[0]?.question;
+      if (_srvQ) return _srvQ;
+      const _srvClaims = sldArchRefusal?.conflicts?.[0]?.claims;
+      if (_srvClaims && _srvClaims.length > 0) {
+        return _srvClaims.map(c => c.says).filter(Boolean).join(' ');
+      }
       const inv = electrical?.externalInverterId;
       return `An external inverter${inv ? ` (${inv})` : ''} and `
         + `${electrical?.storage.invertingUnitCount ?? 0} battery inverter(s) that take PV on DC are `
