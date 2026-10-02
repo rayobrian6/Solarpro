@@ -65,6 +65,46 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // ══════════════════════════════════════════════════════════════════════
+    // 🚨 THE SIZING TAB CONSUMES THE CANONICAL PROJECT — Ray's §11.
+    //
+    //   "computeSystem / sizing are still evidently reconstructing an older electrical architecture.
+    //    They must consume canonical architecture rather than independently deriving."
+    //
+    // This route had no `projectId` AT ALL: everything it knew came from the page's POST body. On a
+    // DC-coupled job that meant the string generator never ran — `if (firstStr && firstInv)` below,
+    // and `firstInv` is absent by design when the PV lands on the batteries — so the Electrical
+    // Sizing tab produced NOTHING while the drawing showed 5 strings of 9. Two surfaces, one array,
+    // and only one of them had an answer.
+    //
+    // 🚨 IT IS NOT GATED ON THE ARCHITECTURE CONFLICT. Ray: "Other unrelated project engineering may
+    // continue." This tab is a working view, not a permit-grade artefact — it refuses nothing, it
+    // just has to stop sizing against equipment that is not in the design.
+    //
+    // Architecture comes from the model; the arithmetic below is untouched.
+    let _canonicalCoupling: string | null = null;
+    let _dcLimits: import('@/lib/electrical/dcStringLimits').DcStringLimits | null = null;
+    if (typeof body.projectId === 'string' && body.projectId) {
+      try {
+        const { loadElectricalProject } = await import('@/lib/electrical/loadElectricalProject');
+        const { dcStringLimits, dcStringLimitsNote } = await import('@/lib/electrical/dcStringLimits');
+        const _loaded = await loadElectricalProject(String(body.projectId), _auth.user.id);
+        if (_loaded) {
+          _canonicalCoupling = _loaded.model.solarCoupling;
+          _dcLimits = dcStringLimits(_loaded.model.topology, _loaded.model.solarCoupling);
+          if (_dcLimits) {
+            console.log('[calculate] DC-coupled: string limits from the storage, not an inverter: '
+              + dcStringLimitsNote(_dcLimits));
+          }
+        }
+      } catch (e) {
+        // A read failure leaves the posted body in charge, which is today's behaviour — never a 500
+        // on the compliance tab because one query failed.
+        console.warn('[calculate] canonical electrical read skipped (non-fatal):',
+          (e as Error)?.message);
+      }
+    }
+
     // Jurisdiction detection: use explicit state code if provided, else parse from address
     // This fixes the "Unknown" state/jurisdiction issue when address is empty
     const stateCode = state || parseStateFromAddress(address || '');
@@ -114,16 +154,33 @@ export async function POST(req: NextRequest) {
           // String / Optimizer topology: run NEC 690.7 string generator
           const firstStr = (firstInv?.strings || [])[0];
 
-          if (firstStr && firstInv) {
+          // 🚨 `firstInv` IS LEGITIMATELY ABSENT ON A DC-COUPLED JOB. `_dcLimits` is non-null only
+          // when the canonical model says the strings terminate on storage that publishes its own PV
+          // input, so this opens the generator for exactly that case and for nothing else.
+          // 🚨 THE ARRAY, FROM THE ARRAY — not from an inverter's string list.
+          //
+          // On a DC-coupled job `firstInv` is absent by design, so `firstStr` is absent with it and
+          // the generator below could not run. `electrical.pvArray` carries the module specs and the
+          // module count as facts about the design; it is used ONLY when there is no inverter fleet
+          // to read them from, so every existing job keeps reading exactly what it read before.
+          const _pvArray = (electrical.pvArray ?? null) as null | {
+            moduleCount: number; panelVoc: number; panelVmp: number; panelIsc: number;
+            panelImp: number; panelWatts: number; tempCoeffVoc: number; tempCoeffVmp?: number;
+            maxSeriesFuseRating?: number;
+          };
+          const _arraySrc = firstStr ?? (_dcLimits ? _pvArray : null);
+
+          if (_arraySrc && (firstInv || _dcLimits)) {
+            const firstStrOrArray = _arraySrc;
             const moduleSpecs = moduleSpecsFromRegistry({
-              voc:               firstStr.panelVoc           ?? 49.6,
-              vmp:               firstStr.panelVmp           ?? 41.8,
-              isc:               firstStr.panelIsc           ?? 10.18,
-              imp:               firstStr.panelImp           ?? 9.57,
-              watts:             firstStr.panelWatts         ?? 400,
-              tempCoeffVoc:      firstStr.tempCoeffVoc       ?? -0.27,
-              tempCoeffVmp:      firstStr.tempCoeffVmp,
-              maxSeriesFuseRating: firstStr.maxSeriesFuseRating ?? 20,
+              voc:               firstStrOrArray.panelVoc    ?? 49.6,
+              vmp:               firstStrOrArray.panelVmp    ?? 41.8,
+              isc:               firstStrOrArray.panelIsc    ?? 10.18,
+              imp:               firstStrOrArray.panelImp    ?? 9.57,
+              watts:             firstStrOrArray.panelWatts  ?? 400,
+              tempCoeffVoc:      firstStrOrArray.tempCoeffVoc ?? -0.27,
+              tempCoeffVmp:      firstStrOrArray.tempCoeffVmp,
+              maxSeriesFuseRating: firstStrOrArray.maxSeriesFuseRating ?? 20,
             });
 
             // Total MPPT channels across all inverter units (e.g. 2x sg7.6rs = 4 channels).
@@ -138,7 +195,27 @@ export async function POST(req: NextRequest) {
               0,
             );
 
-            const inverterSpecs = inverterSpecsFromRegistry({
+            // ══════════════════════════════════════════════════════════════
+            // 🚨 THE DC WINDOW COMES FROM THE DEVICE THE STRINGS LAND ON.
+            //
+            // This is the A-8 defect, in its second home. `?? 600` is a standalone PV inverter's
+            // maximum; a Powerwall 3's published PV input is 60–550 V. Sizing an array against the
+            // defaults produced String Voc × 1.25 = 1345.8 V into a 550 V device on the drawing, and
+            // would have produced the same number here the moment this generator started running for
+            // DC-coupled jobs.
+            //
+            // `dcStringLimits` is the SAME projection the SLD route consumes — one derivation, so the
+            // sizing tab and the sheet cannot disagree about one device.
+            // ══════════════════════════════════════════════════════════════
+            const inverterSpecs = inverterSpecsFromRegistry(_dcLimits ? {
+              maxDcVoltage:              _dcLimits.maxDcVoltage,
+              mpptVoltageMin:            _dcLimits.mpptVoltageMin,
+              mpptVoltageMax:            _dcLimits.mpptVoltageMax,
+              mpptChannels:              _dcLimits.mpptChannels,
+              maxInputCurrent:           _dcLimits.maxInputCurrentPerMppt,
+              // The storage's own AC output is the system's AC rating; there is no PV inverter.
+              acOutputKw:                totalInverterAcKw > 0 ? totalInverterAcKw : _dcLimits.maxStcKw,
+            } : {
               maxDcVoltage:              firstInv.maxDcVoltage              ?? 600,
               mpptVoltageMin:            firstInv.mpptVoltageMin            ?? 100,
               mpptVoltageMax:            firstInv.mpptVoltageMax            ?? 600,
@@ -154,12 +231,17 @@ export async function POST(req: NextRequest) {
               maxPanelsPerString:        firstInv.maxPanelsPerString,
             });
 
-            // Total modules across all inverters and strings
-            const totalModules = (electrical.inverters || []).reduce(
+            // Total modules across all inverters and strings — or off the array itself when there
+            // is no inverter fleet to carry them. 🚨 NEVER DEFAULTED: a module count guessed here
+            // would size an array nobody designed.
+            const _fleetModules = (electrical.inverters || []).reduce(
               (sum: number, inv: any) =>
                 sum + (inv.strings || []).reduce((s: number, str: any) => s + (str.panelCount || 0), 0),
               0
             );
+            const totalModules = _fleetModules > 0
+              ? _fleetModules
+              : (_dcLimits && _pvArray ? _pvArray.moduleCount : 0);
 
             // The canonical basis, not whatever the client happened to post.
             // A client-side default is not an AHJ ruling; the only admissible
