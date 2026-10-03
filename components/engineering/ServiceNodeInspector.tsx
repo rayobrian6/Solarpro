@@ -26,7 +26,9 @@ import {
   placeDevice, placeDeviceInline, selectDeviceProduct,
   setSolarCoupling, selectAggregationProduct,
 } from '@/lib/electrical/topologyAuthoring';
-import { governingArticleFor, resolveDemands } from '@/lib/electrical/serviceTopology';
+import {
+  governingArticleFor, resolveDemands, SERVICE_PHASES, servicePhaseInfo,
+} from '@/lib/electrical/serviceTopology';
 import type { LoadCalculationMethod } from '@/lib/electrical/serviceTopology';
 
 const A = (v: number | null | undefined) => (typeof v === 'number' ? `${v} A` : 'not established');
@@ -136,17 +138,28 @@ export function ServiceNodeInspector({
           )}
         </Field>
 
+        {/* 🚨 EVERY MEMBER IS AN OPTION. A select missing the stored value renders its FIRST option,
+            so a delta or custom service showed "120/240 V split phase" here without anything having
+            changed. The voltage follows the phase; only 'Other / custom' has none, so it keeps the
+            current number and shows it for editing rather than inventing one. */}
         <Field label="System voltage / phase">
           <select data-testid="inspector-service-phase" value={s.phase} className={`mt-1 ${box}`}
                   onChange={e => {
                     const phase = e.target.value as ServiceTopology['service']['phase'];
-                    const voltage = phase === 'wye-480' ? 480 : phase === 'wye-208' ? 208 : 240;
+                    const voltage = servicePhaseInfo(phase).lineToLineV ?? s.voltage;
                     onChange(updateService(topology, { phase, voltage }));
                   }}>
-            <option value="split-240">120/240 V split phase</option>
-            <option value="wye-208">120/208 V wye</option>
-            <option value="wye-480">277/480 V wye</option>
+            {SERVICE_PHASES.map(p => (
+              <option key={p} value={p}>{servicePhaseInfo(p).label}</option>
+            ))}
           </select>
+          {servicePhaseInfo(s.phase).lineToLineV === null ? (
+            <NumberInput testId="inspector-service-voltage" value={s.voltage}
+                         onChange={v => {
+                           // A blank or non-positive entry is not a voltage; keep the last real one.
+                           if (v !== null && v > 0) onChange(updateService(topology, { voltage: v }));
+                         }} />
+          ) : null}
         </Field>
 
         <Field label="Available fault current (A)" focused={isFocus('availableFaultCurrentA')}

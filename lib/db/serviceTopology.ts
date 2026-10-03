@@ -64,7 +64,9 @@ import type {
   ProtectiveDevice, GatewayInstance, DeviceRole,
   GenerationUnit, DerAggregationPanel, DerAggregationInput, PointOfInterconnection,
   PoiRelationship, ExistingServiceEquipment, LoadModel, LoadCalculationMethod, PanelLoad,
+  ServicePhase,
 } from '@/lib/electrical/serviceTopology';
+import { isServicePhase, servicePhaseInfo } from '@/lib/electrical/serviceTopology';
 
 /**
  * Bumped only when the stored shape changes in a way a reader must know about.
@@ -490,7 +492,26 @@ export function parseServiceTopology(
   const ic = isObj(t.interconnection) ? t.interconnection : {};
   const doc = isObj(ic.multiGatewayMeteringDoc) ? ic.multiGatewayMeteringDoc : null;
 
-  const phase = t.service && isObj(t.service) ? t.service.phase : null;
+  // 🚨 AN UNRECOGNISED PHASE IS NOT SPLIT PHASE. This read used to turn every value it did not know
+  // into 'split-240', so a 480 V or delta service written by a newer build (or typed by hand)
+  // reloaded as a house and was checked as one, with nothing saying anything had changed. Three
+  // cases, kept apart:
+  //   absent             → 'split-240'. Every graph written before the phase could be anything else
+  //                        WAS residential split phase, so this is what it meant, not a guess.
+  //   a known member     → exactly that member.
+  //   anything else      → 'custom', the system SolarPro has no model for, which the evaluation
+  //                        reports as CALCULATION METHOD NOT YET SUPPORTED instead of calculating.
+  const rawPhase = service?.phase;
+  const phase: ServicePhase = rawPhase === undefined || rawPhase === null
+    ? 'split-240'
+    : isServicePhase(rawPhase) ? rawPhase : 'custom';
+  // The stored voltage is kept whenever there is one. Absent, it follows the phase. The final 240 is
+  // reachable ONLY for a 'custom' graph stored with no voltage at all (no SolarPro writer produces
+  // one); `voltage` is a non-nullable number that the drawing and schedule print, and no check
+  // reads it, so the phase stays 'custom' and every phase-dependent check still reports NOT
+  // EVALUATED. Making it nullable instead would print `null V` on every sheet in this strict:false
+  // build, the trap `serviceRatingLabel` documents.
+  const voltage = numOrNull(service?.voltage) ?? servicePhaseInfo(phase).lineToLineV ?? 240;
 
   const parsed: StoredServiceTopology = {
     schemaVersion: numOrNull(v.schemaVersion) ?? SERVICE_TOPOLOGY_SCHEMA_VERSION,
@@ -500,8 +521,8 @@ export function parseServiceTopology(
     topology: {
       service: {
         ratedAmps,
-        voltage: numOrNull(service?.voltage) ?? 240,
-        phase: phase === 'wye-208' || phase === 'wye-480' ? phase : 'split-240',
+        voltage,
+        phase,
         availableFaultCurrentA: numOrNull(service?.availableFaultCurrentA),
         existingEquipment: parseExistingEquipment(service?.existingEquipment),
       },

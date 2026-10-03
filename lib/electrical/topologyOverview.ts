@@ -21,6 +21,7 @@
 
 import {
   evaluateServiceTopology, OPTIONAL_REQUIREMENT_TOKENS, solarCouplingLabel, serviceRatingLabel,
+  servicePhaseInfo, isServicePhase,
   type ServiceTopology, type TopologyEvaluation, type TopologyCheck,
 } from '@/lib/electrical/serviceTopology';
 import { foldConclusions, type EngineeringConclusion } from '@/lib/engineering/engineeringStatus';
@@ -61,7 +62,13 @@ export type RequirementOwner =
    * calculations or optional." So this owner exists to be COUNTED SEPARATELY — the engineering
    * conclusion behind it is still NOT_EVALUATED and still not a pass.
    */
-  | 'optional-calculation';
+  | 'optional-calculation'
+  /**
+   * 🚨 NOBODY CAN SUPPLY THIS, BECAUSE SOLARPRO DOES NOT CALCULATE IT YET. A three-phase or custom
+   * service is represented but its calculation method is not implemented. Filed under "field
+   * verify" it would send an installer to read a label that does not exist.
+   */
+  | 'not-yet-supported';
 
 export interface RequirementOwnerSpec {
   owner: RequirementOwner;
@@ -100,6 +107,12 @@ export const REQUIREMENT_OWNERS: ReadonlyArray<RequirementOwnerSpec> = [
     owner: 'manufacturer-authority',
     heading: 'Manufacturer authority',
     action: 'Governed by a document SolarPro does not hold.',
+  },
+  {
+    owner: 'not-yet-supported',
+    heading: 'Not yet supported by SolarPro',
+    action: 'SolarPro represents this electrical system but does not calculate it yet. Nothing here '
+      + 'is claimed until an engineer establishes it.',
   },
   // Last on purpose: it is the only category nothing is waiting on.
   {
@@ -253,12 +266,6 @@ const DER_ARRANGEMENT_LABEL: Record<string, string> = {
   'custom': 'Custom engineered topology',
 };
 
-const PHASE_LABEL: Record<string, string> = {
-  'split-240': '120/240 V split phase',
-  'wye-208': '120/208 V wye',
-  'wye-480': '277/480 V wye',
-};
-
 /**
  * The human name for one `requires` token.
  *
@@ -304,6 +311,11 @@ export function labelForToken(token: string, t: ServiceTopology): string {
   }
   if (token.startsWith('device.role:')) {
     return `A device carrying the ${token.slice('device.role:'.length)} role`;
+  }
+  if (token.startsWith('calculation-method:')) {
+    const phase = token.slice('calculation-method:'.length);
+    return `Calculation method for ${phase === 'custom' || !isServicePhase(phase)
+      ? 'this electrical system' : servicePhaseInfo(phase).label} (not yet supported)`;
   }
   if (token.startsWith('aggregation.input-source:')) {
     return `A DER source for the aggregation input '${token.slice('aggregation.input-source:'.length)}'`;
@@ -383,6 +395,7 @@ function ownerForToken(token: string): RequirementOwner {
   // The same set decides what the permit readiness treats as non-blocking; a second copy here
   // would be a second answer to "is this holding the job up".
   if (OPTIONAL_REQUIREMENT_TOKENS.has(token)) return 'optional-calculation';
+  if (token.startsWith('calculation-method:')) return 'not-yet-supported';
   if (token.startsWith('manufacturer-document:') || token.startsWith('manufacturer-limit:')
       || token.startsWith('sccr:') || token === 'gateway.continuousRatingA') {
     return 'manufacturer-authority';
@@ -432,6 +445,9 @@ export function groupRequirements(items: readonly RequiredInput[]): RequirementG
  * whenever a domain backs up one panel and approximate only when it backs up several.
  */
 function focusFor(check: TopologyCheck, token: string, t: ServiceTopology): OverviewFocus {
+  if (token.startsWith('calculation-method:')) {
+    return { kind: 'service', nodeId: 'service', field: 'phase' };
+  }
   if (token.startsWith('interconnection.')) {
     return { kind: 'interconnection', nodeId: 'interconnection', field: token.split('.')[1] };
   }
@@ -673,7 +689,8 @@ export function buildServiceOverview(
       serviceAmps: rated,
       serviceAmpsLabel: serviceRatingLabel(topology),
       voltage: topology.service.voltage,
-      phaseLabel: PHASE_LABEL[topology.service.phase] ?? topology.service.phase,
+      // One label table for the picker, the summary and the evaluation, so they cannot disagree.
+      phaseLabel: servicePhaseInfo(topology.service.phase).label,
       systemCount,
       systemAmps,
       systemsLabel,

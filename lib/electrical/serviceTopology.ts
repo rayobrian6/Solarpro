@@ -78,7 +78,89 @@ const CONTINUOUS_DUTY_FACTOR = 1.25;
 
 // ── The service ─────────────────────────────────────────────────────────────
 
-export type ServicePhase = 'split-240' | 'wye-208' | 'wye-480';
+/**
+ * The electrical system the utility delivers.
+ *
+ * 🚨 A NON-RESIDENTIAL SERVICE MUST BE REPRESENTABLE BEFORE IT CAN BE CALCULATED. With only three
+ * members, a 240 V delta or a 120/240 V high-leg delta had no honest value, and the reader turned
+ * every phase it did not recognise into `'split-240'`, so a commercial service was stored, reloaded
+ * and checked as a house. Representing a system is not the same as calculating it:
+ * `evaluateServiceTopology` reports CALCULATION METHOD NOT YET SUPPORTED for every phase-dependent
+ * check on a system whose method SolarPro has not implemented.
+ *
+ * `'custom'` is a system SolarPro has no model for yet (347/600 V, corner-grounded delta, …). It is
+ * also what a stored phase this build does not recognise reads back as, so it never becomes split
+ * phase.
+ */
+export type ServicePhase =
+  | 'split-240'
+  | 'wye-208'
+  | 'wye-480'
+  | 'delta-240'
+  | 'high-leg-delta-240'
+  | 'custom';
+
+/** Every member, in the order a picker offers them. */
+export const SERVICE_PHASES: readonly ServicePhase[] = [
+  'split-240', 'wye-208', 'wye-480', 'delta-240', 'high-leg-delta-240', 'custom',
+];
+
+export interface ServicePhaseInfo {
+  /** What an installer calls it. */
+  label: string;
+  /** 1 or 3; null when SolarPro does not know (custom). */
+  phaseCount: 1 | 3 | null;
+  lineToLineV: number | null;
+  /** null when there is no neutral, or when it is not known (custom). */
+  lineToNeutralV: number | null;
+  wires: string | null;
+  /** true / false when the system definition says; null when nobody has said (custom). */
+  hasNeutral: boolean | null;
+  /** The one system SolarPro's service engineering is built for. */
+  residentialSplitPhase: boolean;
+}
+
+const SERVICE_PHASE_INFO: Record<ServicePhase, ServicePhaseInfo> = {
+  'split-240': {
+    label: '120/240 V split phase', phaseCount: 1, lineToLineV: 240, lineToNeutralV: 120,
+    wires: '3-wire (L1, L2, N)', hasNeutral: true, residentialSplitPhase: true,
+  },
+  'wye-208': {
+    label: '120/208 V 3φ wye', phaseCount: 3, lineToLineV: 208, lineToNeutralV: 120,
+    wires: '4-wire (A, B, C, N)', hasNeutral: true, residentialSplitPhase: false,
+  },
+  'wye-480': {
+    label: '277/480 V 3φ wye', phaseCount: 3, lineToLineV: 480, lineToNeutralV: 277,
+    wires: '4-wire (A, B, C, N)', hasNeutral: true, residentialSplitPhase: false,
+  },
+  'delta-240': {
+    label: '240 V 3φ delta', phaseCount: 3, lineToLineV: 240, lineToNeutralV: null,
+    wires: '3-wire (A, B, C)', hasNeutral: false, residentialSplitPhase: false,
+  },
+  // The neutral is the centre tap of one winding: A–N and C–N are 120 V, the high leg B–N is ~208 V.
+  'high-leg-delta-240': {
+    label: '120/240 V high-leg delta', phaseCount: 3, lineToLineV: 240, lineToNeutralV: 120,
+    wires: '4-wire (A, B high leg, C, N)', hasNeutral: true, residentialSplitPhase: false,
+  },
+  'custom': {
+    label: 'Other / custom', phaseCount: null, lineToLineV: null, lineToNeutralV: null,
+    wires: null, hasNeutral: null, residentialSplitPhase: false,
+  },
+};
+
+export function isServicePhase(v: unknown): v is ServicePhase {
+  return typeof v === 'string' && (SERVICE_PHASES as readonly string[]).includes(v);
+}
+
+/**
+ * The facts a service phase implies. Isomorphic: no catalogue, no database.
+ *
+ * A value outside the union (an unparsed graph, a stale client) is described as `'custom'` — the
+ * system SolarPro has no model for — never as split phase.
+ */
+export function servicePhaseInfo(phase: ServicePhase): ServicePhaseInfo {
+  return SERVICE_PHASE_INFO[phase] ?? SERVICE_PHASE_INFO.custom;
+}
 
 /**
  * 🚨 THE SERVICE EQUIPMENT IS ALREADY ON THE WALL, AND NOBODY HAS READ IT YET.
@@ -128,6 +210,10 @@ export interface UtilityService {
    * the equipment inventory — still evaluates.
    */
   ratedAmps: number | null;
+  /**
+   * Line-to-line voltage. Printed by the drawing and the schedule; no check in this file reads it.
+   * Phase-dependent conclusions come from `phase`, so a wrong number here cannot turn into a PASS.
+   */
   voltage: number;
   phase: ServicePhase;
   /**
@@ -1296,6 +1382,44 @@ export function evaluateServiceTopology(topology: ServiceTopology): TopologyEval
   const storageById = new Map(topology.storage.map(u => [u.id, u]));
   const demands = resolveDemands(topology);
 
+  // ── THE ELECTRICAL SYSTEM ─────────────────────────────────────────────────
+  //
+  // 🚨 REPRESENTED IS NOT CALCULATED. Nothing in this function reads `service.voltage` or derives a
+  // current from a power: every comparison below is between ratings that arrive in amperes, which is
+  // the same arithmetic on any system. That includes the NEC 705.12(B) busbar checks — and summing
+  // source currents is an upper bound on any one line's current on a three-phase bus, so they stay
+  // conservative. What IS residential is narrower, and each piece is reported instead of run:
+  //   · `service.calculation-method` — per-phase current from power, balancing single-phase
+  //     equipment across three phases and equipment voltage compatibility exist for no other system;
+  //   · `load.calculation` and the demands summed from it, when the model is NEC 220.82, which NEC
+  //     scopes to 120/240 V or 208Y/120 V THREE-WIRE dwellings (so not a 3φ four-wire 'wye-208');
+  //   · `bonding.location`, where the system has no neutral or nobody has said whether it has one.
+  // Split phase gets none of these, so a residential evaluation is unchanged.
+  const system = servicePhaseInfo(topology.service.phase);
+  const notSupported = (
+    id: string, scope: string, title: string, why: string, citation?: string,
+  ): TopologyCheck => unknown(id, scope, title,
+    `CALCULATION METHOD NOT YET SUPPORTED — ${system.label}. ${why}`,
+    [`calculation-method:${topology.service.phase}`], citation);
+  if (!system.residentialSplitPhase) {
+    checks.push(notSupported('service.calculation-method', 'site', 'Service calculation method',
+      `${topology.service.phase === 'custom' ? 'This is an electrical system SolarPro has no model '
+        + 'for. ' : ''}SolarPro represents this service, and its service engineering is built for `
+      + '120/240 V split phase. For this system it does not convert power to per-phase current, '
+      + 'does not balance single-phase equipment across the phases, and does not check that the '
+      + 'equipment is rated for this voltage and phase, so none of that is claimed. The comparisons '
+      + 'below are between ratings stated in amperes and still evaluate; per-unit currents read from '
+      + 'the catalogue are the products\' published ratings, not confirmed at this voltage.'));
+  }
+  const loadMethodOutOfScope = demands.source === 'load-model'
+    && topology.loads?.method === 'optional-220-82' && !system.residentialSplitPhase;
+  /** A demand comparison whose figure came from a method that does not apply here is not run. */
+  const viaLoadMethod = (c: TopologyCheck): TopologyCheck =>
+    loadMethodOutOfScope && c.conclusion !== 'NOT_EVALUATED'
+      ? notSupported(c.id, c.scope, c.title, 'This figure is summed from an NEC 220.82 optional '
+          + 'dwelling calculation, which does not apply to this system.', c.citation)
+      : c;
+
   // ── SERVICE ───────────────────────────────────────────────────────────────
 
   // 🚨 THE RATING IS AN ORDINARY UNRESOLVED INPUT, NOT A CONDITION OF EXISTING.
@@ -1355,7 +1479,7 @@ export function evaluateServiceTopology(topology: ServiceTopology): TopologyEval
   // it against is not a pass and not a failure — it names the rating, and the load model it already
   // has stops being the thing it is waiting on.
   const svcDemand = demands.serviceA;
-  checks.push(!num(svcDemand)
+  checks.push(viaLoadMethod(!num(svcDemand)
     ? unknown('service.demand', 'site', 'Aggregate service demand',
         'No load calculation has been provided, so the service rating has not been shown to be '
         + 'adequate for the dwelling load. Nothing else in this design depends on it.',
@@ -1370,7 +1494,7 @@ export function evaluateServiceTopology(topology: ServiceTopology): TopologyEval
             + `${topology.service.ratedAmps} A service.`, 'NEC 220')
         : fail('service.demand', 'site', 'Aggregate service demand',
             `${svcDemand.toFixed(1)} A calculated demand exceeds the `
-            + `${topology.service.ratedAmps} A service.`, 'NEC 220'));
+            + `${topology.service.ratedAmps} A service.`, 'NEC 220')));
 
   // ── THE LOAD CALCULATION — OPTIONAL, AND ASKED FOR ONCE ───────────────────
   //
@@ -1378,7 +1502,12 @@ export function evaluateServiceTopology(topology: ServiceTopology): TopologyEval
   // weaken it... Missing information can never become PASS." What changes is only that this is ONE
   // item, owned by the operator's own choice of whether to run the calculation at all — not five
   // amperage boxes on a needs-input screen, and not a reason to call the design broken.
-  if (demands.source === 'none') {
+  if (loadMethodOutOfScope) {
+    checks.push(notSupported('load.calculation', 'site', 'Dwelling load calculation',
+      'The load model is the NEC 220.82 optional dwelling calculation, which NEC 220.82(A) scopes '
+      + 'to a dwelling served by a 120/240 V or 208Y/120 V three-wire set of conductors. SolarPro '
+      + 'does not apply it, or pass figures summed from it, on this system.', 'NEC 220.82(A)'));
+  } else if (demands.source === 'none') {
     checks.push(unknown('load.calculation', 'site', 'Dwelling load calculation',
       'LOAD CALCULATION NOT PROVIDED. Optional: the topology, the equipment, the disconnects, the '
       + 'single-line diagram, the schedule and the permit drawing are all engineered without it. '
@@ -1423,7 +1552,7 @@ export function evaluateServiceTopology(topology: ServiceTopology): TopologyEval
     // 🚨 SUMMED FROM THE ONE LOAD MODEL, NOT ASKED FOR AGAIN. A branch's demand is the demand of
     // the panels it feeds; the operator is never asked for it as a separate number.
     const bDemand = demands.branchA[b.id] ?? null;
-    checks.push(num(bDemand)
+    checks.push(viaLoadMethod(num(bDemand)
       ? (bDemand <= b.ratedAmps
           ? pass('branch.demand', scope, `${b.label} calculated demand`,
               `${bDemand.toFixed(1)} A on a ${b.ratedAmps} A branch`
@@ -1435,7 +1564,7 @@ export function evaluateServiceTopology(topology: ServiceTopology): TopologyEval
           'No load calculation covers the panelboards on this branch, so its feeder has not been '
           + 'shown to be adequate for the load. An aggregate service figure does not establish an '
           + 'individual branch.',
-          ['loads.model'], 'NEC 220'));
+          ['loads.model'], 'NEC 220')));
   }
 
   // ── DOMAINS ───────────────────────────────────────────────────────────────
@@ -1483,6 +1612,9 @@ export function evaluateServiceTopology(topology: ServiceTopology): TopologyEval
       }
 
       // 705.12(B) per domain — each gateway is its own point of connection.
+      //
+      // Ampere arithmetic on the busbar and the sources, so it is evaluated on every electrical
+      // system; see THE ELECTRICAL SYSTEM at the top of this function for why that stays honest.
       //
       // 🚨 THE GENERATION IN THIS DOMAIN IS READ FROM THE UNITS WHERE THERE ARE UNITS, AND FROM THE
       // SCALAR ONLY WHERE THERE ARE NOT. `generationOutputA` predates `topology.generation`; left as
@@ -1588,7 +1720,7 @@ export function evaluateServiceTopology(topology: ServiceTopology): TopologyEval
     }
 
     const dDemand = demands.domainBackedUpA[d.id] ?? null;
-    checks.push(num(dDemand)
+    checks.push(viaLoadMethod(num(dDemand)
       ? pass('domain.backed-up-load', scope, `${d.label} backed-up load`,
           `${dDemand.toFixed(1)} A of backed-up load`
           + `${demands.source === 'load-model'
@@ -1596,7 +1728,7 @@ export function evaluateServiceTopology(topology: ServiceTopology): TopologyEval
                 + `${d.backedUpPanelIds.length === 1 ? '' : 's'}` : ' recorded'}.`)
       : unknown('domain.backed-up-load', scope, `${d.label} backed-up load`,
           'No load calculation covers the panelboards this domain backs up, so the load the island '
-          + 'must carry is not established.', ['loads.model']));
+          + 'must carry is not established.', ['loads.model'])));
   }
 
   // ── STORAGE ───────────────────────────────────────────────────────────────
@@ -1666,7 +1798,18 @@ export function evaluateServiceTopology(topology: ServiceTopology): TopologyEval
 
   // ── BONDING ───────────────────────────────────────────────────────────────
 
-  if (bonding.bondedAtNodeIds.length === 0) {
+  // 🚨 THE BONDING MODEL ASSUMES A NEUTRAL. It bonds neutral to ground at the service disconnect
+  // and isolates the neutral downstream; a 3-wire delta has no neutral, so applying it there would
+  // pass a bond on a conductor that does not exist.
+  if (system.hasNeutral !== true) {
+    checks.push(notSupported('bonding.location', 'site', 'Neutral-ground bond location',
+      `${system.hasNeutral === false
+        ? 'This system has no neutral conductor.'
+        : 'Whether this system has a neutral conductor is not recorded.'} SolarPro's bonding model `
+      + 'places a neutral-to-ground bond at the service disconnect and carries an isolated neutral '
+      + 'downstream, so where this system\'s grounded conductor, if any, is bonded is not '
+      + 'established here.', 'NEC 250.24 / 250.142'));
+  } else if (bonding.bondedAtNodeIds.length === 0) {
     checks.push(unknown('bonding.location', 'site', 'Neutral-ground bond location',
       bonding.basis, ['device.role:service-disconnect'], 'NEC 250.24 / 250.142'));
   } else {

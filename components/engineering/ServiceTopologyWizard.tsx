@@ -22,6 +22,7 @@
 
 import React, { useMemo, useState } from 'react';
 import type { ServiceTopology, DeviceRole, ServicePhase } from '@/lib/electrical/serviceTopology';
+import { SERVICE_PHASES, servicePhaseInfo } from '@/lib/electrical/serviceTopology';
 import {
   DISTRIBUTION_PRESETS, SERVICE_SIZE_CHOICES, DISCONNECT_ROLES, buildServiceFromPreset,
   DER_ARRANGEMENT_CHOICES, applyDerArrangement,
@@ -68,6 +69,12 @@ export function ServiceTopologyWizard({
   const [step, setStep] = useState(initial ? 2 : 0);
   const [serviceAmps, setServiceAmps] = useState(initial?.service.ratedAmps ?? 400);
   const [phase, setPhase] = useState<ServicePhase>(initial?.service.phase ?? 'split-240');
+  // Only 'Other / custom' has no voltage of its own, so only it asks for one, and it starts empty:
+  // a pre-filled 240 would be the split-phase default this list exists to stop applying.
+  const [customVoltage, setCustomVoltage] = useState<number | null>(
+    initial?.service.phase === 'custom' ? initial.service.voltage : null);
+  const phaseInfo = servicePhaseInfo(phase);
+  const voltage = phaseInfo.lineToLineV ?? customVoltage;
   const [distribution, setDistribution] = useState('two-main-panels');
   const [customBranches, setCustomBranches] = useState(2);
   const [draft, setDraft] = useState<ServiceTopology | null>(initial);
@@ -79,9 +86,9 @@ export function ServiceTopologyWizard({
 
   /** Step 2 → 3: the graph comes into existence here, from the generic authoring functions. */
   const materialise = () => {
+    if (voltage === null) return;
     const built = buildServiceFromPreset({
-      ratedAmps: serviceAmps, phase, distribution, customBranches,
-      voltage: phase === 'wye-480' ? 480 : phase === 'wye-208' ? 208 : 240,
+      ratedAmps: serviceAmps, phase, distribution, customBranches, voltage,
     });
     // The project's own interconnection authority is recorded up front, so a prohibited
     // arrangement is unavailable rather than selectable-then-rejected.
@@ -179,11 +186,28 @@ export function ServiceTopologyWizard({
               System
               <select data-testid="wizard-phase" value={phase} className={`mt-1 block ${box}`}
                       onChange={e => setPhase(e.target.value as ServicePhase)}>
-                <option value="split-240">120/240 V split phase</option>
-                <option value="wye-208">120/208 V wye</option>
-                <option value="wye-480">277/480 V wye</option>
+                {SERVICE_PHASES.map(p => (
+                  <option key={p} value={p}>{servicePhaseInfo(p).label}</option>
+                ))}
               </select>
             </label>
+            {phaseInfo.lineToLineV === null ? (
+              <label className="block text-xs text-slate-400">
+                Line-to-line voltage (V)
+                <input type="number" data-testid="wizard-custom-voltage" value={customVoltage ?? ''}
+                       placeholder="Required for a custom system" className={`mt-1 block w-32 ${box}`}
+                       onChange={e => {
+                         const v = Number(e.target.value);
+                         setCustomVoltage(e.target.value.trim() !== '' && v > 0 ? v : null);
+                       }} />
+              </label>
+            ) : null}
+            {phaseInfo.residentialSplitPhase ? null : (
+              <div data-testid="wizard-phase-not-supported" className="text-[11px] text-amber-300">
+                SolarPro records this system, but its calculations are built for 120/240 V split
+                phase. Checks that depend on the system will read NOT EVALUATED, not pass.
+              </div>
+            )}
           </div>
         ) : null}
 
@@ -791,6 +815,7 @@ export function ServiceTopologyWizard({
         </button>
         {step < STEPS.length - 1 ? (
           <button type="button" className={primary} data-testid="wizard-next"
+                  disabled={step === 0 && voltage === null}
                   onClick={() => {
                     if (step === 1) { materialise(); return; }
                     if (step === 2) { materialiseDomains(); return; }

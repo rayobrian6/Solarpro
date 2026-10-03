@@ -23,7 +23,7 @@ import type {
   GenerationUnit, DerAggregationPanel, DerTapPoint, PointOfInterconnection, PoiRelationship,
   ExistingServiceEquipment, LoadModel, LoadCalculationMethod, SolarCoupling,
 } from '@/lib/electrical/serviceTopology';
-import { sizeAggregationPanel } from '@/lib/electrical/serviceTopology';
+import { sizeAggregationPanel, servicePhaseInfo } from '@/lib/electrical/serviceTopology';
 import { nextStandardOcpd } from '@/lib/electrical/stdSizes';
 
 /** A new, empty service. Branches, panels and domains are added onto it. */
@@ -33,11 +33,15 @@ export function createServiceTopology(opts: {
   phase?: ServicePhase;
   utilityId?: string | null;
 }): ServiceTopology {
+  const phase = opts.phase ?? 'split-240';
   return {
     service: {
       ratedAmps: opts.ratedAmps,
-      voltage: opts.voltage ?? 240,
-      phase: opts.phase ?? 'split-240',
+      // 🚨 THE VOLTAGE FOLLOWS THE PHASE. `?? 240` alone built an 800 A 480Y/277 V service at 240 V
+      // whenever the caller named the phase and not the voltage. The last 240 is reachable only for
+      // 'custom' with no voltage given, the same documented fallback the stored-graph reader uses.
+      voltage: opts.voltage ?? servicePhaseInfo(phase).lineToLineV ?? 240,
+      phase,
       // 🚨 NOT ZERO. Nobody has measured it yet, and the SCCR chain must say so.
       availableFaultCurrentA: null,
     },
