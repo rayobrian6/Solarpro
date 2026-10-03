@@ -574,7 +574,13 @@ describe('🚨 REPAIR 4 — a retirement clears every ACTIVE mirror', () => {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ projectId: PROJECT_B, coupling: 'dc-coupled-storage' }),
       }));
-    expect(res.status, 'the resolution route refused').toBe(200);
+    // 🚨 THE EXPLICIT PATH MUST SURVIVE THE DERIVATION. Deriving the answer must not take away the
+    // installer's ability to STATE it — a derivation is not a decision, and only the decision is
+    // permanent and attributable. Ray: "Do not remove valid edit paths... Do not solve redundancy
+    // by deleting useful engineering capability."
+    expect(res.status,
+      `the resolution route refused an explicit decision over a derived value: `
+      + `${JSON.stringify(await res.clone().json()).slice(0, 200)}`).toBe(200);
 
     const row = (await db.query(
       `SELECT selected_equipment, engineering_config FROM projects WHERE id = $1`,
@@ -941,43 +947,60 @@ describe("🚨 THE PHANTOM INVERTER ON RAY'S LIVE PROJECT", () => {
   // He regenerated it and got the same sheet. This is that sheet, as a test.
   // ═══════════════════════════════════════════════════════════════════════
 
-  it('🚨 an architecture that claims an inverter the project has not got is REFUSED', async () => {
+  // ═══════════════════════════════════════════════════════════════════════
+  // 🚨 AND REFUSING WAS ALSO WRONG — IT ASKED A QUESTION WITH ONE POSSIBLE ANSWER.
+  //
+  // The first version of this block asserted a 409 on his row and called that the repair. It is
+  // not: his project has no separate PV inverter and four Powerwall 3, so the strings have nowhere
+  // else to terminate. Treating a DETERMINED architecture as unresolved left the sizing gate
+  // (`solarCoupling === 'dc-coupled-storage'`) FALSE, and the engine went on recommending two
+  // standalone Tesla string inverters that `SizingRecommendation` offered as "Apply Recommended
+  // Configuration" — the writer Ray named: "there is an auto config button that pops up on sys
+  // config page that chooses those fucking 5.7 inverters... And that data flows into the sld."
+  //
+  // Ray, earlier, on exactly this: "solarpro should automatically know or ask questions... This is
+  // pretty common sense logic." Know when it is determined. Ask when it is not — and the control
+  // case below pins the asking half, so this is not a deleted refusal.
+  // ═══════════════════════════════════════════════════════════════════════
+  it('🚨 a determined architecture is DERIVED from the equipment, not asked about', async () => {
     await writeRaysLiveRowAsItIs();
 
     const { loadElectricalProject } = await import('@/lib/electrical/loadElectricalProject');
     const m = (await loadElectricalProject(PROJECT_B, USER_ID))!.model;
 
-    // The two stores disagree, and the model must say so.
     expect(m.hasExternalInverter, 'the fixture is not in the live state').toBe(false);
-    expect(m.conflicts.map(c => c.code),
-      'an AC-coupled claim with no inverter behind it raised nothing')
-      .toContain('SOLAR_COUPLING_UNRESOLVED');
-    expect(m.architectureResolutionRequired,
-      'the architecture is contradictory and the model does not require a resolution').toBe(true);
+    expect(m.storage.invertingUnitCount, 'the four Powerwalls are not in the graph').toBe(4);
 
-    // And the refusal carries the question a human can answer.
-    const { architectureRefusal } = await import('@/lib/electrical/architectureGate');
-    const refusal = architectureRefusal(m, 'rev-1');
-    expect(refusal, 'the gate did not fire on a contradictory architecture').toBeTruthy();
-    expect(String(refusal!.conflicts[0]?.question ?? ''),
-      'the refusal does not name both options').toMatch(/battery DC inputs/i);
+    expect(m.solarCoupling,
+      'the model still reports the contradicted scalar, so the sizing gate stays shut')
+      .toBe('dc-coupled-storage');
+    expect(m.solarCouplingProvenance.source,
+      'a derived answer must not be reported as the designer\'s word').toBe('derived');
+    expect(m.conflicts.map(c => c.code),
+      'an answer with one possible value was raised as a conflict').not.toContain(
+      'SOLAR_COUPLING_UNRESOLVED');
+    expect(m.architectureResolutionRequired,
+      'the operator is still being asked a question the equipment already answers').toBe(false);
   });
 
-  it('🚨 the SLD route REFUSES rather than drawing the page\'s inverter', async () => {
+  it('🚨 the SLD draws the REAL design, with no resolution click at all', async () => {
     await writeRaysLiveRowAsItIs();
     const svg = await generateSld(PROJECT_B);
 
-    expect(svg.status,
-      'the route drew a sheet for an architecture that claims equipment the project has not got')
-      .toBe(409);
-    expect(String((svg.json as any)?.code ?? ''))
-      .toContain('ELECTRICAL_ARCHITECTURE_REQUIRES_RESOLUTION');
+    expect(svg.status, `the sheet failed: ${JSON.stringify(svg.json).slice(0, 300)}`).toBe(200);
+
+    // 🚨 THE EXACT THINGS THAT WERE WRONG ON HIS SCREEN.
+    expect(svg.svg, 'the sheet still names a Tesla Solar Inverter')
+      .not.toMatch(/Tesla Solar Inverter/i);
+    expect(svg.svg, 'the title block still says STRING INVERTER')
+      .not.toMatch(/STRING INVERTER/i);
+    expect(svg.svg, 'the sheet does not state the real architecture').toMatch(/DC COUPLED/i);
   });
 
-  it('🚨 the EXPORTED PDF refuses too — it is the sheet that gets submitted', async () => {
+  it('🚨 the EXPORTED PDF is the same sheet — it is the one that gets submitted', async () => {
     await writeRaysLiveRowAsItIs();
     const pdf = await exportPdfSheet(PROJECT_B);
-    expect(pdf.status, 'the exported PDF can still be produced from the contradiction').toBe(409);
+    expect(pdf.status, 'the exported PDF could not be produced').toBe(200);
   });
 
   it('🚨 and once resolved, the phantom is gone and the sheet is the real design', async () => {
@@ -1220,5 +1243,393 @@ describe('🚨 FIXTURE A — the ordinary house, which had no fixture at all', (
     // boundary: a resolved interconnection must not be swept into NOT_EVALUATED.
     expect(r.json?.overallStatus,
       'a resolved load-side 200 A job was reported as not evaluated').not.toBeNull();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 🚨 THE AUTO-PICK POPUP — THE WRITER RAY NAMED, REACHED THROUGH THE REAL CHAIN
+//
+// Ray, 2026-10-02: "there is an auto config button that pops up on sys config page that chooses
+// those fucking 5.7 inverters because it is auto picking a system that works for code. And that
+// data flows into the sld."
+//
+// The control is `components/engineering/SizingRecommendation.tsx` — it renders "System Mismatch
+// Detected" whenever the sizing engine's recommendation differs from `config.inverters`, and its
+// button is "Apply Recommended Configuration" (:315), which calls `applySizingRecommendation`
+// (page.tsx:11755) and writes the fleet into `config.inverters` — the sole source of the SLD
+// request's inverterId / inverterModel / inverterManufacturer / topologyType.
+//
+// This probe runs HIS ROW through the production chain and asserts what the browser would get.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('🚨 THE AUTO-PICK POPUP — the writer Ray named, through the real chain', () => {
+  // ═════════════════════════════════════════════════════════════════════════
+  // The control is `components/engineering/SizingRecommendation.tsx`: it renders "System Mismatch
+  // Detected" whenever the engine's recommendation differs from `config.inverters`, and its button
+  // "Apply Recommended Configuration" (:315) calls `applySizingRecommendation`
+  // (app/engineering/page.tsx:11755), which writes the fleet into `config.inverters` — the sole
+  // source of the SLD request's inverterId / inverterModel / inverterManufacturer / topologyType.
+  //
+  // So the question that decides whether a phantom can exist at all is: WHAT DOES THE ENGINE OFFER
+  // for his row? Measured here through the production chain, not a fixture.
+  // ═════════════════════════════════════════════════════════════════════════
+  it('🚨 the engine offers NO inverter for his row, so Apply has no phantom to write', async () => {
+    await writeRaysLiveRowAsItIs();
+
+    const { loadElectricalProject } = await import('@/lib/electrical/loadElectricalProject');
+    const m = (await loadElectricalProject(PROJECT_B, USER_ID))!.model;
+
+    // The page's gate, character for character (app/engineering/page.tsx:3178):
+    //   const pvOnStorageDc = electrical?.solarCoupling === 'dc-coupled-storage'
+    const pvOnStorageDc = m.solarCoupling === 'dc-coupled-storage';
+    expect(pvOnStorageDc, 'the gate is shut, so the engine is never told the architecture')
+      .toBe(true);
+
+    const { sizeSystemFromBrand } = await import('@/lib/system/sizingEngine');
+    const raysInputs = {
+      systemType: 'roof' as const,
+      panelCount: 37, panelWattage: 440,
+      panelVoc: 52.7, panelIsc: 13.7, panelTempCoeffVoc: -0.27, designTempMin: -18,
+      selectedBrand: 'tesla',
+      batteryEnabled: true, batteryMode: 'auto', batteryGoal: 'backup', batteryDesiredUnits: 4,
+    };
+
+    const rec = sizeSystemFromBrand({ ...raysInputs, pvCoupledToStorage: pvOnStorageDc } as never);
+    expect(rec.inverterModels, 'the engine still recommends equipment the design has not got')
+      .toEqual([]);
+    expect(rec.inverterCount).toBe(0);
+    expect(rec.warnings.map((w: any) => w.code),
+      'nothing explains the empty fleet, so it reads as a failure')
+      .toContain('PV_DC_COUPLED_NO_INVERTER');
+
+    // 🚨 AND THE NOISE A REPAIR REACHING THE NEXT DEFECT PRODUCED. Returning an empty fleet made
+    // `distributeStrings` spread 37 modules across zero inverters and `buildFeasibilityReport`
+    // declare no viable model — three alarming banners on a design that is completely fine.
+    for (const noise of ['NO_MPPT_SLOTS', 'STRING_OVERFLOW', 'FEASIBILITY_NO_VIABLE_MODEL']) {
+      expect(rec.warnings.map((w: any) => w.code),
+        `${noise} is reported for a design whose array terminates on the storage MPPTs`)
+        .not.toContain(noise);
+    }
+
+    // 🚨 THE CONTROL. Without it this test passes on a build where the flag is ignored and the
+    // engine has simply stopped recommending inverters for some unrelated reason.
+    const blind = sizeSystemFromBrand({ ...raysInputs } as never);
+    expect(blind.inverterModels.length,
+      'the engine recommends nothing even when NOT told the architecture — this test can no longer '
+      + 'detect the defect it exists for').toBeGreaterThan(0);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 🚨 THE BLAST RADIUS OF DERIVING IT — THE ASKING HALF IS STILL THERE
+//
+// Ray: "I'm telling you if you change the auto configuration. You are going to fuck up the slds
+// that are working just to make this one scenario work... every auto pick selection works for
+// installs that do not have batteries. Do not fuck my entire website up because we are getting 1
+// real world scenario to work."
+//
+// The branch I added turns a contradicted `ac-coupled-inverter` into `dc-coupled-storage` ONLY when
+// the storage publishes its own PV DC inputs. These two cases are the same project with that one
+// fact changed, through the pure resolver so hydration cannot re-add the capability behind the test.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('🚨 DERIVING A DETERMINED ARCHITECTURE — the A/B on the one condition', () => {
+  async function resolveWithStorage(opts: { dcCapable: boolean }) {
+    const { buildRaysIntendedJob } = await import('@/lib/electrical/fixtures/tesla400aTwoGateway');
+    const { resolveElectricalProject } = await import('@/lib/electrical/projectModel');
+    const topology = JSON.parse(JSON.stringify(buildRaysIntendedJob().topology));
+    topology.solarCoupling = 'ac-coupled-inverter';
+    topology.storage = (topology.storage ?? []).map((u: any) => opts.dcCapable
+      ? u
+      : { ...u, pvInputLimits: undefined });
+    return resolveElectricalProject({
+      topology,
+      selectedEquipment: { batteryCount: 4, inverter: null, inverterId: null, moduleCount: 37 },
+      engineeringConfig: null,
+      equipmentProvenance: null,
+      legacyInverter: null,
+    } as never);
+  }
+
+  it('🚨 storage that takes PV on DC ⇒ derived, because nothing else can take the strings', async () => {
+    const m = await resolveWithStorage({ dcCapable: true });
+    expect(m.solarCoupling).toBe('dc-coupled-storage');
+    expect(m.architectureResolutionRequired).toBe(false);
+    expect(m.conflicts.map(c => c.code)).not.toContain('SOLAR_COUPLING_UNRESOLVED');
+  });
+
+  it('🚨 CONTROL — storage that does NOT ⇒ still asked, and still refuses', async () => {
+    const m = await resolveWithStorage({ dcCapable: false });
+
+    expect(m.solarCoupling,
+      'a project with no inverter and no DC-capable storage was silently given an answer')
+      .not.toBe('dc-coupled-storage');
+    expect(m.conflicts.map(c => c.code),
+      'the contradiction is no longer raised for a project the equipment cannot answer for — the '
+      + 'refusal was deleted rather than narrowed').toContain('SOLAR_COUPLING_UNRESOLVED');
+    expect(m.architectureResolutionRequired,
+      'nothing asks the operator any more').toBe(true);
+
+    // The refusal still carries the question a human can actually answer.
+    const { architectureRefusal } = await import('@/lib/electrical/architectureGate');
+    const refusal = architectureRefusal(m, 'rev-1');
+    expect(refusal, 'the gate no longer fires on an unanswerable architecture').toBeTruthy();
+    expect(String(refusal!.conflicts[0]?.question ?? ''),
+      'the refusal does not name both options').toMatch(/battery DC inputs/i);
+  });
+
+  it('🚨 an inverter ON the project is untouched — PW3 beside a separate inverter still asks', async () => {
+    const { buildRaysIntendedJob } = await import('@/lib/electrical/fixtures/tesla400aTwoGateway');
+    const { resolveElectricalProject } = await import('@/lib/electrical/projectModel');
+    const topology = JSON.parse(JSON.stringify(buildRaysIntendedJob().topology));
+    topology.solarCoupling = 'ac-coupled-inverter';
+
+    // Ray: "Do not assume Tesla storage always eliminates Enphase."
+    const m = resolveElectricalProject({
+      topology,
+      selectedEquipment: {
+        batteryCount: 4, inverterId: 'enphase-iq8plus', inverter: 'IQ8PLUS', moduleCount: 37,
+      },
+      engineeringConfig: null, equipmentProvenance: null, legacyInverter: null,
+    } as never);
+
+    expect(m.hasExternalInverter, 'the inverter did not reach the model').toBe(true);
+    expect(m.solarCoupling,
+      'a Powerwall 3 standing beside a separate PV inverter had its inverter derived away')
+      .not.toBe('dc-coupled-storage');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 🚨 THE BROWSER MAY NOT RE-DECIDE THE ARCHITECTURE FROM ITS WORKING FLEET
+//
+// The server resolving Ray's row correctly fixed nothing on his screen. `app/engineering/page.tsx`
+// composes its OWN model and feeds it `selectedEquipment.inverterId:
+// config.inverters[0]?.inverterId` — `engineering_config`, the working fleet, which holds whatever
+// the auto-pick last wrote. So the browser computed `hasExternalInverter: true` from the phantom,
+// concluded `ac-coupled-inverter`, left the sizing gate FALSE, and the engine went on recommending
+// the phantom that had proved the architecture. It sustained itself.
+//
+// Ray's chain law: "A downstream stage may derive new information. It may not re-decide upstream
+// information from: React state, old snapshots, fallback literals, default catalogue products,
+// renderer-local calculations."
+//
+// These are source assertions because the page cannot be mounted here — but they are about LIVE
+// lines, not comments, for the reason `a-passing-guard-can-be-blind` records: a substring guard
+// that matches its own explanatory comment proves nothing.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('🚨 THE PAGE TAKES THE ARCHITECTURE FROM THE SERVER', () => {
+  const liveLines = () => src('app', 'engineering', 'page.tsx')
+    .split('\n').filter(l => !l.trim().startsWith('//') && !l.trim().startsWith('*'));
+
+  it('🚨 the sizing gate reads the server answer, not only its own composition', () => {
+    const live = liveLines();
+    const idx = live.findIndex(l => l.includes('const pvOnStorageDc = useMemo'));
+    expect(idx, 'the sizing gate is gone').toBeGreaterThan(-1);
+    const memo = live.slice(idx, idx + 5).join(' ');
+
+    expect(memo, 'the gate no longer consults the server-resolved coupling, so a browser model '
+      + 'built from the working fleet decides the architecture again').toContain('_archServer');
+    expect(memo, 'the gate does not test the resolved coupling')
+      .toContain("coupling === 'dc-coupled-storage'");
+
+    // 🚨 AND STILL NOT CAPABILITY. Ray stopped this arm before it shipped: a Powerwall 3 beside
+    // Enphase micros would lose its inverter.
+    expect(memo.includes('pvInputLimits'),
+      'sizing is gated on storage CAPABILITY again').toBe(false);
+  });
+
+  it('🚨 the architecture is fetched for every project, not only when a conflict is suspected', () => {
+    const live = liveLines();
+    const idx = live.findIndex(l => l.includes('electrical-architecture?projectId='));
+    expect(idx, 'the page no longer reads the server architecture at all').toBeGreaterThan(-1);
+
+    // The effect's own early return, just above the request.
+    const guard = live.slice(Math.max(0, idx - 8), idx).join(' ');
+    expect(guard,
+      'the architecture read is gated on the browser already believing the architecture is '
+      + 'unresolved — so on the one project where the browser is wrong, the correcting read never '
+      + 'goes out').not.toMatch(/if\s*\(\s*!_archUnresolved/);
+    expect(guard, 'the read is no longer scoped to a project').toContain('currentProjectId');
+  });
+
+  it('🚨 Smart Defaults holds while the architecture is unknown — and ONLY then', () => {
+    const live = liveLines();
+    const idx = live.findIndex(l => l.includes("_archServerRead === 'loading'")
+      && l.includes('_graphHasPvCapableStorage'));
+    expect(idx,
+      'nothing stops Smart Defaults seeding an inverter in the window before the architecture '
+      + 'answer lands').toBeGreaterThan(-1);
+
+    // 🚨 THE BLAST RADIUS IS IN THE CONDITION ITSELF. Ray: "every auto pick selection works for
+    // installs that do not have batteries." A hold on 'failed', or a hold that ignored the graph,
+    // would stall the picker on designs that have no storage at all.
+    const hold = live[idx];
+    expect(hold, 'a FAILED read now blocks the seed permanently, so a dropped fetch stalls a new '
+      + 'design').not.toContain("=== 'failed'");
+    expect(hold, 'the hold is not scoped to graphs that could answer DC')
+      .toContain('_graphHasPvCapableStorage');
+  });
+
+  it('🚨 the capability test used for the HOLD is a separate expression from the sizing gate', () => {
+    const live = liveLines();
+    const capIdx = live.findIndex(l => l.includes('const _graphHasPvCapableStorage'));
+    const gateIdx = live.findIndex(l => l.includes('const pvOnStorageDc = useMemo'));
+    expect(capIdx, 'the hold predicate is gone').toBeGreaterThan(-1);
+    expect(gateIdx, 'the sizing gate is gone').toBeGreaterThan(-1);
+    expect(capIdx, 'the capability predicate and the sizing gate are the same expression — which '
+      + 'is how capability becomes architecture').not.toBe(gateIdx);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 🚨 A DERIVED ARCHITECTURE IS A CURRENT-STATE RESULT, NOT AN AUTHORED DECISION
+//
+// Ray, before authorising the push:
+//
+//   "PW3 + PV modules + no external inverter yet must not make DC coupling an irreversible
+//    authored decision. If the installer subsequently explicitly selects Enphase or another
+//    external inverter, the architecture must resolve AC-coupled normally. The new DC-coupled
+//    conclusion may be a derived current-state result, but it must not be persisted as user
+//    intent merely because no inverter is presently selected."
+//
+// This is the adversarial case for the whole slice, because the repair's value comes from deriving
+// an answer — and a derivation that hardens into a recorded fact is worse than the question it
+// replaced: it looks settled and nobody knows who settled it.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('🚨 A DERIVED ARCHITECTURE MUST NOT HARDEN INTO AN AUTHORED ONE', () => {
+  /**
+   * The same Powerwall 3 graph every time. Only the two things that may legitimately change the
+   * answer are varied: what the graph RECORDS, and what inverter the project HOLDS.
+   */
+  async function resolve(opts: {
+    recorded?: string | null;
+    inverterId?: string | null;
+    inverterProvenanceKind?: string | null;
+  }) {
+    const { buildRaysIntendedJob } = await import('@/lib/electrical/fixtures/tesla400aTwoGateway');
+    const { resolveElectricalProject } = await import('@/lib/electrical/projectModel');
+    const topology = JSON.parse(JSON.stringify(buildRaysIntendedJob().topology));
+    topology.solarCoupling = opts.recorded ?? null;
+    return resolveElectricalProject({
+      topology,
+      selectedEquipment: {
+        batteryCount: 4, moduleCount: 37,
+        inverter: opts.inverterId ? 'IQ8PLUS' : null,
+        inverterId: opts.inverterId ?? null,
+      },
+      engineeringConfig: null,
+      legacyInverter: null,
+      // An EXPLICIT pick records its provenance; that is what the equipment picker writes.
+      equipmentProvenance: opts.inverterProvenanceKind
+        ? { inverter: { kind: opts.inverterProvenanceKind, basis: 'The installer picked it.',
+                        by: 'installer', recordedAt: '2026-10-02T00:00:00.000Z' } }
+        : null,
+    } as never);
+  }
+
+  // ── 1. THE DERIVATION ITSELF CLAIMS NOTHING ABOUT INTENT ────────────────
+  it('🚨 PW3 + modules + no inverter: derived DC, and recorded as DERIVED — never as the designer\'s word', async () => {
+    const m = await resolve({ recorded: 'ac-coupled-inverter', inverterId: null });
+    expect(m.solarCoupling).toBe('dc-coupled-storage');
+    expect(m.solarCouplingProvenance.source,
+      'a derivation is being reported as the designer having recorded it').toBe('derived');
+    expect(m.solarCouplingProvenance.source).not.toBe('service-topology');
+  });
+
+  it('🚨 and it queues NOTHING for the row — no write, so nothing to outlive the state', async () => {
+    const m = await resolve({ recorded: 'ac-coupled-inverter', inverterId: null });
+    // 🚨 `canonicalSldProjection` calls `persistElectricalCanonicalization` on EVERY generate, so a
+    // patch here is a write to `projects.service_topology` on the next click.
+    expect(m.canonicalizationPatch,
+      'the derivation queued a write that would record DC coupling on the row merely because no '
+      + 'inverter is presently selected').toBeNull();
+  });
+
+  // ── 2. AND IT IS REVERSIBLE BY THE ACT RAY NAMED ────────────────────────
+  it('🚨 REVERSIBLE — explicitly selecting Enphase afterwards resolves AC-coupled, no question asked', async () => {
+    const m = await resolve({
+      recorded: 'ac-coupled-inverter',
+      inverterId: 'enphase-iq8plus', inverterProvenanceKind: 'USER_SELECTED',
+    });
+    expect(m.hasExternalInverter, 'the pick did not reach the model').toBe(true);
+    expect(m.solarCoupling, 'an explicit inverter pick did not resolve AC-coupled')
+      .toBe('ac-coupled-inverter');
+    expect(m.conflicts.map(c => c.code),
+      'the installer picked an inverter and was asked a question about it anyway')
+      .not.toContain('SOLAR_COUPLING_UNRESOLVED');
+    expect(m.architectureResolutionRequired).toBe(false);
+  });
+
+  // ── 3. 🚨 THE CASE THAT MATTERS — AFTER THE MIGRATION HAS ALREADY WRITTEN DC ──
+  //
+  // CASE A(iii) DOES emit a patch when NOTHING is recorded, and the SLD route persists it. So the
+  // real sequence Ray describes is: generate once with no inverter (row now says DC), then pick
+  // Enphase. If that produces a refusal, the derived answer has hardened exactly as he said it
+  // must not — it became sticky because of what was absent at one moment in time.
+  it('🚨 a RECORDED-but-derived DC coupling still yields to an explicit inverter pick', async () => {
+    const fresh = await resolve({ recorded: null, inverterId: null });
+    expect(fresh.canonicalizationPatch?.solarCoupling,
+      'the premise is gone: a fresh PW3 project no longer migrates to DC').toBe('dc-coupled-storage');
+
+    // The row now records what that migration wrote. Nobody authored it.
+    const m = await resolve({
+      recorded: 'dc-coupled-storage',
+      inverterId: 'enphase-iq8plus', inverterProvenanceKind: 'USER_SELECTED',
+    });
+    expect(m.solarCoupling,
+      'DC coupling recorded by a migration now outranks an inverter the installer explicitly '
+      + 'picked — the derived answer hardened into an authored one').toBe('ac-coupled-inverter');
+    expect(m.conflicts.map(c => c.code),
+      'the installer is asked to adjudicate between his own pick and a value nobody chose')
+      .not.toContain('SOLAR_COUPLING_UNRESOLVED');
+  });
+
+  // ── 4. CONTROLS — WHAT MUST STILL ASK ───────────────────────────────────
+  it('🚨 CONTROL — a coupling the DESIGNER authored is not overridden by an inverter pick', async () => {
+    const { buildRaysIntendedJob } = await import('@/lib/electrical/fixtures/tesla400aTwoGateway');
+    const { resolveElectricalProject } = await import('@/lib/electrical/projectModel');
+    const topology = JSON.parse(JSON.stringify(buildRaysIntendedJob().topology));
+    topology.solarCoupling = 'dc-coupled-storage';
+
+    const m = resolveElectricalProject({
+      topology,
+      selectedEquipment: { batteryCount: 4, moduleCount: 37,
+        inverter: 'IQ8PLUS', inverterId: 'enphase-iq8plus' },
+      engineeringConfig: null, legacyInverter: null,
+      equipmentProvenance: {
+        // 🚨 A HUMAN RECORDED THE ARCHITECTURE. That outranks the derivation in BOTH directions,
+        // and adding an inverter to it is a real contradiction that a person must settle.
+        architecture: { kind: 'USER_SELECTED', basis: 'The designer answered the wizard.',
+                        by: 'designer', recordedAt: '2026-10-01T00:00:00.000Z' },
+        inverter: { kind: 'USER_SELECTED', basis: 'The installer picked it.',
+                    by: 'installer', recordedAt: '2026-10-02T00:00:00.000Z' },
+      },
+    } as never);
+
+    expect(m.conflicts.map(c => c.code),
+      'an authored DC coupling was silently overridden by an inverter pick — the repair now '
+      + 'discards a designer\'s recorded decision').toContain('SOLAR_COUPLING_UNRESOLVED');
+    expect(m.architectureResolutionRequired).toBe(true);
+  });
+
+  it('🚨 CONTROL — an AUTO-SUGGESTED inverter settles nothing, in either direction', async () => {
+    // Neither side is a decision: a coupling nobody authored, and an inverter nobody picked. This
+    // is the one that must still ask, and it is what stops this repair becoming "Tesla wins".
+    const { buildRaysIntendedJob } = await import('@/lib/electrical/fixtures/tesla400aTwoGateway');
+    const { resolveElectricalProject } = await import('@/lib/electrical/projectModel');
+    const topology = JSON.parse(JSON.stringify(buildRaysIntendedJob().topology));
+    topology.solarCoupling = 'dc-coupled-storage';
+
+    const m = resolveElectricalProject({
+      topology,
+      selectedEquipment: { batteryCount: 4, moduleCount: 37,
+        inverter: 'Tesla Solar Inverter', inverterId: RAYS_INVERTER },
+      engineeringConfig: null, equipmentProvenance: null,
+      legacyInverter: { verdict: 'AUTO_SUGGESTED_LEGACY',
+        basis: 'The ecosystem picker suggested it.', evidence: [] },
+    } as never);
+
+    expect(m.conflicts.map(c => c.code),
+      'an inverter nobody picked now overrides the recorded coupling').toContain(
+      'SOLAR_COUPLING_UNRESOLVED');
   });
 });

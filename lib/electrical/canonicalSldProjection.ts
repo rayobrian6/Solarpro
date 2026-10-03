@@ -112,9 +112,36 @@ export async function projectCanonicalArchitecture(
   // DC-coupled graph the resolver returns no patch and the sheet keeps what was recorded, with
   // the conflict reported — because picking a side silently is how one drawing came to contain
   // two architectures.
-  input.serviceTopology = model.canonicalizationPatch
-    ? { ...model.topology, ...model.canonicalizationPatch }
-    : model.topology;
+  //
+  // 🚨 WHAT THE SHEET DRAWS AND WHAT MAY BE WRITTEN BACK ARE TWO DIFFERENT QUESTIONS.
+  //
+  // This line used to answer only the second one. `canonicalizationPatch` is the model's opinion
+  // about what is safe to PERSIST — it is withheld whenever a conflict exists, and withheld again
+  // where writing it would move `meta.digest` and retire a live PE approval as a side effect of a
+  // read. `model.solarCoupling` is the model's CONCLUSION, and the conclusion is what a drawing is
+  // entitled to. Handing the renderer `model.topology` instead handed it the raw stored scalar.
+  //
+  // That is how a sheet kept saying STRING INVERTER on a project whose model had already resolved
+  // to `dc-coupled-storage`: `sld-professional-renderer.ts:4155` reads
+  // `input.serviceTopology?.solarCoupling` for `_couplingIsDc` (and again at `:5717`), so the
+  // renderer believed the store while every other surface believed the model. The comment directly
+  // above has said "Not the renderer" since this module was written; the code did not do it.
+  //
+  // Unchanged for every project whose recorded coupling is not contradicted: there
+  // `model.solarCoupling === recorded`, so this writes the identical value. And when the model
+  // reaches NO conclusion the raw graph is left exactly as it is, because an override is only
+  // warranted by an answer.
+  input.serviceTopology = {
+    ...model.topology,
+    ...(model.canonicalizationPatch ?? {}),
+    ...(model.solarCoupling ? { solarCoupling: model.solarCoupling } : {}),
+  };
+  if (model.topology.solarCoupling && model.solarCoupling
+      && model.topology.solarCoupling !== model.solarCoupling) {
+    console.warn(`[${tag}] the stored coupling disagrees with the canonical model:`
+      + ` stored=${model.topology.solarCoupling} canonical=${model.solarCoupling}`
+      + ` (${model.solarCouplingProvenance.source}) — the sheet follows the model.`);
+  }
 
   // 🚨 THE SERVICE RATING IS PROJECTED FROM THE MODEL, NOT FABRICATED AS 200.
   // A graph with NO recorded rating projects nothing: `serviceRatingLabel` prints

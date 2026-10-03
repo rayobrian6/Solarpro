@@ -425,25 +425,123 @@ export function resolveElectricalProject(
     // behind it.
     // ══════════════════════════════════════════════════════════════════════
     if (!architectureIsDecision && recorded === 'ac-coupled-inverter' && !hasExternalInverter) {
-      conflicts.push({
-        code: 'SOLAR_COUPLING_UNRESOLVED',
-        fact: 'How the PV is coupled',
-        claims: [
-          { source: 'service-topology',
-            says: `The project records '${recorded}' — a separate PV inverter between the array `
-              + 'and the service. Nothing records who decided that, so it was written by a '
-              + 'derivation rather than stated by a designer.' },
-          { source: 'selected-equipment',
-            says: 'No separate PV inverter is selected on this project. The architecture names '
-              + 'equipment the equipment record does not contain.' },
-        ],
-        question: 'Does the PV land on the battery DC inputs, or is there a separate AC '
-          + 'PV inverter that has not been selected yet? Choosing "PV into the batteries" records '
-          + 'the design the storage is wired for; choosing the inverter means picking which one.',
-      });
+      // ══════════════════════════════════════════════════════════════════════
+      // 🚨 AND WHEN ONLY ONE PLACEMENT IS PHYSICALLY POSSIBLE, THIS IS NOT A QUESTION.
+      //
+      // Ray, 2026-10-02: "there is an auto config button that pops up on sys config page that
+      // chooses those fucking 5.7 inverters because it is auto picking a system that works for
+      // code. And that data flows into the sld." And, earlier: "solarpro should automatically know
+      // or ask questions... This is pretty common sense logic."
+      //
+      // The check below was right that the recorded value is contradicted and WRONG about what to
+      // do with it. Raising an unanswerable question set `architectureResolutionRequired`, which
+      // left the sizing gate (`solarCoupling === 'dc-coupled-storage'`) FALSE — so the engine went
+      // on recommending TWO standalone Tesla string inverters for a design holding four Powerwall 3
+      // and no inverter at all. `SizingRecommendation` then offered exactly that as "Apply
+      // Recommended Configuration", and applying it writes the phantom into `config.inverters`,
+      // which is the sole source of the SLD request's inverter identity. Proven on his row:
+      //
+      //     solarCoupling = ac-coupled-inverter · hasExternalInverter = false
+      //     storage.invertingUnitCount = 4 (Tesla Powerwall 3) · moduleCount = 37
+      //     THE GATE pvOnStorageDc = false
+      //     inverterModels = [tesla-solar-inverter-7p6k x 2]
+      //
+      // There is no choice to be made here. The array terminates somewhere. No separate PV inverter
+      // exists on the project, and the storage publishes its own PV DC inputs, so the strings can
+      // only land there. That is the SAME evidence CASE A(iii) below already derives from when
+      // nothing is recorded — the one difference is that this row carries an IMPOSSIBLE recorded
+      // value, and an impossible value is worth less than an absent one, not more.
+      //
+      // Ray's own rule, applied: "Actual physical identity always outranks convenient arithmetic."
+      //
+      // 🚨 NARROWER THAN THE CONFLICT IT REPLACES, AND THE BLAST RADIUS IS THE POINT.
+      // Ray: "Do not fuck my entire website up because we are getting 1 real world scenario to
+      // work... every auto pick selection works for installs that do not have batteries."
+      //   · an inverter IS on the project → `hasExternalInverter` is true → this whole branch is
+      //     unreachable, so a Powerwall 3 beside Enphase micros or a SolarEdge string inverter is
+      //     untouched. Ray: "Do not assume Tesla storage always eliminates Enphase."
+      //   · no DC-PV-capable storage → falls through to the question below, unchanged. Every
+      //     battery that publishes no `pvInput`, and every design with no battery at all, is in
+      //     that half — which is the whole of "installs that do not have batteries".
+      //   · a designer answered the coupling → `architectureIsDecision` → unreachable.
+      //   · `recorded` is dc-coupled or storage-only → unreachable.
+      //   · no modules read yet → nothing is derived. Absence is not evidence.
+      // ══════════════════════════════════════════════════════════════════════
+      if (pvCapableUnits.length > 0 && (moduleCount ?? 0) > 0) {
+        solarCoupling = 'dc-coupled-storage';
+        solarCouplingProvenance = {
+          source: 'derived',
+          basis: `The project records 'ac-coupled-inverter', which names a separate PV inverter the `
+            + 'equipment record does not contain, and nothing records who decided it. '
+            + `${pvCapableUnits.length} storage unit(s) publish their own PV DC inputs and no `
+            + 'separate PV inverter is selected, so the strings can only terminate on the storage. '
+            + 'Derived from the equipment, which outranks a contradicted scalar.',
+        };
+        // 🚨 DELIBERATELY NO `canonicalizationPatch` HERE.
+        //
+        // Correcting the stored scalar would move `meta.digest` and retire any live PE approval on
+        // the project as a side effect of a READ — see the snapshot digest rule. The derivation is
+        // deterministic and runs on every load, so the model is right either way, and
+        // `electricalRevision` fingerprints the RESOLVED coupling rather than the stored one.
+        // Writing the correction back belongs to a deliberate operator action, not to a load.
+      } else {
+        conflicts.push({
+          code: 'SOLAR_COUPLING_UNRESOLVED',
+          fact: 'How the PV is coupled',
+          claims: [
+            { source: 'service-topology',
+              says: `The project records '${recorded}' — a separate PV inverter between the array `
+                + 'and the service. Nothing records who decided that, so it was written by a '
+                + 'derivation rather than stated by a designer.' },
+            { source: 'selected-equipment',
+              says: 'No separate PV inverter is selected on this project. The architecture names '
+                + 'equipment the equipment record does not contain.' },
+            // 🚨 AND WHY THIS ONE CANNOT BE DERIVED, WHERE RAY'S COULD.
+            { source: 'service-topology',
+              says: 'No storage on this project publishes its own PV DC inputs either, so there is '
+                + 'nowhere the strings could land instead. The answer is not determined by the '
+                + 'equipment and has to be stated.' },
+          ],
+          question: 'Does the PV land on the battery DC inputs, or is there a separate AC '
+            + 'PV inverter that has not been selected yet? Choosing "PV into the batteries" records '
+            + 'the design the storage is wired for; choosing the inverter means picking which one.',
+        });
+      }
     }
 
-    if (recorded === 'dc-coupled-storage' && hasExternalInverter) {
+    if (recorded === 'dc-coupled-storage' && hasExternalInverter
+        // ══════════════════════════════════════════════════════════════════
+        // 🚨 AND A DERIVED DC COUPLING YIELDS TO AN INVERTER THE INSTALLER ACTUALLY PICKED.
+        //
+        // Ray, before authorising this slice: "PW3 + PV modules + no external inverter yet must
+        // not make DC coupling an irreversible authored decision. If the installer subsequently
+        // explicitly selects Enphase or another external inverter, the architecture must resolve
+        // AC-coupled normally. The new DC-coupled conclusion may be a derived current-state
+        // result, but it must not be persisted as user intent merely because no inverter is
+        // presently selected."
+        //
+        // His control found this, and it is a real sequence, not a hypothetical:
+        //
+        //   1. a fresh Powerwall 3 project with modules and no inverter reaches CASE A(iii)
+        //      below, which emits `canonicalizationPatch = { solarCoupling: 'dc-coupled-storage' }`;
+        //   2. `canonicalSldProjection` calls `persistElectricalCanonicalization` on EVERY
+        //      generate, so the first Generate SLD WRITES that onto `projects.service_topology`;
+        //   3. the installer then picks Enphase — and this branch raised a conflict, refused the
+        //      drawing, and asked him to adjudicate between the inverter he had just chosen and a
+        //      coupling no human ever authored.
+        //
+        // That is the derived answer hardening into an authored one, by nothing more than what
+        // happened to be absent at one moment in time. An explicit equipment decision outranks a
+        // migration, exactly as it outranks the contradicted scalar in the branch below.
+        //
+        // 🚨 BOTH HALVES ARE REQUIRED, AND THE CONTROLS PIN BOTH:
+        //   · a coupling the DESIGNER recorded (`architectureIsDecision`) is NEVER overridden —
+        //     adding an inverter to an authored DC design is a genuine contradiction for a person;
+        //   · an AUTO_SUGGESTED or UNRECORDED inverter settles nothing, because then neither side
+        //     is a decision and this is CASE B. Ray: "Do not silently choose either side." It is
+        //     also what stops this becoming "whoever wrote last wins".
+        // ══════════════════════════════════════════════════════════════════
+        && !(!architectureIsDecision && externalInverterOrigin?.isInstallerDecision === true)) {
       conflicts.push({
         code: 'SOLAR_COUPLING_UNRESOLVED',
         fact: 'How the PV is coupled',
@@ -457,6 +555,20 @@ export function resolveElectricalProject(
           + 'batteries? Remove the inverter selection, or change the coupling to "PV on its own AC '
           + 'inverter".',
       });
+    } else if (recorded === 'dc-coupled-storage' && hasExternalInverter) {
+      // ── The installer's explicit pick settles it, and says so. ──────────
+      solarCoupling = 'ac-coupled-inverter';
+      solarCouplingProvenance = {
+        source: 'derived',
+        basis: `Derived: the installer explicitly selected '${explicitInverterId}' as a separate `
+          + 'PV inverter, and the DC coupling recorded on the graph was written by a migration '
+          + 'rather than stated by a designer. An explicit equipment decision outranks a derived '
+          + 'scalar. Recording the coupling on the project would make this permanent.',
+      };
+      // 🚨 AND NO `canonicalizationPatch`. `persistElectricalCanonicalization` would not overwrite
+      // a recorded value anyway, and writing one from here would move `meta.digest` on a READ and
+      // retire a live PE approval. The derivation runs every load; the row is corrected only by a
+      // deliberate action through the resolution route or the service-topology PUT.
     } else if (
       // ══════════════════════════════════════════════════════════════════════
       // 🚨 THE COMBINATION NOTHING ASKED ABOUT — RAY'S LIVE ROW.

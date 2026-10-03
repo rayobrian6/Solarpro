@@ -68,16 +68,44 @@ export function planArchitectureResolution(
   coupling: SolarCoupling,
   now: Date,
 ): ArchitectureResolutionResult {
-  // 🚨 REFUSE ON A SETTLED PROJECT. Without this, a stale browser tab — or a replayed request —
-  // could overwrite a recorded architecture with whatever it was showing when it loaded.
-  if (!m.architectureResolutionRequired) {
+  // ══════════════════════════════════════════════════════════════════════════
+  // 🚨 REFUSE WHEN A HUMAN ALREADY DECIDED — NOT MERELY WHEN NOTHING IS OUTSTANDING.
+  //
+  // This guard used to read `!m.architectureResolutionRequired`. It was right about the hazard it
+  // protects against — a stale browser tab, or a replayed request, overwriting a recorded
+  // architecture with whatever it was showing when it loaded — and wrong about the test for it.
+  //
+  // The moment `projectModel` learned to DERIVE a determined architecture rather than ask an
+  // unanswerable question, a project whose coupling is derived could no longer be STATED by the
+  // installer at all: the resolution dialog's own endpoint answered NOTHING_TO_RESOLVE. That is a
+  // capability regression introduced by a correctness repair, which is precisely the trade Ray
+  // ruled out: "Do not remove valid edit paths... Do not solve redundancy by deleting useful
+  // engineering capability."
+  //
+  // A derivation is not a decision. Recording a human decision over a derivation is always an
+  // improvement — it is the write that makes the value permanent, attributable, and immune to every
+  // future change in the derivation. So the refusal names the state it is actually protecting.
+  // ══════════════════════════════════════════════════════════════════════════
+  if (m.solarCouplingProvenance.source === 'service-topology') {
     return {
       ok: false, refusal: 'NOTHING_TO_RESOLVE',
-      message: 'This project has no unresolved architecture conflict. Change the coupling through '
-        + 'the service topology, which records who changed it.',
+      message: 'A designer already recorded the architecture on this project. Change the coupling '
+        + 'through the service topology, which records who changed it.',
     };
   }
-  const choice = m.architectureChoices.find(c => c.coupling === coupling);
+  // The answers an outstanding conflict offers; and when none is outstanding, the two couplings
+  // this endpoint is entitled to record. `retiresExternalInverter` is a property of the ANSWER and
+  // not of the offer — choosing DC coupling retires a separate inverter whichever way the question
+  // arrived, and `storage-only` is still not an answer this endpoint accepts.
+  const choice = m.architectureChoices.find(c => c.coupling === coupling)
+    ?? (coupling === 'dc-coupled-storage' || coupling === 'ac-coupled-inverter'
+      ? {
+          coupling,
+          label: '',
+          consequence: '',
+          retiresExternalInverter: coupling === 'dc-coupled-storage',
+        }
+      : undefined);
   if (!choice) {
     return {
       ok: false, refusal: 'NOT_AN_OFFERED_CHOICE',

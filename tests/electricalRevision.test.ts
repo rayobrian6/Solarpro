@@ -85,7 +85,39 @@ describe('🚨 every canonical electrical fact moves the revision', () => {
   moves('the service rating going absent', t => ({ ...t, service: { ...t.service, ratedAmps: null } }));
   moves('the available fault current', t => ({ ...t, service: { ...t.service, availableFaultCurrentA: 12000 } }));
   moves('the service voltage', t => ({ ...t, service: { ...t.service, voltage: 208 } }));
-  moves('the recorded solar coupling', t => ({ ...t, solarCoupling: 'ac-coupled-inverter' }));
+  // 🚨 'storage-only', NOT 'ac-coupled-inverter'. On this job — four Powerwall 3 publishing
+  // their own PV DC inputs and NO separate inverter selected — a recorded
+  // `ac-coupled-inverter` names equipment the project has not got, and `projectModel` now
+  // derives past it to `dc-coupled-storage`. The model's conclusion does not move, so the
+  // fingerprint must not either; the case below pins that deliberately. `storage-only` is a
+  // coupling the equipment does not contradict, so it reaches the model and must move it.
+  moves('the recorded solar coupling', t => ({ ...t, solarCoupling: 'storage-only' }));
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // 🚨 AND THE INVERSE, WHICH IS NOT A GAP — A CONTRADICTED SCALAR MOVES NOTHING.
+  //
+  // This looks like case 1 above (a fact that does not move the fingerprint) and is its
+  // opposite. The revision answers one question: WOULD THE DRAWING DIFFER? Writing
+  // 'ac-coupled-inverter' onto a project holding four Powerwall 3 and no inverter produces a
+  // byte-identical sheet, because the model derives the only architecture the equipment allows.
+  // A revision that moved here would mark every such sheet STALE and retire its PE approval for
+  // a drawing that did not change — see `digest-moves-retire-pe-approvals`.
+  //
+  // The guard that matters is therefore not 'the stored byte changed' but 'the conclusion
+  // changed', and the `moves(...)` case above is what holds that line.
+  // ═══════════════════════════════════════════════════════════════════════
+  it('a recorded coupling the equipment contradicts does NOT move it', () => {
+    const contradicted = { ...job(), solarCoupling: 'ac-coupled-inverter' } as ServiceTopology;
+
+    // The premise: it really is contradicted, and really is derived past.
+    const m = modelOf(contradicted);
+    expect(m.hasExternalInverter, 'the fixture gained an inverter').toBe(false);
+    expect(m.solarCoupling, 'the model did not derive past the contradicted scalar')
+      .toBe('dc-coupled-storage');
+
+    expect(revOf(contradicted),
+      'the fingerprint moved for a sheet that is byte-identical, which marks it STALE and retires its approval for nothing').toBe(base);
+  });
 
   // 🚨 THE ONE RAY NAMED. A switch beside a conductor interrupts nothing; re-routed inline it
   // interrupts the path. Same device, same rating, completely different drawing.

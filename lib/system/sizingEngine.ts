@@ -2500,7 +2500,26 @@ export function sizeSystemFromBrand(input: SizingInput): SystemSizingResult {
   const inverterCount = inverters.reduce((s, i) => s + i.qty, 0);
 
   // 4. Distribute strings / micros
-  const stringInfo = distributeStrings(brand, effectiveInput, inverters, warnings);
+  //
+  // ══════════════════════════════════════════════════════════════════════════
+  // 🚨 A REPAIR REACHES THE NEXT DEFECT.
+  //
+  // Returning an empty fleet above is not enough: `distributeStrings` then tried to spread 37
+  // modules across zero inverters and reported NO_MPPT_SLOTS + STRING_OVERFLOW, and
+  // `buildFeasibilityReport` added FEASIBILITY_NO_VIABLE_MODEL. All three rendered in the
+  // recommendation panel as alarming failures of a design that is completely fine — the array
+  // terminates on the storage's own MPPTs (six per Powerwall 3, twenty-four across four).
+  //
+  // Both stages ask the same question — "does this array fit the standalone inverter fleet?" — and
+  // on a DC-coupled design there is no standalone fleet for it to fit. The DC string bounds for
+  // storage MPPTs are owned elsewhere and derived from the published `pvInputLimits`
+  // (`lib/electrical/dcStringLimits.ts`); this engine does not get a second opinion about them.
+  //
+  // Not gated on the flag ⇒ identical behaviour to before, on every brand and every topology.
+  // ══════════════════════════════════════════════════════════════════════════
+  const stringInfo = effectiveInput.pvCoupledToStorage
+    ? { strings: [], microDeviceCount: 0, acBranchCount: 0 }
+    : distributeStrings(brand, effectiveInput, inverters, warnings);
 
   // 5. Size battery (gated)
   const battery = sizeBattery(brand, effectiveInput, warnings);
@@ -2521,7 +2540,12 @@ export function sizeSystemFromBrand(input: SizingInput): SystemSizingResult {
   // Picks the single "chosen" model (first distinct inverter) for diffing
   // against the feasibility-first recommendation.
   const chosenEquipmentDbId = inverters.length > 0 ? inverters[0].equipmentDbId : null;
-  const feasibility = buildFeasibilityReport(brand, effectiveInput, chosenEquipmentDbId);
+  // 🚨 No standalone fleet ⇒ no fleet to judge. Feasibility ranks candidate INVERTER models against
+  // the array; with the PV on the storage DC inputs there is no candidate and no question, and the
+  // report it produced said FEASIBILITY_NO_VIABLE_MODEL about a design that needs no model.
+  const feasibility = effectiveInput.pvCoupledToStorage
+    ? null
+    : buildFeasibilityReport(brand, effectiveInput, chosenEquipmentDbId);
   if (feasibility) applyFeasibilityWarnings(feasibility, warnings);
 
   // 9. v47.423 — Soften multi-unit "no viable model" scary warnings.

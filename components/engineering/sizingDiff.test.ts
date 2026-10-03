@@ -398,3 +398,75 @@ describe('Phase 12.5 — Unified inverter-count semantics (normalized state)', (
     expect(invCountMismatch).toBeUndefined();
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 🚨 A RECOMMENDATION THAT WAS DELIBERATELY NOT MADE IS NOT A RECOMMENDATION OF ZERO.
+//
+// Ray's job: four Powerwall 3, PV on their DC inputs, no separate inverter. The engine returns an
+// empty fleet and PV_DC_COUPLED_NO_INVERTER. Read naively that is 'recommended: 0 strings', and
+// the panel printed "Config layout differs from Sizing Recommendation — Current strings: 10/9/9/9
+// → Recommended: — Click Apply Recommended Configuration to sync" over a correct design.
+//
+// The strings are real; they terminate on the storage MPPTs. The two auto-picked inverter CARDS
+// are not, and that row stays, because it is how Apply offers to remove them.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('🚨 a DC-coupled design has no fleet to drift from', () => {
+  const raysInputs = {
+    systemType: 'roof' as const,
+    panelCount: 37, panelWattage: 440,
+    panelVoc: 52.7, panelIsc: 13.7, panelTempCoeffVoc: -0.27, designTempMin: -18,
+    selectedBrand: 'tesla',
+    batteryEnabled: true, batteryMode: 'auto' as const, batteryGoal: 'backup' as const,
+    batteryDesiredUnits: 4,
+  };
+  const declined = () =>
+    sizeSystemFromBrand({ ...raysInputs, pvCoupledToStorage: true } as never);
+
+  /** His real config: four strings, and two inverter cards nobody picked. */
+  const hisConfig: CurrentConfigSnapshot = {
+    inverterCount: 2, inverterId: 'tesla-solar-inverter-5p7k', topology: 'string',
+    stringCount: 4, panelsPerString: 10, stringPanelCounts: [10, 9, 9, 9],
+    microDeviceCount: 0, batteryEnabled: true, batteryModuleCount: 4,
+  };
+
+  it('the engine really did decline, so the premise holds', () => {
+    const rec = declined();
+    expect(rec.inverterModels).toEqual([]);
+    expect(rec.warnings.map(w => w.code)).toContain('PV_DC_COUPLED_NO_INVERTER');
+  });
+
+  it('🚨 reports NO string-layout drift', () => {
+    expect(detectStringLayoutMismatch(hisConfig, declined()),
+      'a real 10/9/9/9 array is reported as drift from a recommendation that was never made')
+      .toBe(false);
+    expect(diffCurrentVsRecommended(hisConfig, declined()).stringLayoutMismatch,
+      'the rose drift banner still fires on a correct design').toBe(false);
+  });
+
+  it('🚨 prints no string rows, and DOES print the phantom inverter row', () => {
+    const fields = diffCurrentVsRecommended(hisConfig, declined()).mismatches.map(m => m.field);
+
+    expect(fields, 'a string-count row describes a recommendation that was never made')
+      .not.toContain('String count');
+    expect(fields, 'a panels-per-string row tells the installer to delete a correct array')
+      .not.toContain('Panels per string');
+
+    // 🚨 AND THE USEFUL HALF SURVIVES. Without this the panel would go silent about two
+    // inverters the design has not got, and Apply would have nothing to offer.
+    expect(fields.some(f => /inverter/i.test(f)),
+      'the panel no longer offers to remove the two auto-picked inverters').toBe(true);
+  });
+
+  it('🚨 CONTROL — an ordinary design still reports its drift', () => {
+    // Not told the architecture: the engine sizes as it always has, and a wrong layout must still
+    // be called drift. Without this the suppression could swallow every design.
+    const normal = sizeSystemFromBrand({ ...raysInputs } as never);
+    expect(normal.inverterModels.length,
+      'the engine recommends nothing even when NOT told — this control can no longer detect the '
+      + 'over-suppression it exists for').toBeGreaterThan(0);
+
+    const drifted = snapshotMatching(normal, { stringPanelCounts: [1, 1], stringCount: 2 });
+    expect(detectStringLayoutMismatch(drifted, normal),
+      'real drift on an ordinary design is no longer reported').toBe(true);
+  });
+});

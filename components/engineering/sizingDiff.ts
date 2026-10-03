@@ -70,10 +70,31 @@ export interface CurrentConfigSnapshot {
  * by comparing total panel count (micro has no "strings" in the classical
  * sense — every panel is its own string).
  */
+/**
+ * 🚨 DID THE ENGINE DECLINE TO SIZE A FLEET, OR FAIL TO FIND ONE?
+ *
+ * `PV_DC_COUPLED_NO_INVERTER` means the array terminates on the storage's own DC inputs, so there
+ * is no separate PV inverter to size and no strings for this engine to lay out — the DC string
+ * bounds for storage MPPTs are owned by `lib/electrical/dcStringLimits.ts`, derived from the
+ * published `pvInputLimits`.
+ *
+ * An empty fleet alone cannot be read as 'nothing is recommended': it is also what a failed sizing
+ * looks like, and the two must not render the same. Without this the recommendation panel compared
+ * a real 10/9/9/9 layout against an empty one, declared `stringLayoutMismatch`, and printed
+ * \"Config layout differs from Sizing Recommendation... Click Apply Recommended Configuration to
+ * sync\" over a design that is completely correct.
+ */
+function declinedToSize(recommended: SystemSizingResult): boolean {
+  return recommended.warnings.some(w => w.code === 'PV_DC_COUPLED_NO_INVERTER');
+}
+
 export function detectStringLayoutMismatch(
   current: CurrentConfigSnapshot,
   recommended: SystemSizingResult,
 ): boolean {
+  // 🚨 Nothing was recommended, so there is nothing to have drifted FROM.
+  if (declinedToSize(recommended)) return false;
+
   // Micro: the only string-layout invariant is total panel count.
   // This is equivalent to comparing normalized physicalUnits for micro.
   if (recommended.topology === 'micro') {
@@ -168,6 +189,15 @@ export function diffCurrentVsRecommended(
         recommended: recommended.microDeviceCount,
       });
     }
+  } else if (declinedToSize(recommended)) {
+    // 🚨 THE INVERTER-COUNT ROW ABOVE IS KEPT ON PURPOSE, AND THE STRING ROWS ARE NOT.
+    //
+    // A design whose PV lands on the storage DC inputs still wants to be told that the two
+    // auto-picked inverter cards it is carrying are not part of it — that row is how Apply offers
+    // to remove them. But 'String count 4 \u2192 0' and 'Panels per string 10/9/9/9 \u2192 (none)'
+    // describe a recommendation that was never made, and the strings themselves are real: they
+    // terminate on the storage MPPTs. Printing them as drift tells the installer to delete a
+    // correct array.
   } else {
     // Check string count first
     if (current.stringCount !== recommended.strings.length) {

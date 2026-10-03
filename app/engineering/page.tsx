@@ -3175,9 +3175,58 @@ function EngineeringPageInner() {
   // The equipment picker keeps its own broader expression on purpose: it is choosing whether to
   // OFFER a default, and declining to preselect costs nothing. Declining to SIZE costs a design.
   // ══════════════════════════════════════════════════════════════════════════
+  // ══════════════════════════════════════════════════════════════════════════
+  // 🚨 AND THE ANSWER COMES FROM THE SERVER, BECAUSE THE BROWSER CANNOT COMPOSE IT.
+  //
+  // This gate used to read `electrical`, which is the page's OWN composition — and the page feeds
+  // it `selectedEquipment.inverterId: config.inverters[0]?.inverterId` (see the effect that calls
+  // `resolveElectricalProject`). `config.inverters` is `engineering_config`: the working fleet,
+  // which holds whatever the auto-pick last wrote and cannot tell a product an installer chose
+  // from one a writer suggested. The server composes the same model from `selected_equipment`
+  // plus its provenance, which can.
+  //
+  // On Ray's project those two disagree in the way that matters: `selected_equipment` holds NO
+  // inverter, so the server resolves `dc-coupled-storage` — while `config.inverters` holds the
+  // auto-picked Tesla, so the browser computed `hasExternalInverter: true`, concluded
+  // `ac-coupled-inverter`, and left this gate FALSE. The sizing engine was then never told the
+  // architecture, recommended two standalone Tesla string inverters, and
+  // `SizingRecommendation` offered them as "Apply Recommended Configuration" — which writes them
+  // back into `config.inverters`. The phantom was sustaining itself: the fleet proved the
+  // architecture that justified the fleet.
+  //
+  // Ray's chain law, exactly: "A downstream stage may derive new information. It may not
+  // re-decide upstream information from React state." The architecture is upstream.
+  //
+  // 🚨 FALLS BACK, NEVER FAILS OPEN INTO A BEHAVIOUR CHANGE. Until the server's answer lands this
+  // is exactly what it was before, so no project behaves differently on the strength of a
+  // pending fetch.
+  // ══════════════════════════════════════════════════════════════════════════
+  const [_archServer, setArchServer] = useState<{
+    coupling: string | null;
+    resolutionRequired: boolean;
+    provenanceSource: string | null;
+  } | null>(null);
+  /** 'loading' until the first architecture answer for THIS project has landed. */
+  const [_archServerRead, setArchServerRead] =
+    useState<'loading' | 'failed' | 'loaded'>('loading');
+
+  /**
+   * Does the GRAPH hold storage that publishes its own PV DC inputs?
+   *
+   * Used ONLY to decide whether a pending architecture read is worth waiting for. `pvInput` is
+   * published by one catalogue family today (`tesla-powerwall-3`), so every design with no
+   * battery — and every battery that publishes none — answers false here and is never held.
+   */
+  const _graphHasPvCapableStorage = useMemo(
+    () => (svcTopology?.storage ?? []).some(
+      (u: any) => u.role === 'inverter-unit' && !!u.pvInputLimits),
+    [svcTopology]);
+
   const pvOnStorageDc = useMemo(
-    () => electrical?.solarCoupling === 'dc-coupled-storage',
-    [electrical]);
+    () => (_archServerRead === 'loaded' && _archServer
+      ? _archServer.coupling === 'dc-coupled-storage'
+      : electrical?.solarCoupling === 'dc-coupled-storage'),
+    [_archServerRead, _archServer, electrical]);
 
   // ══════════════════════════════════════════════════════════════════════════
   // 🚨 RESOLVING THE ARCHITECTURE — one click, recorded on the server, re-read from the store.
@@ -5353,6 +5402,29 @@ function EngineeringPageInner() {
       : null;
     const panelWattage = panelData?.watts ?? 400;
 
+    // ══════════════════════════════════════════════════════════════════════
+    // 🚨 DO NOT SEED AN INVERTER WHILE THE ARCHITECTURE IS STILL UNKNOWN.
+    //
+    // Smart Defaults fires exactly when the fleet is EMPTY, which is both the state a new design
+    // starts in and the state a DC-coupled project sits in permanently. `pvOnStorageDc` falls back
+    // to the browser's composition while the server's answer is in flight, and on a DC-coupled
+    // project that fallback is `false` — so without this the seed could land in the window before
+    // the correction arrives, and `defaultsApplied` would then make it look like a settled
+    // decision.
+    //
+    // 🚨 SCOPED TO GRAPHS THAT COULD ANSWER 'DC'. Ray: "every auto pick selection works for
+    // installs that do not have batteries. Do not fuck my entire website up because we are getting
+    // 1 real world scenario to work." `_graphHasPvCapableStorage` is false for every design with
+    // no battery and every battery that publishes no PV input, so none of them ever waits. And
+    // only 'loading' holds — a FAILED read falls through and behaves exactly as it did before,
+    // because ignorance must not become a permanent block on a new design either.
+    // ══════════════════════════════════════════════════════════════════════
+    if (_archServerRead === 'loading' && _graphHasPvCapableStorage) {
+      console.log('🔒 [SMART DEFAULTS] holding — the architecture read has not landed and this '
+        + 'graph holds storage that takes PV on its own DC inputs');
+      return;
+    }
+
     console.log('🚨 [SMART DEFAULTS] calling applySmartDefaultsOnce — systemPanelCount=', systemPanelCount, ', defaultsApplied=', config.defaultsApplied);
     const result = applySmartDefaultsOnce({
       // 🚨 Smart Defaults fires precisely when there are NO inverters — the state an architecture
@@ -5441,7 +5513,8 @@ function EngineeringPageInner() {
       };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [systemPanelCount, config.defaultsApplied, config.userHasEditedInverters, subSystemCounts]);
+  }, [systemPanelCount, config.defaultsApplied, config.userHasEditedInverters, subSystemCounts,
+      pvOnStorageDc, _archServerRead, _graphHasPvCapableStorage]);
 
   // Auto-apply watcher (opt-in). Fires only when:
   //   1. sizingAutoApply === true
@@ -9602,24 +9675,50 @@ function EngineeringPageInner() {
   // server's (`config.inverters[0]?.inverterId`, not `selected_equipment`), so it can miss a
   // contradiction the server catches — which is exactly what happened on Ray's project. A refusal
   // in hand means the question is open, whatever the browser thinks.
-  const _archUnresolved = !!electrical?.architectureResolutionRequired || !!sldArchRefusal;
+  // 🚨 AND THE SERVER'S VERDICT IS IN THE OR, BOTH WAYS. It can see a contradiction the browser
+  // misses (Ray's project, before this slice) — and it can also RESOLVE one the browser still
+  // thinks is open, because it reads `selected_equipment` where the browser reads the working
+  // fleet. When the server has answered and says nothing is outstanding, the browser's narrower
+  // composition does not get to keep the dialog open over it.
+  const _archUnresolved = _archServerRead === 'loaded' && _archServer
+    ? (_archServer.resolutionRequired || !!sldArchRefusal)
+    : (!!electrical?.architectureResolutionRequired || !!sldArchRefusal);
   // 🚨 ASK THE SERVER WHERE THE EQUIPMENT CAME FROM. See `_archDetail`: the browser can see THAT the
   // architecture is unresolved, but only the server can say whether the inverter was ever a decision.
+  // 🚨 FETCHED FOR EVERY PROJECT NOW, NOT ONLY WHEN THE BROWSER ALREADY SUSPECTS A CONFLICT.
+  //
+  // The gate above needs the server's COUPLING, and the old condition (`_archUnresolved`) made
+  // this request conditional on the browser having already reached the right conclusion — so on
+  // the one project where the browser was wrong, the call that would have corrected it never went
+  // out. A read that only happens when you already know the answer cannot tell you anything.
   useEffect(() => {
-    if (!_archUnresolved || !currentProjectId) { return; }
+    if (!currentProjectId) { setArchServerRead('loading'); setArchServer(null); return; }
     let cancelled = false;
+    setArchServerRead('loading');
     (async () => {
       try {
         const res = await fetch(
           `/api/engineering/electrical-architecture?projectId=${encodeURIComponent(currentProjectId)}`,
           { cache: 'no-store' });
         const data = await res.json().catch(() => null);
-        if (cancelled || !data?.success) return;
+        if (cancelled) return;
+        if (!data?.success) { setArchServerRead('failed'); return; }
         setArchDetail({ externalInverter: data.externalInverter ?? null });
-      } catch { /* the dialog falls back to the client model's origin */ }
+        setArchServer({
+          coupling: (data.coupling ?? null) as string | null,
+          resolutionRequired: !!data.resolutionRequired,
+          provenanceSource: (data.couplingProvenance?.source ?? null) as string | null,
+        });
+        setArchServerRead('loaded');
+      } catch {
+        // 🚨 A DROPPED READ IS IGNORANCE, NOT AN ARCHITECTURE. 'failed' makes the gate fall back
+        // to the browser's own composition, which is exactly the behaviour that shipped before.
+        if (!cancelled) setArchServerRead('failed');
+      }
     })();
     return () => { cancelled = true; };
-  }, [_archUnresolved, currentProjectId]);
+    // `svcTopologyReloadKey` moves when a resolution is recorded, so the answer is re-read.
+  }, [currentProjectId, _svcTopologyReloadKey]);
   const _archOrigin = _archDetail?.externalInverter?.origin ?? electrical?.externalInverterOrigin ?? null;
   // 🚨 THE ORDER LIVES IN `topologyBadge`, NOT IN A TERNARY HERE. A chain in JSX is a chain no test
   // can reach, and this one spent a whole green slice printing STRING INVERTER over a conflict.
