@@ -30,6 +30,7 @@ import { sizingResultToBomItems, shouldStripMicroItems } from '@/lib/system/sizi
 import { applyDistributorPricing, type DistributorPriceOverride } from '@/lib/bom/distributorPricing';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 import { readStoredCombinerSelection, effectiveCombinerId, isReadableProjectId } from '@/lib/combinerSelection/storedRead';
+import { postedBomArray, projectPvArrayOntoBom, type BomPvArrayReport } from '@/lib/electrical/outputPvArrayProjection';
 
 // ── Helper: Inject structural items into V4 result (preserves manufacturer/model/partNumber) ──
 // This is the MASTER TASK merge: V4 owns electrical, structural profile owns structural.
@@ -164,6 +165,10 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
+    // The array the caller posted, captured before any projection below touches the body, so the
+    // response can say exactly what the design overrode (see `projectPvArrayOntoBom`).
+    const _postedArray = postedBomArray(body);
+    let _pvArrayReport: BomPvArrayReport | null = null;
 
     // ═══════════════════════════════════════════════════════════════════════
     // 🚨 HOW MANY DEVICES ARE THERE? THE GRAPH ANSWERS, NOT THE POST BODY.
@@ -266,6 +271,25 @@ export async function POST(req: NextRequest) {
             console.warn('[bom/POST] 🚨 INTERCONNECTION ARRANGEMENT NOT RESOLVED on this project —'
               + ' the graph declines to name one, so the legacy scalar is deciding the code article.');
           }
+          // 🚨 A DC-COUPLED OR STORAGE-ONLY PROJECT HAS NO STANDALONE PV INVERTER TO ORDER.
+          //
+          // The SLD routes assert this as Rule Eleven (`projectCanonicalArchitecture`); the parts
+          // list kept taking `inverterId` / `optimizerId` from the request, so a stale tab still
+          // carrying the retired fleet put a string inverter (or 37 optimizers) on the order for a
+          // design whose strings land on the Powerwalls' own DC inputs. Not an unknown inverter —
+          // none. The AC-coupled arm is deliberately untouched here: there the posted id still has a
+          // job (the v58.8 optimizer-peripheral mapping below reads it).
+          if (_m.solarCoupling === 'dc-coupled-storage' || _m.solarCoupling === 'storage-only') {
+            const _postedInv = typeof body.inverterId === 'string' ? body.inverterId.trim() : '';
+            const _postedOpt = typeof body.optimizerId === 'string' ? body.optimizerId.trim() : '';
+            if (_postedInv || _postedOpt) {
+              console.warn('[bom/POST] the caller posted PV conversion equipment the project does not have:'
+                + `${_postedInv ? ` inverterId=${_postedInv}` : ''}${_postedOpt ? ` optimizerId=${_postedOpt}` : ''}`
+                + ` — not ordered (canonical coupling: ${_m.solarCoupling}).`);
+            }
+            delete body.inverterId;
+            delete body.optimizerId;
+          }
           // ═══════════════════════════════════════════════════════════════
           // 🚨 PATTERN A — THE CANONICAL MODULE COUNT HAD ZERO CONSUMERS ANYWHERE IN THE REPO.
           //
@@ -314,6 +338,32 @@ export async function POST(req: NextRequest) {
             console.warn(`[bom/POST] ELECTRICAL CONFLICT — ${c.fact}: `
               + c.claims.map(x => `${x.source} says ${x.says}`).join(' | '));
           }
+        }
+        // ═══════════════════════════════════════════════════════════════
+        // 🚨 THE ARRAY ON THE ORDER IS THE ARRAY DESIGN PLACED — count, module AND DC size.
+        //
+        // The block above corrected the COUNT (from `layouts.total_panels`) and then ordered that
+        // count of whatever module the request named: Ray's 37-module design came back as
+        // 37 × Q CELLS Q.PEAK DUO 400 W, because the page fills an empty fleet's panel with
+        // `defaultPanelForSystemType()` and this route read `body.panelId` verbatim — and sized the
+        // AC side from `Number(body.systemKw) || 8.0`.
+        //
+        // `pvArray` is the same resolver output both SLD routes project (placed modules > layout
+        // total for the count, `selected_equipment.panelId` for the module), so the drawing and the
+        // order cannot disagree about the array. It is a Design fact, not a graph fact — a plain
+        // house with no service graph has an array too — so it runs outside the topology gate, and
+        // after the count above so the placed-module count wins where the two stores differ.
+        // Where the store has no answer the posted value stands and the gap is reported — except a
+        // posted module on a project whose Design placed modules but names none, which can only be
+        // the browser's fallback and is listed as TBD instead of ordered.
+        // ═══════════════════════════════════════════════════════════════
+        if (_electrical) {
+          const { getMicroinverterById } = await import('@/lib/equipment-db');
+          const _recordedMicro = _m?.externalInverterId ? getMicroinverterById(_m.externalInverterId) : undefined;
+          _pvArrayReport = projectPvArrayOntoBom(body, _electrical.pvArray, 'bom/POST', {
+            posted: _postedArray,
+            microModulesPerDevice: _recordedMicro?.modulesPerDevice ?? null,
+          });
         }
       } catch (e) {
         console.warn('[bom/POST] canonical electrical read skipped (non-fatal):', (e as Error)?.message);
@@ -397,6 +447,29 @@ export async function POST(req: NextRequest) {
       const _roofAttach      = _finiteOrUndef(_roofData?.attachmentCount);
       const _roofRails       = _finiteOrUndef(_roofData?.railSections);
       const _fencePanelCount = _finiteOrUndef(body.fenceData?.fencePanelCount);
+
+      // ── DC SIZE ──────────────────────────────────────────────────────────────
+      // Where the project's Design array states a DC size, `projectPvArrayOntoBom` has already put it
+      // on `body.systemKw`, so the `|| 8.0` below is reached only when NOTHING states a positive size:
+      // no Design array (or one with no modules) and no posted size. It is left in place for that case
+      // — an AC disconnect sized for 0 kW is no truer for a storage-only job than one sized for 8 — but
+      // it is REPORTED in the response warnings instead of being passed off as the system's size.
+      const _arrayWarnings: string[] = [];
+      if (!(Number(body.systemKw) > 0)) {
+        const _designPlacedNone = _pvArrayReport?.dcStcKw === 0;
+        console.warn('[bom/POST] 🚨 PV DC SIZE NOT ESTABLISHED — '
+          + (_designPlacedNone ? 'Design placed no modules' : 'neither the project\'s Design array nor the request states one')
+          + '; AC-side sizing is using the legacy 8.0 kW placeholder.');
+        _arrayWarnings.push(_designPlacedNone
+          ? 'PV DC size not established — Design placed no PV modules; AC-side sizing on this BOM used an '
+            + '8.0 kW placeholder.'
+          : 'PV DC size not established — no Design array and no posted system size; AC-side sizing on this '
+            + 'BOM used an 8.0 kW placeholder. Place the modules in Design.');
+      }
+      // What the design could not establish; `electrical.pvArray.corrected` says what was done instead.
+      for (const f of _pvArrayReport?.missing ?? []) {
+        _arrayWarnings.push(`${f.fact} not established — ${f.why} Owner: ${f.owner}.`);
+      }
 
       const input: BOMGenerationInputV4 = {
         inverterId:         resolvedInverterId,
@@ -1036,7 +1109,7 @@ export async function POST(req: NextRequest) {
         totalLineItems: finalResult.totalLineItems,
         stageCount: finalResult.stages.filter(s => s.itemCount > 0).length,
         complianceNotes: finalResult.complianceNotes,
-        warnings: [...finalResult.warnings, ...validation.warnings],
+        warnings: [...finalResult.warnings, ...validation.warnings, ..._arrayWarnings],
       },
       // 🚨 THE ELECTRICAL STATE THIS BOM WAS BUILT FROM, and whether it agrees with the graph.
       // `quantityDisagreements` is empty on a healthy project; non-empty it is a failure somebody
@@ -1051,6 +1124,9 @@ export async function POST(req: NextRequest) {
         topologyBomLines: _topologyBomLines,
         quantityDisagreements: _quantityDisagreements,
         conflicts: _electrical.model.conflicts,
+        // The physical array this BOM ordered, where each fact came from, what the design overrode
+        // in the request, and what it could not establish.
+        pvArray: _pvArrayReport,
       } : undefined,
       merge: (sysType !== 'roof' || hybridPartition) ? {
         v4ItemCount: v4Result.totalLineItems,

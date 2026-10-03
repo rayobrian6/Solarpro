@@ -891,6 +891,21 @@ export async function POST(req: NextRequest) {
       }, { status: 409 });
     }
 
+    // 🚨 THE DESIGN'S ARRAY IS READ HERE — AND COMPARED, NOT PROJECTED.
+    //
+    // The SLD and the BOM now take module count, module identity and DC size from
+    // `loadElectricalProject().pvArray`. The permit cannot, yet: this body becomes the sealed
+    // snapshot in the same pass, its array facts are inside `meta.digest`, and correcting a body that
+    // disagrees with Design would rotate the digest of an unchanged design and retire its PE approval.
+    // So the disagreement is logged — what the package will say beside what Design placed — and the
+    // body is left byte-for-byte as posted. See `comparePermitArrayWithDesign`.
+    if (_electrical) {
+      const { comparePermitArrayWithDesign } = await import('@/lib/electrical/outputPvArrayProjection');
+      for (const d of comparePermitArrayWithDesign(body, _electrical.pvArray)) {
+        console.warn(`[permit/POST] 🚨 PV ARRAY DISAGREES WITH DESIGN (not corrected — digest-frozen): ${d}`);
+      }
+    }
+
     // ── Backfill inverters/strings from the PERSISTED design when the POSTed
     // payload is empty or a single-string placeholder ────────────────────────
     // The planset is built from the Engineering page's live React state at click
