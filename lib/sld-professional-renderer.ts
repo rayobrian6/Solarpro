@@ -3397,7 +3397,14 @@ function dcStorageLabelSld(t: ServiceTopologyForSld): string {
 
 /** One line of text in a service-section box. */
 type SectionLine = { t: string; sz: number; bold?: boolean; fill?: string; italic?: boolean };
-type SectionGlyph = 'controller' | 'battery-inverter' | 'panelboard';
+type SectionGlyph =
+  | 'controller' | 'battery-inverter' | 'panelboard'
+  | 'service' | 'breaker' | 'switch' | 'poi' | 'battery';
+/** Ink width of each glyph from its anchor (stubs included) — what the box's text must clear. */
+const SECTION_GLYPH_W: Readonly<Record<SectionGlyph, number>> = {
+  controller: 26, 'battery-inverter': 28, panelboard: 15,
+  service: 22, breaker: 26, switch: 26, poi: 14, battery: 13,
+};
 
 /**
  * 🚨 A SCHEMATIC GLYPH, NOT ARTWORK — and not a rectangle that could be anything.
@@ -3429,15 +3436,123 @@ function sectionDeviceGlyph(kind: SectionGlyph, gx: number, gy: number, stroke: 
     s.push(ln(gx + 12, gy + 4, gx + 12, gy + 10, { sw: SW_THIN, stroke }));
     s.push(rect(gx + 16, gy + 1, 12, 12, { fill: 'none', stroke, sw: SW_THIN }));
     s.push(ln(gx + 16, gy + 13, gx + 28, gy + 1, { sw: SW_THIN, stroke }));
-  } else {
+  } else if (kind === 'panelboard') {
     // A panelboard: a vertical bus with branch breaker stubs off it.
     s.push(ln(gx + 4, gy, gx + 4, gy + 14, { sw: SW_MED, stroke }));
     for (const dy of [2, 7, 12]) {
       s.push(ln(gx + 4, gy + dy, gx + 12, gy + dy, { sw: SW_THIN, stroke }));
       s.push(ln(gx + 12, gy + dy, gx + 15, gy + dy - 2.5, { sw: SW_THIN, stroke }));
     }
+  } else if (kind === 'service') {
+    // Service entrance equipment: the utility's conductors arriving (arrow) onto a bus that feeds
+    // the service branches below it.
+    s.push(ln(gx + 11, gy, gx + 11, gy + 6, { sw: SW_MED, stroke }));
+    s.push(`<path d="M${gx + 8.5},${gy + 3.5} L${gx + 11},${gy + 6.5} L${gx + 13.5},${gy + 3.5}" fill="none" stroke="${stroke}" stroke-width="${SW_THIN}"/>`);
+    s.push(ln(gx + 1, gy + 7, gx + 21, gy + 7, { sw: SW_MED, stroke }));
+    for (const dx of [4, 11, 18]) s.push(ln(gx + dx, gy + 7, gx + dx, gy + 13, { sw: SW_THIN, stroke }));
+  } else if (kind === 'breaker') {
+    // A circuit breaker (the service disconnect / main): two terminals bridged by the IEEE arc.
+    s.push(ln(gx - 4, gy + 10, gx + 3, gy + 10, { sw: SW_THIN, stroke }));
+    s.push(ln(gx + 19, gy + 10, gx + 26, gy + 10, { sw: SW_THIN, stroke }));
+    s.push(`<circle cx="${gx + 3}" cy="${gy + 10}" r="1.4" fill="${stroke}"/>`);
+    s.push(`<circle cx="${gx + 19}" cy="${gy + 10}" r="1.4" fill="${stroke}"/>`);
+    s.push(`<path d="M${gx + 3},${gy + 10} A8,8 0 0 1 ${gx + 19},${gy + 10}" fill="none" stroke="${stroke}" stroke-width="${SW_MED}"/>`);
+  } else if (kind === 'switch') {
+    // A disconnect switch, as the sheet's own in-line isolation switches are drawn: a closed hinge,
+    // an open blade, an open far contact.
+    s.push(ln(gx - 4, gy + 10, gx + 3, gy + 10, { sw: SW_THIN, stroke }));
+    s.push(`<circle cx="${gx + 3}" cy="${gy + 10}" r="1.4" fill="${stroke}"/>`);
+    s.push(ln(gx + 3, gy + 10, gx + 16, gy + 3, { sw: SW_MED, stroke }));
+    s.push(`<circle cx="${gx + 19}" cy="${gy + 10}" r="1.6" fill="none" stroke="${stroke}" stroke-width="${SW_THIN}"/>`);
+    s.push(ln(gx + 21, gy + 10, gx + 26, gy + 10, { sw: SW_THIN, stroke }));
+  } else if (kind === 'poi') {
+    // A point of interconnection: a connection node ringed — where two systems join.
+    s.push(`<circle cx="${gx + 7}" cy="${gy + 7}" r="6" fill="none" stroke="${stroke}" stroke-width="${SW_THIN}"/>`);
+    s.push(`<circle cx="${gx + 7}" cy="${gy + 7}" r="2" fill="${stroke}"/>`);
+  } else {
+    // A battery (DC storage with no inverter of its own): the long/short plate stack.
+    s.push(ln(gx, gy + 1, gx, gy + 13, { sw: SW_MED, stroke }));
+    s.push(ln(gx + 4, gy + 4, gx + 4, gy + 10, { sw: SW_THIN, stroke }));
+    s.push(ln(gx + 8, gy + 1, gx + 8, gy + 13, { sw: SW_MED, stroke }));
+    s.push(ln(gx + 12, gy + 4, gx + 12, gy + 10, { sw: SW_THIN, stroke }));
   }
-  return s.join('');
+  return `<g data-glyph="${kind}">${s.join('')}</g>`;
+}
+
+/**
+ * 🚨 PROPOSED NEW WORK IS MARKED WHERE IT IS DRAWN — the plan-set revision triangle with an N, in
+ * the box's top-right corner, on equipment carrying an applied 120% remedy. The text says "(N)" on
+ * the rating; the mark lets an inspector find every piece of new work on the sheet at a glance.
+ */
+function newWorkBadge(rx: number, ty: number, stroke: string): string {
+  const x0 = rx - 18, y0 = ty + 3;
+  return `<g data-mark="new-work"><path d="M${x0 + 7},${y0} L${x0 + 14},${y0 + 13} L${x0},${y0 + 13} Z" fill="${WHT}" stroke="${stroke}" stroke-width="${SW_THIN}"/>`
+    + txt(x0 + 7, +(y0 + 11.6).toFixed(2), 'N', { sz: MIN_TYPE_UU, bold: true, anc: 'middle', fill: stroke }) + '</g>';
+}
+/** The glyph for a service-chain device, by what it is. */
+function deviceGlyphSld(roles: readonly string[]): SectionGlyph {
+  return roles.includes('service-disconnect') ? 'breaker' : 'switch';
+}
+/** A panelboard's corner marks: the panelboard symbol, and the new-work mark when a remedy is applied. */
+function panelMarksSld(panel: Parameters<typeof panelRemedyWorkSld>[0] | null | undefined):
+  { glyph: SectionGlyph; badge?: 'new-work' } {
+  return { glyph: 'panelboard', ...(panel && panelRemedyWorkSld(panel) ? { badge: 'new-work' as const } : {}) };
+}
+
+/** A box's corner marks: its schematic glyph (top-left) and the new-work mark (top-right). */
+type SectionMarks = { glyph?: SectionGlyph; badge?: 'new-work' };
+
+/** `wrapWords`, but a parenthesised group — a code citation like "(NEC 705.12(B))" — is never split. */
+function wrapWordsKeepGroups(line: string, maxW: number, sz: number, bold = false): string[] {
+  const groups: string[] = [];
+  let depth = 0, cur = '';
+  for (const word of line.split(' ')) {
+    cur = cur ? `${cur} ${word}` : word;
+    for (const ch of word) depth = ch === '(' ? depth + 1 : ch === ')' ? Math.max(0, depth - 1) : depth;
+    if (depth === 0) { groups.push(cur); cur = ''; }
+  }
+  if (cur) groups.push(cur);
+  const out: string[] = [];
+  let row = '';
+  for (const g of groups) {
+    const next = row ? `${row} ${g}` : g;
+    if (row && textWidthUu(next, sz, bold) > maxW) { out.push(row); row = g; } else row = next;
+  }
+  if (row) out.push(row);
+  return out;
+}
+
+/**
+ * ONE WRAP for a service-section box — used by `drawBox` to draw it and by `sectionBoxHeight` to
+ * lay it out, so the planned height and the drawn height cannot disagree.
+ *
+ * - 🚨 A CALLOUT CUT IS NOT ALWAYS ENOUGH. `wrapToWidth` breaks only at ' — ' / ' / ', so
+ *   'MAIN BREAKER DERATE (NEC 705.12(B))' ran past both edges of its panel box. A piece that still
+ *   crosses the border is wrapped at spaces, measured in the weight it prints in.
+ * - The title is never split to make room for a corner glyph (it is what a reviewer searches the
+ *   sheet for). Centred where it clears the glyph; otherwise centred in the space beside it
+ *   (`headerDx`); otherwise the text block starts below the glyph row (`topPad`).
+ */
+function wrapSectionLines(lines: SectionLine[], w: number, marks: SectionMarks = {}):
+  { lines: SectionLine[]; headerDx: number; topPad: number } {
+  const out: SectionLine[] = [];
+  for (const l of lines) {
+    for (const piece of wrapToWidth(l.t, w - 14, l.sz)) {
+      const sub = textWidthUu(piece, l.sz, l.bold) > w - 4 ? wrapWordsKeepGroups(piece, w - 14, l.sz, l.bold) : [piece];
+      for (const t of sub) out.push({ ...l, t });
+    }
+  }
+  let headerDx = 0, topPad = 0;
+  if ((marks.glyph || marks.badge) && out.length > 0) {
+    const left = marks.glyph ? 7 + SECTION_GLYPH_W[marks.glyph] + 3 : 7;
+    const right = marks.badge ? 21 : 7;
+    const hw = textWidthUu(out[0].t, out[0].sz, out[0].bold);
+    if (hw > w - 2 * Math.max(left, right)) {
+      if (hw <= w - left - right) headerDx = (left - right) / 2;
+      else topPad = 16;
+    }
+  }
+  return { lines: out, headerDx, topPad };
 }
 
 /** BOX PRIMITIVE: text wraps and the box GROWS. Truncating would hide a requirement. */
@@ -3446,15 +3561,11 @@ function sectionCanvas(p: string[], boxes: ServiceSectionBox[]) {
     id: string, cx: number, cyOrTop: number, w: number, lines: SectionLine[],
     o: {
       stroke?: string; fill?: string; dash?: string; anchor?: 'center' | 'top';
-      glyph?: SectionGlyph;
-    } = {},
+    } & SectionMarks = {},
   ) => {
-    const wrapped: SectionLine[] = [];
-    for (const l of lines) {
-      for (const piece of wrapToWidth(l.t, w - 14, l.sz)) wrapped.push({ ...l, t: piece });
-    }
+    const { lines: wrapped, headerDx, topPad } = wrapSectionLines(lines, w, o);
     const pitch = Math.max(LBL_PITCH, MIN_TYPE_UU + 2);
-    const h = Math.max(38, wrapped.length * pitch + 12);
+    const h = Math.max(38, wrapped.length * pitch + 12 + topPad);
     // 🚨 THE BOX GROWS WITH ITS TEXT, so an anchor has to say WHICH edge is fixed. A stacked chain
     // anchors its top (or the next box starts inside this one); a row anchors its centre line.
     const cy = o.anchor === 'top' ? cyOrTop + h / 2 : cyOrTop;
@@ -3462,12 +3573,13 @@ function sectionCanvas(p: string[], boxes: ServiceSectionBox[]) {
     p.push(rect(x, y, w, h, { fill: o.fill ?? WHT, stroke: o.stroke ?? BLK, sw: SW_MED, dash: o.dash }));
     // In the top-left corner, inside the border: the text is centred, so the corner is clear.
     if (o.glyph) p.push(sectionDeviceGlyph(o.glyph, x + 7, y + 5, o.stroke ?? BLK));
-    let by = y + 8 + capUu(wrapped[0]?.sz ?? F.sub);
-    for (const l of wrapped) {
-      p.push(txt(cx, +by.toFixed(2), l.t,
+    if (o.badge === 'new-work') p.push(newWorkBadge(x + w, y, SEC_AMBER));
+    let by = y + 8 + topPad + capUu(wrapped[0]?.sz ?? F.sub);
+    wrapped.forEach((l, li) => {
+      p.push(txt(li === 0 ? cx + headerDx : cx, +by.toFixed(2), l.t,
         { sz: l.sz, bold: l.bold, anc: 'middle', fill: l.fill, italic: l.italic }));
       by += pitch;
-    }
+    });
     boxes.push({ id, x, y, w, h, kind: 'device' });
     return { x, y, w, h, cx, cy, top: y, bottom: y + h, left: x, right: x + w };
   };
@@ -3487,10 +3599,9 @@ function sectionCanvas(p: string[], boxes: ServiceSectionBox[]) {
 type SectionBoxGeom = ReturnType<ReturnType<typeof sectionCanvas>['drawBox']>;
 
 /** The height `drawBox` will give these lines at this width — the same wrap, the same pitch. */
-function sectionBoxHeight(lines: SectionLine[], w: number): number {
-  let n = 0;
-  for (const l of lines) n += wrapToWidth(l.t, w - 14, l.sz).length;
-  return Math.max(38, n * Math.max(LBL_PITCH, MIN_TYPE_UU + 2) + 12);
+function sectionBoxHeight(lines: SectionLine[], w: number, marks: SectionMarks = {}): number {
+  const { lines: wrapped, topPad } = wrapSectionLines(lines, w, marks);
+  return Math.max(38, wrapped.length * Math.max(LBL_PITCH, MIN_TYPE_UU + 2) + 12 + topPad);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -3642,11 +3753,11 @@ function renderCompactDcServiceSection(
       (inverting.some(h => h.id === u.attachedToUnitId) ? u.attachedToUnitId! : inverting[0]?.id ?? null);
     const ess = (u: SldStorageUnit): RowItem => {
       const lines = storageUnitLinesSld(t, u, true);
-      return { kind: 'ess', u, lines, h: sectionBoxHeight(lines, W_ESS) };
+      return { kind: 'ess', u, lines, h: sectionBoxHeight(lines, W_ESS, { glyph: 'battery-inverter' }) };
     };
     const exp = (u: SldStorageUnit): RowItem => {
       const lines = expansionLinesSld(u);
-      return { kind: 'exp', u, lines, h: sectionBoxHeight(lines, W_ESS) };
+      return { kind: 'exp', u, lines, h: sectionBoxHeight(lines, W_ESS, { glyph: 'battery' }) };
     };
     const expsOf = (hostId: string) => expansions.filter(e => hostOf(e) === hostId).map(exp);
     // Expansions sit on the OUTBOARD side of their host, chained cabinet to cabinet, so a harness
@@ -3687,14 +3798,14 @@ function renderCompactDcServiceSection(
       const lines = generationPanelLinesSld(t, agg);
       const label = agg.outputOcpdA === null
         ? 'GENERATION FEEDER — OUTPUT OCPD NOT EVALUATED' : `${agg.outputOcpdA} A GENERATION FEEDER`;
-      return { agg, lines, h: sectionBoxHeight(lines, W_GEN), label };
+      return { agg, lines, h: sectionBoxHeight(lines, W_GEN, { glyph: 'panelboard' }), label };
     });
     const gwLines = domain ? gatewayLinesSld(domain.gateway) : null;
     const panelLines = panel ? servicePanelLinesSld(panel) : null;
     const coreW = domain ? W_GW : W_PNL;
-    const coreH = domain ? sectionBoxHeight(gwLines!, W_GW)
-      : panelLines ? sectionBoxHeight(panelLines, W_PNL) : 38;
-    const mspH = domain && panelLines ? sectionBoxHeight(panelLines, W_PNL) : 0;
+    const coreH = domain ? sectionBoxHeight(gwLines!, W_GW, { glyph: 'controller' })
+      : panelLines ? sectionBoxHeight(panelLines, W_PNL, panelMarksSld(panel)) : 38;
+    const mspH = domain && panelLines ? sectionBoxHeight(panelLines, W_PNL, panelMarksSld(panel)) : 0;
     const feederLabel = `BACKUP FEEDER — ${amps(panel?.mainBreakerA ?? branch.ratedAmps)}`;
 
     // The devices IN this branch's feeder, and how much run they need: each knife switch gets a slot
@@ -3783,7 +3894,7 @@ function renderCompactDcServiceSection(
 
   // ── 3. DOWN: HOW TALL EVERYTHING BELOW THE TOP BAND IS ───────────────────
   const distLines = serviceDistributionLinesSld(t);
-  const distH = sectionBoxHeight(distLines, W_DIST);
+  const distH = sectionBoxHeight(distLines, W_DIST, { glyph: 'service' });
   const bondedAt = new Set(ev.bonding.bondedAtNodeIds);
   const inlineIds = new Set(t.devices.filter(d => !!d.inlineOnNodeId).map(d => d.id));
   const chainDevices = [
@@ -3813,7 +3924,7 @@ function renderCompactDcServiceSection(
     const devTops: number[] = [];
     for (const cd of chainDevices) {
       devTops.push(chainTop);
-      chainTop += sectionBoxHeight(cd.lines, W_DEV) + gap;
+      chainTop += sectionBoxHeight(cd.lines, W_DEV, { glyph: deviceGlyphSld(cd.d.roles) }) + gap;
     }
     const meterCy = chainTop + mR;
     const gridCy = meterCy + mR + gap;
@@ -3850,7 +3961,7 @@ function renderCompactDcServiceSection(
     const itemBoxes = col.row.map((r, k) => drawBox(`${r.kind}-${r.u.id}`, x + col.itemDx[k], rowTop,
       W_ESS, r.lines, r.kind === 'ess'
         ? { stroke: GREEN, glyph: 'battery-inverter', anchor: 'top' }
-        : { stroke: SEC_DC, dash: '6 4', anchor: 'top' }));
+        : { stroke: SEC_DC, dash: '6 4', anchor: 'top', glyph: 'battery' }));
     col.row.forEach((r, k) => { if (r.kind === 'ess') essBoxById.set(r.u.id, itemBoxes[k]); });
     // Each Expansion is chained to its neighbour toward its host: dashed, orange, no OCPD.
     col.row.forEach((r, k) => {
@@ -3904,14 +4015,15 @@ function renderCompactDcServiceSection(
       ? drawBox(`gateway-${col.domain.gateway.id}`, x, coreTop, W_GW, col.gwLines!,
           { stroke: SEC_BLUE, glyph: 'controller', anchor: 'top' })
       : drawBox(`panel-${col.panel?.id ?? col.branch.id}`, x, coreTop, W_PNL,
-          col.panelLines ?? [{ t: col.branch.label, sz: F.hdr, bold: true }], { anchor: 'top' });
+          col.panelLines ?? [{ t: col.branch.label, sz: F.hdr, bold: true }],
+          { anchor: 'top', ...(col.panel ? panelMarksSld(col.panel) : {}) });
     coreBoxes.push(core);
 
     // The MSP on the gateway's BACKUP side, by its backup feeder.
     if (col.domain && col.panel && col.panelLines) {
       const mspTop = core.bottom + BACKUP_DROP;
       p.push(ln(x, core.bottom, x, mspTop, { sw: SW_MED }));
-      drawBox(`panel-${col.panel.id}`, x, mspTop, W_PNL, col.panelLines, { anchor: 'top' });
+      drawBox(`panel-${col.panel.id}`, x, mspTop, W_PNL, col.panelLines, { anchor: 'top', ...panelMarksSld(col.panel) });
       const inboardRight = col.outboard === 'L';
       const fbW = textWidthUu(col.feederLabel, F.seg);
       const fbY = core.bottom + BACKUP_DROP / 2 + capUu(F.seg) / 2;
@@ -3939,7 +4051,7 @@ function renderCompactDcServiceSection(
 
   // ── 6. THE SERVICE EQUIPMENT, AND EACH BRANCH FEEDER INTO IT ──────────────
   const dist = drawBox('service-distribution', cx.dist, Y(below.distTop), W_DIST, distLines,
-    { anchor: 'top' });
+    { anchor: 'top', glyph: 'service' });
   cols.forEach((col, i) => {
     const core = coreBoxes[i];
     const dir = col.outboard === 'L' ? 1 : -1;          // toward the service equipment
@@ -3995,7 +4107,8 @@ function renderCompactDcServiceSection(
   // ── 7. THE SHARED SERVICE CHAIN, DROPPING TOWARD THE UTILITY ─────────────
   let lastY = dist.bottom;
   chainDevices.forEach((cd, k) => {
-    const b = drawBox(`device-${cd.d.id}`, cx.dist, Y(below.devTops[k]), W_DEV, cd.lines, { anchor: 'top' });
+    const b = drawBox(`device-${cd.d.id}`, cx.dist, Y(below.devTops[k]), W_DEV, cd.lines,
+      { anchor: 'top', glyph: deviceGlyphSld(cd.d.roles) });
     p.push(ln(cx.dist, lastY, cx.dist, b.top, { sw: SW_MED }));
     // 🚨 THE CANONICAL N-G BOND, WHERE THE TOPOLOGY PUTS IT — once.
     if (bondedAt.has(cd.d.id)) {
@@ -4234,7 +4347,7 @@ export function renderTopologyServiceSection(opts: {
     // PANEL — beside its gateway where the sheet is wide enough, stacked under it where it is not.
     let panelBox: ReturnType<typeof drawBox> | null = null;
     if (panel && wide) {
-      panelBox = drawBox(`panel-${panel.id}`, cxPanel, y, W_PANEL, panelLines);
+      panelBox = drawBox(`panel-${panel.id}`, cxPanel, y, W_PANEL, panelLines, panelMarksSld(panel));
       if (!entryLabel) { entryLabel = panel.label; entryX = panelBox.left; entryY = y; }
       highest = Math.min(highest, panelBox.top);
       lowest = Math.max(lowest, panelBox.bottom);
@@ -4293,7 +4406,7 @@ export function renderTopologyServiceSection(opts: {
         // NARROW: the panel hangs under its gateway and the feeder is a short drop. Same conductor,
         // same label — only the direction it is drawn in changes.
         panelBox = drawBox(`panel-${panel.id}`, cxGw, gwBox.bottom + 46, W_PANEL, panelLines,
-          { anchor: 'top' });
+          { anchor: 'top', ...panelMarksSld(panel) });
         p.push(ln(cxGw, gwBox.bottom, cxGw, panelBox.top, { sw: SW_MED }));
         const lw = textWidthUu(feederLabel, F.seg);
         p.push(txt(cxGw + 8, +((gwBox.bottom + panelBox.top) / 2).toFixed(2), feederLabel,
@@ -4444,7 +4557,7 @@ export function renderTopologyServiceSection(opts: {
         const anchor = host ?? essBoxes.values().next().value;
         const ey = (anchor ? anchor.bottom : stackTop) + 56 + k * 62;
         const b = drawBox(`exp-${u.id}`, cxGw, ey, W_EXP, expansionLinesSld(u),
-          { stroke: SEC_DC, dash: '6 4' });
+          { stroke: SEC_DC, dash: '6 4', glyph: 'battery' });
         if (anchor) {
           p.push(ln(cxGw, anchor.bottom, cxGw, b.top, { sw: SW_MED, stroke: SEC_DC, dash: '6 4' }));
           // The label goes LEFT, away from the service chain's column — the same class of defect
@@ -4483,7 +4596,7 @@ export function renderTopologyServiceSection(opts: {
   // supplied. Do not automatically add replacement 400 A service distribution equipment." A drawing
   // that shows it as new service distribution tells an inspector SolarPro is replacing it.
   const distLines: Line[] = serviceDistributionLinesSld(t);
-  const dist = drawBox('service-distribution', cxDist, opts.busY, W_DIST, distLines);
+  const dist = drawBox('service-distribution', cxDist, opts.busY, W_DIST, distLines, { glyph: 'service' });
   highest = Math.min(highest, dist.top);
 
   // Each branch leaves the distribution by its own OCPD and turns to its row.
@@ -4665,7 +4778,7 @@ export function renderTopologyServiceSection(opts: {
       let top = sourceBoxes[k].bottom + 34;
       for (const u of exps) {
         const b = drawBox(`exp-${u.id}`, sourceBoxes[k].cx, top, W_EXP, expansionLinesSld(u),
-          { stroke: SEC_DC, dash: '6 4', anchor: 'top' });
+          { stroke: SEC_DC, dash: '6 4', anchor: 'top', glyph: 'battery' });
         p.push(ln(b.cx, sourceBoxes[k].bottom, b.cx, b.top,
           { sw: SW_MED, stroke: SEC_DC, dash: '6 4' }));
         top = b.bottom + 34;
@@ -4742,7 +4855,7 @@ export function renderTopologyServiceSection(opts: {
         ? [{ t: 'NOT EVALUATED — INTERRUPTING RATING REQUIRED', sz: F.tiny, fill: SEC_AMBER, bold: true } as Line]
         : [{ t: `${d.sccrA} A SCCR`, sz: F.tiny } as Line]),
       ...(d.visibleOpen ? [{ t: 'LOCKABLE · VISIBLE OPEN', sz: F.tiny } as Line] : []),
-    ], { anchor: 'top' });
+    ], { anchor: 'top', glyph: deviceGlyphSld(d.roles) });
     derChain.push({ id: d.id, box: b });
     lowest = Math.max(lowest, b.bottom);
     derY = b.bottom + 34;
@@ -4778,7 +4891,7 @@ export function renderTopologyServiceSection(opts: {
         ? [{ t: `TO ${nodeLabel(t, poi.connectedToNodeId).toUpperCase()}`, sz: F.tiny } as Line]
         : [{ t: 'NOT EVALUATED — PREMISES CONNECTION POINT REQUIRED',
              sz: F.tiny, fill: SEC_AMBER, bold: true } as Line]),
-    ], { stroke: SEC_AMBER, anchor: 'top' });
+    ], { stroke: SEC_AMBER, anchor: 'top', glyph: 'poi' });
     derChain.push({ id: poi.id, box: b });
     lowest = Math.max(lowest, b.bottom);
     derY = b.bottom + 34;
@@ -4834,7 +4947,7 @@ export function renderTopologyServiceSection(opts: {
   ];
   for (const d of chainDevices) {
     const lines: Line[] = chainDeviceLinesSld(d);
-    const b = drawBox(`device-${d.id}`, cxDist, chainY, W_DEV, lines, { anchor: 'top' });
+    const b = drawBox(`device-${d.id}`, cxDist, chainY, W_DEV, lines, { anchor: 'top', glyph: deviceGlyphSld(d.roles) });
     p.push(ln(lastX, lastY, cxDist, b.top, { sw: SW_MED }));
     // 🚨 THE CANONICAL N-G BOND, WHERE THE TOPOLOGY PUTS IT — once.
     if (bondedAt.has(d.id)) {
