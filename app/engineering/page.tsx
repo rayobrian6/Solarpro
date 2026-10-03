@@ -117,6 +117,7 @@ import { gateMayReplaceModule, moduleSwapWithheld } from '@/lib/electrical/modul
 import { deriveStorageDcStrings } from '@/lib/electrical/storageDcStrings';
 import { dcStringLimits } from '@/lib/electrical/dcStringLimits';
 import { buildSystemConfigInterview, type InterviewEquipment } from '@/lib/electrical/systemConfigInterview';
+import { selectionPairOf, controllersByProduct } from '@/lib/electrical/systemConfigSystemEquipment';
 import { evaluateServiceTopology } from '@/lib/electrical/serviceTopology';
 import SystemConfigInterview from '@/components/engineering/systemConfig/SystemConfigInterview';
 // Phase 12 — System-wide validation layer.
@@ -9816,12 +9817,15 @@ function EngineeringPageInner() {
     gatewayProductId: string | null; storageProductId: string | null;
   }>(() => {
     const graphUnits = (svcTopology?.storage ?? []).filter(u => u.role === 'inverter-unit');
-    const storageProductId = graphUnits[0]?.productId ?? (config.batteryId || null);
+    // The controller and the battery are read from ONE system — a new backed-up system is built from
+    // this pair, and "first controller" + "first battery" are two systems once one is re-equipped.
+    const pair = selectionPairOf(svcTopology);
+    const storageProductId = pair.unit?.productId ?? (config.batteryId || null);
     const bat = storageProductId ? getBatteryById(storageProductId) as any : null;
     const unitCount = graphUnits.length > 0 ? graphUnits.length
       : (config.batteryId ? Math.max(1, Number(config.batteryCount) || 1) : 0);
     const graphGateways = (svcTopology?.domains ?? []).map(d => d.gateway);
-    const gatewayProductId = graphGateways[0]?.productId || config.backupInterfaceId || null;
+    const gatewayProductId = pair.gateway?.productId || config.backupInterfaceId || null;
     const gw = gatewayProductId ? getBackupInterfaceById(gatewayProductId) as any : null;
     const fleet = config.inverters.filter(inv => !!inv.inverterId);
     const firstFleet = fleet[0];
@@ -9840,15 +9844,17 @@ function EngineeringPageInner() {
         count: firstFleet?.type === 'micro' ? undefined : fleet.length,
       },
       storage: unitCount > 0 ? {
-        label: graphUnits[0]?.label ?? (bat ? `${bat.manufacturer} ${bat.model}` : null),
+        label: pair.unit?.label ?? (bat ? `${bat.manufacturer} ${bat.model}` : null),
         count: unitCount,
         pvInput: !!(bat?.pvInput) || graphUnits.some(u => !!u.pvInputLimits),
         backupCapable: !!bat?.backupCapable,
         requiresGateway: !!bat?.requiresGateway,
       } : null,
       gateway: gatewayProductId ? {
-        label: graphGateways[0]?.label ?? (gw ? `${gw.manufacturer} ${gw.model}` : null),
+        label: pair.gateway?.label ?? (gw ? `${gw.manufacturer} ${gw.model}` : null),
         count: graphGateways.length > 0 ? graphGateways.length : 1,
+        // Different controllers on different systems are stated per product, not as the first × N.
+        products: controllersByProduct(svcTopology),
       } : null,
       gatewayProductId,
       storageProductId,

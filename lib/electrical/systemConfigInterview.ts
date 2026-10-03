@@ -155,8 +155,22 @@ export interface InterviewEquipment {
     /** The manufacturer requires a gateway / controller with it. */
     requiresGateway: boolean;
   } | null;
-  gateway: { label: string | null; count: number } | null;
+  gateway: {
+    label: string | null;
+    count: number;
+    /**
+     * Each controller product installed and how many — where the systems use different ones, the
+     * controllers are stated per product ("1 × A · 1 × B"), never as the first one times the count.
+     */
+    products?: ReadonlyArray<{ label: string | null; count: number }>;
+  } | null;
 }
+
+/** The backup controllers in words: one product ⇒ "2 × A"; several ⇒ "1 × A · 1 × B". */
+const controllersInWords = (gw: NonNullable<InterviewEquipment['gateway']>): string =>
+  gw.products && gw.products.length > 1
+    ? gw.products.map(p => `${p.count} × ${p.label ?? 'gateway'}`).join(' · ')
+    : `${gw.count} × ${gw.label ?? 'gateway'}`;
 
 export interface InterviewInput {
   pvArray: PvArrayDesign;
@@ -416,7 +430,7 @@ export function buildSystemConfigInterview(input: InterviewInput): SystemConfigI
         section: 'equipment',
         question: 'Which backup controller / gateway?',
         state: gw && gw.count > 0 ? 'answered' : 'needs-answer',
-        answer: gw && gw.count > 0 ? `${gw.count} × ${gw.label ?? 'gateway'}` : undefined,
+        answer: gw && gw.count > 0 ? controllersInWords(gw) : undefined,
         source: gw && gw.count > 0 ? 'Selected equipment' : 'Not established',
         why: 'The manufacturer requires a gateway / controller with this storage.',
         owner: 'Installer (equipment selection)',
@@ -729,7 +743,7 @@ export function buildSystemConfigInterview(input: InterviewInput): SystemConfigI
     sectionOf('equipment', 'Equipment', equipment, [
       equipment[0].answer ? `PV inverter: ${equipment[0].answer}` : 'PV inverter not chosen',
       hasStorage ? `${eq.storage!.count} × ${eq.storage!.label ?? 'battery'}` : 'No storage selected',
-      eq.gateway && eq.gateway.count > 0 ? `${eq.gateway.count} × ${eq.gateway.label ?? 'gateway'}` : null,
+      eq.gateway && eq.gateway.count > 0 ? controllersInWords(eq.gateway) : null,
     ].filter(Boolean).join(' · ')),
     sectionOf('behavior', 'System Behavior & Connection', behavior,
       behavior.length === 0 ? 'Nothing to connect yet'
@@ -800,7 +814,7 @@ export function buildSystemConfigInterview(input: InterviewInput): SystemConfigI
     });
   }
   if (eq.gateway && eq.gateway.count > 0) {
-    facts.push({ label: 'Backup controllers', value: `${eq.gateway.count} × ${eq.gateway.label ?? 'gateway'}`,
+    facts.push({ label: 'Backup controllers', value: controllersInWords(eq.gateway),
       source: 'Selected equipment' });
   }
   facts.push({ label: 'Service', value: rated !== null ? `${rated} A` : 'Not entered',

@@ -201,3 +201,38 @@ describe('🚨 one system\'s battery landing, answered alone, survives the round
     expect(iv.openQuestions.map(q => q.id)).not.toContain(systemLandingItemId(s2));
   });
 });
+
+describe('🚨 a system re-equipped on a job combined in ONE generation panel, all the way through the reload', () => {
+  it('common aggregation → PUT → GET → 3 batteries on System 1 → PUT → GET: one panel, one connection, every battery on it', async () => {
+    const { answerSystemsArrangement } = await import('@/lib/electrical/systemConfigAnswers');
+    const { answerBackupChoice, answerSystemEquipment, answerSystemLanding, systemLandingItemId } =
+      await import('@/lib/electrical/systemConfigSystemEquipment');
+    const two = await twoPanelService();
+    await persist(answerBackupChoice(two, 'whole', { ...SEL, unitsPerPanel: { 'msp-1': 2, 'msp-2': 2 } }));
+    await persist(answerSystemsArrangement(await reload(), 'common-aggregation'));
+    const combined = await reload();
+    expect(combined.aggregationPanels).toHaveLength(1);
+    expect(combined.pointsOfInterconnection).toHaveLength(1);
+    const [s1, s2] = combined.domains.map(d => d.id);
+
+    await persist(answerSystemEquipment(combined, s1, { storageUnits: 3 }));
+    const back = await reload();
+    expect(back.aggregationPanels, 'a per-system panel nobody chose survived the reload').toHaveLength(1);
+    expect(back.aggregationPanels[0].id).toBe(combined.aggregationPanels[0].id);
+    expect(back.pointsOfInterconnection, 'a connection nobody chose survived the reload').toHaveLength(1);
+    const inverters = back.storage.filter(u => u.role === 'inverter-unit').map(u => u.id).sort();
+    expect(inverters).toHaveLength(5);
+    expect(back.aggregationPanels[0].inputs.map(i => i.sourceId).sort()).toEqual(inverters);
+
+    const { evaluateServiceTopology } = await import('@/lib/electrical/serviceTopology');
+    expect(evaluateServiceTopology(back).checks
+      .filter(c => c.id === 'aggregation.landing' && c.conclusion === 'FAIL')).toEqual([]);
+
+    // Read back: no system is asked where ITS batteries land, and a per-system answer is refused.
+    const { iv } = await interviewOf(back);
+    const ids = iv.sections.flatMap(s => s.items).map(i => i.id);
+    expect(ids).not.toContain(systemLandingItemId(s1));
+    expect(ids).not.toContain(systemLandingItemId(s2));
+    expect(answerSystemLanding(back, s2, 'gateway-panelboard').ok).toBe(false);
+  });
+});

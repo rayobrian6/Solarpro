@@ -18,6 +18,7 @@ import {
   parseSystemEquipmentItemId, systemEquipmentFacts, controllersFor, backupBatteries, expansionsFor,
   answerSystemEquipment, answerSystemLanding, answerBackedUpPanels, answerBackupChoice,
 } from '@/lib/electrical/systemConfigSystemEquipment';
+import { getBackupInterfaceById, getBatteryById } from '@/lib/equipment-db';
 
 /** The equipment selection the page already passes the interview. */
 export interface SystemEquipmentSelection {
@@ -27,7 +28,8 @@ export interface SystemEquipmentSelection {
   totalUnits: number;
 }
 
-type Apply = (r: AnswerResult) => Promise<void>;
+/** Writes an answer. True only when it was accepted AND the page's PUT succeeded. */
+type Apply = (r: AnswerResult) => Promise<boolean>;
 
 const box = 'rounded bg-slate-800 px-2 py-1 text-xs text-slate-100 border border-slate-700';
 const T = 'answer-system-equipment';
@@ -78,17 +80,35 @@ function Choice({ name, options, value, onPick, disabled, testid }: {
   );
 }
 
-/** A select of only what fits — plus the recorded value, shown but not offered, when it does not. */
-function FitSelect({ testid, value, options, onChange, disabled, empty }: {
+/** A catalogue row's name, for showing a recorded value; the key itself only when the row is unknown. */
+const controllerName = (id: string) => {
+  const g = getBackupInterfaceById(id);
+  return g ? `${g.manufacturer} ${g.model}` : id;
+};
+const batteryName = (id: string) => {
+  const b = getBatteryById(id);
+  return b ? `${b.manufacturer} ${b.model}` : id;
+};
+
+/**
+ * A select of only what fits — plus the recorded value, shown by name but not offered, when it does
+ * not: "not listed as fitting" where the catalogue says what fits and this is not it, "compatibility
+ * not evaluated" where the catalogue carries no fact either way.
+ */
+function FitSelect({ testid, value, options, onChange, disabled, empty, nameOf, evaluated }: {
   testid: string; value: string; options: InterviewOption[]; onChange: (v: string) => void;
-  disabled?: boolean; empty?: string;
+  disabled?: boolean; empty?: string; nameOf: (id: string) => string; evaluated: boolean;
 }) {
   const listed = options.some(o => o.value === value);
   return (
     <select data-testid={testid} className={`mt-0.5 block w-full ${box}`} disabled={disabled} value={value}
             onChange={e => onChange(e.target.value)}>
       {empty !== undefined ? <option value="">{empty}</option> : null}
-      {value && !listed ? <option value={value} disabled>{value} — not listed as fitting</option> : null}
+      {value && !listed ? (
+        <option value={value} disabled>
+          {nameOf(value)} — {evaluated ? 'not listed as fitting' : 'compatibility not evaluated'}
+        </option>
+      ) : null}
       {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
     </select>
   );
@@ -122,8 +142,8 @@ function SystemEquipmentForm({ t, domainId, apply, busy }: {
       ...(v.exp !== cur.exp ? { expansionProductId: v.exp || null } : {}),
       ...(v.nExp !== cur.nExp ? { expansionUnits: v.nExp } : {}),
     });
-    await apply(r);
-    if (r.ok) setDraft({});
+    // A refused answer or a failed write keeps what the installer typed.
+    if (await apply(r)) setDraft({});
   };
 
   return (
@@ -131,6 +151,7 @@ function SystemEquipmentForm({ t, domainId, apply, busy }: {
       <div className="grid gap-2 sm:grid-cols-3">
         <label className="text-[11px] text-slate-400">Backup controller
           <FitSelect testid={`${T}-gateway-${d.id}`} value={v.gw} options={ctl.options} disabled={busy}
+                     nameOf={controllerName} evaluated={ctl.evaluated}
                      onChange={x => setDraft(s => ({ ...s, gw: x }))} />
           {ctl.evaluated ? null : (
             <span data-testid={`${T}-gateway-note-${d.id}`} className="mt-0.5 block text-[10px] font-bold text-amber-300">
@@ -140,6 +161,7 @@ function SystemEquipmentForm({ t, domainId, apply, busy }: {
         </label>
         <label className="text-[11px] text-slate-400">Batteries
           <FitSelect testid={`${T}-ess-${d.id}`} value={v.ess} options={backupBatteries()} disabled={busy}
+                     nameOf={batteryName} evaluated={ctl.evaluated}
                      empty="— choose —" onChange={x => setDraft(s => ({ ...s, ess: x }))} />
           <input type="number" min={0} step={1} data-testid={`${T}-ess-count-${d.id}`} disabled={busy}
                  className={`mt-1 block w-20 ${box}`} value={v.nEss}
@@ -148,6 +170,7 @@ function SystemEquipmentForm({ t, domainId, apply, busy }: {
         {showExpansion ? (
           <label className="text-[11px] text-slate-400">Expansion units
             <FitSelect testid={`${T}-expansion-${d.id}`} value={v.exp} options={exps.options} disabled={busy}
+                       nameOf={batteryName} evaluated={exps.evaluated}
                        empty="none" onChange={x => setDraft(s => ({ ...s, exp: x }))} />
             <input type="number" min={0} max={v.nEss} step={1} data-testid={`${T}-expansion-count-${d.id}`}
                    disabled={busy} className={`mt-1 block w-20 ${box}`} value={v.nExp}
@@ -182,8 +205,7 @@ function BackupPanels({ t, item, apply, busy, equipment }: {
 
   const record = async () => {
     const r = answerBackedUpPanels(t, t.panels.filter(p => isPicked(p.id)).map(p => p.id), sel);
-    await apply(r);
-    if (r.ok) { setChoosing(false); setPicked({}); }
+    if (await apply(r)) { setChoosing(false); setPicked({}); }
   };
 
   return (

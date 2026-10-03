@@ -24,8 +24,8 @@ import type {
   SystemConfigInterview as Interview, InterviewItem, InterviewSection, SectionId,
 } from '@/lib/electrical/systemConfigInterview';
 import {
-  answerServiceRating, answerElectricalSystem, answerDistribution, answerPanel, answerBackup,
-  answerSystemBatteries, answerStorageLanding, answerSystemsArrangement, answerInterconnection,
+  answerServiceRating, answerElectricalSystem, answerDistribution, answerPanel,
+  answerStorageLanding, answerSystemsArrangement, answerInterconnection,
   answerIsolationRequired, answerIsolationArrangement, answerIsolationAccepted, answerPvLanding,
   answerAvailableFaultCurrent, answerExistingService, type AnswerResult,
 } from '@/lib/electrical/systemConfigAnswers';
@@ -70,10 +70,12 @@ export function SystemConfigInterview(props: SystemConfigInterviewProps) {
   const [refusal, setRefusal] = useState<string | null>(null);
   const [open, setOpen] = useState<Partial<Record<SectionId, boolean>>>({});
 
-  const apply = async (r: AnswerResult) => {
-    if (r.ok === false) { setRefusal(r.refused); return; }
+  /** True only when the answer was accepted AND the page's PUT succeeded — an editor clears what the
+   *  installer typed on true alone, so a failed write never throws the answer away. */
+  const apply = async (r: AnswerResult): Promise<boolean> => {
+    if (r.ok === false) { setRefusal(r.refused); return false; }
     setRefusal(null);
-    await props.onWrite(r.topology, r.did);
+    return props.onWrite(r.topology, r.did);
   };
 
   // One engineering state, three ways through it (the owners are the same in every mode):
@@ -230,7 +232,7 @@ function Radio({ name, options, value, onPick, disabled, testid }: {
 }
 
 function Editor({ item, props, apply, busy }: {
-  item: InterviewItem; props: SystemConfigInterviewProps; apply: (r: AnswerResult) => Promise<void>; busy: boolean;
+  item: InterviewItem; props: SystemConfigInterviewProps; apply: (r: AnswerResult) => Promise<boolean>; busy: boolean;
 }) {
   const t = props.topology;
   const id = item.id;
@@ -404,7 +406,7 @@ function Editor({ item, props, apply, busy }: {
 }
 
 function PvLandingEditor({ t, props, apply, busy }: {
-  t: ServiceTopology; props: SystemConfigInterviewProps; apply: (r: AnswerResult) => Promise<void>; busy: boolean;
+  t: ServiceTopology; props: SystemConfigInterviewProps; apply: (r: AnswerResult) => Promise<boolean>; busy: boolean;
 }) {
   const units = t.storage.filter(u => u.role === 'inverter-unit');
   const strings = props.derivedStrings;

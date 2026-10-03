@@ -32,7 +32,9 @@ import {
   BACKUP_INTERFACES, BATTERIES, getBatteryById, getBackupInterfaceById,
   type BackupInterface, type BatterySystem,
 } from '@/lib/equipment-db';
-import type { ServiceTopology, BackupDomain, StorageUnit } from '@/lib/electrical/serviceTopology';
+import type {
+  ServiceTopology, BackupDomain, StorageUnit, DerAggregationPanel, GatewayInstance,
+} from '@/lib/electrical/serviceTopology';
 import type {
   InterviewInput, InterviewItem, InterviewOption, ItemState,
 } from '@/lib/electrical/systemConfigInterview';
@@ -89,7 +91,23 @@ export interface CatalogueChoice {
   note?: string;
 }
 
-/** The backup controllers the catalogue lists as compatible with this battery. */
+/** What a catalogue row that is NOT a backup controller is, in an installer's words. */
+const DEVICE_KIND: Record<BackupInterface['subcategory'], string> = {
+  gateway_controller: 'backup controller',
+  hybrid_inverter_gateway: 'hybrid inverter / gateway',
+  hybrid_inverter_charger: 'hybrid inverter / charger',
+  energy_management_controller: 'energy management controller',
+};
+const andList = (xs: string[]) =>
+  xs.length <= 1 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`;
+
+/**
+ * The backup controllers the catalogue lists as compatible with this battery.
+ *
+ * Nothing listed is said as one of two different gaps: the catalogue carries NO compatibility fact
+ * for the battery at all, or it names the battery only with a device that is not a separate backup
+ * controller (a hybrid inverter / gateway, an energy management controller) — that device is named.
+ */
 export function controllersFor(storageProductId: string | null | undefined): CatalogueChoice {
   if (!storageProductId) {
     return { evaluated: false, options: [], note: 'Which controller fits depends on the batteries — choose them first.' };
@@ -100,10 +118,38 @@ export function controllersFor(storageProductId: string | null | undefined): Cat
       note: `${NOT_EVALUATED_MFR} — '${storageProductId}' is not in the equipment catalogue, so no controller can be shown to fit it.` };
   }
   const options = CONTROLLERS().filter(g => listedTogether(g, b)).map(g => ({ value: g.id, label: nameOf(g) }));
-  return options.length > 0
-    ? { evaluated: true, options }
-    : { evaluated: false, options: [],
-        note: `${NOT_EVALUATED_MFR} — the catalogue lists no backup controller as compatible with ${nameOf(b)}.` };
+  if (options.length > 0) return { evaluated: true, options };
+  const others = BACKUP_INTERFACES.filter(g => g.subcategory !== 'gateway_controller' && g.active !== false
+    && listedTogether(g, b));
+  if (others.length > 0) {
+    const kinds = [...new Set(others.map(g => DEVICE_KIND[g.subcategory] ?? g.subcategory))];
+    return { evaluated: false, options: [],
+      note: `${NOT_EVALUATED_MFR} — the catalogue lists ${nameOf(b)} only with ${andList(others.map(nameOf))} `
+        + `(${andList(kinds)}), not with a separate backup controller.` };
+  }
+  return { evaluated: false, options: [],
+    note: `${NOT_EVALUATED_MFR} — the catalogue carries no compatibility fact naming ${nameOf(b)} with any `
+      + 'backup controller.' };
+}
+
+/** The refusal for a controller and a battery the catalogue does not list together — one wording. */
+function unlistedPairing(gatewayProductId: string, storageProductId: string, ctl: CatalogueChoice): string {
+  const g = getBackupInterfaceById(gatewayProductId);
+  const b = getBatteryById(storageProductId);
+  return `The catalogue does not list ${g ? nameOf(g) : gatewayProductId} as compatible with `
+    + `${b ? nameOf(b) : storageProductId}. Listed: ${ctl.options.map(o => o.label).join(', ')}.`;
+}
+
+/**
+ * A NEW system is built from the equipment selection's controller and battery. Null ⇒ the catalogue
+ * lists the two together (or carries no fact either way — the system's own question then says
+ * NOT EVALUATED). Otherwise the refusal, in the same words as re-equipping a system.
+ */
+function newSystemPairing(gatewayProductId: string | null, storageProductId: string | null): string | null {
+  if (!gatewayProductId || !storageProductId) return null;
+  const ctl = controllersFor(storageProductId);
+  if (!ctl.evaluated || ctl.options.some(o => o.value === gatewayProductId)) return null;
+  return unlistedPairing(gatewayProductId, storageProductId, ctl);
 }
 
 /**
@@ -170,6 +216,74 @@ export function systemDependents(t: ServiceTopology, d: BackupDomain): string[] 
     || owned.has(p.derNodeId ?? '') || aggIds.has(p.derNodeId ?? ''));
   const devices = t.devices.filter(x => x.inlineOnNodeId === gw || x.feedsNodeId === gw);
   return [...aggs.map(a => a.label), ...pois.map(p => p.label), ...devices.map(x => x.label)];
+}
+
+/**
+ * 🚨 A SITE-WIDE GENERATION PANEL IS NOT ONE SYSTEM'S PANEL. The common-aggregation arrangement
+ * builds ONE panel (no `domainId`) taking every system's battery circuits, with ONE connection.
+ * A system whose batteries land there is combined with the others: where its batteries land is not
+ * its own question, and re-equipping it changes that panel's circuits — never builds it a second one.
+ */
+export function landsOnSharedPanel(t: ServiceTopology, d: BackupDomain): boolean {
+  if (t.interconnection.derArrangement === 'common-aggregation') return true;
+  const owned = new Set([d.id, ...d.storageUnitIds]);
+  return (t.aggregationPanels ?? []).some(a => !a.domainId && a.inputs.some(i => owned.has(i.sourceId)));
+}
+
+/**
+ * The site-wide panel this system's battery circuits are wired into one by one, if any — the panel
+ * whose circuits a re-equip has to rebuild. `partial` ⇒ only some of the system's batteries are on
+ * it, and which of the new batteries would be is not SolarPro's to decide.
+ *
+ * A panel that takes the WHOLE system as one input (the input names the system, not a battery)
+ * follows the system on its own, so there is nothing to rebuild. An empty system recorded as landing
+ * in a generation panel, on a job combined in the one site-wide panel, lands there.
+ */
+function sharedBatteryPanel(
+  t: ServiceTopology, d: BackupDomain, inverting: StorageUnit[],
+): { panel: DerAggregationPanel; partial: boolean } | null {
+  const siteWide = (t.aggregationPanels ?? []).filter(a => !a.domainId);
+  if (siteWide.some(a => a.inputs.some(i => i.sourceId === d.id))) return null;
+  for (const panel of siteWide) {
+    const held = inverting.filter(u => panel.inputs.some(i => i.sourceId === u.id)).length;
+    if (held > 0) return { panel, partial: held < inverting.length };
+  }
+  if (inverting.length === 0 && d.storageConnection === 'der-aggregation-panel' && siteWide.length === 1
+    && t.interconnection.derArrangement === 'common-aggregation'
+    && !(t.aggregationPanels ?? []).some(a => a.domainId === d.id)) {
+    return { panel: siteWide[0], partial: false };
+  }
+  return null;
+}
+
+/**
+ * Replace this system's battery circuits on a shared panel with its new batteries' — the panel's id,
+ * enclosure, ratings and every other system's circuits are kept. The ratings are then checked against
+ * what the panel now takes by the engine's own aggregation checks; nothing is re-sized silently here.
+ */
+function replaceBatteryCircuits(
+  t: ServiceTopology, panelId: string, oldUnitIds: Set<string>, units: StorageUnit[],
+): ServiceTopology {
+  return {
+    ...t,
+    aggregationPanels: (t.aggregationPanels ?? []).map(p => {
+      if (p.id !== panelId) return p;
+      const first = p.inputs.findIndex(i => oldUnitIds.has(i.sourceId));
+      const at = first < 0 ? p.inputs.length : first;
+      const tap = first < 0 ? 'der-output' as const : p.inputs[first].tap;
+      const taken = new Set(p.inputs.map(i => i.id));
+      let n = p.inputs.length;
+      const fresh = units.map(u => {
+        let id = `${p.id}-in-${++n}`;
+        while (taken.has(id)) id = `${p.id}-in-${++n}`;
+        taken.add(id);
+        return { id, sourceId: u.id, tap, ocpdA: u.ocpdA };
+      });
+      const before = p.inputs.slice(0, at).filter(i => !oldUnitIds.has(i.sourceId));
+      const after = p.inputs.slice(at).filter(i => !oldUnitIds.has(i.sourceId));
+      return { ...p, inputs: [...before, ...fresh, ...after] };
+    }),
+  };
 }
 
 const freeSystemLabel = (t: ServiceTopology) => {
@@ -283,7 +397,11 @@ export function buildSystemEquipmentItems(input: InterviewInput): InterviewItem[
     const holding = t.domains
       .map(d => ({ d, units: systemEquipmentFacts(t, d).inverting.length }))
       .filter(x => x.units > 0);
-    if (holding.length > 1) for (const { d, units } of holding) items.push(landingItem(d, units));
+    // A system combined with the others in one site-wide generation panel is not asked where ITS
+    // batteries land: they land where the others' do, and "its own panel" would be untrue.
+    if (holding.length > 1) {
+      for (const { d, units } of holding) if (!landsOnSharedPanel(t, d)) items.push(landingItem(d, units));
+    }
   }
   return items;
 }
@@ -318,6 +436,24 @@ export function placeSystemEquipmentItems(
   insertAfter(sections.behavior, ['behavior.storage-landing'], items.filter(i => i.section === 'behavior'));
 
   const t = input.topology;
+
+  // 🚨 ONE GAP, ONE BLOCKER. Where every system still open has its own landing question, the
+  // "every system" question is a shortcut to answer them alike, not one more gap: left open it
+  // counted each unanswered system twice in the release blockers.
+  const allLanding = sections.behavior.find(i => i.id === 'behavior.storage-landing');
+  const perSystem = new Set(items.map(i => parseSystemEquipmentItemId(i.id))
+    .filter(x => x?.kind === 'landing').map(x => x!.domainId));
+  if (t && allLanding && allLanding.state === 'needs-answer' && perSystem.size > 0) {
+    const open = t.domains.filter(d => d.storageConnection === 'unresolved'
+      && systemEquipmentFacts(t, d).inverting.length > 0);
+    if (open.every(d => perSystem.has(d.id))) {
+      allLanding.state = 'answered';
+      allLanding.answer = 'Asked per system below';
+      allLanding.source = undefined;
+      allLanding.why = 'Choose here to give every system the same answer, or answer each system below.';
+    }
+  }
+
   const backup = sections.behavior.find(i => i.id === 'behavior.backup');
   if (t && backup) {
     const multi = t.panels.length > 1;
@@ -346,6 +482,13 @@ export function placeSystemEquipmentItems(
  *     (a landing recorded for four units is not a landing for three, so a count change reopens it);
  *   · a system that lands its batteries in its own generation panel gets that panel rebuilt from the
  *     new batteries, so the panel never carries fewer battery circuits than the system has.
+ *
+ * And two things it would otherwise get wrong:
+ *   · a system combined with the others in ONE site-wide generation panel keeps that panel: only its
+ *     own battery circuits on it are replaced (id, enclosure, ratings and the other systems' circuits
+ *     stay). It is never given a per-system panel and a new connection nobody chose;
+ *   · a point of interconnection recorded on a battery that is removed moves to the system's first
+ *     remaining battery — or names none — instead of naming a battery that is gone.
  */
 export function answerSystemEquipment(
   t: ServiceTopology,
@@ -399,11 +542,7 @@ export function answerSystemEquipment(
     if (!ess) return refuse('Which controller fits depends on the batteries — choose them first.');
     const ctl = controllersFor(ess);
     if (!ctl.evaluated) return refuse(ctl.note ?? NOT_EVALUATED_MFR);
-    if (!ctl.options.some(o => o.value === gw)) {
-      const g = getBackupInterfaceById(gw);
-      return refuse(`The catalogue does not list ${g ? nameOf(g) : gw} as compatible with ${essName}. `
-        + `Listed: ${ctl.options.map(o => o.label).join(', ')}.`);
-    }
+    if (!ctl.options.some(o => o.value === gw)) return refuse(unlistedPairing(gw, ess, ctl));
   }
 
   if (nExp > 0 && expChanged) {
@@ -421,6 +560,14 @@ export function answerSystemEquipment(
     }
   }
 
+  // Which panel the system's battery circuits are in decides what a new set of batteries changes.
+  const ownPanel = (t.aggregationPanels ?? []).some(a => a.domainId === d.id);
+  const shared = ownPanel ? null : sharedBatteryPanel(t, d, f.inverting);
+  if (inverterSetChanged && shared?.partial) {
+    return refuse(`Only some of ${d.label}’s batteries land in ${shared.panel.label}, which the other systems `
+      + 'share. Which of the new batteries land there is not SolarPro’s to decide — change it in Advanced.');
+  }
+
   const keepConfig = essChanged ? null
     : (f.inverting.find(u => u.outputConfigKw !== undefined && u.outputConfigKw !== null)?.outputConfigKw ?? null);
   const r = setDomainEquipment(t, d.id, {
@@ -430,10 +577,23 @@ export function answerSystemEquipment(
     outputConfigKw: keepConfig,
   });
   let next = r.topology;
+  const rebuiltInverting = () => systemEquipmentFacts(next, next.domains.find(x => x.id === d.id)!).inverting;
+
+  // A connection recorded on a battery that is no longer there moves to the system's first remaining
+  // battery, or names none — never a node that is gone.
+  const removed = new Set(d.storageUnitIds.filter(id => !next.storage.some(u => u.id === id)));
+  if (removed.size > 0) {
+    const firstLeft = rebuiltInverting()[0]?.id ?? null;
+    next = {
+      ...next,
+      pointsOfInterconnection: (next.pointsOfInterconnection ?? []).map(p =>
+        p.derNodeId && removed.has(p.derNodeId) ? { ...p, derNodeId: firstLeft } : p),
+    };
+  }
 
   const notes: string[] = [];
   if (!inverterSetChanged) {
-    const rebuilt = systemEquipmentFacts(next, next.domains.find(x => x.id === d.id)!).inverting;
+    const rebuilt = rebuiltInverting();
     f.inverting.forEach((u, i) => {
       if (u.pvDcStcKw !== undefined && u.pvDcStcKw !== null && rebuilt[i]) {
         next = setStoragePvInput(next, rebuilt[i].id, u.pvDcStcKw);
@@ -442,10 +602,15 @@ export function answerSystemEquipment(
   } else if (f.inverting.some(u => u.pvDcStcKw !== undefined && u.pvDcStcKw !== null)) {
     notes.push('which battery receives each PV string must be answered again');
   }
-  if (inverterSetChanged && d.storageConnection === 'der-aggregation-panel') {
+  if (inverterSetChanged && d.storageConnection === 'der-aggregation-panel' && ownPanel) {
     const hadProduct = (t.aggregationPanels ?? []).some(a => a.domainId === d.id && !!a.productId);
     next = applyPerSystemGenerationPanels(next, [d.id]).topology;
     notes.push(`its generation panel was rebuilt from the new batteries${hadProduct ? ' — choose its enclosure again' : ''}`);
+  } else if (inverterSetChanged && shared) {
+    const now = rebuiltInverting();
+    next = replaceBatteryCircuits(next, shared.panel.id, new Set(f.inverting.map(u => u.id)), now);
+    notes.push(`${shared.panel.label} now takes its ${plural(now.length, 'battery circuit', 'battery circuits')}; `
+      + 'the panel and its ratings are kept and checked against them');
   }
 
   const g = getBackupInterfaceById(gw);
@@ -463,6 +628,12 @@ export function answerSystemLanding(
 ): AnswerResult {
   const d = t.domains.find(x => x.id === domainId);
   if (!d) return refuse(`No system '${domainId}'.`);
+  if (landsOnSharedPanel(t, d)) {
+    const shared = (t.aggregationPanels ?? []).find(a => !a.domainId);
+    return refuse(`${d.label}’s batteries are combined with the other systems’ in `
+      + `${shared ? shared.label : 'one generation panel'}, so where they land is not ${d.label}’s alone. `
+      + 'Change how the systems connect to the service, or edit it in Advanced.');
+  }
   const r = answerStorageLanding(t, value, [domainId]);
   return r.ok === false ? r : done(r.topology, `${d.label} battery circuits: ${value}`);
 }
@@ -512,6 +683,11 @@ export function answerBackedUpPanels(t: ServiceTopology, panelIds: string[], equ
   if (joining.length > 0 && !equipment.gatewayProductId) {
     return refuse('Choose the backup controller / gateway in Equipment first — each backed-up system needs one.');
   }
+  // A new system holding batteries is that controller with that battery: listed together, or refused.
+  if (joining.some(p => Math.floor(equipment.unitsPerPanel?.[p.id] ?? 0) > 0)) {
+    const why = newSystemPairing(equipment.gatewayProductId, equipment.storageProductId);
+    if (why) return refuse(why);
+  }
   for (const p of t.panels.filter(x => chosen.has(x.id))) {
     next = updatePanel(next, p.id, { backedUp: true });
     if (next.domains.some(d => d.backedUpPanelIds.includes(p.id))) continue;
@@ -554,10 +730,50 @@ export function answerBackupChoice(
     }
   }
   if (choice === 'whole' && t.panels.length > 1) return answerBackedUpPanels(t, t.panels.map(p => p.id), equipment);
+  if (choice === 'whole' && (equipment.totalUnits ?? 0) > 0
+    && t.panels.some(p => !t.domains.some(d => d.backedUpPanelIds.includes(p.id)))) {
+    const why = newSystemPairing(equipment.gatewayProductId, equipment.storageProductId);
+    if (why) return refuse(why);
+  }
   return answerBackup(t, choice, {
     gatewayProductId: equipment.gatewayProductId,
     storageProductId: equipment.storageProductId,
     totalUnits: equipment.totalUnits ?? 0,
     unitsPerPanel: equipment.unitsPerPanel,
   });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WHAT THE PAGE READS FROM THE GRAPH FOR THE EQUIPMENT SELECTION
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * 🚨 THE CONTROLLER AND THE BATTERY A NEW SYSTEM IS BUILT FROM COME FROM ONE SYSTEM. Read as "the
+ * first controller" and "the first battery" they come from two different systems as soon as one is
+ * re-equipped (its rebuilt units go to the end of the list) — and a new system would be built around
+ * a pair the catalogue never listed together. The first system holding a battery gives both; with
+ * none holding one, the first controller and the first battery recorded anywhere.
+ */
+export function selectionPairOf(
+  t: ServiceTopology | null | undefined,
+): { gateway: GatewayInstance | null; unit: StorageUnit | null } {
+  if (!t) return { gateway: null, unit: null };
+  for (const d of t.domains) {
+    const unit = systemEquipmentFacts(t, d).inverting[0];
+    if (unit) return { gateway: d.gateway, unit };
+  }
+  return { gateway: t.domains[0]?.gateway ?? null, unit: t.storage.find(u => u.role === 'inverter-unit') ?? null };
+}
+
+/** Each backup controller product in the graph, with how many systems use it, in system order. */
+export function controllersByProduct(
+  t: ServiceTopology | null | undefined,
+): Array<{ productId: string; label: string | null; count: number }> {
+  const out: Array<{ productId: string; label: string | null; count: number }> = [];
+  for (const d of t?.domains ?? []) {
+    const row = out.find(x => x.productId === d.gateway.productId);
+    if (row) row.count += 1;
+    else out.push({ productId: d.gateway.productId, label: d.gateway.label ?? null, count: 1 });
+  }
+  return out;
 }
