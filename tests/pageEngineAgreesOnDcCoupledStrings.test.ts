@@ -80,10 +80,23 @@ describe('…and the page hands the engine NOTHING that overrides that derivatio
     expect(Math.max(...cs.strings.map(x => x.vocCorrected * x.panelCount))).toBeGreaterThan(dc!.maxDcVoltage);
   });
 
+  it('ONE partitioner: the page hands the engine the SLD route\'s own derivation (9 / 9 / 9 / 8 / 2)', async () => {
+    // The production page, once it stopped adopting 20 / 17, derived 7 / 7 / 7 / 7 / 9 itself while the
+    // sheet drew 9 / 9 / 9 / 8 / 2 — two partitioners. The page now calls the route's derivation.
+    const { deriveStorageDcStrings } = await import('@/lib/electrical/storageDcStrings');
+    const counts = deriveStorageDcStrings({ moduleCount: 37, module: m, limits: dc!, designTempMin: -22 });
+    expect(counts).toEqual([9, 9, 9, 8, 2]);   // what tests/designArrayReachesTheSheet sees on the sheet
+    const cs = computeSystem({ ...pageInput(dc, 'dc-coupled-storage'), totalStrings: counts!.length, configStringPanelCounts: counts! });
+    expect(cs.strings.map(x => x.panelCount)).toEqual([9, 9, 9, 8, 2]);
+    // Control: left to itself the engine partitions differently — the disagreement this closes.
+    expect(computeSystem(pageInput(dc, 'dc-coupled-storage')).strings.map(x => x.panelCount)).not.toEqual([9, 9, 9, 8, 2]);
+  });
+
   it('the page passes no fleet layout and no fleet module when the strings land on the storage', () => {
     const page = stripComments(readFileSync(join(__dirname, '..', 'app', 'engineering', 'page.tsx'), 'utf8'));
-    expect(page).toMatch(/totalStrings: topology !== 'micro' && !dcLim\s*\?/);
-    expect(page).toMatch(/configStringPanelCounts: topology !== 'micro' && !dcLim && fleet\.some/);
+    expect(page).toMatch(/totalStrings: dcLim\s*\?\s*dcStrings\?\.length/);
+    expect(page).toMatch(/configStringPanelCounts: dcLim\s*\?\s*\(dcStrings \?\? undefined\)/);
+    expect(page).toMatch(/const dcStrings: number\[\] \| null = dcLim && panelData && csPanels > 0\s*\?\s*deriveStorageDcStrings\(/);
     expect(page).toMatch(/const panelData = dcLim \? \(pvModule \?\? strPanel\) : \(strPanel \?\? pvModule\);/);
     // …and the SLD request carries no brand to size a phantom inverter from.
     expect(page).toMatch(/selectedBrand:\s+pvOnStorageDc \? undefined : config\.selectedBrand,/);

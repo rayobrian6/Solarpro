@@ -114,6 +114,7 @@ import {
 import { resolveSystemPanelCount } from '@/lib/system/panelCountSource';
 import { resolvePvArrayDesign, pvModuleCountSourceLabel, pvModuleSourceLabel } from '@/lib/electrical/pvArrayDesign';
 import { gateMayReplaceModule, moduleSwapWithheld } from '@/lib/electrical/moduleAuthority';
+import { deriveStorageDcStrings } from '@/lib/electrical/storageDcStrings';
 import { dcStringLimits } from '@/lib/electrical/dcStringLimits';
 import { buildSystemConfigInterview, type InterviewEquipment } from '@/lib/electrical/systemConfigInterview';
 import { evaluateServiceTopology } from '@/lib/electrical/serviceTopology';
@@ -3573,6 +3574,23 @@ function EngineeringPageInner() {
     // with an inverter keep their own per-fleet module.
     const strPanel = firstStr ? getPanelById(firstStr.panelId) as any : null;
     const panelData = dcLim ? (pvModule ?? strPanel) : (strPanel ?? pvModule);
+    // …and those strings are partitioned by the SAME derivation the SLD route makes
+    // (lib/electrical/storageDcStrings.ts) — one partitioner, so the summary, the landing question
+    // and the drawing state the same strings. Null ⇒ the engine derives (nothing is handed over).
+    const dcDesignTempMin: number = (compliance.autoDetected as any)?.designTempMin
+      ?? getThermalDesignBasis({ state: config.state || null }).minDesignTempC;
+    const dcStrings: number[] | null = dcLim && panelData && csPanels > 0
+      ? deriveStorageDcStrings({
+          moduleCount: csPanels,
+          module: {
+            voc: panelData.voc, vmp: panelData.vmp, isc: panelData.isc, imp: panelData.imp,
+            watts: panelData.watts, tempCoeffVoc: panelData.tempCoeffVoc,
+            maxSeriesFuseRating: panelData.maxSeriesFuseRating,
+          },
+          limits: dcLim,
+          designTempMin: dcDesignTempMin,
+        })
+      : null;
 
     // v47.360: 'ecoflow' maps to 'string' for ComputedSystemInput — the compliance
     // engine treats EcoFlow PowerOcean as a string-based hybrid inverter.
@@ -3802,15 +3820,19 @@ function EngineeringPageInner() {
       // 🚨 Strings landing on a battery's own PV inputs are DERIVED against its window — exactly as
       // both SLD routes derive them — never adopted from a fleet layout sized for no device (the
       // production page drew 20 / 17 on Ray's job while the sheet drew 9 / 9 / 9 / 8 / 2).
-      totalStrings: topology !== 'micro' && !dcLim
-        ? fleet.reduce((s, inv) => s + inv.strings.length, 0) || undefined
-        : undefined,
+      totalStrings: dcLim
+        ? dcStrings?.length
+        : topology !== 'micro'
+          ? fleet.reduce((s, inv) => s + inv.strings.length, 0) || undefined
+          : undefined,
       // v61.7: Pass actual per-string panel counts from the fleet's strings so
       // computeSystem() performs NEC 690.7 Voc checks on the REAL string lengths,
       // not on equally-divided totalPanels/totalStrings. Prevents false Voc violations.
-      configStringPanelCounts: topology !== 'micro' && !dcLim && fleet.some(inv => inv.strings.length > 0)
-        ? fleet.flatMap(inv => inv.strings.map(s => s.panelCount))
-        : undefined,
+      configStringPanelCounts: dcLim
+        ? (dcStrings ?? undefined)
+        : topology !== 'micro' && fleet.some(inv => inv.strings.length > 0)
+          ? fleet.flatMap(inv => inv.strings.map(s => s.panelCount))
+          : undefined,
       maxACVoltageDropPct: 2,
       maxDCVoltageDropPct: 3,
       // Battery NEC 705.12(B) bus impact — AC-coupled batteries add backfeed breaker to bus loading

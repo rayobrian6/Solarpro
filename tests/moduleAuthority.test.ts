@@ -73,3 +73,29 @@ describe('the page\'s three consumers of the gate\'s swap obey it (live lines, c
     expect(head).toMatch(/=== 'recorded-module'\s*\?\s*\{ \.\.\.sizingRecommendation\.panelCompatibility, autoSwitched: false \}/);
   });
 });
+
+describe('the drawing sizes the module it prints (server sizing engine)', () => {
+  it('with allowPanelAutoSwap:false the gate reports but sizes the recorded module (Growatt + Q CELLS 400 W)', async () => {
+    const { sizeSystemFromBrand } = await import('@/lib/system/sizingEngine');
+    const { SOLAR_PANELS } = await import('@/lib/equipment-db');
+    const q = SOLAR_PANELS.find(p => p.id === 'qcells-peak-duo-400')!;
+    const base = {
+      systemType: 'roof' as const, panelCount: 36, selectedBrand: 'growatt',
+      panelId: q.id, panelWattage: q.watts, panelVoc: q.voc, panelVmp: q.vmp, panelIsc: q.isc,
+      panelTempCoeffVoc: q.tempCoeffVoc,
+    };
+    // Control: the legacy call swaps (this is the pairing the v47.423 tests pin).
+    expect(sizeSystemFromBrand(base).panelCompatibility?.autoSwitched).toBe(true);
+    const bound = sizeSystemFromBrand({ ...base, allowPanelAutoSwap: false });
+    expect(bound.panelCompatibility?.autoSwitched).toBe(false);
+    expect(bound.panelCompatibility?.effectivePanelId).toBe('qcells-peak-duo-400');
+    expect(bound.panelCompatibility?.status).toBe('incompatible');   // still reported
+  });
+
+  it('the SLD route binds its sizing to the module it draws (live line)', () => {
+    const route = stripComments(readFileSync(join(__dirname, '..', 'app', 'api', 'engineering', 'sld', 'route.ts'), 'utf8'));
+    const at = route.indexOf('sizingResult = sizeSystemFromBrand({');
+    expect(at).toBeGreaterThan(0);
+    expect(route.slice(at, route.indexOf('});', at))).toMatch(/allowPanelAutoSwap: false,/);
+  });
+});

@@ -78,6 +78,14 @@ export interface SizingInput {
   /** System type from SystemDefinition (roof/ground/fence). */
   systemType: SystemType;
 
+  /**
+   * `false` ⇒ the panel-compatibility gate REPORTS but never swaps the module it sizes with. A drawing
+   * must size the module it prints: the SLD route prints the project's recorded module (Design's), so
+   * sizing its strings for the gate's substitute would draw one module's strings under another's name.
+   * Absent ⇒ legacy behaviour (auto-swap on 'incompatible' with a suggestion).
+   */
+  allowPanelAutoSwap?: boolean;
+
   /** Total panel count from CADModel or layout. */
   panelCount: number;
 
@@ -2268,8 +2276,9 @@ function runPanelCompatibilityGate(
     designTempMinC: input.designTempMin,
   });
 
-  // Auto-swap only on 'incompatible' AND when at least one suggestion exists.
-  if (gate.status === 'incompatible' && gate.suggestions.length > 0) {
+  // Auto-swap only on 'incompatible' AND when at least one suggestion exists — and never when the
+  // caller sizes a module it is bound to (see `allowPanelAutoSwap`).
+  if (input.allowPanelAutoSwap !== false && gate.status === 'incompatible' && gate.suggestions.length > 0) {
     const topId = gate.suggestions[0].id;
     const swap  = SOLAR_PANELS.find(p => p.id === topId);
     if (swap) {

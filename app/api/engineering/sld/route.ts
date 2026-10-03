@@ -470,6 +470,9 @@ export async function POST(req: NextRequest) {
           selectedBrand:      _selectedBrand,
           selectedInverterId: _selectedInvId,
           panelId:            _panelId,
+          // 🚨 The sheet prints the project's recorded module; it sizes that module's strings, never
+          // the compatibility gate's substitute (lib/electrical/moduleAuthority.ts).
+          allowPanelAutoSwap: false,
           // Battery fields — required for sizing engine to include battery in result.
           // Previously omitted, causing the engine to return no-battery result even when
           // the user had configured a battery system.
