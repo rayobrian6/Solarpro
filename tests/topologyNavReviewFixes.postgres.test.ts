@@ -266,3 +266,23 @@ describe('🚨 the PV coupling through the writer System Config chooses — prod
     expect(prov.inverter).toBeUndefined();
   }, 120_000);
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+describe('🚨 the generation panel part chosen in System Config is ordered — POST /api/engineering/bom', () => {
+  it('chosen for one of the two panels: one BOM line, quantity 1; none chosen: no line is invented', async () => {
+    const G = await import('@/lib/electrical/systemConfigGenerationPanels');
+    await persist(await raysJob());
+    const items = async () => {
+      const b = await bom();
+      expect(b.status).toBe(200);
+      return ((b.json as any).bom?.items ?? []) as Array<{ partNumber: string; quantity: number; description?: string }>;
+    };
+    expect((await items()).filter(i => /der-aggregation|BR816/i.test(`${i.partNumber} ${i.description ?? ''}`))).toEqual([]);
+    const t = await reload();
+    await persist(G.answerGenerationPanelPart(t, t.aggregationPanels[0].id, { productId: 'Eaton BR816L125RP', busbarRatingA: 125, sccrA: 10_000 }));
+    const line = (await items()).find(i => i.partNumber === 'Eaton BR816L125RP');
+    expect(line, 'the chosen generation panel is not on the BOM').toBeTruthy();
+    expect(line!.quantity).toBe(1);
+    expect(line!.description).toMatch(/aggregation \/ AC generation panel/i);
+  }, 120_000);
+});

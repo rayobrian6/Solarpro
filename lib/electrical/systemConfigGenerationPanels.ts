@@ -27,7 +27,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import type { InterviewInput, InterviewItem, ItemState } from '@/lib/electrical/systemConfigInterview';
-import type { AnswerResult } from '@/lib/electrical/systemConfigAnswers';
+import { sccrKaFromAmps, type AnswerResult } from '@/lib/electrical/systemConfigAnswers';
 import type { DerAggregationPanel, ServiceTopology, TopologyEvaluation } from '@/lib/electrical/serviceTopology';
 import { sizeAggregationPanel } from '@/lib/electrical/serviceTopology';
 import { selectAggregationProduct, updateAggregationPanel } from '@/lib/electrical/topologyAuthoring';
@@ -100,7 +100,7 @@ export function buildGenerationPanelsItem(input: InterviewInput): InterviewItem 
     state,
     answer: facts.map(f => `${f.label}: ${f.panel.productId ?? 'part not selected'}`
       + ` · bus ${f.busbarStated ? `${f.panel.busbarRatingA} A` : 'not stated'}`
-      + ` · SCCR ${f.sccrStated ? `${f.panel.sccrA} A` : 'not established'}`).join(' · '),
+      + ` · SCCR ${f.sccrStated ? `${sccrKaFromAmps(f.panel.sccrA as number)} kA` : 'not established'}`).join(' · '),
     source: chosen === panels.length && state !== 'needs-verification' ? 'Installer entered' : 'Not established',
     why: state === 'fails'
       ? facts.flatMap(f => f.fails).join(' ')
@@ -167,5 +167,5 @@ export function answerGenerationPanelPart(
   if (Object.keys(ratings).length === 0) return refuse(`Nothing to change on ${p.label}.`);
   return done(updateAggregationPanel(next, p.id, ratings),
     `${p.label}: ${[ratings.busbarRatingA !== undefined ? `busbar ${ratings.busbarRatingA ?? 'not stated'}` : null,
-      ratings.sccrA !== undefined ? `SCCR ${ratings.sccrA ?? 'not established'}` : null].filter(Boolean).join(' · ')}`);
+      ratings.sccrA !== undefined ? `SCCR ${ratings.sccrA == null ? 'not established' : `${sccrKaFromAmps(ratings.sccrA)} kA`}` : null].filter(Boolean).join(' · ')}`);
 }

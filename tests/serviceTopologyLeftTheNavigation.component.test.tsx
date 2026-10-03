@@ -6,7 +6,8 @@
 //
 //   · a PW3's commissioned output setting   → Battery card (one system: under the count; more than
 //     one: per system behind [Configure systems differently])
-//   · the generation panels' part / busbar / SCCR → Battery card [Select Equipment] (inline in Manual)
+//   · the generation panels' part / busbar / SCCR (kA) → Battery card, each beside its own system behind
+//     [Configure systems differently] (inline in Manual); Answer Next / Review Engineering
 //   · a panelboard's SCCR                     → the panel row (Service card / Answer Next)
 //   · the PV coupling where no question asks it → the question dialog, through `onRecordCoupling`
 //   · the graph editor itself                 → only inside Review Engineering, behind a disclosure,
@@ -21,7 +22,7 @@ import {
   answerSystemsArrangement, type AnswerResult,
 } from '@/lib/electrical/systemConfigAnswers';
 import { outputConfigOf, systemEquipmentFacts } from '@/lib/electrical/systemConfigSystemEquipment';
-import { GENERATION_PANELS_ITEM_ID } from '@/lib/electrical/systemConfigGenerationPanels';
+import { GENERATION_PANELS_ITEM_ID, answerGenerationPanelPart } from '@/lib/electrical/systemConfigGenerationPanels';
 import { findInterviewItem } from '@/lib/electrical/systemConfigPlacement';
 import { resolvePvArrayDesign } from '@/lib/electrical/pvArrayDesign';
 import { evaluateServiceTopology, type ServiceTopology } from '@/lib/electrical/serviceTopology';
@@ -122,48 +123,81 @@ describe('Battery card — the generation panels the AC aggregation answer built
     return ok(answerSystemsArrangement(t, 'independent-branch'));
   };
 
-  it('no generation panel ⇒ no row', () => {
+  it('🚨 no permanent row of its own (brief §6): nothing on the card until [Configure systems differently] is opened', () => {
     render(<LiveBattery initial={oneSystem()} writes={[]} />);
-    expect(screen.queryByTestId('bat-generation-row')).toBeNull();
+    expect(screen.queryByTestId('answer-generation-panels')).toBeNull();
+    cleanup();
+    render(<LiveBattery initial={twoSystemsWithPanels()} writes={[]} />);
+    expect(screen.queryByTestId('answer-generation-panels')).toBeNull();
+    expect(screen.queryByTestId('bat-system-generation-domain-1')).toBeNull();
   });
 
-  it('[Select Equipment] → the dialog; a part, its busbar and SCCR each write the graph; the row reads the rebuild', async () => {
+  it('behind [Configure systems differently], each system\'s OWN panel: part, busbar, SCCR (kA) each write the graph and read back', async () => {
     const writes: ServiceTopology[] = [];
-    render(<LiveBattery initial={twoSystemsWithPanels()} writes={writes} />);
-    const row = screen.getByTestId('bat-generation-row');
-    expect(row.getAttribute('data-state')).toBe('needs-answer');
-    expect(screen.getByTestId('bat-generation-summary').textContent).toBe('2 · parts not selected');
-    fireEvent.click(screen.getByTestId('bat-generation-select'));
-    const dialog = screen.getByRole('dialog');
-    expect(dialog.querySelector('[data-item-id]')!.getAttribute('data-item-id')).toBe(GENERATION_PANELS_ITEM_ID);
-    // The engine's requirement, read — never the service rating.
-    expect(within(dialog).getByTestId('answer-generation-requirement-agg-1').textContent)
+    const t0 = twoSystemsWithPanels();
+    const [d1, d2] = t0.domains.map(d => d.id);
+    const agg1 = t0.aggregationPanels.find(a => a.domainId === d1)!.id;
+    const agg2 = t0.aggregationPanels.find(a => a.domainId === d2)!.id;
+    render(<LiveBattery initial={t0} writes={writes} />);
+    fireEvent.click(screen.getByTestId('bat-configure-differently'));
+    const box1 = screen.getByTestId(`bat-system-generation-${d1}`);
+    // Each system shows its own panel only, with the engine's requirement — never the service rating.
+    expect(within(box1).queryByTestId(`answer-generation-panel-${agg2}`)).toBeNull();
+    expect(within(box1).getByTestId(`answer-generation-requirement-${agg1}`).textContent)
       .toBe('Requirement: 125 A output OCPD and busbar for 96 A of DER · 2 breaker positions');
-    for (const id of ['agg-1', 'agg-2']) {
-      const part = within(dialog).getByTestId(`answer-generation-part-${id}`);
+    for (const [d, id] of [[d1, agg1], [d2, agg2]] as const) {
+      const box = () => screen.getByTestId(`bat-system-generation-${d}`);
+      const part = within(box()).getByTestId(`answer-generation-part-${id}`);
       fireEvent.change(part, { target: { value: 'Eaton BR816L125RP' } });
       fireEvent.blur(part);
       await waitFor(() => expect(writes.at(-1)!.aggregationPanels.find(a => a.id === id)!.productId).toBe('Eaton BR816L125RP'));
-      const bus = screen.getByTestId(`answer-generation-bus-${id}`);
+      const bus = within(box()).getByTestId(`answer-generation-bus-${id}`);
       fireEvent.change(bus, { target: { value: '125' } });
       fireEvent.blur(bus);
       await waitFor(() => expect(writes.at(-1)!.aggregationPanels.find(a => a.id === id)!.busbarRatingA).toBe(125));
-      const sccr = screen.getByTestId(`answer-generation-sccr-${id}`);
-      fireEvent.change(sccr, { target: { value: '10000' } });
+      // 🚨 kA, like every other interrupting rating System Config asks for: 10 off a 10 kA label is 10 000 A.
+      const sccr = within(box()).getByTestId(`answer-generation-sccr-${id}`);
+      fireEvent.change(sccr, { target: { value: '10' } });
       fireEvent.blur(sccr);
       await waitFor(() => expect(writes.at(-1)!.aggregationPanels.find(a => a.id === id)!.sccrA).toBe(10_000));
     }
-    // The dialog stays open across the several writes and says it saved.
-    expect(screen.getByTestId('question-saved')).toBeTruthy();
-    fireEvent.click(screen.getByTestId('question-dialog-done'));
-    await waitFor(() => expect(screen.getByTestId('bat-generation-row').getAttribute('data-state')).toBe('answered'));
-    expect(screen.getByTestId('bat-generation-summary').textContent).toBe('2 · parts selected');
+    // The rebuilt interview reads it back, in kA.
+    await waitFor(() => expect((screen.getByTestId(`answer-generation-sccr-${agg1}`) as HTMLInputElement).value).toBe('10'));
   });
 
-  it('Manual mode: the same editor inline in the card', () => {
-    render(<LiveBattery initial={twoSystemsWithPanels()} mode="manual" writes={[]} />);
-    expect(screen.queryByTestId('bat-generation-row')).toBeNull();
-    expect(within(screen.getByTestId('bat-generation-inline')).getByTestId('answer-generation-part-agg-2')).toBeTruthy();
+  it('🚨 a typo never erases a recorded rating: badInput is refused and the stored figure restored', async () => {
+    let t0 = twoSystemsWithPanels();
+    const agg = t0.aggregationPanels[0];
+    t0 = ok(answerGenerationPanelPart(t0, agg.id, { productId: 'Eaton BR816L125RP', busbarRatingA: 125, sccrA: 22_000 }));
+    const writes: ServiceTopology[] = [];
+    render(<LiveBattery initial={t0} writes={writes} />);
+    fireEvent.click(screen.getByTestId('bat-configure-differently'));
+    for (const [field, restored] of [['sccr', '22'], ['bus', '125']] as const) {
+      const input = screen.getByTestId(`answer-generation-${field}-${agg.id}`) as HTMLInputElement;
+      // What Chrome does with '22e' (Firefox with '22kA'): value '' and validity.badInput.
+      Object.defineProperty(input, 'validity', { configurable: true, value: { badInput: true } });
+      fireEvent.change(input, { target: { value: '' } });
+      fireEvent.blur(input);
+      expect(input.value, `${field}: the recorded figure is restored`).toBe(restored);
+    }
+    expect(writes, 'a typo wrote over a recorded rating').toEqual([]);
+    expect(screen.getByTestId('bat-refusal').textContent).toMatch(/enter the (kilo)?amperes on the panelboard label/);
+  });
+
+  it('Manual mode: the same editors inline, beside each system', () => {
+    const t0 = twoSystemsWithPanels();
+    render(<LiveBattery initial={t0} mode="manual" writes={[]} />);
+    const d2 = t0.domains[1].id;
+    const agg2 = t0.aggregationPanels.find(a => a.domainId === d2)!.id;
+    expect(within(screen.getByTestId(`bat-system-generation-${d2}`)).getByTestId(`answer-generation-part-${agg2}`)).toBeTruthy();
+  });
+
+  it('the dialog (Answer Next / Review Engineering) still lists every panel, SCCR in kA', () => {
+    const t0 = twoSystemsWithPanels();
+    const item = findInterviewItem(interviewOf(t0), GENERATION_PANELS_ITEM_ID)!;
+    render(<QuestionDialog {...ctxFor(t0, async () => true)} item={item} onClose={() => {}} />);
+    for (const a of t0.aggregationPanels) expect(screen.getByTestId(`answer-generation-panel-${a.id}`)).toBeTruthy();
+    expect(screen.getByLabelText(`${t0.aggregationPanels[0].label} SCCR (kA)`)).toBeTruthy();
   });
 });
 

@@ -21,6 +21,11 @@ import { buildSystemConfigInterview } from '@/lib/electrical/systemConfigIntervi
 import { findInterviewItem, requiredQueue } from '@/lib/electrical/systemConfigPlacement';
 import { resolvePvArrayDesign } from '@/lib/electrical/pvArrayDesign';
 import { evaluateServiceTopology } from '@/lib/electrical/serviceTopology';
+import { answerGenerationPanelPart } from '@/lib/electrical/systemConfigGenerationPanels';
+import { equipmentInstancesFromTopology, reconcileQuantities } from '@/lib/electrical/topologyEquipment';
+import { bomFromServiceTopology } from '@/lib/bom/topologyBom';
+import { serviceTopologyScheduleRows, serviceTopologyProcurement } from '@/lib/permit/utils/serviceTopologySchedule';
+import { sccrAmpsFromKa, sccrKaFromAmps } from '@/lib/electrical/systemConfigAnswers';
 
 const PW3 = 'tesla-powerwall-3';
 const GW3 = 'tesla-backup-gateway-3';
@@ -131,5 +136,29 @@ describe('🚨 the PV coupling: no phantom inverter decision, and a recorded dec
     const queue = requiredQueue(iv).map(i => i.id);
     expect(queue).toContain('equipment.pv-inverter');
     expect(queue).not.toContain('engineering.needs.interconnection.solarCoupling');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+describe('🚨 the generation panel part reaches the consumers its editor promises', () => {
+  it('instances → BOM line, quantity and the procurement schedule name the chosen part; none chosen orders nothing', () => {
+    const t = raysJob();
+    expect(equipmentInstancesFromTopology(t).filter(i => i.kind === 'der-aggregation-panel').map(i => i.productId)).toEqual(['', '']);
+    expect(bomFromServiceTopology(t).items.filter(i => i.id.startsWith('topology-der-aggregation'))).toEqual([]);
+    const chosen = ok(answerGenerationPanelPart(t, t.aggregationPanels[0].id, { productId: 'Eaton BR816L125RP', busbarRatingA: 125, sccrA: 10_000 }));
+    const bom = bomFromServiceTopology(chosen);
+    expect(bom.items.filter(i => i.partNumber === 'Eaton BR816L125RP').map(i => i.quantity)).toEqual([1]);
+    expect(reconcileQuantities(chosen, bom.quantities)).toEqual([]);
+    const rows = serviceTopologyScheduleRows(chosen).filter(r => r.deviceType === 'der-aggregation-panel');
+    expect(rows.map(r => r.model)).toEqual(['Eaton BR816L125RP', '']);
+    expect(serviceTopologyProcurement(chosen).find(l => l.productId === 'Eaton BR816L125RP')?.quantity).toBe(1);
+  });
+
+  it('the item states the SCCR in kA, as it is entered', () => {
+    const t = ok(answerGenerationPanelPart(raysJob(), 'agg-1', { productId: 'P', busbarRatingA: 125, sccrA: 22_000 }));
+    expect(sccrAmpsFromKa(22)).toBe(22_000);
+    expect(sccrKaFromAmps(10_000)).toBe(10);
+    const r = answerGenerationPanelPart(t, 'agg-1', { sccrA: 10_000 });
+    expect(r.ok && r.did).toMatch(/SCCR 10 kA/);
   });
 });

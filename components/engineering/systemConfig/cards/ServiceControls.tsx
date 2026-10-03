@@ -19,7 +19,7 @@ import type { PanelBoard, ServiceTopology, TopologyCheck } from '@/lib/electrica
 import { SERVICE_PHASES, servicePhaseInfo } from '@/lib/electrical/serviceTopology';
 import {
   answerServiceRating, answerElectricalSystem, answerDistribution, answerPanel,
-  answerAvailableFaultCurrent, answerExistingService, type AnswerResult,
+  answerAvailableFaultCurrent, answerExistingService, sccrAmpsFromKa, sccrKaFromAmps, type AnswerResult,
 } from '@/lib/electrical/systemConfigAnswers';
 import {
   BUSBAR_RATINGS, MAIN_BREAKER_RATINGS, SERVICE_RATINGS, busbarRemedies, existingRecordedFacts,
@@ -244,16 +244,16 @@ export function PanelRow({ t, panel: p, item, ids, disabled, apply, check = null
             <input type="number" min={0} step={0.5} data-testid={`${id}-sccr-${p.id}`} key={p.sccrA ?? 'none'}
                    aria-label={`${p.label} SCCR (kA)`} placeholder="kA" disabled={disabled}
                    className={`w-full min-w-0 ${box} ${sccrNeeded ? NEEDS : ''}`}
-                   defaultValue={p.sccrA != null ? p.sccrA / 1000 : ''}
+                   defaultValue={p.sccrA != null ? sccrKaFromAmps(p.sccrA) : ''}
                    onBlur={e => {
                      const el = e.currentTarget;
                      if (el.validity?.badInput) {
-                       el.value = p.sccrA != null ? String(p.sccrA / 1000) : '';
+                       el.value = p.sccrA != null ? String(sccrKaFromAmps(p.sccrA)) : '';
                        void apply({ ok: false, refused: `${p.label} SCCR: enter the kiloamperes on the panel label, or leave it blank.` });
                        return;
                      }
                      const ka = el.value.trim() === '' ? null : Number(el.value);
-                     const a = ka === null ? null : Math.round(ka * 1000);
+                     const a = ka === null ? null : sccrAmpsFromKa(ka);
                      if (a !== (p.sccrA ?? null)) void apply(answerPanel(t, p.id, { sccrA: a }));
                    }} />
           </label>

@@ -14,9 +14,11 @@
 //     in Manual mode). The battery model is asked once for every system: the project selection can
 //     name one battery, so a job with a different battery per system is flagged, not offered.
 //   · The output setting the batteries are commissioned at — under the count with one system, per
-//     system behind [Configure systems differently] — and the generation panels the AC aggregation
-//     answer built ([Select Equipment]: panelboard, busbar, SCCR). Both moved here from the Service
-//     Topology inspector when it left the normal navigation (closure slice 1).
+//     system behind [Configure systems differently] — and each system's generation panel the AC
+//     aggregation answer built (panelboard, busbar, SCCR), beside its system behind the SAME
+//     disclosure. No permanent row of their own (brief §6): the panels are also answered in Answer
+//     Next / Review Engineering. Both moved here from the Service Topology inspector when it left the
+//     normal navigation (closure slice 1).
 //
 // Which store is edited:
 //   · No backup system in the service graph yet ⇒ the project selection (`config.batteryId /
@@ -50,9 +52,8 @@ import {
   type BatteryGrouping, type BatterySelection, type BatterySystemSummary,
 } from '@/lib/electrical/systemConfigBatteryCard';
 import { findInterviewItem } from '@/lib/electrical/systemConfigPlacement';
-import {
-  ItemEditor, ProvenanceChip, QuestionDialog, type ApplyAnswer, type ItemEditorContext,
-} from '@/components/engineering/systemConfig/ItemEditor';
+import { ProvenanceChip, type ApplyAnswer, type ItemEditorContext } from '@/components/engineering/systemConfig/ItemEditor';
+import { GenerationPanelsEditor } from '@/components/engineering/systemConfig/GenerationPanelsEditor';
 import { GENERATION_PANELS_ITEM_ID } from '@/lib/electrical/systemConfigGenerationPanels';
 
 export interface BatteryStorageCardProps extends ItemEditorContext {
@@ -475,51 +476,6 @@ function Aggregation({ item, systems, onPick, busy }: {
   );
 }
 
-// ── The generation / combiner panels the AC aggregation answer built ────────
-
-/**
- * "Generation panels · 2 · parts not selected [Select Equipment]" — the panelboard, busbar and SCCR of
- * each panel the AC aggregation answer built, behind ONE button (inline in Manual), exactly as the
- * System Configuration card's Utility Isolation does it. Shown only when such a panel exists. These
- * were answerable only in the Service Topology inspector before it left the normal navigation.
- */
-function GenerationPanels({ ctx, item, apply }: {
-  ctx: BatteryStorageCardProps; item: InterviewItem; apply: ApplyAnswer;
-}) {
-  const [open, setOpen] = useState(false);
-  const panels = ctx.topology?.aggregationPanels ?? [];
-  const chosen = panels.filter(p => !!p.productId).length;
-  const summary = `${panels.length} · ${chosen === 0 ? 'parts not selected'
-    : chosen === panels.length ? 'parts selected' : `${chosen} of ${panels.length} parts selected`}`
-    + (item.state === 'fails' ? ' · FAILS — review the parts' : item.state === 'needs-verification' ? ' · SCCR to confirm' : '');
-  if (ctx.controlMode === 'manual') {
-    return (
-      <div data-testid="bat-generation-inline" data-state={item.state}
-           className="rounded border border-slate-800 bg-slate-950/40 p-1.5">
-        <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-slate-500">
-          Generation panel{panels.length === 1 ? '' : 's'}<Owed item={item} testid="bat-generation-owed" />
-        </div>
-        <ItemEditor {...ctx} item={item} apply={apply} />
-      </div>
-    );
-  }
-  return (
-    <div data-testid="bat-generation-row" data-state={item.state} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
-      <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">
-        Generation panel{panels.length === 1 ? '' : 's'}
-      </span>
-      <Owed item={item} testid="bat-generation-owed" />
-      <span data-testid="bat-generation-summary" className="text-slate-400">{summary}</span>
-      <button type="button" data-testid="bat-generation-select" disabled={ctx.busy}
-              className="ml-auto rounded bg-slate-700 px-2 py-0.5 text-[11px] font-bold text-slate-100 hover:bg-slate-600 disabled:opacity-40"
-              onClick={() => setOpen(true)}>
-        Select Equipment
-      </button>
-      <QuestionDialog {...ctx} apply={apply} item={open ? item : null} error={ctx.error} onClose={() => setOpen(false)} />
-    </div>
-  );
-}
-
 // ── One system's own controller, battery count and expansion packs ──────────
 
 interface SystemDraft { gw?: string; nEss?: number; exp?: string; nExp?: number; cfg?: string }
@@ -628,6 +584,7 @@ function Grouping({ ctx, grouping, apply }: {
   const inline = ctx.controlMode === 'manual';
   const expanded = inline || open;
   const t = ctx.topology!;
+  const generationItem = findInterviewItem(ctx.interview, GENERATION_PANELS_ITEM_ID);
   // The battery a system holding none yet takes: the one every other system holds, else the selection's.
   const battery = grouping.commonStorageProductId ?? ctx.equipment.storageProductId ?? (ctx.selection.batteryId || null);
   return (
@@ -663,6 +620,15 @@ function Grouping({ ctx, grouping, apply }: {
                    className="rounded border border-slate-700/60 p-2 space-y-2">
                 <div className="text-[11px] font-bold text-slate-100">{s.label}</div>
                 <SystemRow t={t} s={s} battery={battery} apply={apply} busy={ctx.busy} />
+                {/* This system's own generation panel — panelboard, busbar, SCCR — beside its system. */}
+                {(t.aggregationPanels ?? []).some(a => a.domainId === s.domainId) ? (
+                  <div data-testid={`bat-system-generation-${s.domainId}`}>
+                    <div className="text-[11px] text-slate-400">Its generation panel
+                      <Owed item={generationItem} testid={`bat-system-generation-owed-${s.domainId}`} />
+                    </div>
+                    <GenerationPanelsEditor topology={t} apply={apply} busy={ctx.busy} domainId={s.domainId} />
+                  </div>
+                ) : null}
                 {landing ? (
                   <label className="block text-[11px] text-slate-400">Its battery AC circuits
                     <select data-testid={`bat-system-landing-${s.domainId}`} className="eng-select mt-0.5"
@@ -678,6 +644,15 @@ function Grouping({ ctx, grouping, apply }: {
               </div>
             );
           })}
+          {/* A generation panel the systems SHARE (site-wide) belongs to none of them. */}
+          {(t.aggregationPanels ?? []).some(a => !a.domainId) ? (
+            <div data-testid="bat-shared-generation" className="rounded border border-slate-700/60 p-2">
+              <div className="text-[11px] font-bold text-slate-100">Shared generation panel
+                <Owed item={generationItem} testid="bat-shared-generation-owed" />
+              </div>
+              <GenerationPanelsEditor topology={t} apply={apply} busy={ctx.busy} domainId={null} />
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>
@@ -726,7 +701,6 @@ export function BatteryStorageCard(props: BatteryStorageCardProps) {
   const grouping = batteryGroupingOf(t);
   const landing = findInterviewItem(interview, 'behavior.storage-landing');
   const gatewayItem = findInterviewItem(interview, 'equipment.gateway');
-  const generationItem = findInterviewItem(interview, GENERATION_PANELS_ITEM_ID);
 
   return (
     <div className="space-y-3" data-testid="bat-card" data-record={grouping ? 'service-graph' : 'selection'}>
@@ -740,7 +714,6 @@ export function BatteryStorageCard(props: BatteryStorageCardProps) {
         <Aggregation item={landing} systems={t.domains.length} busy={busy}
                      onPick={v => void apply(answerStorageLanding(t, v))} />
       ) : null}
-      {generationItem && t ? <GenerationPanels ctx={props} item={generationItem} apply={apply} /> : null}
       {grouping && t && grouping.systems.length > 1 ? <Grouping ctx={props} grouping={grouping} apply={apply} /> : null}
       {refusal ? (
         <div data-testid="bat-refusal" className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-200">

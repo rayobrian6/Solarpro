@@ -46,6 +46,15 @@ const refuse = (refused: string): AnswerResult => ({ ok: false, refused });
  */
 export const ADVANCED_EDITOR = 'the Advanced service model editor (Engineering Readiness → Review Engineering)';
 
+/**
+ * 🚨 ONE UNIT FOR AN INTERRUPTING RATING ON EVERY SCREEN: kA, as nameplates print it (the fault
+ * current and the Verify AIC are entered in kA too). Stored in amperes. A panel's SCCR and a
+ * generation panel's SCCR go through these two — an installer copying "10" off a 10 kA generation
+ * panel label recorded 10 A when that field alone took amperes.
+ */
+export const sccrAmpsFromKa = (ka: number): number => Math.round(ka * 1000);
+export const sccrKaFromAmps = (amps: number): number => amps / 1000;
+
 /** Services above this are commonly split; at or below it a service IS one main panel. */
 export const SINGLE_PANEL_MAX_A = 225;
 

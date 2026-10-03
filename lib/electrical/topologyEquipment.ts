@@ -131,7 +131,11 @@ export function equipmentInstancesFromTopology(t: ServiceTopology): EquipmentIns
 
   for (const agg of t.aggregationPanels ?? []) {
     out.push({
-      instanceId: agg.id, productId: '', kind: 'der-aggregation-panel', label: agg.label,
+      // 🚨 THE PANELBOARD THE INSTALLER CHOSE IS WHAT GETS ORDERED. System Config records it
+      // (`answerGenerationPanelPart` → `agg.productId`) and this was hard-coded '', so the BOM, pricing
+      // and the procurement schedule never listed the part the editor said "nothing is ordered until".
+      // None chosen ⇒ '' — a calculated minimum is not a purchase, and no line is invented for it.
+      instanceId: agg.id, productId: agg.productId?.trim() || '', kind: 'der-aggregation-panel', label: agg.label,
       contributesAcSource: false, continuousOutputA: null, usableKwh: null,
     });
   }
