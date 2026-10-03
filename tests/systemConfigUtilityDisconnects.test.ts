@@ -327,6 +327,33 @@ describe('🚨 a rating nobody read off the part never becomes the part’s rati
     expect(t.devices[0]).toMatchObject({ productId: 'MID-100', ratedAmps: 100, sccrA: null });
   });
 
+  it('(d) the SAME rule through the Service Topology inspector’s writer — one shared writer, not two', async () => {
+    // Verified after the first fix: the inspector writes the part with a bare selectDeviceProduct, so
+    // the seeded 200 A survived there and System Config printed it as the part's rating.
+    const { selectDeviceProduct } = await import('@/lib/electrical/topologyAuthoring');
+    const t0 = isolatedHouse();
+    const t = selectDeviceProduct(t0, isoSwitch(t0).id, 'DU30');
+    expect(isoSwitch(t)).toMatchObject({ productId: 'DU30', ratedAmps: null, sccrA: null });
+    expect(item(interview(t), disconnectItemId('der-isolation-disconnect'))?.answer).not.toMatch(/rated 200 A/);
+    expect(inlineChecks(t).find(x => x.title.startsWith(isoSwitch(t).label))?.conclusion).toBe('NOT_EVALUATED');
+    // Re-sending the same part changes nothing; stating the part's numbers with it records them.
+    const t2 = selectDeviceProduct(t, isoSwitch(t).id, 'DU30');
+    expect(isoSwitch(t2).ratedAmps).toBeNull();
+    const t3 = selectDeviceProduct(t0, isoSwitch(t0).id, 'DU60', { ratedAmps: 60, sccrA: 10000 });
+    expect(isoSwitch(t3)).toMatchObject({ productId: 'DU60', ratedAmps: 60, sccrA: 10000 });
+  });
+
+  it('clearing a part says so — it does not claim a part was recorded', () => {
+    let t = ok(answerAddDisconnect(house200(), 'service-disconnect'));
+    const id = t.devices[0].id;
+    t = ok(answerDisconnectPart(t, id, { productId: 'BIG-200', ratedAmps: 200, sccrA: 22000 }));
+    const r = answerDisconnectPart(t, id, { productId: '' });
+    expect(r.ok).toBe(true);
+    if (r.ok === false) return;
+    expect(r.did).toMatch(/part cleared — its rating and SCCR cleared with it/);
+    expect(r.topology.devices[0]).toMatchObject({ productId: null, ratedAmps: null, sccrA: null });
+  });
+
   it('a number recorded with no part reads as recorded, not as a part’s — rating and SCCR alike', () => {
     const t = ok(answerAddDisconnect(house200(), 'service-disconnect'));
     const d = { ...t.devices[0], ratedAmps: 200, sccrA: 10000 };

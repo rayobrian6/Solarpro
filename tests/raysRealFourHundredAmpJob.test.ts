@@ -1043,7 +1043,15 @@ describe('🚨 the job CAN be finished — the model is not merely pessimistic',
       feederArrangement: 'Two 200 A outgoing feeders, bottom entry',
       sccrA: 22_000, verified: true,
     });
-    for (const d of t.devices) t = selectDeviceProduct(t, d.id, 'eaton-dg224urk');
+    // 🚨 EACH PART WITH ITS OWN NAMEPLATE RATING. This used to select a 200 A DG224URK for EVERY device
+    // — including the 400 A service disconnect — and PASSed only because the device kept the seeded
+    // 400 A across the part change. A new part now brings its own numbers (selectDeviceProduct), so
+    // the 400 A disconnect gets a 400 A switch and each rating is the part's.
+    for (const d of t.devices) {
+      t = (d.ratedAmps ?? 0) > 200
+        ? selectDeviceProduct(t, d.id, 'eaton-dg325urk', { ratedAmps: 400 })
+        : selectDeviceProduct(t, d.id, 'eaton-dg224urk', { ratedAmps: 200 });
+    }
     // The generation panels: the part actually bought, its nameplate interrupting rating, and the
     // PV the string layout put on each Powerwall.
     for (const p of t.aggregationPanels) t = selectAggregationProduct(t, p.id, 'eaton-ch8l125rp');

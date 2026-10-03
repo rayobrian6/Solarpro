@@ -507,15 +507,21 @@ export function answerDisconnectPart(
   let next = t;
   const ratings: Partial<ProtectiveDevice> = {};
   let partChanged = false;
+  let newPart: string | null = d.productId ?? null;
   if (patch.productId !== undefined) {
-    const productId = patch.productId?.trim() || null;
-    partChanged = productId !== (d.productId ?? null);
-    if (partChanged) { ratings.ratedAmps = null; ratings.sccrA = null; }
-    next = selectDeviceProduct(next, d.id, productId);
+    newPart = patch.productId?.trim() || null;
+    partChanged = newPart !== (d.productId ?? null);
+    // The shared writer clears the old part's / the seed's numbers on a part change (see
+    // selectDeviceProduct) unless this write states them.
+    next = selectDeviceProduct(next, d.id, newPart, { ratedAmps: patch.ratedAmps, sccrA: patch.sccrA });
+  } else {
+    if (patch.ratedAmps !== undefined) ratings.ratedAmps = patch.ratedAmps;
+    if (patch.sccrA !== undefined) ratings.sccrA = patch.sccrA;
+    if (Object.keys(ratings).length > 0) next = updateProtectiveDevice(next, d.id, ratings);
   }
-  if (patch.ratedAmps !== undefined) ratings.ratedAmps = patch.ratedAmps;
-  if (patch.sccrA !== undefined) ratings.sccrA = patch.sccrA;
-  if (Object.keys(ratings).length > 0) next = updateProtectiveDevice(next, d.id, ratings);
+  if (partChanged && newPart === null) {
+    return done(next, `${d.label}: part cleared — its rating and SCCR cleared with it`);
+  }
   const unstated = partChanged && (patch.ratedAmps === undefined || patch.sccrA === undefined);
   return done(next, `${d.label}: part recorded${unstated
     ? ' — read its rating and SCCR off the part; nothing the device carried before is kept' : ''}`);

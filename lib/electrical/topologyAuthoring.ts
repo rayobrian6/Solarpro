@@ -702,11 +702,33 @@ export function placeDeviceInline(
   };
 }
 
-/** Record the catalogue part selected to meet a device's engineered requirement. */
+/**
+ * Record the catalogue part selected to meet a device's engineered requirement.
+ *
+ * 🚨 A NEW PART BRINGS ITS OWN NUMBERS. The device's `ratedAmps` / `sccrA` before a part is chosen are
+ * a seed (the service or path rating an arrangement copied in) or the previous part's nameplate; kept
+ * across a part change, the engine's in-line rating check PASSed the new part against a copy of the
+ * requirement itself, and every screen printed the seed as the part's rating. So when the part
+ * changes, both are cleared unless this same write states them — read off the part. Every editor of
+ * the graph (System Config, the Service Topology inspector) goes through here.
+ */
 export function selectDeviceProduct(
   t: ServiceTopology, deviceId: string, productId: string | null,
+  partRatings: { ratedAmps?: number | null; sccrA?: number | null } = {},
 ): ServiceTopology {
-  return { ...t, devices: t.devices.map(d => (d.id === deviceId ? { ...d, productId } : d)) };
+  return {
+    ...t,
+    devices: t.devices.map(d => {
+      if (d.id !== deviceId) return d;
+      const changed = (productId ?? null) !== (d.productId ?? null);
+      return {
+        ...d,
+        productId,
+        ratedAmps: partRatings.ratedAmps !== undefined ? partRatings.ratedAmps : changed ? null : d.ratedAmps,
+        sccrA: partRatings.sccrA !== undefined ? partRatings.sccrA : changed ? null : d.sccrA,
+      };
+    }),
+  };
 }
 
 /**
