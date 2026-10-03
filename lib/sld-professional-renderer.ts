@@ -359,6 +359,41 @@ export interface SLDSourceBranch {
   standaloneGateway?: StandaloneGatewayFields;
 }
 
+/**
+ * The storage a DC-coupled array lands on, named from the graph's own instances — never a literal
+ * product (the sheet used to print "POWERWALL 3" for every DC-coupled storage product).
+ */
+function dcStorageNameSld(t: ServiceTopologyForSld | null | undefined): string {
+  const names = [...new Set((t?.storage ?? []).filter(u => u.role === 'inverter-unit')
+    .map(u => (u.label ?? u.productId).toUpperCase()))];
+  return names.length === 1 ? names[0] : 'STORAGE';
+}
+
+/**
+ * The batteries' continuous AC output. A × V is the single-phase relationship, so it is stated in
+ * kW only on a 120/240 V split-phase service; anywhere else the amperes are printed and the kW is
+ * not computed.
+ */
+function essAcOutputLabelSld(t: ServiceTopologyForSld | null | undefined): string {
+  const inv = (t?.storage ?? []).filter(u => u.role === 'inverter-unit');
+  if (inv.length === 0 || inv.some(u => u.continuousOutputA == null)) return 'NOT EVALUATED';
+  const a = inv.reduce((n, u) => n + (u.continuousOutputA as number), 0);
+  return t?.service.phase === 'split-240' ? `${((a * 240) / 1000).toFixed(2)} kW` : `${a} A`;
+}
+
+/** The interconnection token, in words. A token is not a label. */
+function interconnectionLabelSld(raw: unknown): string {
+  const v = String(raw ?? '').toUpperCase();
+  switch (v) {
+    case '': case 'UNRESOLVED': return 'NOT ESTABLISHED';
+    case 'LOAD_SIDE': return 'LOAD SIDE — NEC 705.12(B)';
+    case 'SUPPLY_SIDE_TAP': case 'SUPPLY_SIDE': return 'SUPPLY SIDE — NEC 705.11';
+    case 'MANUFACTURER_INTEGRATED': return 'INSIDE LISTED EQUIPMENT';
+    case 'METER_COLLAR': return 'METER COLLAR';
+    default: return String(raw);
+  }
+}
+
 export interface SLDProfessionalInput {
   /** Embedded in a planset sheet that has its own title block — suppress the
    *  internal SOLARPRO title panel (it duplicated project/system/code data
@@ -2850,6 +2885,14 @@ export interface ServiceSectionResult {
   }>;
   /** A clear vertical corridor just left of this section, for the DC trunk to drop in. */
   dcBusX: number;
+  /**
+   * 🚨 DC coupled, and nobody has said which unit receives which strings. The trunk is then drawn to
+   * a "landing to be assigned" tag rather than fanned out to every cabinet — a fan-out IS a claim
+   * that all of them take PV, which the design has not made.
+   */
+  dcLandingUnassigned: boolean;
+  /** The storage the strings land on, named from the graph (never a hard-coded product). */
+  dcStorageLabel: string;
 }
 
 /**
@@ -3465,16 +3508,20 @@ export function renderTopologyServiceSection(opts: {
           { t: `${amps(u.ocpdA)} OCPD`, sz: F.tiny },
           ...(u.outputConfigKw ? [{ t: `${u.outputConfigKw} kW CONFIGURED`, sz: F.tiny } as Line] : []),
           // The DC side of a DC-coupled unit, named on the box the strings land in.
+          // 🚨 EACH CABINET STATES ITS OWN LANDING. "PV DC INPUT — 6 MPPT" on all four was a statement
+          // of capability that read as a statement of design; the landing is per unit and may be none.
           ...(dcCoupled
-            ? [{ t: u.pvInputLimits
-                   ? `PV DC INPUT — ${u.pvInputLimits.mppts} MPPT`
-                   : 'PV DC INPUT — LIMITS NOT EVALUATED',
+            ? [{ t: !u.pvInputLimits ? 'PV DC INPUT — LIMITS NOT EVALUATED'
+                   : u.pvDcStcKw == null ? `PV DC INPUT (${u.pvInputLimits.mppts} MPPT) — LANDING TO BE ASSIGNED`
+                     : u.pvDcStcKw === 0 ? 'NO PV ON THIS UNIT'
+                       : `PV DC IN — ${u.pvDcStcKw.toFixed(2)} kW STC`,
                  sz: F.tiny, fill: SEC_DC,
-                 ...(u.pvInputLimits ? {} : { bold: true }) } as Line]
+                 ...(u.pvInputLimits && u.pvDcStcKw != null ? {} : { bold: true }) } as Line]
             : []),
         ], { stroke: '#1B5E20', glyph: 'battery-inverter' });
         essBoxes.set(u.id, b);
-        if (dcCoupled) {
+        // Only a unit the design lands PV on gets a DC conductor drawn to it.
+        if (dcCoupled && typeof u.pvDcStcKw === 'number' && u.pvDcStcKw > 0) {
           dcEntries.push({
             cx: b.cx, bottom: b.bottom, label: storageUnitLabelSld(t, u),
             mppts: u.pvInputLimits?.mppts ?? null,
@@ -4090,6 +4137,16 @@ export function renderTopologyServiceSection(opts: {
     // Left of everything this section draws: the panelboard column starts at `startX`, so a trunk
     // dropped here crosses no box and no feeder callout on its way down the sheet.
     dcBusX: opts.startX - 22,
+    dcLandingUnassigned: t.solarCoupling === 'dc-coupled-storage'
+      && t.storage.some(u => u.role === 'inverter-unit')
+      && dcEntries.length === 0
+      && !t.storage.some(u => u.role === 'inverter-unit' && u.pvDcStcKw === 0
+        && t.storage.filter(x => x.role === 'inverter-unit').every(x => typeof x.pvDcStcKw === 'number')),
+    dcStorageLabel: (() => {
+      const names = [...new Set(t.storage.filter(u => u.role === 'inverter-unit')
+        .map(u => (u.label ?? u.productId).toUpperCase()))];
+      return names.length === 1 ? names[0] : 'BATTERY';
+    })(),
   };
 }
 
@@ -4279,20 +4336,16 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   // drawing with no microinverter on it is the contradiction Ray read in the browser, in the one
   // place a reviewer looks first.
   const _archLabel = _couplingIsDc
-    ? 'PV DC COUPLED TO POWERWALL 3'
+    ? `PV DC COUPLED TO ${dcStorageNameSld(_svcTopology)}`
     : esc(input.topologyType.replace(/_/g, ' '));
   parts.push(txt(tcx, DY+26,
-    // 🚨 THE SUBTITLE'S AC FIGURE FOLLOWS THE ARCHITECTURE BESIDE IT.
-    //
-    // `_archLabel` already says "PV DC COUPLED TO POWERWALL 3" here, and the next clause printed the
-    // auto-selected string inverter's 11.40 kW — the two halves of one sentence describing two
-    // different systems. The storage is the AC source on this architecture.
-    `${esc(input.address)}  |  ${_archLabel}  |  ${input.totalModules} MODULES  |  ${(() => {
-      if (!_couplingIsDc) return Number(input.acOutputKw).toFixed(2);
-      const inv = (_svcTopology?.storage ?? []).filter(u => u.role === 'inverter-unit');
-      if (inv.length === 0 || inv.some(u => u.continuousOutputA == null)) return '—';
-      return ((inv.reduce((n, u) => n + (u.continuousOutputA as number), 0) * 240) / 1000).toFixed(2);
-    })()} kW AC`,
+    // 🚨 THE SUBTITLE STATES PV AND STORAGE AS TWO FACTS. "37 MODULES | 46.08 kW AC" read as a 46 kW
+    // PV system; on this architecture the PV is DC and the AC figure is the batteries' discharge.
+    _couplingIsDc
+      ? `${esc(input.address)}  |  ${_archLabel}  |  ${input.totalModules} MODULES · `
+        + `${((input.totalModules * input.panelWatts) / 1000).toFixed(2)} kW DC  |  ESS ${essAcOutputLabelSld(_svcTopology)} AC`
+      : `${esc(input.address)}  |  ${_archLabel}  |  ${input.totalModules} MODULES  |  `
+        + `${Number(input.acOutputKw).toFixed(2)} kW AC`,
     {sz:F.sub, anc:'middle', fill:'#444'}));
 
   // ── Schematic border ──────────────────────────────────────────────────────
@@ -5396,11 +5449,27 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       const _dcLines = [
         `${input.totalStrings || _svcSection.dcEntries.length} PV STRING HOME RUNS`,
         `${input.dcWireGauge ?? '#10'} PV WIRE + EGC IN ${input.dcConduitType ?? 'EMT'}`,
-        `TO POWERWALL 3 PV INPUTS — DC COUPLED`,
+        `TO ${_svcSection.dcStorageLabel} PV INPUTS — DC COUPLED`,
       ];
       parts.push(tspan((_jbOutPt.x + busX) / 2,
         +(_jbOutPt.y - 10 - 2 * LBL_PITCH).toFixed(2), _dcLines,
         { sz: F.seg, anc: 'middle', lh: LBL_PITCH, fill: SEC_DC }));
+    } else if (_dcCoupled && _svcSection.dcLandingUnassigned) {
+      // 🚨 THE LANDING IS NOT DECIDED, SO IT IS NOT DRAWN. The trunk leaves the junction box and ends
+      // at a tag that says what is owed — never a fan-out to every cabinet, which would assert that
+      // every unit takes PV. The units themselves each say "LANDING TO BE ASSIGNED".
+      const busX = _svcSection.dcBusX;
+      parts.push(ln(_jbOutPt.x, _jbOutPt.y, busX, _jbOutPt.y, { sw: SW_MED, stroke: SEC_DC }));
+      parts.push(tspan((_jbOutPt.x + busX) / 2,
+        +(_jbOutPt.y - 10 - 2 * LBL_PITCH).toFixed(2), [
+          `${input.totalStrings || 'PV'} PV STRING HOME RUNS`,
+          `${input.dcWireGauge ?? '#10'} PV WIRE + EGC IN ${input.dcConduitType ?? 'EMT'}`,
+          `TO ${_svcSection.dcStorageLabel} PV INPUTS — DC COUPLED`,
+        ], { sz: F.seg, anc: 'middle', lh: LBL_PITCH, fill: SEC_DC }));
+      parts.push(tspan(busX - 6, +(_jbOutPt.y + 14).toFixed(2), [
+        'STRING LANDING TO BE ASSIGNED —',
+        'WHICH UNIT RECEIVES EACH STRING',
+      ], { sz: F.tiny, anc: 'end', lh: LBL_PITCH, fill: SEC_DC, bold: true }));
     }
     // The PV AC feeder leaves the AC disconnect and lands where the graph says it lands.
     if (!_dcCoupled) {
@@ -6528,32 +6597,38 @@ function titleBlockSvg(input: SLDProfessionalInput, dcKw: number): string {
   const _tbTopo = input.serviceTopology ?? null;
   const _tbDc = (_tbTopo?.solarCoupling ?? null) === 'dc-coupled-storage';
   const _tbInverting = (_tbTopo?.storage ?? []).filter(u => u.role === 'inverter-unit');
-  const sysRows: [string,string][] = [
-    ['TOPOLOGY', _tbDc ? 'PV DC COUPLED TO POWERWALL 3' : input.topologyType.replace(/_/g,' ')],
-    ['DC SIZE',`${dcKw.toFixed(2)} kW`],
-    // 🚨 THE AC OUTPUT OF A DC-COUPLED SYSTEM IS ITS STORAGE'S, NOT A PV INVERTER'S.
+  const _tbGateways = (_tbTopo?.domains ?? []).map(d => d.gateway);
+  const sysRows: [string,string][] = _tbDc ? [
+    // ══════════════════════════════════════════════════════════════════
+    // 🚨 PHYSICALLY PRECISE — PV PRODUCTION IS NOT ESS DISCHARGE, AND A BATTERY IS NOT THE PV INVERTER.
     //
-    // The title block already deferred to the coupling for TOPOLOGY and MODEL two lines above, and
-    // then printed `input.acOutputKw` — the auto-selected string inverter's 11.40 kW — right beneath
-    // them. Same block, same sheet, two architectures.
-    ['AC OUTPUT', (() => {
-      if (!_tbDc) return `${Number(input.acOutputKw).toFixed(2)} kW`;
-      const inv = (_tbTopo?.storage ?? []).filter(u => u.role === 'inverter-unit');
-      if (inv.length === 0 || inv.some(u => u.continuousOutputA == null)) return 'NOT EVALUATED';
-      const a = inv.reduce((n, u) => n + (u.continuousOutputA as number), 0);
-      return `${((a * 240) / 1000).toFixed(2)} kW`;
-    })()],
+    // Ray: "Do not write INVERTER: 4 × Powerwall 3 as the primary human summary… Do not confuse PV
+    // production capacity with ESS discharge capacity." This block said INVERTERS 4 × Tesla
+    // Powerwall 3 and AC OUTPUT 46.08 kW — the batteries' output in the slot a reviewer reads as the
+    // PV system's. Each fact now has its own row, named for what it is, and the storage is named from
+    // the graph rather than a hard-coded "POWERWALL 3".
+    // ══════════════════════════════════════════════════════════════════
+    ['TOPOLOGY', `PV DC COUPLED TO ${dcStorageNameSld(_tbTopo)}`],
+    ['DC SIZE',`${dcKw.toFixed(2)} kW`],
     ['MODULES',`${input.totalModules} × ${input.panelWatts}W`],
-    // On a DC-coupled design the inverter IS the battery, so the two rows name it rather than an
-    // AC-coupled product the job does not contain.
-    ...(_tbDc
-      ? ([['INVERTERS', `${_tbInverting.length} × ${_tbInverting[0]?.label ?? 'ESS'}`],
-          ['MODEL', 'INTEGRATED — SEE EQUIPMENT SCHEDULE']] as [string, string][])
-      : ([['INVERTER',esc(input.inverterManufacturer)],
-          ['MODEL',esc(input.inverterModel)]] as [string, string][])),
+    ['PV INVERTER', 'NONE — DC COUPLED TO STORAGE'],
+    ['STORAGE', `${_tbInverting.length} × ${_tbInverting[0]?.label ?? 'ESS'}`],
+    ['ESS AC OUT', essAcOutputLabelSld(_tbTopo)],
+    ...(_tbGateways.length > 0
+      ? [['BACKUP CTRL', `${_tbGateways.length} × ${_tbGateways[0].label}`] as [string, string]] : []),
     ['SERVICE', _tbTopo ? serviceRatingLabelSld(_tbTopo) : `${input.mainPanelAmps}A`],
     ['UTILITY',esc(input.utilityName)],
-    ['INTERCONN.',esc(input.interconnection)],
+    ['INTERCONN.', interconnectionLabelSld(input.interconnection)],
+  ] : [
+    ['TOPOLOGY', input.topologyType.replace(/_/g,' ')],
+    ['DC SIZE',`${dcKw.toFixed(2)} kW`],
+    ['AC OUTPUT', `${Number(input.acOutputKw).toFixed(2)} kW`],
+    ['MODULES',`${input.totalModules} × ${input.panelWatts}W`],
+    ['INVERTER',esc(input.inverterManufacturer)],
+    ['MODEL',esc(input.inverterModel)],
+    ['SERVICE', _tbTopo ? serviceRatingLabelSld(_tbTopo) : `${input.mainPanelAmps}A`],
+    ['UTILITY',esc(input.utilityName)],
+    ['INTERCONN.', interconnectionLabelSld(input.interconnection)],
   ];
   let sysY2 = sysY+12;
   const sysRH = 16;

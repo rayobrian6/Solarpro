@@ -837,15 +837,35 @@ describe('the SLD shows the system Ray intends to install', () => {
   it('🚨 a DC-coupled design draws NO microinverter, combiner, inverter or PV AC disconnect', () => {
     // Ray, from the live browser: "SLD still draws Enphase equipment" under a Tesla topology.
     const svg = sheet(buildRaysIntendedJob().topology);
-    expect(svg).toContain('PV DC COUPLED TO POWERWALL 3');
+    // The storage is NAMED FROM THE GRAPH — the literal "POWERWALL 3" for every DC-coupled product is gone.
+    expect(svg).toContain('PV DC COUPLED TO TESLA POWERWALL 3');
     expect(svg).not.toContain('AC COMBINER');
     expect(svg).not.toContain('IQ8PLUS');
     expect(svg).not.toContain('ENPHASE Q CABLE');
     expect(svg).not.toContain('AC DISCONNECT');
     expect(svg).not.toContain('MICROINVERTER');
-    // The strings land where they actually land.
-    expect(svg).toContain('TO POWERWALL 3 PV INPUTS — DC COUPLED');
-    expect((svg.match(/PV DC INPUT — 6 MPPT/g) ?? []).length).toBe(4);
+    // The strings go to the batteries' PV inputs — and WHICH battery is not decided on this graph,
+    // so the sheet says so instead of fanning a DC bus out to all four (System Config gauntlet: "Do
+    // not imply a DC bus arrangement that does not match actual string/MPPT assignments").
+    expect(svg).toContain('TO TESLA POWERWALL 3 PV INPUTS — DC COUPLED');
+    expect(svg).toContain('STRING LANDING TO BE ASSIGNED');
+    expect((svg.match(/LANDING TO BE ASSIGNED/g) ?? []).length).toBe(5);   // the tag + each of 4 units
+  });
+
+  it('🚨 once the landing is recorded, each unit states its own share and only those units are fed', () => {
+    const t = buildRaysIntendedJob().topology;
+    const units = t.storage.filter(u => u.role === 'inverter-unit');
+    const landed = {
+      ...t,
+      storage: t.storage.map(u => u.id === units[0].id ? { ...u, pvDcStcKw: 15.4 }
+        : u.id === units[1].id ? { ...u, pvDcStcKw: 0.88 }
+          : u.role === 'inverter-unit' ? { ...u, pvDcStcKw: 0 } : u),
+    };
+    const svg = sheet(landed);
+    expect(svg).toContain('PV DC IN — 15.40 kW STC');
+    expect(svg).toContain('PV DC IN — 0.88 kW STC');
+    expect((svg.match(/NO PV ON THIS UNIT/g) ?? []).length).toBe(2);
+    expect(svg).not.toContain('LANDING TO BE ASSIGNED');
   });
 
   it('the SAME project with AC-coupled PV keeps the whole AC chain', () => {
@@ -854,7 +874,7 @@ describe('the SLD shows the system Ray intends to install', () => {
     const { topology } = buildRaysIntendedJob({ solarCoupling: 'ac-coupled-inverter' });
     const svg = sheet(topology);
     expect(svg).toContain('AC COMBINER');
-    expect(svg).not.toContain('TO POWERWALL 3 PV INPUTS — DC COUPLED');
+    expect(svg).not.toContain('TO TESLA POWERWALL 3 PV INPUTS — DC COUPLED');
   });
 
   it('🚨 the sheet asks in WORDS, once, and says which item is optional', () => {

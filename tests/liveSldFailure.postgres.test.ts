@@ -499,7 +499,8 @@ describe('🚨 the PDF export route, on the same legacy project', () => {
 
   it('the exported sheet is DC coupled, with no invented inverter', async () => {
     const svg = await exportPdfAsSvg();
-    expect(svg).toContain('PV DC COUPLED TO POWERWALL 3');
+    // The storage is NAMED FROM THE GRAPH — the literal "POWERWALL 3" for every DC-coupled product is gone.
+    expect(svg).toContain('PV DC COUPLED TO TESLA POWERWALL 3');
     for (const forbidden of ['Tesla Solar Inverter', 'STRING INVERTER', 'Enphase', 'MICROINVERTER']) {
       expect(svg.includes(forbidden), `the exported PDF names '${forbidden}'`).toBe(false);
     }
