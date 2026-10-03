@@ -95,6 +95,8 @@ test.describe('System Config interview — real browser, real routes, real Postg
     await expect(page.getByTestId('summary-fact-pv-strings')).toHaveText('5 (9 / 9 / 9 / 8 / 2)');
     // No PV inverter ⇒ no PV AC rating anywhere on the page (the header used to say "7.60 kW AC").
     await expect(page.locator('text=/\\d+\\.\\d\\d kW AC/'), 'a PV AC rating is shown on a design with no PV inverter').toHaveCount(0);
+    // …and no "Recommended" inverter fleet to switch to (the sizing engine's Enphase proposal).
+    await expect(page.getByRole('button', { name: 'Recommended', exact: true })).toHaveCount(0);
 
     // The drawing the page itself requests.
     const sld = page.waitForResponse(r => r.url().includes('/api/engineering/sld') && r.request().method() === 'POST',

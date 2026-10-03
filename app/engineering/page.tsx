@@ -4587,11 +4587,11 @@ function EngineeringPageInner() {
       recommendedStrings: sizingRecommendation && sizingRecommendation.topology !== 'micro'
         ? sizingRecommendation.strings.length
         : 0,
-      displayedStrings: displayMode === 'recommended' && sizingRecommendation && sizingRecommendation.topology !== 'micro'
+      displayedStrings: displayMode === 'recommended' && !pvOnStorageDc && sizingRecommendation && sizingRecommendation.topology !== 'micro'
         ? sizingRecommendation.strings.length
         : config.inverters.reduce((s, inv) => s + inv.strings.length, 0),
     };
-  }, [config, compliance, engineeringMode, displayedEcosystemComponents, sizingRecommendation, displayMode]);
+  }, [config, compliance, engineeringMode, displayedEcosystemComponents, sizingRecommendation, displayMode, pvOnStorageDc]);
 
   // Snapshot of current config for diffing.
     // v58.0 — Canonical AC output kW.
@@ -4669,7 +4669,9 @@ function EngineeringPageInner() {
   } : currentDisplayConfig;
 
   // THE single selector — every component reads from here
-  const displayConfig = displayMode === 'recommended' && sizingRecommendation
+  // On a DC-coupled job the sizing engine's "recommendation" is a PV inverter fleet for a brand the
+  // project never chose — there is nothing to recommend instead of the storage's own PV inputs.
+  const displayConfig = displayMode === 'recommended' && !pvOnStorageDc && sizingRecommendation
     ? recommendedDisplayConfig
     : currentDisplayConfig;
 
@@ -10717,8 +10719,8 @@ function EngineeringPageInner() {
         </div>
       ) : null}
 
-      {/* ── v61.2 Display Mode Toggle ── */}
-      {sizingRecommendation && !sizingDismissed ? (
+      {/* ── v61.2 Display Mode Toggle ── (absent on a DC-coupled job: no PV inverter fleet to recommend) */}
+      {sizingRecommendation && !sizingDismissed && !pvOnStorageDc ? (
         <div className="bg-slate-900/50 border-b border-slate-700/40 px-6 py-2 flex-shrink-0 flex items-center gap-2 flex-wrap">
           <span className="text-xs text-slate-500 mr-1 font-medium select-none">Viewing:</span>
           <button

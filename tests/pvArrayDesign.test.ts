@@ -197,6 +197,12 @@ describe('the page reads the array from Design, not from its fleet (source guard
     expect(legacyUses).toHaveLength(5);   // the definition + totalAcKw and dcAcRatio in each of the two permit payloads
   });
 
+  it('a DC-coupled job shows no "Recommended" inverter fleet — no toggle, no recommended display config', () => {
+    expect(page).toMatch(/\{sizingRecommendation && !sizingDismissed && !pvOnStorageDc \? \(/);
+    expect(page).toMatch(/const displayConfig = displayMode === 'recommended' && !pvOnStorageDc && sizingRecommendation/);
+    expect(page).toMatch(/displayedStrings: displayMode === 'recommended' && !pvOnStorageDc && sizingRecommendation/);
+  });
+
   it('the PDF export no longer names SolarEdge / SE7600H / IQ8+ for an absent inverter', () => {
     const at = page.indexOf("fetch('/api/engineering/sld/pdf'");
     const body = page.slice(at, at + 9000);
