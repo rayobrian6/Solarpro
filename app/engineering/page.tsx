@@ -9605,10 +9605,13 @@ function EngineeringPageInner() {
     const q = aiQuery.trim();
     setAiQuery('');
     // Build context-aware response from system state
-    const topo = config.inverters[0]?.type === 'micro' ? 'Microinverter' : config.inverters[0]?.type === 'optimizer' ? 'String + Optimizer' : 'String Inverter';
-    const firstInv = getInvById(config.inverters[0]?.inverterId || '', config.inverters[0]?.type || 'string') as any;
-    const firstPanel = getPanelById(config.inverters[0]?.strings[0]?.panelId || '') as any;
-    const context = `System: ${totalKw} kW DC / ${totalInverterKw} kW AC, ${totalPanels} panels, ${topo} topology. Inverter: ${firstInv?.manufacturer} ${firstInv?.model}. Panel: ${firstPanel?.manufacturer} ${firstPanel?.model} ${firstPanel?.watts}W. Compliance: ${compliance.overallStatus || 'not run'}. Address: ${config.address || 'not set'}.`;
+    // 🚨 THE ENGINEERED PROJECT, NOT THE FIRST FLEET ENTRY. This used to describe the system from
+    // `config.inverters[0]` — "String Inverter topology. Inverter: undefined undefined" on a DC-coupled
+    // job — i.e. an explanation inferred from stale config. It now states the same facts the
+    // Engineering Summary shows, each read from its owner.
+    const topo = topologyLabel;
+    const context = `System: ${systemConfigInterview.summaryFacts.map(f => `${f.label}: ${f.value}`).join('; ')}. `
+      + `Architecture: ${topo}. Compliance: ${compliance.overallStatus || 'not run'}. Address: ${config.address || 'not set'}.`;
     // Simulate intelligent response based on query keywords
     await new Promise(r => setTimeout(r, 600));
     let response = '';
@@ -10757,11 +10760,15 @@ function EngineeringPageInner() {
             const _dcAcRatio  = _acKwNum > 0 ? calcDcAcRatio(_totalKwNum, _acKwNum).toFixed(2) : '—';
             // v61.2 — Single Source of Truth: string/branch count from displayConfig only.
             // NEVER mix recommendation strings in one place and current config in another.
+            // 🚨 A RETIRED FLEET HAS NO STRINGS, BUT THE ARRAY DOES. On a DC-coupled job the engineered
+            // strings are the engine's (sized against the storage's PV inputs), not the empty fleet's.
             const _branchCount = cs.isMicro
               ? cs.acBranchCount
               : displayConfig.totalStrings > 0
                 ? displayConfig.totalStrings
-                : config.inverters.reduce((s, i) => s + i.strings.length, 0);
+                : (cs.strings?.length ?? config.inverters.reduce((s, i) => s + i.strings.length, 0));
+            // No standalone PV inverter ⇒ there is no PV AC rating and no DC/AC ratio to state.
+            const _noPvInverter = electrical?.solarCoupling === 'dc-coupled-storage';
             const _genData    = config.generatorId ? getGeneratorById(config.generatorId) : null;
             const _atsData    = config.atsId ? getATSById(config.atsId) : null;
             const _batData    = config.batteryId ? getBatteryById(config.batteryId) : null;
@@ -12878,8 +12885,8 @@ function EngineeringPageInner() {
                         {[
                           { label: 'Panels', value: totalPanels, color: 'text-amber-400', icon: <Sun size={11} /> },
                           { label: 'kW DC', value: totalKw, color: 'text-amber-400', icon: <Zap size={11} /> },
-                          { label: 'kW AC', value: _acKwNum > 0 ? _acKwNum.toFixed(2) : '—', color: 'text-blue-400', icon: <Cpu size={11} /> },
-                          { label: 'DC/AC', value: _dcAcRatio, color: parseFloat(_dcAcRatio) < 1.0 ? 'text-red-400' : parseFloat(_dcAcRatio) > DC_AC_TARGET.hardMax ? 'text-red-400' : parseFloat(_dcAcRatio) > DC_AC_TARGET.max ? 'text-amber-400' : parseFloat(_dcAcRatio) < DC_AC_TARGET.min ? 'text-amber-400' : 'text-emerald-400', icon: <Activity size={11} /> },
+                          { label: 'kW AC', value: _noPvInverter ? 'N/A' : (_acKwNum > 0 ? _acKwNum.toFixed(2) : '—'), color: 'text-blue-400', icon: <Cpu size={11} /> },
+                          { label: 'DC/AC', value: _noPvInverter ? 'N/A' : _dcAcRatio, color: parseFloat(_dcAcRatio) < 1.0 ? 'text-red-400' : parseFloat(_dcAcRatio) > DC_AC_TARGET.hardMax ? 'text-red-400' : parseFloat(_dcAcRatio) > DC_AC_TARGET.max ? 'text-amber-400' : parseFloat(_dcAcRatio) < DC_AC_TARGET.min ? 'text-amber-400' : 'text-emerald-400', icon: <Activity size={11} /> },
                           { label: cs.isMicro ? 'Branches' : 'Strings', value: _branchCount, color: 'text-purple-400', icon: <GitBranch size={11} /> },
                           { label: 'BOM Cost', value: bomPricing?.pricingApplied ? `$${(bomPricing.totalBomCost / 1000).toFixed(1)}k` : '—', color: 'text-emerald-400', icon: <Package size={11} /> },
                         ].map(item => (
@@ -12892,6 +12899,28 @@ function EngineeringPageInner() {
                           </div>
                         ))}
                       </div>
+
+                      {/* ── THE ENGINEERED PROJECT, STATED PRECISELY ───────────────────────
+                          Read from the interview's summary facts — each from its owner. On a DC-coupled
+                          job the PV inverter reads NONE and the batteries' AC output is its own line;
+                          PV production capacity is never shown as ESS discharge capacity. */}
+                      <dl data-testid="engineering-summary-facts"
+                          className="mb-3 rounded-xl bg-slate-900/40 border border-slate-700/30 divide-y divide-slate-700/30">
+                        {systemConfigInterview.summaryFacts.map(f => (
+                          <div key={f.label} className="flex items-baseline justify-between gap-2 px-3 py-1.5">
+                            <dt className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{f.label}</dt>
+                            <dd className="text-right">
+                              <span className="text-[11px] font-bold text-slate-100" data-testid={`summary-fact-${f.label.toLowerCase().replace(/[^a-z]+/g, '-')}`}>{f.value}</span>
+                              <span className="ml-1.5 text-[9px] text-slate-500">{f.source}</span>
+                            </dd>
+                          </div>
+                        ))}
+                      </dl>
+                      {_noPvInverter ? (
+                        <div className="mb-3 text-[10px] text-slate-500">
+                          kW AC and DC/AC are not applicable: no standalone PV inverter exists on this design.
+                        </div>
+                      ) : null}
 
                       {/* System health rows */}
                       <div className="rounded-xl bg-slate-900/40 border border-slate-700/30 divide-y divide-slate-700/30">

@@ -111,7 +111,19 @@ export interface ReleaseState {
   blockers: string[];
 }
 
+/** One line of the engineered project's summary — each read from its owner, never recomputed here. */
+export interface SummaryFact {
+  label: string;
+  value: string;
+  source: FactSource;
+}
+
 export interface SystemConfigInterview {
+  /**
+   * The engineered project in installer language — the Engineering Summary card reads THESE, so it
+   * cannot say "0 panels · 0.00 kW" over a 37-module design or call four Powerwalls an inverter.
+   */
+  summaryFacts: SummaryFact[];
   sections: InterviewSection[];
   /** Every relevant, unanswered question, in the order an installer should answer them. */
   openQuestions: InterviewItem[];
@@ -679,7 +691,61 @@ export function buildSystemConfigInterview(input: InterviewInput): SystemConfigI
   if (requiredUnknown.length > 0) {
     blockers.push(`${requiredUnknown.length} required check${requiredUnknown.length === 1 ? '' : 's'} not evaluated.`);
   }
+  // ── The engineered project, stated precisely ─────────────────────────────
+  // 🚨 PV PRODUCTION CAPACITY IS NOT ESS DISCHARGE CAPACITY. "INVERTER: 4 × Powerwall 3" is the
+  // summary Ray rejected: the PV inverter on a DC-coupled job is NONE, and the batteries' AC output is
+  // a separate fact with its own number.
+  const facts: SummaryFact[] = [];
+  facts.push({ label: 'PV modules', value: pvArray.moduleCount === null ? 'Not established' : String(pvArray.moduleCount),
+    source: pvArray.moduleCount === null ? 'Not established' : 'From Design' });
+  facts.push({ label: 'PV DC size', value: pvArray.dcStcKw === null ? 'Not established' : `${pvArray.dcStcKw.toFixed(2)} kW`,
+    source: pvArray.dcStcKw === null ? 'Not established' : 'From Design' });
+  facts.push({
+    label: 'PV architecture',
+    value: input.coupling === 'dc-coupled-storage' ? `DC coupled to ${storageLabel}`
+      : input.coupling === 'ac-coupled-inverter' ? 'PV on its own AC inverter'
+        : input.coupling === 'storage-only' ? 'No PV — storage only'
+          : eq.pvInverter.state === 'SELECTED' ? 'PV on its own AC inverter' : 'Not decided',
+    source: input.couplingIsDecision ? 'Installer decision'
+      : input.coupling || eq.pvInverter.state === 'SELECTED' ? 'Selected equipment' : 'Not established',
+  });
+  facts.push({ label: 'PV inverter', value: equipment[0].answer ?? 'Not chosen',
+    source: equipment[0].source ?? 'Not established' });
+  if (input.derivedStrings && input.derivedStrings.length > 0 && hasPv) {
+    const counts = input.derivedStrings.map(x => x.panelCount);
+    facts.push({ label: 'PV strings', value: `${counts.length} (${counts.join(' / ')})`, source: 'SolarPro calculation' });
+  }
+  facts.push({ label: 'Storage', value: hasStorage ? `${eq.storage!.count} × ${eq.storage!.label ?? 'battery'}` : 'None',
+    source: 'Selected equipment' });
+  const essA = input.evaluation?.storageSummary.totalContinuousOutputA ?? null;
+  if (hasStorage) {
+    // A × V is the single-phase relationship; on any other electrical system it is not computed here.
+    const v = t?.service.phase === 'split-240' ? 240 : null;
+    facts.push({
+      label: 'ESS max continuous AC output',
+      value: essA !== null && v !== null ? `${(essA * v / 1000).toFixed(2)} kW (${essA} A)`
+        : essA !== null ? `${essA} A` : 'Not evaluated',
+      source: essA !== null ? 'Manufacturer specification' : 'Not established',
+    });
+  }
+  if (eq.gateway && eq.gateway.count > 0) {
+    facts.push({ label: 'Backup controllers', value: `${eq.gateway.count} × ${eq.gateway.label ?? 'gateway'}`,
+      source: 'Selected equipment' });
+  }
+  facts.push({ label: 'Service', value: rated !== null ? `${rated} A` : 'Not entered',
+    source: rated !== null ? 'Installer entered' : 'Not established' });
+  if (t && t.panels.length > 0) {
+    const sizes = [...new Set(t.panels.map(p => p.busbarRatingA))];
+    facts.push({
+      label: 'Distribution',
+      value: sizes.length === 1 ? `${t.panels.length} × ${sizes[0] ?? '—'} A main panel${t.panels.length === 1 ? '' : 's'}`
+        : t.panels.map(p => `${p.label} ${p.busbarRatingA ?? '—'} A`).join(' · '),
+      source: 'Installer entered',
+    });
+  }
+
   return {
+    summaryFacts: facts,
     sections,
     openQuestions,
     release: { drawable, releaseReady: drawable && blockers.length === 0, blockers },

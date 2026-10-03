@@ -154,10 +154,10 @@ describe('🚨 the 200 A house, answered in System Config, reaches the drawing',
   it('"a breaker in the panel" → persisted → the canonical model and the SLD read LOAD SIDE from the store', async () => {
     const { answerServiceRating, answerInterconnection } = await import('@/lib/electrical/systemConfigAnswers');
     const svc = answerServiceRating(null, 200);
-    if (!svc.ok) throw new Error(svc.refused);
+    if (svc.ok === false) throw new Error(svc.refused);
     await persist(svc.topology);
     const ic = answerInterconnection(await reload(), 'load-side-busbar');
-    if (!ic.ok) throw new Error(ic.refused);
+    if (ic.ok === false) throw new Error(ic.refused);
     await persist(ic.topology);
 
     const { loadElectricalProject, interconnectionMethodScalar } = await import('@/lib/electrical/loadElectricalProject');
@@ -176,7 +176,7 @@ describe('🚨 the 200 A house, answered in System Config, reaches the drawing',
   it('control: before the interconnection is answered, the sheet does NOT claim a load-side tap', async () => {
     const { answerServiceRating } = await import('@/lib/electrical/systemConfigAnswers');
     const svc = answerServiceRating(null, 200);
-    if (!svc.ok) throw new Error(svc.refused);
+    if (svc.ok === false) throw new Error(svc.refused);
     await persist(svc.topology);
     const s = await sheet();
     expect(s.status).toBe(200);
@@ -188,14 +188,14 @@ describe('🚨 400 A split into two 200 A main panels survives the round trip as
   it('service 400 → distribution two-main-panels → persisted → reloaded: 400 A service, two 200 A busbars', async () => {
     const { answerServiceRating, answerDistribution, answerPanel } = await import('@/lib/electrical/systemConfigAnswers');
     const svc = answerServiceRating(null, 400);
-    if (!svc.ok) throw new Error(svc.refused);
+    if (svc.ok === false) throw new Error(svc.refused);
     await persist(svc.topology);
     const two = answerDistribution(await reload(), 'two-main-panels');
-    if (!two.ok) throw new Error(two.refused);
+    if (two.ok === false) throw new Error(two.refused);
     await persist(two.topology);
     let back = await reload();
     const named = answerPanel(back, back.panels[0].id, { manufacturer: 'Eaton' });
-    if (!named.ok) throw new Error(named.refused);
+    if (named.ok === false) throw new Error(named.refused);
     await persist(named.topology);
     back = await reload();
     expect(back.service.ratedAmps).toBe(400);

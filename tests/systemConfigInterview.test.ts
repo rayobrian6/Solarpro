@@ -254,3 +254,42 @@ describe('honesty', () => {
     expect(answerInterconnection(t, 'meter-collar').ok).toBe(false);
   });
 });
+
+describe('the Engineering Summary states the engineered project precisely (Ray\'s job)', () => {
+  const rays = { ...buildRaysIntendedJob().topology, solarCoupling: 'dc-coupled-storage' as const };
+  const iv = buildSystemConfigInterview(base({
+    pvArray: pv37, topology: rays, coupling: 'dc-coupled-storage', couplingIsDecision: true,
+    equipment: { ...PW3_NO_INVERTER, pvInverter: { state: 'NONE' } },
+    evaluation: evaluateServiceTopology(rays),
+    derivedStrings: [9, 9, 9, 8, 2].map(panelCount => ({ panelCount })),
+  }));
+  const fact = (label: string) => iv.summaryFacts.find(f => f.label === label);
+
+  it('PV is the Design array; the PV inverter is NONE; storage and its AC output are separate lines', () => {
+    expect(fact('PV modules')?.value).toBe('37');
+    expect(fact('PV modules')?.source).toBe('From Design');
+    expect(fact('PV DC size')?.value).toBe('16.28 kW');
+    expect(fact('PV architecture')?.value).toBe('DC coupled to Tesla Powerwall 3');
+    expect(fact('PV inverter')?.value).toBe('None — DC coupled to storage');
+    expect(fact('PV strings')?.value).toBe('5 (9 / 9 / 9 / 8 / 2)');
+    expect(fact('Storage')?.value).toBe('4 × Tesla Powerwall 3');
+    expect(fact('ESS max continuous AC output')?.value).toMatch(/^46\.08 kW \(192 A\)$/);
+    expect(fact('Backup controllers')?.value).toBe('2 × Tesla Gateway 3');
+    expect(fact('Service')?.value).toBe('400 A');
+    expect(fact('Distribution')?.value).toBe('2 × 200 A main panels');
+  });
+
+  it('the batteries are never named as the PV inverter, and PV size is never the ESS output', () => {
+    expect(fact('PV inverter')?.value).not.toMatch(/Powerwall/);
+    expect(fact('PV DC size')?.value).not.toBe(fact('ESS max continuous AC output')?.value);
+  });
+
+  it('on a system SolarPro has no single-phase relationship for, the ESS kW is not computed', () => {
+    const t3 = { ...rays, service: { ...rays.service, phase: 'wye-208' as const, voltage: 208 } };
+    const iv3 = buildSystemConfigInterview(base({
+      pvArray: pv37, topology: t3, coupling: 'dc-coupled-storage', couplingIsDecision: true,
+      equipment: { ...PW3_NO_INVERTER, pvInverter: { state: 'NONE' } }, evaluation: evaluateServiceTopology(t3),
+    }));
+    expect(iv3.summaryFacts.find(f => f.label === 'ESS max continuous AC output')?.value).toBe('192 A');
+  });
+});
