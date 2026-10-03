@@ -32,7 +32,7 @@ const A = (v: number | null) => (v === null ? 'not summed' : `${v.toFixed(1)} A`
 export function LoadAnalysisEditor({ item, topology: t, apply, busy }: {
   item: InterviewItem;
   topology: ServiceTopology | null;
-  apply: (r: AnswerResult) => Promise<void>;
+  apply: (r: AnswerResult) => Promise<unknown>;
   busy: boolean;
 }) {
   const [method, setMethod] = useState('');
