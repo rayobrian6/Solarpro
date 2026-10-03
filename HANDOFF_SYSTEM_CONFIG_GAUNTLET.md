@@ -11,7 +11,8 @@ then this session's commits). Base for every claim below is `dev` @ `4375ba3`.
 > Ray is looking at, before trusting any "LIVE" claim in either direction.
 
 ## Standing Rules (the ones this work touched)
-- Never push to `master`. This branch is pushed for review only; nothing was deployed.
+- Never push to `master`. Pushed to `dev` on Ray's explicit instruction (R8: `dev` is the integration
+  branch Ray reviews; `dev` → `master` stays JAMES's promotion).
 - R2 three-check suite before every commit/push: `tsc` 0 errors · `eslint` 0 errors on changed files ·
   `vitest` — full deterministic run compared test-by-test against a clean `dev` baseline.
 - R5: no geometry artifact touched. R3 terminology kept ("website", "app").
@@ -102,7 +103,9 @@ then this session's commits). Base for every claim below is `dev` @ `4375ba3`.
 | System Config strings 20 / 17 vs the sheet's 9 / 9 / 9 / 8 / 2 | Ray's job | `c0a0273` (page derives against the storage window) |
 
 ## Current State
-- Branch `claude/quirky-pasteur-iqi5aq`, pushed for review (never `master`, nothing deployed). No PR opened.
+- On `dev` (fast-forwarded from `4375ba3` on Ray's instruction, "You didn't push to dev"), and on
+  `claude/quirky-pasteur-iqi5aq`. `dev` auto-deploys to Vercel `solarpro-dev`. That deployment could not
+  be read from this container, so nothing here is marked DEV-verified or LIVE ACCEPTED. Never `master`. No PR opened.
 - Full vitest at `d52b525` (clean snapshot, `--no-file-parallelism`): **20 failed / 16782 passed**. 19 are,
   test for test, the clean `dev` @ `4375ba3` baseline's (dev: 19 failed / 16411 passed). The 20th,
   `adminHealthShowsOnlyMeasuredStatus` "no invented latency reaches the screen", is intermittent on
