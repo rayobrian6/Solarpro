@@ -192,6 +192,28 @@ describe('🚨 a disconnecting means, added, placed and specified in System Conf
     expect(item(ID)?.answer).toContain('part DU224RB · rated 200 A · 22000 A SCCR');
   });
 
+  it('🚨 the utility isolation switch seeded at 200 A: naming its part → reload → no rating, in-line rating NOT EVALUATED', async () => {
+    const { answerServiceRating, answerInterconnection, answerIsolationRequired } = await import('@/lib/electrical/systemConfigAnswers');
+    const { answerDisconnectPart, disconnectItemId } = await import('@/lib/electrical/systemConfigUtilityDisconnects');
+    await persist(answerServiceRating(null, 200));
+    await persist(answerInterconnection(await reload(), 'load-side-busbar'));
+    await persist(answerIsolationRequired(await reload(), true));
+    let back = await reload();
+    const sw = back.devices.find(d => d.roles.includes('der-isolation-disconnect'))!;
+    expect(sw.ratedAmps, 'precondition: the isolation arrangement seeds the path rating').toBe(200);
+    expect((await check(back, 'device.inline-rating')).find(c => c.scope === `device:${sw.id}`)?.conclusion).toBe('PASS');
+
+    await persist(answerDisconnectPart(back, sw.id, { productId: 'DU30', sccrA: 10000 }));
+    back = await reload();
+    expect(back.devices.find(d => d.id === sw.id)).toMatchObject({ productId: 'DU30', ratedAmps: null, sccrA: 10000 });
+    const inline = (await check(back, 'device.inline-rating')).find(c => c.scope === `device:${sw.id}`);
+    expect(inline?.conclusion, 'the in-line rating passed against the seeded copy of the path rating').toBe('NOT_EVALUATED');
+    expect(inline?.requires).toEqual(['device.ratedAmps']);
+    const { item } = await interviewOf(back);
+    expect(item(disconnectItemId('der-isolation-disconnect'))?.answer).toContain('part DU30 · part rating not stated');
+    expect(item(disconnectItemId('der-isolation-disconnect'))?.state).not.toBe('answered');
+  });
+
   it('removing it → reload → gone, and the bond location is NOT EVALUATED again', async () => {
     const { answerServiceRating } = await import('@/lib/electrical/systemConfigAnswers');
     const { answerAddDisconnect, answerRemoveDisconnect } = await import('@/lib/electrical/systemConfigUtilityDisconnects');

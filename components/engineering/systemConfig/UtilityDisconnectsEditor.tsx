@@ -54,6 +54,9 @@ export function UtilityDisconnectsEditor({ item, topology: t, apply, busy }: Uti
       <div className="text-[10px] text-slate-500">{spec.where} {spec.purpose}</div>
       {devices.map(d => {
         const f = describeDisconnect(t, d);
+        // 🚨 With no part chosen, a number on the device (a seeded service or path rating) was read off
+        // no part, and the boxes say so. Naming a part resets them (answerDisconnectPart).
+        const fromPart = !!d.productId;
         return (
           <div key={d.id} data-testid={`answer-disconnect-device-${d.id}`}
                className="rounded border border-slate-800 bg-slate-950/40 p-1.5">
@@ -87,13 +90,13 @@ export function UtilityDisconnectsEditor({ item, topology: t, apply, busy }: Uti
                        onBlur={e => { if ((e.target.value.trim() || null) !== (d.productId ?? null)) void apply(answerDisconnectPart(t, d.id, { productId: e.target.value })); }} />
               </label>
               <div className="grid grid-cols-2 gap-2">
-                <label className="text-[11px] text-slate-400">Part rating (A)
+                <label className="text-[11px] text-slate-400">{fromPart ? 'Part rating (A)' : 'Recorded rating (A) — not from a part'}
                   <input key={`r-${d.ratedAmps ?? ''}`} type="number" min={0} data-testid={`answer-disconnect-rating-${d.id}`}
                          className={`mt-0.5 block w-full ${box}`} disabled={busy} placeholder="not stated"
                          defaultValue={d.ratedAmps ?? ''}
                          onBlur={e => { const v = amps(e.target.value); if (v !== d.ratedAmps) void apply(answerDisconnectPart(t, d.id, { ratedAmps: v })); }} />
                 </label>
-                <label className="text-[11px] text-slate-400">SCCR (A)
+                <label className="text-[11px] text-slate-400">{fromPart ? 'SCCR (A)' : 'Recorded SCCR (A) — not from a part'}
                   <input key={`s-${d.sccrA ?? ''}`} type="number" min={0} data-testid={`answer-disconnect-sccr-${d.id}`}
                          className={`mt-0.5 block w-full ${box}`} disabled={busy} placeholder="not established"
                          defaultValue={d.sccrA ?? ''}

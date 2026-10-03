@@ -19,7 +19,7 @@
 import React, { useMemo } from 'react';
 import { StatusBadge } from './StatusBadge';
 import {
-  evaluateServiceTopology, summariseStorage, resolveDemands,
+  evaluateServiceTopology, summariseStorage, resolveDemands, isSiteLevelCheck,
   type ServiceTopology, type TopologyCheck,
 } from '@/lib/electrical/serviceTopology';
 import { equipmentQuantities } from '@/lib/electrical/topologyEquipment';
@@ -90,7 +90,8 @@ export function ServiceTopologyPanel({ topology, onChange }: ServiceTopologyPane
     );
   }
 
-  const siteChecks = evaluation.checks.filter(c => c.scope === 'site');
+  // A device's own checks (scope `device:<id>`) list with the site's.
+  const siteChecks = evaluation.checks.filter(isSiteLevelCheck);
   const edit = (mutate: (t: ServiceTopology) => void) => {
     if (!onChange) return;
     const next: ServiceTopology = JSON.parse(JSON.stringify(topology));

@@ -605,7 +605,9 @@ export function buildSystemConfigInterview(input: InterviewInput): SystemConfigI
       state: resolved ? collarRuling ?? 'answered' : 'needs-answer',
       answer: collar ? POI_ANSWER['meter-collar'] + collarNote
         : resolved ? rels.map(r => POI_ANSWER[r]).join(' · ') + collarNote : undefined,
-      source: collarRuling ? 'Utility / AHJ ruling required' : resolved ? 'Installer entered' : 'Not established',
+      // A recorded prohibition IS a ruling: only a ruling still owed reads "ruling required".
+      source: collarRuling === 'needs-verification' ? 'Utility / AHJ ruling required'
+        : resolved ? 'Installer entered' : 'Not established',
       options,
       value: collar ? 'meter-collar' : rels.length === 1 && rels[0] !== 'unresolved' ? rels[0] : null,
       why: 'The physical connection decides which part of the code applies. SolarPro never assumes a '

@@ -21,7 +21,7 @@
 
 import {
   evaluateServiceTopology, OPTIONAL_REQUIREMENT_TOKENS, solarCouplingLabel, serviceRatingLabel,
-  servicePhaseInfo, isServicePhase,
+  servicePhaseInfo, isServicePhase, isSiteLevelCheck,
   type ServiceTopology, type TopologyEvaluation, type TopologyCheck,
 } from '@/lib/electrical/serviceTopology';
 import { foldConclusions, type EngineeringConclusion } from '@/lib/engineering/engineeringStatus';
@@ -598,7 +598,7 @@ export function buildServiceOverview(
     suggestedBranchCount: canSuggest ? unallocated / firstBranch : 0,
   };
 
-  const siteChecks = evalResult.checks.filter(c => c.scope === 'site');
+  const siteChecks = evalResult.checks.filter(isSiteLevelCheck);
   const site: LevelStatus = {
     conclusion: evalResult.overall,
     headline: headlineFor(evalResult.checks, topology),
@@ -644,8 +644,8 @@ export function buildServiceOverview(
   const seen = new Set<string>();
   const requiredInputs: RequiredInput[] = [];
   const ordered = [
-    ...evalResult.checks.filter(c => c.scope === 'site'),
-    ...evalResult.checks.filter(c => c.scope !== 'site'),
+    ...evalResult.checks.filter(c => isSiteLevelCheck(c)),
+    ...evalResult.checks.filter(c => !isSiteLevelCheck(c)),
   ];
   for (const c of ordered) {
     if (c.conclusion !== 'NOT_EVALUATED') continue;

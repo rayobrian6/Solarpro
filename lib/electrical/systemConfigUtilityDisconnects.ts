@@ -37,7 +37,8 @@ import type { AnswerResult } from '@/lib/electrical/systemConfigAnswers';
 import type {
   ServiceTopology, ProtectiveDevice, DeviceRole, TopologyEvaluation,
 } from '@/lib/electrical/serviceTopology';
-import { inlineRequirementA, topologyNodeLabel } from '@/lib/electrical/serviceTopology';
+import { inlineRequirementA, topologyNodeLabel, deviceCheckScope } from '@/lib/electrical/serviceTopology';
+import { foldConclusions } from '@/lib/engineering/engineeringStatus';
 import {
   addProtectiveDevice, removeProtectiveDevice, placeDeviceInline, placeDevice,
   selectDeviceProduct, updateProtectiveDevice, setInterconnection, updatePointOfInterconnection,
@@ -108,9 +109,31 @@ export interface DisconnectFacts {
   sccr: string;
   /** In line ahead of a node whose rating nobody has established. */
   requirementOpen: boolean;
-  /** The engine's own in-line rating verdict for this device, when it reached one. */
+  /** The engine's own in-line rating verdict for THIS device (matched by id), when it reached one. */
   verdict: 'PASS' | 'FAIL' | 'NOT_EVALUATED' | null;
+  /** The engine failed this device's SCCR against the available fault current (`sccr.chain`, or
+   *  `interconnection.der-isolation` for a utility isolation switch). */
+  sccrBelowFaultCurrent: boolean;
   line: string;
+}
+
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * Did the engine FAIL this device's interrupting rating against the available fault current? Read
+ * from the engine's own FAILs, never recomputed: `sccr.chain` lists each device under the available
+ * fault current as "<label> (<SCCR> A)", and `interconnection.der-isolation` states
+ * "<label> SCCR <SCCR> A is below …" for an isolator. The device's SCCR is part of the match, and the
+ * FAIL condition is that SCCR against one site-wide fault current, so a namesake with the same SCCR
+ * fails for the same reason and one with a different SCCR is not matched.
+ */
+function sccrFailNamesDevice(d: ProtectiveDevice, evaluation?: TopologyEvaluation | null): boolean {
+  if (typeof d.sccrA !== 'number') return false;
+  const chain = new RegExp(`(^|, )${escapeRe(`${d.label} (${d.sccrA} A)`)}(, | below )`);
+  const iso = new RegExp(`(^|; )${escapeRe(`${d.label} SCCR ${d.sccrA} A is below`)}`);
+  return (evaluation?.checks ?? []).some(c => c.conclusion === 'FAIL' && (
+    (c.id === 'sccr.chain' && chain.test(c.detail))
+    || (c.id === 'interconnection.der-isolation' && d.roles.includes('der-isolation-disconnect') && iso.test(c.detail))));
 }
 
 /** Where a device sits, in words — the same targets the Service Topology inspector offers. */
@@ -132,19 +155,20 @@ export function describeDisconnect(
     : inline
       ? `rating not established — ${where} has no established rating`
       : 'rating not established';
-  const check = inline
-    ? (evaluation?.checks ?? []).find(c => c.id === 'device.inline-rating' && c.title === `${d.label} rating vs its path`)
-    : undefined;
-  const verdict = check
-    ? (check.conclusion === 'PASS' || check.conclusion === 'FAIL' ? check.conclusion : 'NOT_EVALUATED')
-    : null;
+  // 🚨 THIS device's verdict, matched by the device's own scope — never by a label another device
+  // may share. Should more than one ever match, the worst conclusion stands (a FAIL is never hidden).
+  const own = (evaluation?.checks ?? [])
+    .filter(c => c.id === 'device.inline-rating' && c.scope === deviceCheckScope(d.id));
+  const verdict = own.length > 0 ? foldConclusions(own) : null;
+  const sccrBelowFaultCurrent = sccrFailNamesDevice(d, evaluation);
   const part = d.productId ? `part ${d.productId}` : 'part not selected';
   // A number recorded with no part chosen (a seeded one, say) is the device's recorded rating — not
   // a part's nameplate and not a requirement — and reads as exactly that.
   const rating = typeof d.ratedAmps !== 'number' ? 'part rating not stated'
-    : d.productId ? `rated ${d.ratedAmps} A` : `recorded rating ${d.ratedAmps} A — no part chosen`;
+    : d.productId ? `rated ${d.ratedAmps} A` : `recorded rating ${d.ratedAmps} A — not from a part`;
   const sccrEstablished = typeof d.sccrA === 'number';
-  const sccr = sccrEstablished ? `${d.sccrA} A SCCR` : 'SCCR not established';
+  const sccr = !sccrEstablished ? 'SCCR not established'
+    : d.productId ? `${d.sccrA} A SCCR` : `recorded SCCR ${d.sccrA} A — not from a part`;
   const placement = placementWords(t, inline);
   return {
     deviceId: d.id,
@@ -160,8 +184,10 @@ export function describeDisconnect(
     sccr,
     requirementOpen: !!inline && requirementA === null,
     verdict,
+    sccrBelowFaultCurrent,
     line: `${d.label} — ${placement} · requirement: ${requirement} · ${part} · ${rating} · ${sccr}`
-      + (verdict === 'FAIL' ? ' · FAILS — the device is smaller than what it is in line with' : ''),
+      + (verdict === 'FAIL' ? ' · FAILS — the device is smaller than what it is in line with' : '')
+      + (sccrBelowFaultCurrent ? ' · FAILS — SCCR below the available fault current' : ''),
   };
 }
 
@@ -194,8 +220,9 @@ export function buildUtilityDisconnectsItems(input: InterviewInput): InterviewIt
         section: 'behavior',
         question: 'Does the utility / AHJ permit a meter-collar connection here?',
         state: permitted === null ? 'needs-verification' : 'answered',
+        // Nothing recorded ⇒ no answer stated (the card's summary must not read "Not established").
         answer: permitted === true ? 'Permitted — as recorded from the utility / AHJ'
-          : permitted === false ? 'Not permitted' : 'Not established',
+          : permitted === false ? 'Not permitted' : undefined,
         source: permitted === null ? 'Utility / AHJ ruling required' : 'Installer entered',
         options: METER_COLLAR_OPTIONS,
         value: permitted === true ? 'permitted' : permitted === false ? 'not-permitted' : 'unknown',
@@ -291,7 +318,7 @@ function disconnectRoleItem(
       return {
         ...base,
         state: 'needs-verification',
-        answer: 'None recorded — NOT EVALUATED',
+        answer: 'None recorded — NOT EVALUATED — MANUFACTURER INFORMATION REQUIRED',
         source: 'Manufacturer specification',
         why: 'Whether the storage needs its own disconnecting means beyond what its listing provides '
           + 'is a manufacturer-listing and AHJ question. SolarPro does not decide it, and does not '
@@ -308,7 +335,9 @@ function disconnectRoleItem(
   }
 
   const facts = devices.map(d => describeDisconnect(t, d, evaluation));
-  const fails = facts.some(f => f.verdict === 'FAIL');
+  const tooSmall = facts.some(f => f.verdict === 'FAIL');
+  const sccrLow = facts.some(f => f.sccrBelowFaultCurrent);
+  const fails = tooSmall || sccrLow;
   const noPart = facts.some(f => !f.partSelected);
   const gaps = facts.some(f => !f.sccrEstablished || f.requirementOpen
     || typeof devices.find(d => d.id === f.deviceId)?.ratedAmps !== 'number');
@@ -320,7 +349,11 @@ function disconnectRoleItem(
     answer: facts.map(f => f.line).join(' | '),
     source,
     why: fails
-      ? 'A device is smaller than what it is in line with. Choose a part rated for that path.'
+      ? [
+        tooSmall ? 'A device is smaller than what it is in line with. Choose a part rated for that path.' : '',
+        sccrLow ? 'A device’s SCCR is below the available fault current at the service. Choose a part whose '
+          + 'interrupting rating is at least that.' : '',
+      ].filter(Boolean).join(' ')
       : noPart
         ? 'A requirement is not a purchase: nothing is ordered or drawn as a specific device until the '
           + 'part is chosen.'
@@ -454,6 +487,11 @@ export function answerDisconnectPlacement(
 /**
  * The part chosen to meet the requirement, and what is read off it — its rating and its
  * interrupting rating. Blank is "not stated", never zero; a calculated requirement never fills these.
+ *
+ * 🚨 A NEW PART BRINGS ITS OWN NUMBERS. When the part changes (or is cleared), whatever rating and
+ * SCCR the device carried were not read off THIS part — a seeded service or path rating, or the
+ * previous part's — so each is reset to not stated unless the same answer states it. Otherwise the
+ * engine's in-line rating check would pass against a copy of the requirement.
  */
 export function answerDisconnectPart(
   t: ServiceTopology, deviceId: string,
@@ -467,10 +505,18 @@ export function answerDisconnectPart(
     }
   }
   let next = t;
-  if (patch.productId !== undefined) next = selectDeviceProduct(next, d.id, patch.productId?.trim() || null);
   const ratings: Partial<ProtectiveDevice> = {};
+  let partChanged = false;
+  if (patch.productId !== undefined) {
+    const productId = patch.productId?.trim() || null;
+    partChanged = productId !== (d.productId ?? null);
+    if (partChanged) { ratings.ratedAmps = null; ratings.sccrA = null; }
+    next = selectDeviceProduct(next, d.id, productId);
+  }
   if (patch.ratedAmps !== undefined) ratings.ratedAmps = patch.ratedAmps;
   if (patch.sccrA !== undefined) ratings.sccrA = patch.sccrA;
   if (Object.keys(ratings).length > 0) next = updateProtectiveDevice(next, d.id, ratings);
-  return done(next, `${d.label}: part recorded`);
+  const unstated = partChanged && (patch.ratedAmps === undefined || patch.sccrA === undefined);
+  return done(next, `${d.label}: part recorded${unstated
+    ? ' — read its rating and SCCR off the part; nothing the device carried before is kept' : ''}`);
 }

@@ -1005,6 +1005,19 @@ const unknown = (
 const num = (v: number | null | undefined): v is number => typeof v === 'number' && Number.isFinite(v);
 
 /**
+ * The scope of a check about ONE protective device. Matched by id, not by label: two devices may
+ * share a label, and one's verdict must never be read as the other's.
+ */
+export const deviceCheckScope = (deviceId: string): string => `device:${deviceId}`;
+/**
+ * A device sits on the site, not on a branch or a domain, so its checks list with the site's.
+ * Every surface that groups checks by scope groups through this, so a device-scoped check is shown
+ * exactly where a 'site' one is.
+ */
+export const isSiteLevelCheck = (c: { scope: string }): boolean =>
+  c.scope === 'site' || c.scope.startsWith('device:');
+
+/**
  * 🚨 THE TOKENS NOBODY IS OBLIGED TO SUPPLY — ONE LIST, READ BY EVERY SURFACE.
  *
  * Ray's product decision made "unresolved" two different things: a fact the design genuinely waits
@@ -1838,23 +1851,26 @@ export function evaluateServiceTopology(topology: ServiceTopology): TopologyEval
     //
     // A disconnect in a 200 A path has to carry the path. The requirement comes from the node the
     // device is in line on — which is precisely the thing `inlineOnNodeId` records.
+    // Scoped to the device itself, so a reader matches the verdict by id — never by a label two
+    // devices may share.
     if (dev.inlineOnNodeId) {
       const required = inlineRequirementA(topology, dev.inlineOnNodeId);
       const where = nodeName(topology, dev.inlineOnNodeId);
+      const scope = deviceCheckScope(dev.id);
       if (required === null) {
-        checks.push(unknown('device.inline-rating', 'site', `${dev.label} rating vs its path`,
+        checks.push(unknown('device.inline-rating', scope, `${dev.label} rating vs its path`,
           `${dev.label} is in line ahead of ${where}, whose continuous rating is not established, `
           + 'so the device has not been shown to carry the path it interrupts.',
           ['device.inlineOnNodeId']));
       } else if (!num(dev.ratedAmps)) {
-        checks.push(unknown('device.inline-rating', 'site', `${dev.label} rating vs its path`,
+        checks.push(unknown('device.inline-rating', scope, `${dev.label} rating vs its path`,
           `${dev.label} is in line ahead of ${where}, which needs at least ${required} A, and the `
           + 'device has no rating.', ['device.ratedAmps']));
       } else {
         checks.push(dev.ratedAmps >= required
-          ? pass('device.inline-rating', 'site', `${dev.label} rating vs its path`,
+          ? pass('device.inline-rating', scope, `${dev.label} rating vs its path`,
               `${dev.ratedAmps} A device in line ahead of ${where}, which carries ${required} A.`)
-          : fail('device.inline-rating', 'site', `${dev.label} rating vs its path`,
+          : fail('device.inline-rating', scope, `${dev.label} rating vs its path`,
               `${dev.ratedAmps} A device in line ahead of ${where}, which carries ${required} A.`));
       }
     }
