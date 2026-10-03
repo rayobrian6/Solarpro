@@ -127,6 +127,9 @@ import { EngineeringReadinessPanel } from '@/components/engineering/systemConfig
 import { GuidedStrip, revealHomeCard } from '@/components/engineering/systemConfig/GuidedStrip';
 import { ExistingElectricalServiceCard } from '@/components/engineering/systemConfig/cards/ExistingElectricalServiceCard';
 import { EngineeringSummaryFacts } from '@/components/engineering/systemConfig/EngineeringSummaryFacts';
+// System Config V3 — the Battery Storage card's body, and the selection mirrored from the graph.
+import { BatteryStorageCard } from '@/components/engineering/systemConfig/cards/BatteryStorageCard';
+import { batteryConfigMirror } from '@/lib/electrical/systemConfigBatteryCard';
 // Phase 12 — System-wide validation layer.
 import { validateSystem, type ValidationResult } from '@/lib/system/validationEngine';
 import { ValidationPanel } from '@/components/engineering/ValidationPanel';
@@ -9927,6 +9930,10 @@ function EngineeringPageInner() {
       if (p0?.mainBreakerA != null && p0.mainBreakerA !== config.mainPanelAmps) patch.mainPanelAmps = p0.mainBreakerA;
       if (p0?.busbarRatingA != null && p0.busbarRatingA !== config.panelBusRating) patch.panelBusRating = p0.busbarRatingA;
       if (p0?.manufacturer && p0.manufacturer !== config.mainPanelBrand) patch.mainPanelBrand = p0.manufacturer;
+      // 🚨 Once the graph has backup systems it IS the battery record: the selection follows it
+      // (count, battery, controller), so the Battery card, the summary and the legacy consumers
+      // can never read two different battery counts.
+      Object.assign(patch, batteryConfigMirror(next, config));
       if (Object.keys(patch).length > 0) updateConfig(patch);
     }
     return ok;
@@ -13100,70 +13107,14 @@ function EngineeringPageInner() {
                             <span className="text-xs text-slate-600">No battery · toggle above to add</span>
                           </div>
                         ) : (
-                        /* ON state — expanded */
-                        <div className="space-y-3">
-                          {/* kWh summary strip */}
-                          {_batTotalKwh > 0 ? (
-                            <div className="grid grid-cols-3 gap-2 p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/20">
-                              <div className="text-center">
-                                <div className="text-lg font-black text-emerald-400 tabular-nums">{_batTotalKwh.toFixed(1)}</div>
-                                <div className="text-[10px] text-slate-500">Total kWh</div>
-                              </div>
-                              <div className="text-center">
-                                <div className="text-lg font-black text-emerald-400 tabular-nums">~{_backupPct}%</div>
-                                <div className="text-[10px] text-slate-500">Est. Backup</div>
-                              </div>
-                              <div className="text-center">
-                                <div className="text-lg font-black text-emerald-400 tabular-nums">
-                                  {_batTotalKwh > 0 ? `~${(_batTotalKwh / Math.max(0.5, _totalKwNum * 0.15)).toFixed(1)}h` : '—'}
-                                </div>
-                                <div className="text-[10px] text-slate-500">Est. Runtime</div>
-                              </div>
-                            </div>
-                          ) : null}
-                          <div className="grid grid-cols-2 gap-3">
-                            <div className="col-span-2">
-                              <label className="eng-label">Battery Model</label>
-                              <select value={config.batteryId} onChange={e => {
-                                const bat = getBatteryById(e.target.value);
-                                const _picked = !!e.target.value;
-                                updateConfig({
-                                  batteryId: e.target.value,
-                                  batteryBrand: bat?.manufacturer ?? '',
-                                  batteryModel: bat?.model ?? '',
-                                  batteryKwh: bat?.usableCapacityKwh ?? 0,
-                                  // Seed a unit count so the battery is "user-owned" and the sizing
-                                  // apply path preserves it instead of reverting to the engine's
-                                  // default of 1. Picking "None" clears the count. (Fixes the
-                                  // "battery units snaps back to 1" bug — the preserve guard in
-                                  // applySizingRecommendation requires a non-zero count.)
-                                  batteryCount: _picked ? (config.batteryCount && config.batteryCount > 0 ? config.batteryCount : 1) : 0,
-                                });
-                              }} className="eng-select">
-                                <option value="">None</option>
-                                {BATTERIES.map(b => (
-                                  <option key={b.id} value={b.id}>{b.isNew ? '🆕 ' : ''}{b.manufacturer} {b.model} ({b.usableCapacityKwh} kWh){b.subcategory === 'ac_coupled' ? ` · AC` : ` · DC`}</option>
-                                ))}
-                              </select>
-                            </div>
-                            <div>
-                              <label className="eng-label">Units</label>
-                              <input type="number" min={0} max={10} value={config.batteryCount} onChange={e => updateConfig({ batteryCount: +e.target.value })} className="eng-input" />
-                            </div>
-                            <div>
-                              <label className="eng-label">kWh / Unit</label>
-                              <input type="number" min={0} step={0.1} value={config.batteryKwh} onChange={e => updateConfig({ batteryKwh: +e.target.value })} className="eng-input" />
-                            </div>
-                          </div>
-                          {config.batteryId ? ((() => {
-                            const bat = getBatteryById(config.batteryId);
-                            return bat?.backfeedBreakerA ? (
-                              <div className="text-xs text-orange-400 text-center">
-                                +{bat.backfeedBreakerA}A bus load (NEC 705.12B)
-                              </div>
-                            ) : null;
-                          })()) : null}
-                        </div>
+                        /* ON state — the card's body (System Config V3): battery model, quantity, expansion
+                           packs, backup controller × how many, AC aggregation asked once, and — once the
+                           service graph has backup systems — the graph's totals and "Battery grouping ·
+                           N systems", per-system edits behind [Configure systems differently].
+                           components/engineering/systemConfig/cards/BatteryStorageCard.tsx */
+                        <BatteryStorageCard {...interviewEditorContext} interview={systemConfigInterview}
+                                            controlMode={controlMode} selection={config}
+                                            onSelectionChange={updateConfig} pvKw={_totalKwNum} />
                       )}
 
                       {/* Generator & ATS — v57.5: collapsed to chip when no generator selected */}
