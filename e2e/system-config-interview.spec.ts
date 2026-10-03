@@ -133,6 +133,22 @@ test.describe('System Config interview — real browser, real routes, real Postg
     await expect(page.getByTestId('interview-item-behavior.interconnection')).toHaveAttribute('data-state', 'needs-answer');
   });
 
+  test('the utility\'s meter-collar ruling is a recorded fact: "not permitted" survives a reload and removes the option', async ({ page }) => {
+    // Parity with the Service Topology tab (its "meter-collar interconnection is permitted" checkbox),
+    // as a three-state utility fact: never assumed, and once refused never offered.
+    const projectId = await seedRaysArray(page);
+    await openSystemConfig(page, projectId);
+    await Promise.all([graphWrite(page), page.getByTestId('answer-service-rating').selectOption('200')]);
+    await expect(page.getByTestId('interview-item-behavior.utility.meter-collar')).toHaveAttribute('data-state', 'needs-verification');
+    await expect(page.getByTestId('answer-interconnection-meter-collar')).toHaveCount(1);   // not established: offered, to verify
+
+    await Promise.all([graphWrite(page), page.getByTestId('answer-utility-meter-collar').selectOption('not-permitted')]);
+    await page.reload();
+    await expect(page.getByTestId('system-config-interview')).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByTestId('interview-answer-behavior.utility.meter-collar')).toHaveText('Not permitted');
+    await expect(page.getByTestId('answer-interconnection-meter-collar'), 'a prohibited meter collar is still offered').toHaveCount(0);
+  });
+
   test('400 A → two 200 A main panels → load-side breaker, each surviving a reload', async ({ page }) => {
     const projectId = await seedRaysArray(page);
     await openSystemConfig(page, projectId);
