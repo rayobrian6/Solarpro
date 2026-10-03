@@ -4,9 +4,9 @@
 // 🚨 NO LONGER A TAB (closure slice 1). Ray: "Remove Service Topology from normal Engineering
 // navigation… System Config is the human authoring interface." This screen survives ONLY as the
 // Advanced service model editor inside Engineering Readiness → Review Engineering, for unusual systems
-// and for the edits System Config deliberately refuses; there it saves through the page's one write
-// path (`onSave`). Every installer decision it used to be the only home of now lives in a System Config
-// card (see tests/serviceTopologyLeftTheNavigation.test.ts for the audit).
+// and for the edits System Config deliberately refuses; there it edits the PAGE's graph and saves
+// through the page's one write path (`host`). Every installer decision it used to be the only home of
+// now lives in a System Config card (see tests/serviceTopologyLeftTheNavigation.test.ts for the audit).
 //
 // THE SERVICE TOPOLOGY SCREEN — SEEN FIRST, CONFIGURED THROUGH, PROVED UNDERNEATH.
 //
@@ -36,7 +36,7 @@
 // NOT_EVALUATED engineering conclusion... Do not change the engineering conclusion itself."
 // ═══════════════════════════════════════════════════════════════════════════
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ServiceTopologyPanel } from './ServiceTopologyPanel';
 import { ServiceTopologyMap } from './ServiceTopologyMap';
 import { ServiceNodeInspector } from './ServiceNodeInspector';
@@ -73,17 +73,31 @@ export interface ServiceTopologyBuilderProps {
    */
   onTopologyChange?: (t: ServiceTopology | null) => void;
   /**
-   * 🚨 SAVE THROUGH THE HOST'S ONE WRITE PATH. Service Topology is no longer a tab (closure slice 1);
-   * this screen survives as the Advanced service model editor inside Review Engineering, and the
-   * Engineering page's `writeInterviewAnswer` is the only way a graph reaches the store from there:
-   * refused while the graph is unread, the legacy mirrors kept in step, the graph re-read after. Given,
-   * Save calls it INSTEAD of this component's own PUT; true ⇔ saved.
+   * 🚨 HOSTED: THE HOST'S GRAPH AND THE HOST'S ONE WRITE PATH — NEVER A PRIVATE COPY.
+   *
+   * Service Topology is no longer a tab (closure slice 1); this screen survives as the Advanced service
+   * model editor inside Review Engineering, mounted BESIDE System Config editors that write the same
+   * graph. A copy of its own (one GET at mount) went stale the moment one of them wrote, and its next
+   * Save PUT that copy back over the answer (a lost update the page's read guard cannot see). So when
+   * hosted it reads nothing itself:
+   *   · `topology` / `read` are the host's graph and the host's read of it. In view mode the screen
+   *     shows exactly that graph and follows every re-read; an edit in progress is not overwritten.
+   *   · Save is REFUSED when the host's graph changed since the edit began, and while the host's read
+   *     is loading or failed (no create flow is offered over a graph that could not be read).
+   *   · `save` is the host's write path (`writeInterviewAnswer`); true ⇔ saved.
    */
-  onSave?: (t: ServiceTopology) => Promise<boolean>;
+  host?: {
+    topology: ServiceTopology | null;
+    read: 'loading' | 'absent' | 'failed' | 'loaded';
+    save: (t: ServiceTopology) => Promise<boolean>;
+  };
 }
 
+/** What a graph IS, for "did it change underneath this edit?" — content, not object identity. */
+const graphKey = (t: ServiceTopology | null | undefined): string => JSON.stringify(t ?? null);
+
 export function ServiceTopologyBuilder({
-  projectId, fetchImpl, onTopologyChange, onSave,
+  projectId, fetchImpl, onTopologyChange, host,
 }: ServiceTopologyBuilderProps) {
   const doFetch = fetchImpl ?? (typeof fetch !== 'undefined' ? fetch : null);
   const [topology, setTopology] = useState<ServiceTopology | null>(null);
@@ -91,6 +105,15 @@ export function ServiceTopologyBuilder({
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [unresolved, setUnresolved] = useState<string[]>([]);
+  /**
+   * 🚨 A FAILED READ IS NOT AN EMPTY PROJECT. Standalone, this screen's own GET failing used to fall
+   * through to the empty flow, and "Create bare service" → Save wrote a bare service over the stored
+   * graph. Hosted, the host's read state says the same thing.
+   */
+  const [ownReadFailed, setOwnReadFailed] = useState(false);
+  const hosted = host !== undefined;
+  const readFailed = hosted ? host.read === 'failed' : ownReadFailed;
+  const readPending = hosted && host.read === 'loading';
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [focusField, setFocusField] = useState<string | null>(null);
@@ -134,20 +157,46 @@ export function ServiceTopologyBuilder({
     const ex = EXPANSIONS(); if (ex.length && !expansionId) setExpansionId(ex[0].id);
   }, [gatewayId, essId, expansionId]);
 
+  // The graph the current screen was seeded from (hosted): the base an edit is checked against on Save.
+  const seededFromRef = useRef<string>(graphKey(null));
+  const hostTopology = host?.topology;
+  const hostSave = host?.save;
+
   const load = useCallback(async () => {
+    if (hosted) {
+      // Hosted: the host owns the read. "Reload" shows its graph as it stands now.
+      seededFromRef.current = graphKey(hostTopology);
+      setTopology(hostTopology ?? null);
+      return;
+    }
     if (!projectId || !doFetch) return;
     setLoading(true); setMessage(null);
     try {
       const res = await doFetch(`/api/projects/${projectId}/service-topology`);
-      const data = await res.json().catch(() => null);
-      if (data?.success && data.available) setTopology(data.topology as ServiceTopology);
+      const data = await res.json().catch(() => undefined);
+      // 🚨 A non-OK response or an unreadable payload is a FAILURE, never "no topology yet".
+      if (res.ok === false || data?.success !== true) {
+        setOwnReadFailed(true); setTopology(null);
+        setMessage('The service record could not be read. Nothing is written over it until it can be — Reload to try again.');
+        return;
+      }
+      setOwnReadFailed(false);
+      if (data.available) setTopology(data.topology as ServiceTopology);
       else setTopology(null);
     } catch (e) {
+      setOwnReadFailed(true); setTopology(null);
       setMessage(`Could not load the service topology: ${(e as Error).message}`);
     } finally { setLoading(false); }
-  }, [projectId, doFetch]);
+  }, [hosted, hostTopology, projectId, doFetch]);
 
-  useEffect(() => { void load(); }, [load]);
+  // Standalone: read once per project. Hosted: follow the host's graph while nothing is being edited —
+  // an edit in progress keeps its base, and Save checks that base against the host's graph.
+  useEffect(() => { if (!hosted) void load(); }, [hosted, load]);
+  useEffect(() => {
+    if (!hosted || mode === 'edit') return;
+    seededFromRef.current = graphKey(hostTopology);
+    setTopology(hostTopology ?? null);
+  }, [hosted, hostTopology, mode]);
 
   // Every change, not only the loads: the sidebar must follow an edit in progress too, or it goes
   // back to disagreeing with the screen beside it the moment somebody picks a coupling.
@@ -155,10 +204,22 @@ export function ServiceTopologyBuilder({
 
   const save = useCallback(async () => {
     if (!projectId || !topology) return;
-    if (onSave) {
+    if (readFailed || readPending) {
+      setMessage('Not saved — the service record has not been read, and nothing is written over a record that was not read.');
+      return;
+    }
+    if (hostSave) {
+      // 🚨 NO SAVE OVER A GRAPH THAT MOVED. Another editor beside this one (a System Config card, a
+      // need answered in Review Engineering) wrote the record after this edit began: saving this copy
+      // would silently revert that answer. Refused — discard to take up the current record.
+      if (graphKey(hostTopology) !== seededFromRef.current) {
+        setMessage('Not saved — the service record changed since this edit began (another answer was saved). '
+          + 'Discard changes to take up the current record, then edit again.');
+        return;
+      }
       setSaving(true); setMessage(null);
       try {
-        const ok = await onSave(topology);
+        const ok = await hostSave(topology);
         setMessage(ok ? 'Service model saved.' : 'Not saved — the service record did not accept it.');
         // Back to view only on a real save — the same rule as the PUT below.
         if (ok) { setMode('view'); setBeforeEdit(null); setSelectedId(null); }
@@ -183,17 +244,18 @@ export function ServiceTopologyBuilder({
     } catch (e) {
       setMessage(`Save failed: ${(e as Error).message}`);
     } finally { setSaving(false); }
-  }, [projectId, topology, doFetch, onSave]);
+  }, [projectId, topology, doFetch, hostSave, hostTopology, readFailed, readPending]);
 
   const discard = useCallback(() => {
     // A snapshot exists when editing something that was already saved. A topology built this
     // session has none, so the only honest "before" is what the store actually holds — which is what
     // a reload fetches.
-    if (beforeEdit) setTopology(beforeEdit); else void load();
+    // Hosted, leaving edit mode re-seeds from the host's graph as it stands now (the effect above).
+    if (hosted) { /* re-seeded on the way back to view */ } else if (beforeEdit) setTopology(beforeEdit); else void load();
     setBeforeEdit(null); setMode('view'); setSelectedId(null); setFocusField(null);
     setUnresolved([]); setGuided(false);
     setMessage('Changes discarded.');
-  }, [beforeEdit, load]);
+  }, [beforeEdit, load, hosted]);
 
   const overview = useMemo(
     () => (topology ? buildServiceOverview(topology) : null), [topology]);
@@ -213,6 +275,16 @@ export function ServiceTopologyBuilder({
           {message ? <span data-testid="topology-message" className="text-xs text-amber-300">{message}</span> : null}
         </div>
 
+        {/* 🚨 NOTHING IS CREATED OVER A RECORD THAT WAS NOT READ. A failed (or still pending) read is not
+            an empty project: offering the create flow here is how a bare service got saved over a
+            stored 400 A / two-panel graph. */}
+        {readFailed || readPending ? (
+          <div data-testid="topology-unread" className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-200">
+            {readFailed
+              ? 'The service record could not be read. Nothing can be created or saved here until it is — reload the page to try again.'
+              : 'The service record is being read…'}
+          </div>
+        ) : (<>
         {/* A topology that has just been built has not been SAVED, so the screen it lands on is the
             editing one — with Save changes on it. Landing in view mode would show unsaved work as
             though it were the saved design. */}
@@ -245,6 +317,7 @@ export function ServiceTopologyBuilder({
             </span>
           </div>
         </details>
+        </>)}
       </div>
     );
   }

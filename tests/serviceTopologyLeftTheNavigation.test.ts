@@ -411,7 +411,11 @@ describe('🚨 the Engineering page: Service Topology is not in the navigation',
     expect(panel).toBeGreaterThan(0);
     expect(LIVE.slice(panel, at)).toContain('advancedEditor={');
     const mount = LIVE.slice(at, LIVE.indexOf('/>', at));
-    expect(mount).toContain('onSave={next => writeInterviewAnswer(next,');
+    // 🚨 It edits THE PAGE'S graph and read state (no private GET whose copy goes stale beside the
+    // cards), and saves through the one write path.
+    expect(mount).toContain('topology: svcTopology, read: svcTopologyRead,');
+    expect(mount).toContain('save: next => writeInterviewAnswer(next,');
+    expect(mount).not.toContain('fetchImpl');
     // It does not hand unsaved edits up to the page's copy of the graph any more.
     expect(mount).not.toContain('onTopologyChange');
   });

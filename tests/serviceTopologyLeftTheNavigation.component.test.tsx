@@ -232,32 +232,33 @@ describe('🚨 the graph editor is a diagnostic surface: Review Engineering only
     expect(screen.queryByTestId('review-advanced-editor')).toBeNull();
   });
 
-  it('the builder saves through the host\'s write path (onSave) — never its own PUT', async () => {
+  it('hosted, the builder shows the HOST\'s graph and saves through the host\'s write path — never its own GET or PUT', async () => {
     const stored = buildRaysIntendedJob().topology;
     const calls: string[] = [];
     const fetchImpl = (async (url: string, init?: RequestInit) => {
       calls.push(`${init?.method ?? 'GET'} ${url}`);
       return { json: async () => ({ success: true, available: true, topology: stored }) } as unknown as Response;
     }) as unknown as typeof fetch;
-    const onSave = vi.fn(async () => true);
-    render(<ServiceTopologyBuilder projectId="4030b664-bebe-433b-a11c-cda05ead2f7d" fetchImpl={fetchImpl} onSave={onSave} />);
+    const save = vi.fn(async () => true);
+    render(<ServiceTopologyBuilder projectId="4030b664-bebe-433b-a11c-cda05ead2f7d" fetchImpl={fetchImpl}
+                                   host={{ topology: stored, read: 'loaded', save }} />);
     await waitFor(() => expect(screen.getByTestId('topology-edit')).toBeTruthy());
     fireEvent.click(screen.getByTestId('topology-edit'));
     fireEvent.click(screen.getByTestId('node-msp-1'));
     fireEvent.change(within(screen.getByTestId('node-inspector')).getByTestId('inspector-panel-bus'), { target: { value: '225' } });
     fireEvent.click(screen.getByTestId('topology-save'));
-    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
-    const saved = (onSave.mock.calls[0] as unknown as [ServiceTopology])[0];
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    const saved = (save.mock.calls[0] as unknown as [ServiceTopology])[0];
     expect(saved.panels.find(p => p.id === 'msp-1')!.busbarRatingA).toBe(225);
-    expect(calls.filter(c => c.startsWith('PUT'))).toEqual([]);
+    expect(calls).toEqual([]);
     await waitFor(() => expect(screen.getByTestId('topology-message').textContent).toBe('Service model saved.'));
     expect(screen.queryByTestId('topology-save')).toBeNull();
   });
 
   it('a save the host refuses keeps the edit on screen, in edit mode', async () => {
     const stored = buildRaysIntendedJob().topology;
-    const fetchImpl = (async () => ({ json: async () => ({ success: true, available: true, topology: stored }) }) as unknown as Response) as unknown as typeof fetch;
-    render(<ServiceTopologyBuilder projectId="4030b664-bebe-433b-a11c-cda05ead2f7d" fetchImpl={fetchImpl} onSave={async () => false} />);
+    render(<ServiceTopologyBuilder projectId="4030b664-bebe-433b-a11c-cda05ead2f7d"
+                                   host={{ topology: stored, read: 'loaded', save: async () => false }} />);
     await waitFor(() => expect(screen.getByTestId('topology-edit')).toBeTruthy());
     fireEvent.click(screen.getByTestId('topology-edit'));
     fireEvent.click(screen.getByTestId('topology-save'));

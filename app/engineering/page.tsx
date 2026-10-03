@@ -13648,11 +13648,17 @@ function EngineeringPageInner() {
                                            error={_svcError ?? _archResolveError}
                                            onGoToCard={itemId => { revealHomeCard(itemId); }}
                                            // 🚨 THE GRAPH EDITOR, AS A DIAGNOSTIC SURFACE ONLY — not a tab.
-                                           // Its saves take the page's ONE write path (guarded on the
-                                           // read state, legacy mirrors kept, the graph re-read).
+                                           // It edits THE PAGE'S graph (no private copy that goes stale
+                                           // beside the cards that write it), and its saves take the
+                                           // page's ONE write path (guarded on the read state, legacy
+                                           // mirrors kept, the graph re-read) — refused when the graph
+                                           // moved since its edit began.
                                            advancedEditor={
                                              <ServiceTopologyBuilder projectId={currentProjectId ?? null}
-                                                                     onSave={next => writeInterviewAnswer(next, 'the service model (Advanced editor)')} />
+                                                                     host={{
+                                                                       topology: svcTopology, read: svcTopologyRead,
+                                                                       save: next => writeInterviewAnswer(next, 'the service model (Advanced editor)'),
+                                                                     }} />
                                            } />
 
               </div>
