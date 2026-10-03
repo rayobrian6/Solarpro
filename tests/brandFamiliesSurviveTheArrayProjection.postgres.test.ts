@@ -455,6 +455,22 @@ for (const f of FAMILIES) {
   });
 }
 
+describe('🚨 a stale brand hint cannot re-architect an AC-coupled job (same class as the DC-coupled browser finding)', () => {
+  it('SMA Sunny Boy + Powerwall 2 posted with the migration default selectedBrand "enphase" stays a Sunny Boy string sheet', async () => {
+    // On Ray's DC-coupled job the production page posted `selectedBrand: 'enphase'` — a migration
+    // default — and the route's brand engine turned the sheet into a microinverter path. The
+    // projection now asserts the recorded inverter as the sizing hint on AC-coupled jobs too, so
+    // the brand engine sizes the inverter the project actually holds.
+    const f = FAMILIES.find(x => x.key === '3a-ac-pw2')!;
+    await writeFamilyRow(f);
+    const r = await postSld({ ...(await pageSldBody(f, f.modules)), selectedBrand: 'enphase', selectedInverterId: '' });
+    expect(r.status, JSON.stringify(r.json ?? {}).slice(0, 400)).toBe(200);
+    const t = textOf(r.svg);
+    expect(t).toContain('Sunny Boy 7.7-US');
+    expect(t, 'the stale brand hint drew a microinverter path').not.toMatch(/MICROINVERTER/);
+  });
+});
+
 describe('🚨 the plain house is never asked for a battery', () => {
   it('no graph and no storage ⇒ 200 on both routes, and the only storage text is "NONE"', async () => {
     const f = FAMILIES.find(x => x.key === '6-simple')!;

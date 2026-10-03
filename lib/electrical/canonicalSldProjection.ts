@@ -393,6 +393,16 @@ export async function projectCanonicalArchitecture(
     const postedInv = String(input.inverterModel ?? '');
     if (model.externalInverterId) {
       input.inverterId = model.externalInverterId;
+      // The recorded inverter is also the SIZING hint. The brand engine lets a concrete inverter id
+      // beat a contradicting brand label (BRAND_INVERTER_MISMATCH), so a stale `selectedBrand` — a
+      // migration default like 'enphase' on an SMA job — can no longer turn the sheet into a
+      // microinverter path, as it did on Ray's DC-coupled job.
+      const postedHint = input.selectedInverterId != null ? String(input.selectedInverterId) : '';
+      if (postedHint && postedHint !== model.externalInverterId) {
+        console.warn(`[${tag}] selectedInverterId '${postedHint}' replaced by the recorded inverter`
+          + ` '${model.externalInverterId}'.`);
+      }
+      input.selectedInverterId = model.externalInverterId;
       // Clearing the posted pair stops a stale React-state name outliving the id it was supposed to
       // describe.
       delete input.inverterModel;
@@ -427,6 +437,7 @@ export async function projectCanonicalArchitecture(
       delete input.inverterModel;
       delete input.inverterManufacturer;
       delete input.inverterId;
+      dropBrandHints();
       console.warn(`[${tag}] the project records an AC-coupled architecture but holds NO inverter; `
         + `the caller's '${postedInv || 'equipment'}' is not drawn.`);
     }
