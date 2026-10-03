@@ -19,22 +19,28 @@
 //     if (strings.length === 1 && strings[0].panelCount > maxPanelsPerString)
 //     → 1×N violation — must rebuild
 //
-// REPAIR STRATEGY:
-//   1. Look up maxPanelsPerString from brand profile
-//   2. Call sizeSystemFromBrand() to get the correct multi-string layout
-//   3. Rebuild config.inverters using the result
+// REPAIR STRATEGY (closure review: ONE string engine, no defaulted facts):
+//   1. Look up maxPanelsPerString from brand profile (detection only)
+//   2. String the entry's modules through the canonical string engine
+//      (lib/system/fleetStringWriters.ts → canonicalStringPartition) for its
+//      OWN inverter, with the module's catalogued facts and the caller's
+//      design low temperature — never sizeSystemFromBrand on 49.6 V / −10 °C
+//      defaults
+//   3. Rebuild the entry as one InverterConfig per unit the engine needs —
+//      every module kept (this kept only inverterIndex 0 and dropped the rest)
+//   No design temperature, no catalogued module, or no valid layout ⇒ the
+//   entry is left exactly as it is: the violation stays visible.
 //
 // IDEMPOTENT: safe to call on already-normalized configs.
 // ============================================================
 
 import { getBrandProfileByInverterId } from './brandProfiles';
 import { fleetEntryHasEndpoint } from '@/lib/electrical/canonicalStrings';
-import { sizeSystemFromBrand, type SizingInput } from './sizingEngine';
+import { canonicalFleetEntries } from './fleetStringWriters';
+import { getPanelById } from '@/lib/equipment-db';
 import {
-  buildStringConfig,
-  buildInverterConfig,
   type InverterConfig,
-  type StringConfig,
+  type RoofType,
 } from './buildInverterConfig';
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -88,91 +94,62 @@ export function isElectricallyInvalid(inv: InverterConfig): boolean {
 // ── Repair ───────────────────────────────────────────────────────────────────
 
 /**
- * Repair a single 1×N inverter by calling the sizing engine.
+ * Repair a single 1×N inverter through the one string engine.
  *
  * @param inv     - the invalid InverterConfig (must pass isElectricallyInvalid)
- * @param options - optional panel specs for the sizing engine
- * @returns a new InverterConfig with the correct multi-string layout,
- *          or the original if repair fails (fail-safe: better to show
- *          the violation than to crash)
+ * @param options - `designTempMin` (the project's NEC 690.7 cold basis) is REQUIRED for a repair:
+ *                  without it nothing is re-strung (no −10 °C default)
+ * @returns one InverterConfig per unit the engine lays the entry's modules across (every module
+ *          kept), or `[inv]` unchanged when no valid layout can be derived — fail-safe: better to show
+ *          the violation than to invent a partition
  */
 export function repairElectricallyInvalidInverter(
   inv: InverterConfig,
-  options: {
-    panelWattage?: number;
-    panelVoc?: number;
-    panelTempCoeffVoc?: number;
-    systemType?: string;
-  } = {},
-): InverterConfig {
+  options: ElectricalNormalizeOptions = {},
+): InverterConfig[] {
   const totalPanels = inv.strings.reduce((s, str) => s + str.panelCount, 0);
   const baseStr = inv.strings[0];
-
-  const sizingInput: SizingInput = {
-    systemType:         (options.systemType ?? 'roof') as SizingInput['systemType'],
-    panelCount:         totalPanels,
-    panelWattage:       options.panelWattage ?? 400,
-    panelVoc:           options.panelVoc ?? 49.6,
-    panelTempCoeffVoc:  options.panelTempCoeffVoc ?? -0.27,
-    designTempMin:      -10,
-    selectedInverterId: inv.inverterId,
-  };
-
+  if (typeof options.designTempMin !== 'number' || !Number.isFinite(options.designTempMin)) return [inv];
+  const panel = baseStr?.panelId ? getPanelById(baseStr.panelId) : undefined;
+  if (!panel) return [inv];
   try {
-    const result = sizeSystemFromBrand(sizingInput);
-
-    if (result.strings.length === 0) {
-      // 🚨 NO CONVENIENCE SPLIT. This fell back to an even split at the brand's (or a "conservative"
-      // 20-module) ceiling — a partition no engine derived against the inverter's window. The
-      // violation is left visible instead; the installer re-strings through the engine.
-      return inv;
-    }
-
-    // Group strings by inverterIndex (the result may span multiple inverters,
-    // but we're only repairing one inverter here)
-    const stringsForThisInv = result.strings.filter(s => (s.inverterIndex ?? 0) === 0);
-    const strings: StringConfig[] = (stringsForThisInv.length > 0 ? stringsForThisInv : result.strings)
-      .map((s, i) =>
-        buildStringConfig({
-          index:          i,
-          existingId:     i === 0 ? baseStr?.id : undefined,
-          panelCount:     s.panelCount,
-          panelId:        baseStr?.panelId,
-          wireGauge:      baseStr?.wireGauge,
-          wireLength:     baseStr?.wireLength,
-          tilt:           baseStr?.tilt,
-          azimuth:        baseStr?.azimuth,
-          roofType:       baseStr?.roofType as string,
-          mountingSystem: baseStr?.mountingSystem,
-        })
-      );
-
-    return buildInverterConfig({
-      existingId:            inv.id,
-      inverterId:            inv.inverterId,
-      type:                  inv.type,
-      strings,
+    const r = canonicalFleetEntries({
+      inverterId: inv.inverterId,
+      inverterType: inv.type,
       optimizerPeripheralId: inv.optimizerPeripheralId,
-      deviceRatioOverride:   inv.deviceRatioOverride,
+      moduleCount: totalPanels,
+      panel,
+      designTempMin: options.designTempMin,
+      stringFields: {
+        panelId:        baseStr?.panelId,
+        wireGauge:      baseStr?.wireGauge,
+        wireLength:     baseStr?.wireLength,
+        tilt:           baseStr?.tilt,
+        azimuth:        baseStr?.azimuth,
+        roofType:       baseStr?.roofType as RoofType,
+        mountingSystem: baseStr?.mountingSystem,
+      },
+      existingIds: [inv.id],
+      idPrefix: `${inv.id}-rs`,
+      deviceRatioOverride: inv.deviceRatioOverride,
       // Wave 3 (I-2 corollary): an electrical repair must never strip the
       // subsystem tag — a healed fence fleet stays a fence fleet.
-      subSystemKey:          (inv as { subSystemKey?: 'roof' | 'ground' | 'fence' }).subSystemKey,
+      subSystemKey: (inv as { subSystemKey?: 'roof' | 'ground' | 'fence' }).subSystemKey,
     });
-
+    // 🚨 NO CONVENIENCE SPLIT and no defaulted facts: without a valid canonical layout the violation
+    // is left visible; the installer re-strings through the engine.
+    return r.entries ?? [inv];
   } catch (err) {
-    // The engine threw: keep the inverter as it is — never an invented even split (see above).
-    console.warn('[electricalNormalize] sizeSystemFromBrand failed; the layout is left as it is:', err);
-    return inv;
+    console.warn('[electricalNormalize] the string engine failed; the layout is left as it is:', err);
+    return [inv];
   }
 }
 
 // ── Config-level normalizer ───────────────────────────────────────────────────
 
 export interface ElectricalNormalizeOptions {
-  panelWattage?: number;
-  panelVoc?: number;
-  panelTempCoeffVoc?: number;
-  systemType?: string;
+  /** The project's NEC 690.7(A) design low, °C. Required for any repair (never defaulted). */
+  designTempMin?: number;
 }
 
 export interface ElectricalNormalizeResult<T> {
@@ -218,7 +195,7 @@ export function electricallyNormalizeInverterConfig<T extends { inverters?: unkn
   const inverters = config.inverters as InverterConfig[];
   let anyChanged = false;
 
-  const newInverters = inverters.map(inv => {
+  const newInverters = inverters.flatMap(inv => {
     const incoming = inv.strings.map(s => s.panelCount);
     const maxPPS = getMaxPanelsPerString(inv.inverterId);
     const invalid = isElectricallyInvalid(inv);
@@ -236,7 +213,7 @@ export function electricallyNormalizeInverterConfig<T extends { inverters?: unkn
 
     if (!invalid) {
       log.push(entry);
-      return inv;
+      return [inv];
     }
 
     console.warn(
@@ -246,17 +223,20 @@ export function electricallyNormalizeInverterConfig<T extends { inverters?: unkn
     );
 
     const repaired = repairElectricallyInvalidInverter(inv, options);
-    const outgoing = repaired.strings.map(s => s.panelCount);
+    if (repaired.length === 1 && repaired[0] === inv) {
+      log.push(entry);
+      return [inv];
+    }
+    const outgoing = repaired.flatMap(r => r.strings.map(s => s.panelCount));
 
     entry.outgoingStringLayout = outgoing;
     entry.reason = 'rebuilt_invalid_1xN';
     log.push(entry);
 
     console.log(
-      `[STRING NORMALIZE OUTPUT] inverterId=${repaired.inverterId}` +
-      ` outgoingLayout=[${outgoing.join(',')}]` +
-      ` stringsPerInverter=${repaired.stringsPerInverter}` +
-      ` modulesPerString=${repaired.modulesPerString}` +
+      `[STRING NORMALIZE OUTPUT] inverterId=${inv.inverterId}` +
+      ` outgoingLayout=[${repaired.map(r => r.strings.map(s => s.panelCount).join(',')).join(' | ')}]` +
+      ` units=${repaired.length}` +
       ` reason=rebuilt_invalid_1xN`
     );
 

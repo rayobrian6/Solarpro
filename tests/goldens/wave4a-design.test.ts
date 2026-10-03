@@ -421,7 +421,8 @@ describe('designToPermitInverters — per-sub sets w/ tags (§1.3/I-3), flat fal
         { key: 'roof', topology: 'micro', panelId: 'tesla-tsp-420', rackingId: 'ironridge-xr100',
           microModelId: 'enphase-iq8a',
           strings: [{ stringIndex: 0, panelCount: 2, panelIds: ['a', 'b'] }], byPanelId: { a: 0, b: 0 } },
-        { key: 'ground', topology: 'string', panelId: 'canadian-cs6r-410', rackingId: 'ground-rack',
+        { key: 'ground', topology: 'micro', panelId: 'canadian-cs6r-410', rackingId: 'ground-rack',
+          microModelId: 'enphase-iq8m',
           strings: [{ stringIndex: 1, panelCount: 8, panelIds: [] }], byPanelId: {} },
         { key: 'fence', topology: 'optimizer', panelId: 'philadelphia-430', rackingId: 'solfence-nexus',
           optimizerModelId: 'solfence-opt-800',
@@ -429,17 +430,17 @@ describe('designToPermitInverters — per-sub sets w/ tags (§1.3/I-3), flat fal
       ],
     };
     const out = designToPermitInverters(de)!;
-    expect(out).toHaveLength(3);
-    expect(out.map(i => i.subSystemKey)).toEqual(['roof', 'ground', 'fence']);
-    expect(out.map(i => i.id)).toEqual(['inv-design-0', 'inv-design-1', 'inv-design-2']);
-    // Topology from EACH sub's own equipment — never a project-wide winner (I-3).
-    expect(out.map(i => i.type)).toEqual(['micro', 'string', 'optimizer']);
-    expect(out[0].inverterId).toBe('enphase-iq8a');           // roof: its own micro
-    expect(out[2].optimizerPeripheralId).toBe('solfence-opt-800');
+    // 🚨 Closure review: the fence sub records NO inverter. It used to be handed the topology default
+    // ('se-7600h') carrying Design Studio's chunks — a phantom inverter — and now backfills nothing.
+    expect(out).toHaveLength(2);
+    expect(out.map(i => i.subSystemKey)).toEqual(['roof', 'ground']);
+    expect(out.map(i => i.id)).toEqual(['inv-design-0', 'inv-design-1']);
+    // Equipment from EACH sub's own record — never a project-wide winner (I-3).
+    expect(out.map(i => i.inverterId)).toEqual(['enphase-iq8a', 'enphase-iq8m']);
+    expect(out.every(i => i.inverterId !== 'se-7600h')).toBe(true);
     // Strings inherit the parent tag + carry the sub's own panel/mounting.
     expect(out[0].strings.every(s => s.subSystemKey === 'roof')).toBe(true);
     expect(out[1].strings[0]).toMatchObject({ subSystemKey: 'ground', panelId: 'canadian-cs6r-410', mountingSystem: 'ground-rack' });
-    expect(out[2].strings[0]).toMatchObject({ subSystemKey: 'fence', panelId: 'philadelphia-430' });
   });
 
   it('project-pinned inverter id applies to the PRIMARY sub only (I-4)', () => {
@@ -448,13 +449,13 @@ describe('designToPermitInverters — per-sub sets w/ tags (§1.3/I-3), flat fal
       subSystems: [
         { key: 'roof', topology: 'micro', panelId: 'tesla-tsp-420', microModelId: 'enphase-iq8a',
           strings: [{ stringIndex: 0, panelCount: 2, panelIds: [] }], byPanelId: {} },
-        { key: 'fence', topology: 'optimizer', panelId: 'philadelphia-430',
+        { key: 'fence', topology: 'micro', panelId: 'philadelphia-430', microModelId: 'enphase-iq8plus',
           strings: [{ stringIndex: 1, panelCount: 4, panelIds: [] }], byPanelId: {} },
       ],
     };
-    const out = designToPermitInverters(de, { selectedInverterId: 'pinned-roof-inverter' })!;
-    expect(out[0].inverterId).toBe('pinned-roof-inverter');   // primary honors the pin
-    expect(out[1].inverterId).not.toBe('pinned-roof-inverter'); // fence derives its own
+    const out = designToPermitInverters(de, { selectedInverterId: 'enphase-iq8h' })!;
+    expect(out[0].inverterId).toBe('enphase-iq8h');      // primary honors the pin
+    expect(out[1].inverterId).toBe('enphase-iq8plus');   // fence keeps its own — never the pin
   });
 
   it('degenerate single-entry map falls back to the flat path (no tags)', () => {

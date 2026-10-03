@@ -20,6 +20,12 @@ import { generatePdfFromHtml, CanonicalFontError } from '@/lib/pdf/generatePdf';
 import { fontFaceCss, CSS_FONT_SANS_STACK } from '@/lib/permit/fonts/fontPack';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 import { readStoredCombinerSelection, effectiveCombinerId, isReadableProjectId } from '@/lib/combinerSelection/storedRead';
+import {
+  resolveStringEndpoint, sheetStringPartition, stringModuleFacts, type StoredFleetEntry,
+} from '@/lib/electrical/canonicalStrings';
+import type { DcStringLimits } from '@/lib/electrical/dcStringLimits';
+import { getThermalDesignBasis } from '@/lib/permit/utils/designTemps';
+import { getPanelById } from '@/lib/equipment-db';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -191,7 +197,8 @@ export async function POST(req: NextRequest) {
     let _electricalRevision: string | null = null;
     let _pdfCanonicalApplied = false;
     let _pdfCoupling: string | null = null;
-    let _pdfDcLimits: unknown = null;
+    let _pdfDcLimits: DcStringLimits | null = null;
+    let _pdfFleet: StoredFleetEntry[] = [];
     if (user?.id && isReadableProjectId(buildInput?.projectId)) {
       try {
         const { projectCanonicalArchitecture } =
@@ -203,6 +210,7 @@ export async function POST(req: NextRequest) {
         _pdfCanonicalApplied = _proj.applied;
         _pdfCoupling = _proj.coupling;
         _pdfDcLimits = _proj.dcLimits ?? null;
+        _pdfFleet = _proj.fleet ?? [];
       } catch (e) {
         console.warn('[sld/pdf/POST] canonical electrical read skipped (non-fatal):',
           (e as Error)?.message);
@@ -271,29 +279,75 @@ export async function POST(req: NextRequest) {
       const _isMicroForStrings = /MICRO/i.test(_topoRaw);
       const _isOptimizerForStrings = /OPTIMIZER/i.test(_topoRaw);
       const _modules = Number(buildInput.totalModules) || 0;
-      // 🚨 NO STRINGS WITHOUT AN ENDPOINT (closure brief §2) — the same rule as the SVG route: no PV
-      // inverter, no brand, not micro and no storage PV input ⇒ nothing is derived against the
-      // generator's defaults, and a posted layout is not drawn.
-      const _hasInverter = [buildInput.selectedInverterId, buildInput.inverterId, buildInput.selectedBrand]
-        .some(v => v != null && String(v).trim());
-      const _pdfStringsPending = !_isMicroForStrings && !_hasInverter
-        && !(_pdfCoupling === 'dc-coupled-storage' && _pdfDcLimits);
-      if (_pdfStringsPending) {
+      // ══════════════════════════════════════════════════════════════════
+      // 🚨 THE ENDPOINT BY THE ONE RULE, AND THE CARD'S PARTITION — THE SVG ROUTE'S EXACTLY.
+      //
+      // This decided "has an inverter" from `selectedInverterId` / `inverterId` / `selectedBrand` — none
+      // of which the page's Export-PDF body sends (it names the inverter only on `inverterSpecs[]`), so
+      // EVERY string job exported "STRINGING PENDING" while naming its Fronius; and a posted brand alone
+      // counted as equipment (review findings). The endpoint is now resolved from a catalogued id —
+      // `selectedInverterId` (the page posts it), else `inverterSpecs[0].inverterId` — or the storage's
+      // PV inputs; and the partition is `sheetStringPartition`: the stored fleet when it is this
+      // endpoint's and valid, else the one string engine's — never `generateStringConfig` against posted
+      // defaults on a −18 °C guess. The cold basis is the project's own (`getThermalDesignBasis`).
+      // ══════════════════════════════════════════════════════════════════
+      const _pdfInvId = [buildInput.selectedInverterId, buildInput.inverterId, buildInput.inverterSpecs?.[0]?.inverterId]
+        .map(v => (v == null ? '' : String(v).trim())).find(v => v !== '') ?? null;
+      const _pdfEndpoint = resolveStringEndpoint({
+        inverterId: _pdfInvId,
+        inverterType: _isMicroForStrings ? 'micro' : _isOptimizerForStrings ? 'optimizer' : 'string',
+        optimizerPeripheralId: buildInput.optimizerPeripheralId ? String(buildInput.optimizerPeripheralId) : null,
+        coupling: _pdfCoupling,
+        storageLimits: _pdfDcLimits,
+      });
+      const _pdfStringsPending = !_isMicroForStrings && _pdfEndpoint.kind === 'none';
+      const _clearStrings = (label?: string) => {
         delete buildInput.stringPanelCounts;
         delete buildInput.stringDetails;
         buildInput.totalStrings = 0;
         buildInput.stringingPending = true;
+        if (label) buildInput.stringingPendingLabel = label;
+      };
+      if (_pdfStringsPending) {
+        _clearStrings();
         // …and a posted inverter NAME with no id behind it is not drawn (INVERTER NOT SELECTED).
         delete buildInput.inverterModel;
         delete buildInput.inverterManufacturer;
         console.warn('[sld/pdf/POST] stringing pending equipment selection — no string partition derived or drawn.');
       }
-      if (!_isMicroForStrings && !_pdfStringsPending && _modules > 0) {
+      const _designTempMin = getThermalDesignBasis({
+        lat: typeof buildInput.lat === 'number' ? buildInput.lat : null,
+        lng: typeof buildInput.lng === 'number' ? buildInput.lng : null,
+        state: typeof buildInput.state === 'string' ? buildInput.state : null,
+        address: typeof buildInput.address === 'string' ? buildInput.address : null,
+        designTempMinOverrideC: typeof buildInput.designTempMinOverrideC === 'number'
+          ? buildInput.designTempMinOverrideC : null,
+      }).minDesignTempC;
+      const _pdfSheet = !_isMicroForStrings && !_pdfStringsPending && _modules > 0
+        ? sheetStringPartition({
+            endpoint: _pdfEndpoint,
+            moduleCount: _modules,
+            module: stringModuleFacts(getPanelById(String(buildInput.panelId ?? '')) ?? {
+              voc: Number(buildInput.panelVoc), vmp: Number(buildInput.panelVmp), isc: Number(buildInput.panelIsc),
+              imp: Number(buildInput.panelImp), watts: Number(buildInput.panelWatts),
+              tempCoeffVoc: buildInput.panelTempCoeffVoc != null ? Number(buildInput.panelTempCoeffVoc)
+                : (buildInput.tempCoeffVoc != null ? Number(buildInput.tempCoeffVoc) : null),
+            }),
+            designTempMin: _designTempMin,
+            fleet: _pdfFleet,
+          })
+        : null;
+      if (_pdfSheet?.source === 'none') {
+        _clearStrings('STRING ASSIGNMENT NOT ENGINEERED');
+        console.warn('[sld/pdf/POST] STRING ASSIGNMENT NOT ENGINEERED — ' + _pdfSheet.reason + ' No partition is drawn.');
+      } else if (_pdfSheet?.strings) {
         try {
           const { generateStringConfig, moduleSpecsFromRegistry, inverterSpecsFromRegistry } =
             await import('@/lib/string-generator');
-          const _designTempMin = Number(
-            buildInput.designTempMin ?? buildInput.designTempMinC ?? -18);
+          const _w = _pdfEndpoint.kind === 'pv-inverter' || _pdfEndpoint.kind === 'storage-dc-input'
+            ? _pdfEndpoint.window : null;
+          const _counts = _pdfSheet.strings;
+          // The NEC 690.7 numbers FOR the sheet's partition, against the endpoint's own window.
           _pdfStringResult = generateStringConfig({
             totalModules: _modules,
             moduleSpecs: moduleSpecsFromRegistry({
@@ -311,42 +365,35 @@ export async function POST(req: NextRequest) {
                 ? Number(buildInput.maxSeriesFuse) : undefined,
             }),
             inverterSpecs: inverterSpecsFromRegistry({
-              // Set by the canonical projection from the storage on a DC-coupled job.
-              maxDcVoltage: Number(buildInput.inverterMaxDcV ?? buildInput.maxDcVoltage) || undefined,
-              mpptVoltageMin: Number(buildInput.mpptVoltageMin) || undefined,
-              mpptVoltageMax: Number(buildInput.mpptVoltageMax) || undefined,
-              mpptChannels: Number(buildInput.mpptChannels) || undefined,
-              maxInputCurrent: Number(buildInput.maxInputCurrentPerMppt) || undefined,
+              maxDcVoltage: _w?.maxDcVoltage,
+              mpptVoltageMin: _w?.mpptVoltageMin,
+              mpptVoltageMax: _w?.mpptVoltageMax,
+              mpptChannels: _w ? _w.mpptChannels * (_pdfEndpoint.kind === 'pv-inverter' ? _pdfSheet.units : 1) : undefined,
+              maxInputCurrent: _w?.maxImpPerMpptA ?? undefined,
+              maxParallelStringsPerMppt: _w?.maxParallelStringsPerMppt ?? undefined,
               acOutputKw: Number(buildInput.acOutputKw) || undefined,
-              maxPanelsPerString: Number(buildInput.maxPanelsPerString) || undefined,
+              maxPanelsPerString: _w?.maxPanelsPerString ?? undefined,
             }),
             designTempMin: _designTempMin,
             topology: _isOptimizerForStrings ? 'optimizer' : 'string',
+            configStringPanelCounts: _counts,
           });
-
-          const _counts = _pdfStringResult.strings
-            .map(st => st.panelsInString)
-            .filter((n): n is number => typeof n === 'number' && n > 0);
-          if (_counts.length > 0 && _counts.reduce((a, b) => a + b, 0) === _modules) {
-            buildInput.stringPanelCounts = _counts;
-            buildInput.totalStrings = _pdfStringResult.totalStrings;
-            buildInput.panelsPerString = _counts[0];
-            buildInput.lastStringPanels = _counts[_counts.length - 1];
-            buildInput.vocCorrected = _pdfStringResult.vocCorrected;
-            buildInput.stringVoc = _pdfStringResult.vocCorrected * _counts[0];
-            buildInput.minPanelsPerString = _pdfStringResult.minPanelsPerString;
-            buildInput.maxPanelsPerString = _pdfStringResult.maxPanelsPerString;
-            console.log('[sld/pdf/POST] strings derived by the engine: '
-              + `[${_counts.join('/')}] = ${_modules} modules, `
-              + `${_pdfStringResult.vocCorrected.toFixed(1)} V/module corrected to `
-              + `${_designTempMin} °C, ceiling ${_pdfStringResult.maxPanelsPerString}/string`);
-          } else {
-            console.warn('[sld/pdf/POST] the string derivation did not describe this array '
-              + `([${_counts.join('/')}] vs ${_modules} modules) — the posted values stand.`);
-          }
+          buildInput.stringPanelCounts = [..._counts];
+          buildInput.totalStrings = _counts.length;
+          buildInput.panelsPerString = _counts[0];
+          buildInput.lastStringPanels = _counts[_counts.length - 1];
+          buildInput.vocCorrected = _pdfStringResult.vocCorrected;
+          buildInput.stringVoc = _pdfStringResult.vocCorrected * Math.max(..._counts);
+          buildInput.minPanelsPerString = _pdfStringResult.minPanelsPerString;
+          buildInput.maxPanelsPerString = _pdfStringResult.maxPanelsPerString;
+          console.log(`[sld/pdf/POST] string partition (${_pdfSheet.source}): `
+            + `[${_pdfSheet.perUnit.map(u => u.join('/')).join(' | ')}] = ${_modules} modules on ${_pdfSheet.units} unit(s), `
+            + `${_pdfStringResult.vocCorrected.toFixed(1)} V/module corrected to ${_designTempMin} °C`);
         } catch (e) {
-          console.warn('[sld/pdf/POST] string derivation skipped (non-fatal):',
-            (e as Error)?.message);
+          // The partition stands even if the 690.7 annotation fails; nothing is re-derived.
+          buildInput.stringPanelCounts = [..._pdfSheet.strings];
+          buildInput.totalStrings = _pdfSheet.strings.length;
+          console.warn('[sld/pdf/POST] string annotation skipped (non-fatal):', (e as Error)?.message);
         }
       }
     }
@@ -494,7 +541,10 @@ export async function POST(req: NextRequest) {
                                  && buildInput.stringPanelCounts.length > 0
                                  ? buildInput.stringPanelCounts.map(Number)
                                  : undefined,
-      ...(buildInput.stringingPending === true ? { stringingPending: true } : {}),
+      ...(buildInput.stringingPending === true ? {
+        stringingPending: true,
+        ...(typeof buildInput.stringingPendingLabel === 'string' ? { stringingPendingLabel: buildInput.stringingPendingLabel } : {}),
+      } : {}),
       // No literal module: `pvArrayInputRequired` above refused any request that reached here
       // without these, so a fallback could only ever name a product nobody selected.
       panelModel:              String(buildInput.panelModel ?? (firstPanelSpec ? `${firstPanelSpec.manufacturer} ${firstPanelSpec.model}` : 'PV MODULE — MODEL NOT RECORDED')),

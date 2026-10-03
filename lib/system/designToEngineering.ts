@@ -6,13 +6,23 @@
  * to seed its SystemState — so string count, string sizes, topology, brand,
  * panel, racking and the per-panel string assignment carry over with no re-entry.
  *
- * Pure + dependency-light: only reads equipment-db default lists to pick a
- * sensible inverter id when the project hasn't pinned one.
+ * Pure + dependency-light.
+ *
+ * 🚨 NO DEFAULT INVERTER, AND DESIGN'S CHUNKS ARE NOT A STRING ASSIGNMENT (closure review). This
+ * handed a project nobody had equipped `STRING_INVERTERS[0]` ('se-7600h') — a catalogued id, so
+ * every "no endpoint" guard took it for a choice — and wrote Design Studio's `modulesPerString`
+ * chunks (10 / 10 / 10 / 7 at the studio's default of 10) onto it as the fleet's partition. The
+ * card then showed a SolarEdge SE7600H with a 7.6 kW AC rating on a project where no inverter was
+ * chosen, and the permit route backfilled the same phantom. The inverter is now only one the project
+ * pinned or the design recorded; with none, the handoff carries Design's modules and NO inverter.
+ * A partition is the one string engine's (lib/electrical/canonicalStrings.ts), for that inverter.
  */
 
 import type { DesignElectrical } from '@/types';
 import type { StringConfig } from '@/lib/system-state';
-import { STRING_INVERTERS, MICROINVERTERS } from '@/lib/equipment-db';
+import { STRING_INVERTERS, MICROINVERTERS, getPanelById } from '@/lib/equipment-db';
+import { fleetEntryHasEndpoint } from '@/lib/electrical/canonicalStrings';
+import { fleetUnitsFor } from '@/lib/system/fleetStringWriters';
 import {
   SUB_SYSTEM_KEYS, isSubSystemKey, ensureSubSystemShape, type SubSystemKey, type LegacyScalarConfig,
 } from '@/lib/system/subSystemEquipment';
@@ -20,6 +30,7 @@ import { classifyPanel, effectiveInverterSubKey, type SubSystemPanel } from '@/l
 
 export interface DesignEngineeringHandoff {
   inverterType: 'string' | 'micro' | 'optimizer';
+  /** The pinned or design-recorded inverter — '' when the project has none (no default is chosen). */
   inverterId: string;
   inverterBrand: string;
   mountingId?: string;
@@ -36,6 +47,8 @@ export interface DesignToEngineeringOpts {
   roofType?: string;
   wireGauge?: string;
   wireLength?: number;
+  /** NEC 690.7(A) design low, °C — required to string a pinned PV inverter (permit backfill). */
+  designTempMin?: number;
 }
 
 function defaultInverterId(topology: DesignElectrical['topology']): string {
@@ -114,10 +127,10 @@ export function designElectricalToEngineering(
 
   return {
     inverterType: de.topology,
-    // Precedence: project-pinned inverter > the model the DESIGN recorded > topology default —
-    // each only when it is an inverter of the kind this topology runs on.
+    // Precedence: project-pinned inverter > the model the DESIGN recorded — each only when it is an
+    // inverter of the kind this topology runs on. NEVER a topology default: no inverter ⇒ ''.
     inverterId: (fitsTopology(opts.selectedInverterId, de.topology) ? opts.selectedInverterId : undefined)
-      || designRecordedInverterId(de) || defaultInverterId(de.topology),
+      || designRecordedInverterId(de) || '',
     inverterBrand: inferBrand(de),
     mountingId: de.rackingId,
     optimizerPeripheralId: de.topology === 'optimizer' ? de.optimizerModelId : undefined,
@@ -374,7 +387,47 @@ function permitInverterFromHandoff(
   h: DesignEngineeringHandoff,
   id: string,
   subSystemKey?: SubSystemKey,
-): PermitInverter | null {
+  designTempMin?: number,
+): PermitInverter[] | null {
+  // 🚨 No inverter ⇒ nothing to backfill: the design's modules are not an inverter's strings.
+  if (!fleetEntryHasEndpoint({ inverterId: h.inverterId, type: h.inverterType })) return null;
+  if (h.inverterType !== 'micro') {
+    // A PV inverter's strings are the one string engine's, for THAT inverter over Design's modules —
+    // Design Studio's `modulesPerString` chunks are a display aid, not a partition.
+    const moduleCount = h.strings.reduce((n, s) => n + (Number(s.panelCount) || 0), 0);
+    const t = h.strings[0];
+    if (typeof designTempMin !== 'number' || !t) return null;
+    const r = fleetUnitsFor({
+      inverterId: h.inverterId, inverterType: h.inverterType, optimizerPeripheralId: h.optimizerPeripheralId,
+      moduleCount, panel: getPanelById(String(t.panelId ?? '')) ?? null, designTempMin,
+    });
+    if (!r.units) return null;
+    return r.units.map((counts, u) => {
+      const strings = counts.map((panelCount, j) => ({
+        id: `str-design-${u}-${j}`,
+        label: `String ${j + 1}`,
+        panelCount,
+        panelId: String(t.panelId ?? 'qcells-peak-duo-400'),
+        wireGauge: String(t.wireGauge ?? '#10 AWG THWN-2'),
+        tilt: Number(t.tilt) || 20,
+        azimuth: Number(t.azimuth) || 180,
+        roofType: String((t as any).roofType ?? 'shingle'),
+        mountingSystem: String(t.mountingSystem ?? 'ironridge-xr100'),
+        ...(subSystemKey ? { subSystemKey } : {}),
+      }));
+      return {
+        id: r.units!.length > 1 ? `${id}-u${u}` : id,
+        inverterId: h.inverterId,
+        model: h.inverterId,
+        type: h.inverterType,
+        strings,
+        stringsPerInverter: strings.length,
+        modulesPerString: strings[0]?.panelCount ?? 0,
+        ...(h.optimizerPeripheralId ? { optimizerPeripheralId: h.optimizerPeripheralId } : {}),
+        ...(subSystemKey ? { subSystemKey } : {}),
+      };
+    });
+  }
   const strings = h.strings.map((s, j) => ({
     id: String(s.id ?? `str-design-${j}`),
     label: String(s.label ?? `String ${j + 1}`),
@@ -388,7 +441,7 @@ function permitInverterFromHandoff(
     ...(subSystemKey ? { subSystemKey } : {}),
   })).filter(s => s.panelCount > 0);
   if (strings.length === 0) return null;
-  return {
+  return [{
     id,
     inverterId: h.inverterId,
     model: h.inverterId,
@@ -398,7 +451,7 @@ function permitInverterFromHandoff(
     modulesPerString: h.strings[0]?.panelCount ?? 0,
     ...(h.optimizerPeripheralId ? { optimizerPeripheralId: h.optimizerPeripheralId } : {}),
     ...(subSystemKey ? { subSystemKey } : {}),
-  };
+  }];
 }
 
 /**
@@ -441,8 +494,8 @@ export function designToPermitInverters(
         const subOpts: DesignToEngineeringOpts =
           i === 0 ? opts : { ...opts, selectedInverterId: undefined };
         const h = designElectricalToEngineering(subDe, subOpts);
-        const inv = permitInverterFromHandoff(h, `inv-design-${i}`, b.key);
-        if (inv) out.push(inv);
+        const inv = permitInverterFromHandoff(h, `inv-design-${i}`, b.key, opts.designTempMin);
+        if (inv) out.push(...inv);
       }
       return out.length > 0 ? out : null;
     }
@@ -450,8 +503,7 @@ export function designToPermitInverters(
     // Legacy flat path — byte-identical to the pre-Wave-4 output.
     const h = designElectricalToEngineering(de, opts);
     if (h.strings.length === 0) return null;
-    const inv = permitInverterFromHandoff(h, 'inv-design-0');
-    return inv ? [inv] : null;
+    return permitInverterFromHandoff(h, 'inv-design-0', undefined, opts.designTempMin);
   } catch {
     return null;
   }

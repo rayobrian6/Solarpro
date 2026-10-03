@@ -133,6 +133,8 @@ export interface CanonicalSldProjection {
    * receiving endpoint the routes hand the one string engine (lib/electrical/canonicalStrings.ts).
    */
   dcLimits?: import('@/lib/electrical/dcStringLimits').DcStringLimits | null;
+  /** The project's stored string assignment (endpoint entries only) — see LoadedElectricalProject.fleet. */
+  fleet?: import('@/lib/electrical/canonicalStrings').StoredFleetEntry[];
 }
 
 const NOTHING: CanonicalSldProjection = {
@@ -276,7 +278,7 @@ export async function projectCanonicalArchitecture(
   const recordedMicro = model?.externalInverterId ? getMicroinverterById(model.externalInverterId) : undefined;
   projectPvArray(input, pvArray, tag, recordedMicro?.modulesPerDevice ?? null);
 
-  if (!model?.topology) return { ...NOTHING, pvArray };
+  if (!model?.topology) return { ...NOTHING, pvArray, fleet: loaded?.fleet ?? [] };
 
   // ── 🚨 THE CANONICAL ELECTRICAL MODEL DECIDES THE ARCHITECTURE ────────
   // Not the renderer, and not whatever the equipment picker was last left on. A conflict is
@@ -526,5 +528,6 @@ export async function projectCanonicalArchitecture(
     pvArray,
     batteryCircuit: batteryCircuitOf(model.topology),
     dcLimits: dcLim,
+    fleet: loaded!.fleet ?? [],
   };
 }

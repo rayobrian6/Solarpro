@@ -31,7 +31,7 @@ import { rooftopAmbientAdderC } from '@/lib/nec/rooftopAdder';
 // THE one NEC 240.6(A) ladder. Never Math.ceil(x / 5) * 5 - 55/65/75/85/95 A are not
 // ratings, and this route emitted them onto a degraded E-1 whenever computeSystem threw.
 import { nextStandardOcpd } from '@/lib/electrical/stdSizes';
-import { getInverterById, MICROINVERTERS } from '@/lib/equipment-db';
+import { getInverterById, getPanelById, MICROINVERTERS } from '@/lib/equipment-db';
 import { resolveIntegratedEquipment, planLandingDevice } from '@/lib/equipment/integratedBos';
 import { readProductionMeterFlag } from '@/lib/equipment/currentTransformers';
 import { resolveDesignMetering } from '@/lib/equipment/designMetering';
@@ -56,7 +56,9 @@ import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 import { parseRunId } from '@/lib/computed-multi-system';
 import { combinerBasisIsDecided } from '@/lib/combinerSelection/service';
 import { readStoredCombinerSelection, effectiveCombinerId, isReadableProjectId } from '@/lib/combinerSelection/storedRead';
-import { STRINGING_PENDING } from '@/lib/electrical/canonicalStrings';
+import {
+  STRINGING_PENDING, resolveStringEndpoint, sheetStringPartition, stringModuleFacts, type StoredFleetEntry,
+} from '@/lib/electrical/canonicalStrings';
 
 // ── Wave 3.7 → Wave 5A: LEGACY FALLBACK ARMOR ────────────────────────────────
 // Since Wave 5A the primary hybrid path is `body.sources` (validated by
@@ -115,6 +117,8 @@ export async function POST(req: NextRequest) {
     let _graphBatteryCircuit: { continuousOutputA: number; ocpdA: number } | null = null;
     // The storage's PV input window when the PV lands on it — the receiving endpoint, or null.
     let _canonicalDcLimits: import('@/lib/electrical/dcStringLimits').DcStringLimits | null = null;
+    // The project's STORED string assignment (endpoint entries only) — the card's partition.
+    let _storedFleet: StoredFleetEntry[] = [];
     // 🚨 WHAT THE PAGE ACTUALLY SENT, captured BEFORE anything overwrites it. The architecture
     // projection below mutates `body` in place, so reading `body.topologyType` afterwards reports
     // the override rather than the request — which would make the response claim agreement that
@@ -167,6 +171,7 @@ export async function POST(req: NextRequest) {
         _canonicalCoupling = _proj.coupling;
         _graphBatteryCircuit = _proj.batteryCircuit;
         _canonicalDcLimits = _proj.dcLimits ?? null;
+        _storedFleet = _proj.fleet ?? [];
       } catch (e) {
         console.warn('[sld/POST] service topology unreadable; drawing the legacy service tail', e);
       }
@@ -460,11 +465,20 @@ export async function POST(req: NextRequest) {
     let sldDegraded = false;
 
     const _selectedBrand     = body.selectedBrand      ? String(body.selectedBrand)      : undefined;
-    const _selectedInvId     = body.selectedInverterId  ? String(body.selectedInverterId)  : undefined;
+    // 🚨 THE INVERTER, NOT A BRAND. A posted `selectedBrand` (the old page posted the project's
+    // migration-default 'enphase') or an id the catalogue does not hold is not equipment: it sized a
+    // phantom inverter and drew its strings (review finding — 10/9/9/9 for 'fronius', 19/18 for an
+    // uncatalogued id, on a project with nothing chosen). The endpoint is resolved from a catalogued id.
+    const _selectedInvId     = (body.selectedInverterId ?? body.inverterId) != null
+      && String(body.selectedInverterId ?? body.inverterId).trim()
+      ? String(body.selectedInverterId ?? body.inverterId).trim() : undefined;
+    const _invIdIsEquipment  = resolveStringEndpoint({
+      inverterId: _selectedInvId, inverterType: _bodyTopologyType === 'MICROINVERTER' ? 'micro' : 'string',
+    }).kind !== 'none';
     const _panelId           = body.panelId             ? String(body.panelId)             : undefined;
     const _systemType        = body.systemType          ? String(body.systemType)          : 'roof';
 
-    if (totalModules > 0 && (_selectedBrand || _selectedInvId)) {
+    if (totalModules > 0 && _invIdIsEquipment) {
       try {
         sizingResult = sizeSystemFromBrand({
           systemType:         _systemType as any,
@@ -506,7 +520,8 @@ export async function POST(req: NextRequest) {
       }
     } else {
       sldDegraded = true;
-      console.warn('[SLD B3] No selectedBrand/selectedInverterId in request — SLD layout derived from body only');
+      console.warn('[SLD B3] No catalogued inverter in the request — nothing is sized from a brand'
+        + (_selectedBrand ? ` (posted brand '${_selectedBrand}' ignored)` : ''));
     }
 
     // ── Canonical topology override (Phase 7 Topology Fix) ──────────────────
@@ -621,9 +636,16 @@ export async function POST(req: NextRequest) {
     // stringing pending, and the engine states no strings and no PV AC circuit
     // (lib/electrical/canonicalStrings.ts).
     // ══════════════════════════════════════════════════════════════════
-    const _sldStringsPending = !isMicro
-      && !(_selectedInvId || (body.inverterId != null && String(body.inverterId).trim()) || _selectedBrand)
-      && !(_canonicalCoupling === 'dc-coupled-storage' && _canonicalDcLimits);
+    // The receiving endpoint, by the one rule (lib/electrical/canonicalStrings.ts): a catalogued PV
+    // inverter, the storage's published PV inputs (DC coupled), or nothing — never a brand.
+    const _sldEndpoint = resolveStringEndpoint({
+      inverterId: _selectedInvId,
+      inverterType: isMicro ? 'micro' : isOptimizer ? 'optimizer' : 'string',
+      optimizerPeripheralId: body.optimizerPeripheralId ? String(body.optimizerPeripheralId) : null,
+      coupling: _canonicalCoupling,
+      storageLimits: _canonicalDcLimits,
+    });
+    const _sldStringsPending = !isMicro && _sldEndpoint.kind === 'none';
     if (_sldStringsPending) {
       // A name with no id behind it is not equipment: the sheet says INVERTER NOT SELECTED, never a
       // posted "String Inverter".
@@ -646,15 +668,60 @@ export async function POST(req: NextRequest) {
     // input: collapsing 10/9/9/9 to (first=10, last=9) is what printed 40 modules on a 37-module
     // sheet. The array is carried end to end and the two scalars become its projections.
     let stringPanelCounts: number[] = [];
+    // ══════════════════════════════════════════════════════════════════
+    // 🚨 THE SHEET DRAWS THE CARD'S PARTITION — ONE STRING ENGINE.
+    //
+    // This drew `sizeSystemFromBrand`'s layout (layoutSource=sizingResult): for a Growatt MIN 7600 whose
+    // fleet the picker had strung 8/8/8/7/6 the sheet printed "Strings 4: 10 / 9 / 9 / 9", while the
+    // page posted the BOM a 5-string count (review finding). The partition is now the project's stored
+    // fleet when it is this endpoint's and valid, else the canonical engine's — the same answer the
+    // card, the BOM count and the permit consume (`sheetStringPartition`). A chosen inverter the engine
+    // cannot string is drawn with NO partition and says so.
+    // ══════════════════════════════════════════════════════════════════
+    const _sheet = !isMicro && !_sldStringsPending
+      ? sheetStringPartition({
+          endpoint: _sldEndpoint,
+          moduleCount: totalModules,
+          module: stringModuleFacts(getPanelById(String(body.panelId ?? '')) ?? {
+            voc: panelVoc, vmp: panelVmp, isc: panelIsc, imp: panelImp, watts: panelWatts,
+            tempCoeffVoc: body.panelTempCoeffVoc != null ? Number(body.panelTempCoeffVoc)
+              : (body.tempCoeffVoc != null ? Number(body.tempCoeffVoc) : null),
+          }),
+          designTempMin,
+          fleet: _storedFleet,
+        })
+      : null;
+    const _stringsNotEngineered = _sheet?.source === 'none' ? _sheet.reason : null;
+    if (_stringsNotEngineered) {
+      console.warn(`[sld/POST] STRING ASSIGNMENT NOT ENGINEERED for ${_sldEndpoint.kind === 'pv-inverter' ? _sldEndpoint.label : 'this endpoint'}: `
+        + _stringsNotEngineered + ' — no partition is drawn.');
+    } else if (_sheet) {
+      console.log(`[sld/POST] string partition (${_sheet.source}): [${_sheet.perUnit!.map(u => u.join('/')).join(' | ')}]`
+        + ` on ${_sheet.units} unit(s)`);
+    }
+    // The window the partition is checked against: the chosen inverter's own (all its units), the
+    // storage's (set on the body by the projection) — never the 600 V / 2-MPPT literals below.
+    const _epWindow = _sldEndpoint.kind === 'pv-inverter' || _sldEndpoint.kind === 'storage-dc-input'
+      ? _sldEndpoint.window : null;
+    const _units = _sheet?.units ?? 1;
 
-    if (!isMicro && !_sldStringsPending) {
+    if (!isMicro && !_sldStringsPending && !_stringsNotEngineered) {
       const moduleSpecs = moduleSpecsFromRegistry({
         voc: panelVoc, vmp: panelVmp, isc: panelIsc, imp: panelImp,
         watts: panelWatts, tempCoeffVoc, tempCoeffVmp,
         maxSeriesFuseRating: maxSeriesFuse,
       });
 
-      const inverterSpecs = inverterSpecsFromRegistry({
+      const inverterSpecs = inverterSpecsFromRegistry(_epWindow ? {
+        maxDcVoltage: _epWindow.maxDcVoltage, mpptVoltageMin: _epWindow.mpptVoltageMin,
+        mpptVoltageMax: _epWindow.mpptVoltageMax,
+        mpptChannels: _epWindow.mpptChannels * (_sldEndpoint.kind === 'pv-inverter' ? _units : 1),
+        maxInputCurrent: _epWindow.maxImpPerMpptA ?? undefined,
+        maxParallelStringsPerMppt: _epWindow.maxParallelStringsPerMppt ?? undefined,
+        nominalDcVoltage: _epWindow.nominalDcVoltage ?? undefined,
+        acOutputKw,
+        maxPanelsPerString: _epWindow.maxPanelsPerString ?? undefined,
+      } : {
         maxDcVoltage, mpptVoltageMin, mpptVoltageMax,
         mpptChannels, maxInputCurrent: maxInputCurrentPerMppt,
         maxParallelStringsPerMppt,
@@ -682,6 +749,8 @@ export async function POST(req: NextRequest) {
         designTempMin,
         topology: isOptimizer ? 'optimizer' : 'string',
         optimizerMaxOutputCurrent: optimizerMaxOutputCurrentForSG,
+        // The NEC 690.7 numbers are computed FOR the sheet's partition, not for one of its own.
+        ...(_sheet?.strings ? { configStringPanelCounts: _sheet.strings } : {}),
       });
 
       // Build MPPT allocation label (e.g. "CH1: 3str, CH2: 3str")
@@ -697,37 +766,25 @@ export async function POST(req: NextRequest) {
         .map(st => st.panelsInString)
         .filter((n2): n2 is number => typeof n2 === 'number' && n2 > 0);
 
-      // Phase B3: Override layout-count fields from sizing engine.
-      // generateStringConfig() above is kept for NEC 690.7 Voc/current math.
-      // But the STRING COUNT and PANELS-PER-STRING come from the sizing engine
-      // (the same source the UI uses) when a valid sizingResult is available.
-      if (layoutStrings && layoutStrings.length > 0) {
-        const panelCounts = layoutStrings.map(s => s.panelCount);
-        panelsPerString  = panelCounts[0] ?? panelsPerString;
-        lastStringPanels = panelCounts[panelCounts.length - 1] ?? panelsPerString;
-        stringPanelCounts = panelCounts.filter(
-          (n2): n2 is number => typeof n2 === 'number' && n2 > 0);
-
-        // Rebuild mpptAllocation from sizing engine strings
-        const mpptGroups: Record<number, number> = {};
-        for (const s of layoutStrings) {
-          mpptGroups[s.mpptIndex] = (mpptGroups[s.mpptIndex] ?? 0) + 1;
-        }
-        mpptAllocation = Object.entries(mpptGroups)
-          .sort(([a], [b]) => Number(a) - Number(b))
-          .map(([ch, cnt]) => `CH${Number(ch) + 1}:${cnt}str`)
-          .join(' ');
+      // The partition itself is the sheet's (stored fleet / canonical engine) — never the sizing engine's
+      // `layoutStrings`, which is a different partitioner.
+      if (_sheet?.strings) {
+        stringPanelCounts = [..._sheet.strings];
+        panelsPerString  = stringPanelCounts[0] ?? panelsPerString;
+        lastStringPanels = stringPanelCounts[stringPanelCounts.length - 1] ?? panelsPerString;
       }
     }
 
     // Resolved device count: prefer sizing engine for both string and micro
     const resolvedDeviceCount = isMicro
       ? (layoutMicroCount ?? layoutInverterCount ?? Number(body.deviceCount) ?? totalModules)
-      : (layoutInverterCount ?? Number(body.deviceCount) ?? 1);
+      // A chosen PV inverter: as many units as the partition lands on.
+      : (_sheet?.strings && _sldEndpoint.kind === 'pv-inverter' ? _units
+        : (layoutInverterCount ?? Number(body.deviceCount) ?? 1));
 
-    // Resolved total strings: prefer sizing engine string count
-    const resolvedTotalStrings = !isMicro && !_sldStringsPending
-      ? (layoutStrings ? layoutStrings.length : (stringResult?.totalStrings ?? 1))
+    // Resolved total strings: the sheet's partition (none while stringing is pending / not engineered)
+    const resolvedTotalStrings = !isMicro && !_sldStringsPending && !_stringsNotEngineered
+      ? (_sheet?.strings ? _sheet.strings.length : (stringResult?.totalStrings ?? 1))
       : 0;
 
     // ── Integrated BOS "brains" — THE SAME RESOLVER THE PERMIT SHEET USES ────
@@ -874,6 +931,8 @@ export async function POST(req: NextRequest) {
         // carried the AC conductor of equipment that is not in the design.
         solarCoupling:                 _canonicalCoupling,
         pvEndpointUnresolved:          _sldStringsPending,
+        // A chosen inverter the one string engine cannot string: no strings, and no equal-split fallback.
+        pvStringsNotEngineered:        !!_stringsNotEngineered,
         optimizerMaxOutputCurrent,
         totalPanels:                   totalModules,
         // Pass resolved string count so computeSystem() uses the same
@@ -1197,9 +1256,11 @@ export async function POST(req: NextRequest) {
       branchOcpdAmps:          isMicro ? (Number(body.branchOcpdAmps) || undefined) : undefined,
 
       // String-specific
-      stringDetails:           !isMicro && !_sldStringsPending ? (body.stringDetails ?? undefined) : undefined,
-      // The array is drawn; its stringing is stated as pending — no partition (closure brief §2).
-      ...(_sldStringsPending ? { stringingPending: true } : {}),
+      stringDetails:           !isMicro && !_sldStringsPending && !_stringsNotEngineered ? (body.stringDetails ?? undefined) : undefined,
+      // The array is drawn; its stringing is stated as pending — no partition (closure brief §2) — or,
+      // for a chosen inverter the engine cannot string, as not engineered.
+      ...(_sldStringsPending ? { stringingPending: true }
+        : _stringsNotEngineered ? { stringingPending: true, stringingPendingLabel: 'STRING ASSIGNMENT NOT ENGINEERED' } : {}),
 
       // ComputedSystem.runs — single source of truth for conduit schedule
       runs:                    computedRuns,
@@ -1349,6 +1410,9 @@ export async function POST(req: NextRequest) {
       topology: input.topologyType,
       // Nothing chosen for the strings to land on ⇒ no partition was derived or drawn (closure brief §2).
       stringingPending: _sldStringsPending,
+      // Where the drawn partition came from: the project's stored fleet or the one string engine.
+      partitionSource: _sheet?.source ?? null,
+      stringsNotEngineered: _stringsNotEngineered,
       stringConfig: isMicro ? null : (stringResult ? {
         totalStrings:         resolvedTotalStrings,
         panelsPerString,

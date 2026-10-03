@@ -115,13 +115,17 @@ describe('designElectricalToEngineering', () => {
     // combiner card listed SolarEdge optimizers. Wrong-kind ids are skipped.
     expect(designElectricalToEngineering({ ...baseDE, microModelId: 'enphase-iq8a' },
       { selectedInverterId: 'se-7600h' }).inverterId).toBe('enphase-iq8a');
+    // …and with neither a pin nor a recorded micro there is NO inverter (closure review: no default).
     expect(designElectricalToEngineering({ ...baseDE, microModelId: 'se-7600h' },
-      { selectedInverterId: 'se-7600h' }).inverterId).toBe('enphase-iq8plus');
+      { selectedInverterId: 'se-7600h' }).inverterId).toBe('');
   });
 
-  it('falls back to the topology default only when neither pinned nor recorded model exists', () => {
-    const h = designElectricalToEngineering({ ...baseDE, microModelId: undefined });
-    expect(h.inverterId).toBe('enphase-iq8plus'); // MICROINVERTERS[0]
+  it('🚨 never falls back to a topology default: no pinned or recorded model ⇒ no inverter', () => {
+    // This handed a project nobody had equipped MICROINVERTERS[0] / STRING_INVERTERS[0] ('se-7600h') —
+    // catalogued ids every "no endpoint" guard took for a choice (review finding).
+    expect(designElectricalToEngineering({ ...baseDE, microModelId: undefined }).inverterId).toBe('');
+    expect(designElectricalToEngineering({ ...baseDE, topology: 'string' }).inverterId).toBe('');
+    expect(designElectricalToEngineering({ ...baseDE, topology: 'optimizer', optimizerModelId: 'se-p401' }).inverterId).toBe('');
   });
 });
 
@@ -168,18 +172,22 @@ describe('designToPermitInverters', () => {
   it('builds one valid permit inverter from a design (per-string counts preserved)', () => {
     const de: DesignElectrical = {
       topology: 'optimizer', modulesPerString: 11, rackingId: 'ironridge-xr100',
-      panelId: 'rec-alpha-400w', optimizerModelId: 'se-p401',
+      panelId: 'qcells-peak-duo-400', optimizerModelId: 'se-p401',
       byPanelId: {}, strings: [
         { stringIndex: 0, panelCount: 11, panelIds: [] },
         { stringIndex: 1, panelCount: 11, panelIds: [] },
         { stringIndex: 2, panelCount: 4, panelIds: [] },
       ], deviceCount: 26, generatedAt: '2026-06-28T00:00:00.000Z',
     };
-    const out = designToPermitInverters(de)!;
-    expect(out).toHaveLength(1);
-    expect(out[0].type).toBe('optimizer');
-    expect(out[0].strings.map(s => s.panelCount)).toEqual([11, 11, 4]);
-    expect(out[0].optimizerPeripheralId).toBe('se-p401');
+    // 🚨 No pinned inverter ⇒ nothing to backfill: the design's chunks are not an inverter's strings.
+    expect(designToPermitInverters(de)).toBeNull();
+    // A pinned PV inverter is strung by the one string engine over Design's 26 modules — not 11/11/4.
+    const out = designToPermitInverters(de, { selectedInverterId: 'se-7600h', designTempMin: -10 })!;
+    expect(out.length).toBeGreaterThan(0);
+    expect(out.every(i => i.type === 'optimizer' && i.inverterId === 'se-7600h' && i.optimizerPeripheralId === 'se-p401')).toBe(true);
+    expect(out.flatMap(i => i.strings).reduce((n, s) => n + s.panelCount, 0)).toBe(26);
+    // …and without the project's design low it is not strung at all (no defaulted basis).
+    expect(designToPermitInverters(de, { selectedInverterId: 'se-7600h' })).toBeNull();
   });
 
   it('returns null for an empty design', () => {

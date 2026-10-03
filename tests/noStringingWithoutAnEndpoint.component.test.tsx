@@ -17,6 +17,7 @@ import { buildRaysIntendedJob } from '@/lib/electrical/fixtures/tesla400aTwoGate
 import { evaluateServiceTopology } from '@/lib/electrical/serviceTopology';
 import { applyVia, type ItemEditorContext } from '@/components/engineering/systemConfig/ItemEditor';
 import { InvertersStringsDecisions } from '@/components/engineering/systemConfig/cards/InvertersStringsCard';
+import { FleetRowSummary } from '@/components/engineering/systemConfig/cards/FleetRowSummary';
 
 afterEach(() => { cleanup(); document.body.innerHTML = ''; });
 
@@ -37,6 +38,48 @@ function mountFresh(derivedStrings: number[] = []) {
     <InvertersStringsDecisions {...ctx} interview={interview} coupling={null} pvInverterState="UNDECIDED" />
   </div>);
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// THE FLEET ROW ITSELF — the line that printed "String Inverter · 37 panels · 16.28 kW DC · 2 strings
+// (20/17 panels)". Review finding: the tests above mount the card's decisions, which never drew that
+// line. `FleetRowSummary` IS the page's row summary now (app/engineering/page.tsx renders every fleet
+// row through it), so this renders the production row.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('the Inverters & Strings fleet row on a fresh job', () => {
+  const stored2017 = { inverterId: '', type: 'string', strings: [{ panelCount: 20 }, { panelCount: 17 }] };
+
+  it('an entry with no PV inverter renders "PV inverter not chosen · 37 modules · Stringing pending" — no type, no 20/17', () => {
+    const { container } = render(<FleetRowSummary inv={stored2017} manufacturer={null} model={null}
+      panels={37} kwDc={16.28} designModuleCount={37} />);
+    const row = screen.getByTestId('inv-fleet-row-pending');
+    expect(row.textContent).toContain('PV inverter not chosen');
+    expect(row.textContent).toContain('37 modules');
+    expect(row.textContent).toContain('Stringing pending equipment selection');
+    const text = container.textContent ?? '';
+    expect(text).not.toContain('String Inverter');
+    expect(text).not.toMatch(/20\s*\/\s*17/);
+    expect(text).not.toMatch(/\d+ strings? \(/);
+    expect(text).not.toContain('kW DC');
+    expect(screen.queryByTestId('inv-fleet-row-summary')).toBeNull();
+  });
+
+  it('a micro entry with no device is the same pending state — not a model-less "Microinverter" row', () => {
+    const { container } = render(<FleetRowSummary inv={{ inverterId: '', type: 'micro', strings: [{ panelCount: 37 }] }}
+      panels={37} kwDc={16.28} designModuleCount={37} micro={{ devices: 37, branches: 3 }} />);
+    expect(screen.getByTestId('inv-fleet-row-pending')).toBeTruthy();
+    expect(container.textContent ?? '').not.toContain('Microinverter');
+  });
+
+  it('control: a chosen inverter renders its row as before', () => {
+    render(<FleetRowSummary inv={{ inverterId: 'fronius-primo-8.2', type: 'string', strings: [{ panelCount: 10 }, { panelCount: 10 }] }}
+      manufacturer="Fronius" model="Primo 8.2-1" panels={20} kwDc={8.8} designModuleCount={37} />);
+    const row = screen.getByTestId('inv-fleet-row-summary');
+    expect(row.textContent).toContain('Fronius Primo 8.2-1');
+    expect(row.textContent).toMatch(/String Inverter ·\s*20 panels ·\s*8\.80 kW DC/);
+    expect(row.textContent).toContain('2 strings (10/str)');
+    expect(screen.queryByTestId('inv-fleet-row-pending')).toBeNull();
+  });
+});
 
 describe('a fresh project — Design modules, no PV inverter, no storage', () => {
   it('states 37 modules and "Stringing pending equipment selection", with no partition and no phantom inverter', () => {

@@ -292,8 +292,14 @@ describe('🚨 the page\'s writers obey the rule (source guards on the live line
 
   it('the PANEL COUNT FIX decides from the state it writes, and sizes only a chosen inverter', () => {
     expect(page).toMatch(/setConfig\(prev => prev\.inverters\[0\]\?\.type !== 'micro' \? prev : \(\{/);
-    expect(page).toMatch(/const _pcEngStrings = resizeFleetStrings\(\{/);
+    // The string branch reads the fleet from `prev` (never this callback's stale closure) …
+    expect(page).toMatch(/setConfig\(prev => \{\s*const inv0 = prev\.inverters\[0\];\s*if \(!inv0 \|\| inv0\.type === 'micro'\) return prev;/);
+    expect(page).toMatch(/const eng = resizeFleetStrings\(\{\s*inverter: inv0,/);
     expect(page).not.toMatch(/_pcSizingInput\.selectedBrand/);
+    // … and keeps NO entry beyond the engine's units (a leftover unit held modules Design no longer has).
+    expect(page).not.toMatch(/Math\.max\(prev\.inverters\.length, _pcFinalByInv\.size\)/);
+    // A locked fleet is not proportionally re-scaled into a partition no engine derived.
+    expect(page).not.toMatch(/Math\.round\(\(str\.panelCount \/ _oldTotal\) \* layout\.panelCount\)/);
   });
 
   it('the runtime guard drops an endpoint-less entry instead of handing it to the 1×N re-splitter', () => {
@@ -309,14 +315,63 @@ describe('🚨 the page\'s writers obey the rule (source guards on the live line
   });
 
   it('the page engine and its payloads consume no partition without an endpoint', () => {
-    expect(page).toMatch(/const pvEndpointUnresolved = !dcLim && topology !== 'micro' && !fleet\.some\(inv => fleetEntryHasEndpoint\(inv\)\);/);
+    expect(page).toMatch(/const pvEndpointUnresolved = !dcLim && !fleet\.some\(inv => fleetEntryHasEndpoint\(inv\)\);/);
     expect(page).toMatch(/stringCount:\s+firstInv\?\.type === 'micro' \? 0 : cs\.stringCount,/);
     expect(page).not.toMatch(/: 'String Inverter',/);
     expect(page).not.toMatch(/inverterMaxDcV: invData\?\.maxDcVoltage \|\| 600/);
   });
 
-  it('no phantom inverter row: an endpoint-less entry renders the "choose a PV inverter" state', () => {
+  it('ONE engine on load: no `sizeSystemFromBrand` writer anywhere in the hydration or restored-run paths', () => {
+    // Seed, project load, the Design Studio handoff, the corrupt-layout recovery and the STRING-
+    // DISTRIBUTION HEAL all strung through `sizeSystemFromBrand` (or `selectedBrand`) — a second engine
+    // that disagreed with the canonical one on 41 of 48 inverters (review finding).
+    const loadAt = page.indexOf('const engCfg = seed.synthetic_eng_config;');
+    const load = page.slice(loadAt, page.indexOf('const localKey = `eng-config-${projectId}`;', loadAt));
+    expect(load.length).toBeGreaterThan(1000);
+    expect(load.length).toBeLessThan(60_000);
+    expect(load).not.toMatch(/sizeSystemFromBrand\(/);
+    expect(load).not.toMatch(/_fixInput\.selectedBrand|_hInput\.selectedBrand|selectedBrand: seedBrand/);
+    const rfAt = page.indexOf('let _rfEntries: InverterConfig[] | null = null;');
+    const restored = page.slice(rfAt, page.indexOf('merged.inverters = withoutUnresolvedEntries(merged.inverters).kept;', rfAt));
+    expect(restored.length).toBeGreaterThan(500);
+    expect(restored.length).toBeLessThan(20_000);
+    expect(restored).not.toMatch(/sizeSystemFromBrand\(/);
+    // Every fleet a page writer creates for an inverter comes from the one engine's fleet builder.
+    expect(page.match(/_canonicalFleet\(\{/g)?.length ?? 0).toBeGreaterThanOrEqual(9);
+  });
+
+  it('the design handoff writes no fleet without an inverter, and never Design Studio\'s chunks onto a PV inverter', () => {
+    expect(page).toMatch(/if \(!fleetEntryHasEndpoint\(\{ inverterId: handoff\.inverterId, type: handoff\.inverterType \}\)\) \{\s*patches\.inverters = \[\];/);
+  });
+
+  it('a stored inverter-less entry is dropped BEFORE the staleness gates, and a gate never deletes the fleet key', () => {
+    const drop = page.indexOf('const _preGate = withoutUnresolvedEntries((savedConfig as any).inverters as InverterConfig[]);');
+    expect(drop).toBeGreaterThan(0);
+    const gateAt = page.indexOf('const _pcGate = gateStaleFleetPerSub({');
+    expect(drop).toBeLessThan(gateAt);
+    // …and the drop is WRITTEN back before the gate reads the fleet.
+    expect(page.slice(drop, gateAt)).toMatch(/\(savedConfig as any\)\.inverters = _preGate\.kept;/);
+    expect(page).not.toMatch(/delete \(savedConfig as any\)\.inverters;/);
+    expect(page).toMatch(/\(savedConfig as any\)\.inverters = \[\.\.\._gateKept, \.\.\._gateRestrung\];/);
+  });
+
+  it('"+ String Inv." on a project with no fleet asks for the MODEL first — no catalogue default is added', () => {
+    expect(page).toMatch(/if \(config\.inverters\.length === 0\) \{\s*setPendingInverterAdd\(type\);\s*return;\s*\}/);
+    expect(page).toMatch(/data-testid="pending-inverter-add"/);
+    expect(page).not.toMatch(/const placeholder = newInverter\(type\);/);
+  });
+
+  it('Auto-Apply hands the engine the module facts as published (no −0.27 %/°C, no Imp = Isc stand-in)', () => {
+    const at = page.indexOf('const _autoRes = canonicalStringPartition({');
+    const block = page.slice(at, at + 600);
+    expect(block).toMatch(/module: stringModuleFacts\(firstStrPanel\),/);
+    expect(block).not.toMatch(/-0\.27|imp \?\? firstStrPanel\.isc/);
+  });
+
+  it('no phantom inverter row: every fleet row renders through FleetRowSummary (rendered in the component test)', () => {
     expect(page).toMatch(/if \(!fleetEntryHasEndpoint\(inv\)\) \{\s*return \(\s*<React\.Fragment key=\{inv\.id\}>/);
-    expect(page).toMatch(/data-testid="inv-fleet-row-pending"/);
+    expect(page.match(/<FleetRowSummary\b/g)?.length ?? 0).toBe(2);
+    // The summary line is no longer written inline on the page.
+    expect(page).not.toMatch(/'String \+ Optimizer' : 'String Inverter'\} ·/);
   });
 });

@@ -42,6 +42,7 @@ import { readExternalInverterIdentity } from '@/lib/electrical/inverterIdentity'
 import { electricalRevision } from '@/lib/electrical/revision';
 import type { ServiceTopology } from '@/lib/electrical/serviceTopology';
 import { resolvePvArrayDesign, type PvArrayDesign } from '@/lib/electrical/pvArrayDesign';
+import { storedFleetPartition } from '@/lib/electrical/canonicalStrings';
 
 /**
  * Where each of the model's inputs actually came from on this read — recorded so a diagnostic can
@@ -84,6 +85,13 @@ export interface LoadedElectricalProject {
    * they already take the architecture.
    */
   pvArray: PvArrayDesign;
+  /**
+   * The stored string assignment (`engineering_config.inverters`) of every entry with a receiving
+   * endpoint — the partition the Inverters & Strings card shows. An entry with no PV inverter is not
+   * here (its partition was sized against nothing). Drawing routes draw THIS partition when it is for
+   * the project's endpoint (`sheetStringPartition`, lib/electrical/canonicalStrings.ts).
+   */
+  fleet?: import('@/lib/electrical/canonicalStrings').StoredFleetEntry[];
 }
 
 /** Narrow an unknown JSONB cell to a plain object, tolerating the text form some drivers return. */
@@ -296,7 +304,10 @@ export function composeElectricalProject(
     placedModuleWatts: numOrNull(row.placed_watts),
   });
 
-  return { projectId, model, revision: electricalRevision(model), sources, refreshes, pvArray };
+  return {
+    projectId, model, revision: electricalRevision(model), sources, refreshes, pvArray,
+    fleet: storedFleetPartition(ec?.inverters),
+  };
 }
 
 /**

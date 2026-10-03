@@ -30,7 +30,12 @@ function effectContaining(marker: string): string {
 
 describe('the factory default exists, and is never persisted before hydration', () => {
   it('the factory seed is what this guard is about (control: if it changes, re-read this file)', () => {
-    expect(page).toMatch(/inverters:\s*\[newInverter\('string'\)\]/);
+    // Closure review: the factory fleet is now EMPTY. `[newInverter('string')]` was a catalogued
+    // SE7600H every "no endpoint" guard took for a choice — a load whose stale-count gate deleted the
+    // saved fleet inherited it and strung the array onto it. The guards below still hold for the rest
+    // of the factory config.
+    expect(page).toMatch(/const defaultProject: ProjectConfig = \{[\s\S]{0,1500}?inverters: \[\],/);
+    expect(page).not.toMatch(/inverters:\s*\[newInverter\('string'\)\]/);
   });
 
   it('the autosave returns before its localStorage mirror and its network write until hydrated', () => {

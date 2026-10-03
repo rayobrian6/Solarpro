@@ -11,7 +11,7 @@
 //   5. electricallyNormalizeInverterConfig is idempotent
 //   6. Correctly looks up maxPanelsPerString from brand profiles
 //   7. Falls back to CONSERVATIVE_MAX_PANELS_PER_STRING for unknown inverter IDs
-//   8. repairByEvenSplit when sizing engine is unavailable
+//   8. Repairs through the one string engine only (no even split, no defaulted facts)
 
 import {
   isElectricallyInvalid,
@@ -35,9 +35,10 @@ function makeInv(
   inverterId: string,
   type: InverterConfig['type'],
   strings: Array<{ panelCount: number }>,
+  panelId?: string,
 ): InverterConfig {
   const strConfigs = strings.map((s, i) =>
-    buildStringConfig({ index: i, panelCount: s.panelCount }),
+    buildStringConfig({ index: i, panelCount: s.panelCount, ...(panelId ? { panelId } : {}) }),
   );
   return buildInverterConfig({ inverterId, type, strings: strConfigs });
 }
@@ -142,57 +143,60 @@ describe('isElectricallyInvalid', () => {
 });
 
 // ─── repairElectricallyInvalidInverter ────────────────────────────────────────
+//
+// 🚨 THE REPAIR IS THE ONE STRING ENGINE'S (closure review). It re-strung through `sizeSystemFromBrand`
+// on defaulted facts (49.6 V, −0.27 %/°C, 400 W, −10 °C) and kept only the strings of inverterIndex 0,
+// so a 1 × 37 on an SMA SB 7.7 came back as 10 / 9 — 19 of 37 modules. Now: the entry's own inverter,
+// the string's catalogued module, the caller's design low, one entry per unit, every module kept — or
+// the entry unchanged when no valid layout exists.
+
+const DESIGN_LOW = { designTempMin: -10 };
+const solis44 = () => makeInv('solis-s6-eh1p-5k-us', 'string', [{ panelCount: 44 }], 'qcells-peak-duo-400');
+const total = (invs: InverterConfig[]) => invs.reduce((n, i) => n + i.strings.reduce((m, s) => m + s.panelCount, 0), 0);
 
 describe('repairElectricallyInvalidInverter', () => {
-  it('produces multiple strings for the canonical 1×44 Solis bug', () => {
-    const inv = makeInv('solis-s6-eh1p-5k-us', 'string', [{ panelCount: 44 }]);
+  it('re-strings the canonical 1×44 Solis bug through the engine, across the units it needs, keeping every module', () => {
+    const inv = solis44();
     expect(isElectricallyInvalid(inv)).toBe(true);
-
-    const repaired = repairElectricallyInvalidInverter(inv, { panelWattage: 400 });
-
-    // Must produce more than 1 string
-    expect(repaired.strings.length).toBeGreaterThan(1);
-    // Each string must be within maxPanelsPerString
+    const repaired = repairElectricallyInvalidInverter(inv, DESIGN_LOW);
+    expect(repaired.length).toBeGreaterThan(1);           // 17.6 kW DC on a 7.5 kW-DC-input inverter
+    expect(total(repaired)).toBe(44);                     // nothing dropped (was: inverterIndex 0 only)
     const maxPPS = getMaxPanelsPerString('solis-s6-eh1p-5k-us');
-    for (const str of repaired.strings) {
-      expect(str.panelCount).toBeLessThanOrEqual(maxPPS);
-      expect(str.panelCount).toBeGreaterThan(0);
+    for (const r of repaired) {
+      expect(r.inverterId).toBe('solis-s6-eh1p-5k-us');
+      expect(validateInverterMetadata(r)).toHaveLength(0);
+      for (const str of r.strings) {
+        expect(str.panelCount).toBeLessThanOrEqual(maxPPS);
+        expect(str.panelCount).toBeGreaterThan(0);
+      }
     }
-    // Metadata must be valid after repair
-    const violations = validateInverterMetadata(repaired);
-    expect(violations).toHaveLength(0);
-    // NOTE: The sizing engine distributes panels across multiple inverter units.
-    // repairElectricallyInvalidInverter only repairs the strings for inverterIndex=0,
-    // so the panel count in the repaired inverter may be < the original 44.
-    // The key invariant is: NO string exceeds maxPanelsPerString.
+    expect(new Set(repaired.map(r => r.id)).size).toBe(repaired.length);
+    expect(repaired[0].id).toBe(inv.id);
+  });
+
+  it('without the project\'s design low, or without a catalogued module, nothing is re-strung (no defaulted fact)', () => {
+    const inv = solis44();
+    expect(repairElectricallyInvalidInverter(inv)).toEqual([inv]);
+    const noModule = makeInv('solis-s6-eh1p-5k-us', 'string', [{ panelCount: 44 }]);
+    expect(repairElectricallyInvalidInverter(noModule, DESIGN_LOW)).toEqual([noModule]);
+  });
+
+  it('an inverter the engine cannot string is left as it is — the violation stays visible', () => {
+    // SMA SB 5.0: 10 A operating limit per MPPT, below the module's Imp — no string of it fits an input.
+    const inv = makeInv('sma-sb-5.0', 'string', [{ panelCount: 30 }], 'qcells-peak-duo-400');
+    expect(repairElectricallyInvalidInverter(inv, DESIGN_LOW)).toEqual([inv]);
   });
 
   it('preserves inverterId and type after repair', () => {
-    const inv = makeInv('sma-sb-5.0', 'string', [{ panelCount: 30 }]);
-    const repaired = repairElectricallyInvalidInverter(inv);
-    expect(repaired.inverterId).toBe('sma-sb-5.0');
-    expect(repaired.type).toBe('string');
-  });
-
-  it('resulting config passes isElectricallyInvalid=false after repair', () => {
-    const inv = makeInv('growatt-min-5000tl-xh-us', 'string', [{ panelCount: 44 }]);
-    const repaired = repairElectricallyInvalidInverter(inv, { panelWattage: 400 });
-    expect(isElectricallyInvalid(repaired)).toBe(false);
-  });
-
-  it('is idempotent — repairing an already-valid inverter returns equivalent config', () => {
-    // Build a valid 4-string × 11-panel config
-    const inv = makeInv('solis-s6-eh1p-5k-us', 'string', [
-      { panelCount: 11 }, { panelCount: 11 }, { panelCount: 11 }, { panelCount: 11 },
-    ]);
-    // isElectricallyInvalid should be false — but call repair anyway to test idempotency
-    expect(isElectricallyInvalid(inv)).toBe(false);
-    // Calling repair on a valid inverter doesn't change the layout
-    // (repairElectricallyInvalidInverter doesn't re-check; it's a fix function, not a guard)
-    // So we just verify the metadata is still intact after the call
-    const repaired = repairElectricallyInvalidInverter(inv, { panelWattage: 400 });
-    const violations = validateInverterMetadata(repaired);
-    expect(violations).toHaveLength(0);
+    const inv = makeInv('growatt-min-5000tl-xh-us', 'string', [{ panelCount: 44 }], 'qcells-peak-duo-400');
+    const repaired = repairElectricallyInvalidInverter(inv, DESIGN_LOW);
+    expect(repaired.length).toBeGreaterThan(0);
+    for (const r of repaired) {
+      expect(r.inverterId).toBe('growatt-min-5000tl-xh-us');
+      expect(r.type).toBe('string');
+      expect(isElectricallyInvalid(r)).toBe(false);
+    }
+    expect(total(repaired)).toBe(44);
   });
 });
 
@@ -211,55 +215,43 @@ describe('electricallyNormalizeInverterConfig', () => {
       { panelCount: 11 }, { panelCount: 11 }, { panelCount: 11 }, { panelCount: 11 },
     ]);
     const config = wrapConfig(inv);
-    const result = electricallyNormalizeInverterConfig(config);
+    const result = electricallyNormalizeInverterConfig(config, DESIGN_LOW);
     expect(result.rebuiltCount).toBe(0);
     expect(result.config).toBe(config); // exact same object reference — no copy
   });
 
-  it('repairs a config with a 1×44 Solis violation', () => {
-    const inv = makeInv('solis-s6-eh1p-5k-us', 'string', [{ panelCount: 44 }]);
-    const config = wrapConfig(inv);
-    const result = electricallyNormalizeInverterConfig(config, { panelWattage: 400 });
-
+  it('repairs a config with a 1×44 Solis violation — every module kept, one entry per unit', () => {
+    const config = wrapConfig(solis44());
+    const result = electricallyNormalizeInverterConfig(config, DESIGN_LOW);
     expect(result.rebuiltCount).toBe(1);
-    expect(result.config.inverters).toHaveLength(1);
-
-    const repairedInv = result.config.inverters![0] as InverterConfig;
-    // Must have more than 1 string after repair
-    expect(repairedInv.strings.length).toBeGreaterThan(1);
-    // Each string must respect maxPanelsPerString
-    const maxPPS = getMaxPanelsPerString('solis-s6-eh1p-5k-us');
-    for (const str of repairedInv.strings) {
-      expect(str.panelCount).toBeLessThanOrEqual(maxPPS);
-    }
-    // The repaired config must no longer be flagged as invalid
-    expect(isElectricallyInvalid(repairedInv)).toBe(false);
-    // NOTE: The sizing engine may assign fewer panels to inverterIndex=0 
-    // when the load requires multiple inverters. That is correct behavior.
-    // The test does NOT assert total == 44 for this reason.
+    const invs = result.config.inverters as InverterConfig[];
+    expect(invs.length).toBeGreaterThan(1);
+    expect(total(invs)).toBe(44);
+    for (const r of invs) expect(isElectricallyInvalid(r)).toBe(false);
   });
 
   it('is idempotent — calling twice on an invalid config fixes it on the first call, no-op on second', () => {
-    const inv = makeInv('solis-s6-eh1p-5k-us', 'string', [{ panelCount: 44 }]);
-    const config = wrapConfig(inv);
-
-    const firstPass = electricallyNormalizeInverterConfig(config, { panelWattage: 400 });
+    const config = wrapConfig(solis44());
+    const firstPass = electricallyNormalizeInverterConfig(config, DESIGN_LOW);
     expect(firstPass.rebuiltCount).toBe(1);
-
-    // Second pass on the already-normalized config
-    const secondPass = electricallyNormalizeInverterConfig(firstPass.config, { panelWattage: 400 });
+    const secondPass = electricallyNormalizeInverterConfig(firstPass.config, DESIGN_LOW);
     expect(secondPass.rebuiltCount).toBe(0);
     expect(secondPass.config).toBe(firstPass.config); // no-op: same reference
+  });
+
+  it('a config the engine cannot repair comes back as the same reference (no re-render loop, no invented split)', () => {
+    const config = wrapConfig(solis44());
+    const result = electricallyNormalizeInverterConfig(config); // no design low
+    expect(result.rebuiltCount).toBe(0);
+    expect(result.config).toBe(config);
   });
 
   it('does not repair a micro inverter even with a very large single string', () => {
     const inv = makeInv('enphase-iq8plus', 'micro', [{ panelCount: 44 }]);
     const config = wrapConfig(inv);
-    const result = electricallyNormalizeInverterConfig(config);
-
+    const result = electricallyNormalizeInverterConfig(config, DESIGN_LOW);
     expect(result.rebuiltCount).toBe(0);
     expect(result.config).toBe(config); // no-op
-    // The micro inverter remains unchanged
     expect((result.config.inverters![0] as InverterConfig).strings[0].panelCount).toBe(44);
   });
 
@@ -267,49 +259,31 @@ describe('electricallyNormalizeInverterConfig', () => {
     const validInv = makeInv('solis-s6-eh1p-5k-us', 'string', [
       { panelCount: 11 }, { panelCount: 11 },
     ]);
-    const invalidInv = makeInv('solis-s6-eh1p-5k-us', 'string', [{ panelCount: 44 }]);
-    const config = { inverters: [validInv, invalidInv] };
-
-    const result = electricallyNormalizeInverterConfig(config, { panelWattage: 400 });
-
+    const config = { inverters: [validInv, solis44()] };
+    const result = electricallyNormalizeInverterConfig(config, DESIGN_LOW);
     expect(result.rebuiltCount).toBe(1);
-    expect(result.config.inverters).toHaveLength(2);
-
-    // First inverter stays the same
-    expect((result.config.inverters![0] as InverterConfig).strings).toHaveLength(2);
-    expect((result.config.inverters![0] as InverterConfig).strings[0].panelCount).toBe(11);
-
-    // Second inverter is repaired
-    const repairedInv = result.config.inverters![1] as InverterConfig;
-    expect(repairedInv.strings.length).toBeGreaterThan(1);
-    expect(isElectricallyInvalid(repairedInv)).toBe(false);
+    const invs = result.config.inverters as InverterConfig[];
+    expect(invs[0]).toBe(validInv);
+    expect(total(invs.slice(1))).toBe(44);
+    for (const r of invs.slice(1)) expect(isElectricallyInvalid(r)).toBe(false);
   });
 
   it('log entries capture the before/after string layout', () => {
-    const inv = makeInv('solis-s6-eh1p-5k-us', 'string', [{ panelCount: 44 }]);
-    const config = wrapConfig(inv);
-    const result = electricallyNormalizeInverterConfig(config, { panelWattage: 400 });
-
+    const result = electricallyNormalizeInverterConfig(wrapConfig(solis44()), DESIGN_LOW);
     expect(result.log).toHaveLength(1);
     const entry = result.log[0];
     expect(entry.reason).toBe('rebuilt_invalid_1xN');
     expect(entry.incomingStringLayout).toEqual([44]);
-    // outgoing layout must have multiple strings, each within maxPanelsPerString
     expect(entry.outgoingStringLayout.length).toBeGreaterThan(1);
+    expect(entry.outgoingStringLayout.reduce((a, b) => a + b, 0)).toBe(44);
     const maxPPS = getMaxPanelsPerString('solis-s6-eh1p-5k-us');
-    for (const count of entry.outgoingStringLayout) {
-      expect(count).toBeLessThanOrEqual(maxPPS);
-    }
-    // NOTE: total may be < 44 if the sizing engine distributes load across inverters.
+    for (const count of entry.outgoingStringLayout) expect(count).toBeLessThanOrEqual(maxPPS);
   });
 
   it('resulting inverters all pass validateInverterMetadata after normalization', () => {
-    const inv = makeInv('solis-s6-eh1p-5k-us', 'string', [{ panelCount: 44 }]);
-    const config = wrapConfig(inv);
-    const result = electricallyNormalizeInverterConfig(config, { panelWattage: 400 });
-
-    const repairedInv = result.config.inverters![0] as InverterConfig;
-    const violations = validateInverterMetadata(repairedInv);
-    expect(violations).toHaveLength(0);
+    const result = electricallyNormalizeInverterConfig(wrapConfig(solis44()), DESIGN_LOW);
+    for (const r of result.config.inverters as InverterConfig[]) {
+      expect(validateInverterMetadata(r)).toHaveLength(0);
+    }
   });
 });

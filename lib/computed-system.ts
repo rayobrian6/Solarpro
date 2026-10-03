@@ -501,6 +501,13 @@ export interface ComputedSystemInput {
    * sizing them against a phantom 600 V / 7.6 kW inverter. Ignored for micro and DC-coupled inputs.
    */
   pvEndpointUnresolved?: boolean;
+  /**
+   * 🚨 THE PV INVERTER IS CHOSEN, BUT THE ONE STRING ENGINE FOUND NO VALID STRING LAYOUT FOR IT
+   * (`canonicalStringPartition` → INFEASIBLE / UNRESOLVED). The engine then states no strings and no
+   * DC string run — it does NOT fall back to its own `ceil(total / max)` equal split (a partition no
+   * engine checked). The inverter's AC side stands. Ignored for micro and DC-coupled inputs.
+   */
+  pvStringsNotEngineered?: boolean;
   totalPanels: number;
   // Optional override: when provided, this explicit string count is used
   // instead of recalculating from physics (NEC 690.7 Voc/maxPanelsPerString).
@@ -1116,6 +1123,9 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
   const _isDcCoupled = input.solarCoupling === 'dc-coupled-storage';
   // No PV inverter, no micro, no DC receiving equipment: the PV conversion side does not exist yet.
   const _pvEndpointUnresolved = input.pvEndpointUnresolved === true && !isMicro && !_isDcCoupled;
+  // No string partition, for either reason: nothing chosen, or a chosen inverter the engine cannot string.
+  const _noStringPartition = _pvEndpointUnresolved
+    || (input.pvStringsNotEngineered === true && !isMicro && !_isDcCoupled);
   const topology: TopologyType = _isDcCoupled
     ? 'DC_COUPLED_BATTERY'
     : isMicro
@@ -1264,13 +1274,14 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
   let lastStringPanels = input.totalPanels;
   const strings: StringCalc[] = [];
 
-  if (isString && _pvEndpointUnresolved) {
+  if (isString && _noStringPartition) {
     // 🚨 NO STRINGS WITHOUT AN ENDPOINT. The auto-calculation below sized the array against a 600 V
-    // default nobody chose — the fresh project's 20 / 17 reached the Sizing tab this way.
+    // default nobody chose — the fresh project's 20 / 17 reached the Sizing tab this way. And none for
+    // a chosen inverter the one string engine could not string: the auto-calculation is not a fallback.
     stringCount = 0;
     panelsPerString = 0;
     lastStringPanels = 0;
-    issues.push({
+    issues.push(_pvEndpointUnresolved ? {
       severity: 'warning',
       code: 'PV_ENDPOINT_UNRESOLVED',
       message: 'Stringing pending equipment selection — no PV inverter or DC receiving equipment is chosen, '
@@ -1278,6 +1289,14 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
       necReference: 'NEC 690.7 / 705.12(B)',
       autoFixed: false,
       suggestion: 'Choose a PV inverter, or land the strings on a battery\'s own PV inputs.',
+    } : {
+      severity: 'error',
+      code: 'PV_STRINGS_NOT_ENGINEERED',
+      message: 'String assignment not engineered — the chosen PV inverter has no valid string layout for '
+        + 'this array within its published limits, so no strings are stated.',
+      necReference: 'NEC 690.7 / 690.8',
+      autoFixed: false,
+      suggestion: 'Choose an inverter whose inputs take this module, or change the array.',
     });
   } else if (isString) {
     // v61.7: Honor explicit configStringPanelCounts from config.inverters[].strings.
@@ -2056,7 +2075,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
       true,
       '#10 AWG'
     );
-    if (!_pvEndpointUnresolved) runs.push(makeRunSegment('DC_STRING_RUN', 'DC STRING RUN (PV Wire)', 'PV ARRAY', 'DC DISCONNECT', {
+    if (!_noStringPartition) runs.push(makeRunSegment('DC_STRING_RUN', 'DC STRING RUN (PV Wire)', 'PV ARRAY', 'DC DISCONNECT', {
       sourceTerminal: 'OUT',          // PV string output
       destTerminal:   'LINE',         // DC Disconnect LINE (PV array) side
       conductorCount: stringCount * 2,  // stringCount × DC+ + stringCount × DC-
@@ -2116,7 +2135,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
         // to connect; the strings land on the storage's own PV inputs, which `DC_STRING_RUN` above
         // already carries. Previously this was constructed and then deleted by the SLD renderer's
         // exclusion list — which `lib/plan-set/permit-system-model.ts` never consulted.
-        if (!_isDcCoupled && !_pvEndpointUnresolved) runs.push(makeRunSegment('DC_DISCO_TO_INV_RUN', 'DC DISCO TO INVERTER', 'DC DISCONNECT', 'STRING INVERTER', {
+        if (!_isDcCoupled && !_noStringPartition) runs.push(makeRunSegment('DC_DISCO_TO_INV_RUN', 'DC DISCO TO INVERTER', 'DC DISCONNECT', 'STRING INVERTER', {
           sourceTerminal: 'DISCO_LOAD',   // DC Disconnect LOAD (inverter) side
           destTerminal:   'DC_IN',        // String inverter DC input
           conductorCount: stringCount * 2,  // same bundle as DC_STRING_RUN
@@ -3158,7 +3177,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     // storage's own PV inputs, whose protection is internal to the listed equipment. Quoting one
     // orders hardware the installer will not fit.
     dcDisconnect: (isMicro || _isDcCoupled || _pvEndpointUnresolved) ? 0 : 1,
-    dcOcpd: (isMicro || _isDcCoupled || _pvEndpointUnresolved) ? 0 : stringCount,
+    dcOcpd: (isMicro || _isDcCoupled || _noStringPartition) ? 0 : stringCount,
     // Common
     // 🚨 AND NO AC DISCONNECT OR PRODUCTION METER FOR AN INVERTER THAT IS NOT IN THE DESIGN. These
     // two were unconditional — `acDisconnect: 1` on every system SolarPro has ever quoted.

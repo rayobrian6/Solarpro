@@ -297,3 +297,171 @@ describe('control — Ray\'s DC-coupled job still strings against the Powerwall 
     expect(t).not.toContain('PENDING EQUIPMENT SELECTION');
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// REVIEW FINDINGS — the endpoint is decided by ONE rule on every route, and every consumer draws the
+// card's partition.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** The picker's fleet for `inverterId`, exactly as the page now writes and autosaves it. */
+async function storeChosenFleet(inverterId: string) {
+  const { canonicalFleetEntries } = await import('@/lib/system/fleetStringWriters');
+  const { SOLAR_PANELS } = await import('@/lib/equipment-db');
+  const { getThermalDesignBasis } = await import('@/lib/permit/utils/designTemps');
+  const T = getThermalDesignBasis({ address: '238 N Warwick Ave, Peoria, IL' }).minDesignTempC;
+  const r = canonicalFleetEntries({
+    inverterId, inverterType: 'string', moduleCount: 37, designTempMin: T,
+    panel: SOLAR_PANELS.find(p => p.id === 'panel-fence-ps1')!, stringFields: { panelId: 'panel-fence-ps1' },
+    idPrefix: 'inv-pick',
+  });
+  expect(r.entries, `${inverterId} must be stringable for this fixture`).not.toBeNull();
+  await db.query(`UPDATE projects SET engineering_config = $2 WHERE id = $1`, [FRESH,
+    JSON.stringify({ schemaVersion: 2, selectedBrand: 'enphase', inverters: r.entries })]);
+  return { entries: r.entries!, flat: r.entries!.flatMap(e => e.strings.map(s => s.panelCount)), T };
+}
+
+/** The SVG body the page posts now for a chosen inverter (selectedInverterId + its catalogue window). */
+async function chosenSldBody(inverterId: string, over: Record<string, unknown> = {}) {
+  const { getInverterById } = await import('@/lib/equipment-db');
+  const inv = getInverterById(inverterId)!;
+  return oldPageSldBody({
+    selectedInverterId: inverterId, inverterId, inverterModel: `${inv.manufacturer} ${inv.model}`,
+    inverterManufacturer: inv.manufacturer, inverterMaxDcV: inv.maxDcVoltage, maxDcVoltage: inv.maxDcVoltage,
+    mpptVoltageMin: inv.mpptVoltageMin, mpptVoltageMax: inv.mpptVoltageMax, mpptChannels: inv.mpptChannels,
+    maxInputCurrentPerMppt: inv.maxInputCurrentPerMppt, maxParallelStringsPerMppt: inv.maxParallelStringsPerMppt,
+    acOutputKw: inv.acOutputKw, stringDetails: undefined, stringPanelCounts: undefined, totalStrings: undefined,
+    panelId: 'panel-fence-ps1', ...over,
+  });
+}
+const scheduleStrings = (svg: string): number[] | null => {
+  const m = textOf(svg).match(/Strings\s+(\d+):\s*([\d\s/]+)\s*panels/);
+  return m ? m[2].split('/').map(x => Number(x.trim())) : null;
+};
+
+describe('🚨 the endpoint is a catalogued id or the storage window — never a brand (SLD + PDF)', () => {
+  for (const [label, over] of [
+    ['the old page\'s selectedBrand \'enphase\' (the stored migration default)', { selectedBrand: 'enphase' }],
+    ['a posted selectedBrand \'fronius\'', { selectedBrand: 'fronius' }],
+    ['an inverter id the catalogue does not hold', { inverterId: 'not-in-the-catalogue', selectedInverterId: 'not-in-the-catalogue' }],
+  ] as Array<[string, Record<string, unknown>]>) {
+    it(`SVG: ${label} ⇒ stringing pending, no partition drawn`, async () => {
+      const r = await postSld(oldPageSldBody(over));
+      expect(r.status, JSON.stringify(r.json).slice(0, 300)).toBe(200);
+      expect(r.json.stringingPending).toBe(true);
+      expect(scheduleStrings(r.svg)).toBeNull();
+      expect(textOf(r.svg)).toContain('STRINGING PENDING EQUIPMENT SELECTION');
+    });
+    it(`PDF: ${label} ⇒ stringing pending, no partition drawn`, async () => {
+      const r = await postPdfAsSvg(oldPageSldBody(over));
+      expect(r.status).toBe(200);
+      expect(scheduleStrings(r.svg)).toBeNull();
+      expect(textOf(r.svg)).toContain('PENDING EQUIPMENT SELECTION');
+    });
+  }
+});
+
+describe('🚨 ONE partition: the picker\'s fleet = the SLD "Strings N:" line = the PDF = the BOM string count', () => {
+  for (const inverterId of ['growatt-min-7600tl-xh-us', 'tesla-solar-inverter-7p6k', 'fronius-primo-8.2']) {
+    it(`${inverterId}: card, Diagram, export and BOM state the same strings`, async () => {
+      const { flat, T } = await storeChosenFleet(inverterId);
+      // The Diagram tab (SVG route) draws the stored fleet — not `sizeSystemFromBrand`'s layout.
+      const svg = await postSld(await chosenSldBody(inverterId));
+      expect(svg.status, JSON.stringify(svg.json).slice(0, 300)).toBe(200);
+      expect(svg.json.partitionSource).toBe('fleet');
+      expect(scheduleStrings(svg.svg)).toEqual(flat);
+      expect(svg.json.stringConfig.totalStrings).toBe(flat.length);
+      // The exported PDF, posted the way the page's Export-PDF button posted it (identity only on
+      // inverterSpecs[] — no selectedInverterId), draws the same strings: no false "pending".
+      const pdf = await postPdfAsSvg(await chosenSldBody(inverterId, {
+        selectedInverterId: undefined, inverterId: undefined, inverterSpecs: [{ inverterId }] }));
+      expect(pdf.status).toBe(200);
+      expect(textOf(pdf.svg)).not.toContain('PENDING EQUIPMENT SELECTION');
+      expect(scheduleStrings(pdf.svg)).toEqual(flat);
+      // The page's engine (configStringPanelCounts from the fleet) → the BOM's posted stringCount.
+      const { computeSystem } = await import('@/lib/computed-system');
+      const { resolvePvArrayDesign } = await import('@/lib/electrical/pvArrayDesign');
+      const m = resolvePvArrayDesign({ placedModuleCount: 37, selectedPanelId: 'panel-fence-ps1' }).module!;
+      const { getInverterById } = await import('@/lib/equipment-db');
+      const inv = getInverterById(inverterId)!;
+      const cs = computeSystem({
+        topology: 'string', solarCoupling: null, totalPanels: 37, configStringPanelCounts: flat,
+        panelWatts: m.watts, panelVoc: m.voc, panelIsc: m.isc, panelVmp: m.vmp, panelImp: m.imp,
+        panelTempCoeffVoc: m.tempCoeffVoc, panelTempCoeffIsc: m.tempCoeffIsc, panelMaxSeriesFuse: m.maxSeriesFuseRating,
+        panelModel: m.model, panelManufacturer: m.manufacturer, inverterManufacturer: inv.manufacturer,
+        inverterModel: inv.model, inverterAcKw: inv.acOutputKw, inverterCount: 1, inverterMaxDcV: inv.maxDcVoltage,
+        inverterMpptVmin: inv.mpptVoltageMin, inverterMpptVmax: inv.mpptVoltageMax,
+        inverterMaxInputCurrentPerMppt: inv.maxInputCurrentPerMppt, inverterMpptChannels: inv.mpptChannels,
+        inverterAcCurrentMax: inv.acOutputCurrentMax, inverterModulesPerDevice: 1, inverterBranchLimit: 16,
+        designTempMin: T, ambientTempC: 35, rooftopTempAdderC: 0, runLengths: {}, conduitType: 'EMT',
+        mainPanelAmps: 200, mainPanelBrand: 'Square D', panelBusRating: 200, interconnectionMethod: 'LOAD_SIDE',
+        systemType: 'fence', maxACVoltageDropPct: 2, maxDCVoltageDropPct: 3, batteryIds: [],
+      } as never);
+      expect(cs.stringCount).toBe(flat.length);
+      const bom = await postBom({
+        projectId: FRESH, systemType: 'fence', moduleCount: 37, totalPanels: 37, panelId: 'panel-fence-ps1',
+        panelWatts: 440, systemKw: 16.28, inverterId, stringCount: cs.stringCount, topologyType: 'STRING_INVERTER',
+        mainPanelAmps: 200,
+      });
+      expect(bom.status).toBe(200);
+      expect(bomLines(bom.json).some(l => /stringCount/.test(String(l.derivedFrom ?? '')) && l.quantity === 2 * flat.length))
+        .toBe(true);
+    });
+  }
+
+  it('a stored fleet for ANOTHER model is not drawn for this one — the engine strings the posted inverter', async () => {
+    await storeChosenFleet('fronius-primo-8.2');
+    const r = await postSld(await chosenSldBody('solark-12k-2p'));
+    expect(r.status).toBe(200);
+    expect(r.json.partitionSource).toBe('canonical');
+    const { canonicalStringPartition, resolveStringEndpoint, stringModuleFacts } = await import('@/lib/electrical/canonicalStrings');
+    const { SOLAR_PANELS } = await import('@/lib/equipment-db');
+    const c = canonicalStringPartition({ moduleCount: 37, designTempMin: -23,
+      module: stringModuleFacts(SOLAR_PANELS.find(p => p.id === 'panel-fence-ps1')),
+      endpoint: resolveStringEndpoint({ inverterId: 'solark-12k-2p', inverterType: 'string' }) });
+    expect(c.status).toBe('ENGINEERED');
+    expect(scheduleStrings(r.svg)).toEqual((c as { strings: number[] }).strings);
+  });
+
+  it('a chosen inverter the engine cannot string is drawn with NO partition — not an equal split', async () => {
+    const r = await postSld(await chosenSldBody('sma-sb-7.7'));
+    expect(r.status, JSON.stringify(r.json).slice(0, 300)).toBe(200);
+    expect(r.json.stringsNotEngineered).toMatch(/Imp 10\.28 A exceeds the 10 A operating limit/);
+    expect(scheduleStrings(r.svg)).toBeNull();
+    expect(textOf(r.svg)).toContain('STRING ASSIGNMENT NOT ENGINEERED');
+  });
+});
+
+describe('🚨 the permit route on a fresh Design Studio project — design_electrical present, no inverter', () => {
+  it('backfills NO inverter from Design Studio\'s chunks (it backfilled se-7600h at 10/10/10/7)', async () => {
+    const { assignStrings } = await import('@/lib/stringAssignment');
+    const { buildDesignElectricalBlock } = await import('@/lib/system/designToEngineering');
+    const panels = JSON.parse(placed(37, 440));
+    const sa = assignStrings(panels, { modulesPerString: 10, topology: 'string', modulesPerDevice: 1 } as never);
+    const byPanel: Record<string, number> = {};
+    for (const pid in sa.byPanelId) byPanel[pid] = sa.byPanelId[pid].stringIndex;
+    const de = buildDesignElectricalBlock({ panels, assignmentByPanelId: byPanel, topology: 'string',
+      inverterBrand: 'SolarEdge', modulesPerString: 10, rackingId: 'ironridge-xr100', panelId: 'panel-fence-ps1',
+      deviceCount: sa.deviceCount, generatedAt: '2026-10-03T00:00:00Z' } as never);
+    expect(de.strings.map((s: { panelCount: number }) => s.panelCount)).toEqual([10, 10, 10, 7]);
+    await db.query(`UPDATE layouts SET design_electrical = $2 WHERE project_id = $1`, [FRESH, JSON.stringify(de)]);
+    // The state a fresh project persists now: no fleet entry at all.
+    await db.query(`UPDATE projects SET engineering_config = $2 WHERE id = $1`, [FRESH,
+      JSON.stringify({ schemaVersion: 2, selectedBrand: 'enphase', inverters: [] })]);
+    const { POST } = await import('@/app/api/engineering/permit/route');
+    const { NextRequest } = await import('next/server');
+    const logs: string[] = [];
+    const cap = (...a: unknown[]) => { logs.push(a.map(x => String(x)).join(' ')); };
+    const spies = [vi.spyOn(console, 'log').mockImplementation(cap), vi.spyOn(console, 'warn').mockImplementation(cap)];
+    try {
+      await POST(new NextRequest('http://localhost/api/engineering/permit', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ projectId: FRESH,
+          project: { projectId: FRESH, clientName: 'Fresh', address: '238 N Warwick Ave, Peoria, IL' },
+          system: { totalPanels: 37, inverters: [] } }),
+      }));
+    } finally { spies.forEach(s => s.mockRestore()); }
+    expect(logs.filter(l => l.includes('Backfilled inverters from persisted design'))).toEqual([]);
+    expect(logs.some(l => /design_electrical names no inverter/.test(l))).toBe(true);
+    expect(logs.join('\n')).not.toMatch(/se-7600h/);
+  });
+});

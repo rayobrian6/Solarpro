@@ -83,6 +83,7 @@ import { fetchSiteFeatures } from '@/lib/aerial/siteFeatures';
 import { getNearmapSurfacesCached } from '@/lib/aerial/nearmapCache';
 import { OBSTRUCTION_CLEARANCE_M } from '@/lib/aerial/nearmap';
 import { normalizeToPermitInverters, designToPermitInverters } from '@/lib/system/designToEngineering';
+import { getThermalDesignBasis } from '@/lib/permit/utils/designTemps';
 import { STRINGING_PENDING, withoutUnresolvedEntries } from '@/lib/electrical/canonicalStrings';
 import { getMicroinverterById } from '@/lib/equipment-db';
 // The project's RECORDED combiner — the one server reader every artefact route
@@ -980,7 +981,26 @@ export async function POST(req: NextRequest) {
             const loRows = await sql`SELECT design_electrical FROM layouts WHERE project_id = ${projectId} ORDER BY updated_at DESC LIMIT 1`;
             const de = loRows[0]?.design_electrical as any;
             if (de && Array.isArray(de.strings) && de.strings.length > 0) {
-              derived = designToPermitInverters(de, { selectedInverterId: (project as any).selectedInverter?.id });
+              // 🚨 THE DESIGN'S CHUNKS ARE NOT AN INVERTER'S STRINGS. With no pinned or recorded inverter
+              // this backfilled 'se-7600h' (the topology default) carrying Design Studio's
+              // modulesPerString chunks (10/10/10/7) — a phantom inverter on exactly the state a fresh
+              // project now persists (review finding). `designToPermitInverters` now returns nothing
+              // without an endpoint, and strings a pinned PV inverter through the one string engine on
+              // the project's own cold basis.
+              derived = designToPermitInverters(de, {
+                selectedInverterId: (project as any).selectedInverter?.id,
+                designTempMin: getThermalDesignBasis({
+                  lat: Number.isFinite(Number(project?.lat)) && project?.lat != null ? Number(project.lat) : null,
+                  lng: Number.isFinite(Number(project?.lng)) && project?.lng != null ? Number(project.lng) : null,
+                  state: project?.state ? String(project.state) : null,
+                  address: project?.address ? String(project.address) : null,
+                  designTempMinOverrideC: typeof (project as any)?.designTempMin === 'number' ? (project as any).designTempMin : null,
+                }).minDesignTempC,
+              });
+              if (!derived) {
+                console.log('[permit/POST] design_electrical names no inverter (or none that can be strung) — '
+                  + 'nothing backfilled; Design\'s modules are not an inverter\'s strings.');
+              }
             }
           } catch (deErr) {
             // design_electrical column may not exist yet (migration 096) — non-fatal
