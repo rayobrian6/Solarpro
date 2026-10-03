@@ -103,7 +103,8 @@ describe('[nit] a failed save keeps what the installer typed', () => {
     const end = src.indexOf("from '@/lib/electrical/systemConfigAnswers'");
     expect(end, 'ItemEditor no longer imports the answer writers at all').toBeGreaterThan(0);
     const imports = src.slice(src.lastIndexOf('import {', end), end);
-    expect(imports).toMatch(/\banswerServiceRating\b/);   // the slice really is that import
+    // the slice really is that import (the service writers moved to cards/ServiceControls.tsx)
+    expect(imports).toMatch(/\banswerInterconnection\b/);
     expect(imports).not.toMatch(/\banswerBackup\b/);
     expect(imports).not.toMatch(/\banswerSystemBatteries\b/);
   });

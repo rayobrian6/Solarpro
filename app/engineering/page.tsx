@@ -124,7 +124,9 @@ import { InvertersStringsDecisions } from '@/components/engineering/systemConfig
 // System Config V3 — no questionnaire above the grid: each question in its home card, one dialog,
 // one readiness panel at the bottom (lib/electrical/systemConfigPlacement.ts decides where).
 import { findInterviewItem } from '@/lib/electrical/systemConfigPlacement';
-import { QuestionDialog, applyVia } from '@/components/engineering/systemConfig/ItemEditor';
+import {
+  QuestionDialog, applyVia, guardGraphRead, unreadGraphRefusal,
+} from '@/components/engineering/systemConfig/ItemEditor';
 import { MeterCollarControl, SystemArchitectureControls } from '@/components/engineering/systemConfig/cards/SystemConfigurationControls';
 import { EngineeringReadinessPanel } from '@/components/engineering/systemConfig/EngineeringReadinessPanel';
 import { GuidedStrip, revealHomeCard } from '@/components/engineering/systemConfig/GuidedStrip';
@@ -1212,6 +1214,9 @@ function EngineeringPageInner() {
   // ══════════════════════════════════════════════════════════════════════════
   const [svcTopologyRead, setSvcTopologyRead] =
     useState<'loading' | 'absent' | 'failed' | 'loaded'>('loading');
+  // The read state NOW, for the write path (`guardGraphRead`): a dialog's closure can outlive a render.
+  const svcTopologyReadRef = useRef(svcTopologyRead);
+  svcTopologyReadRef.current = svcTopologyRead;
   /** The canonical electrical model, composed from the stores that own its parts. */
   const [electrical, setElectrical] = useState<ElectricalProjectModel | null>(null);
   // 🚨 THE PROJECT'S RECORDED COMBINER SELECTION — the installer's answer, read
@@ -9828,6 +9833,11 @@ function EngineeringPageInner() {
       }
       logDecision('Service', what, 'manual');
       setSldSvg(null);              // the drawing depicts a service this project no longer has
+      // 🚨 THE GRAPH IN HAND IS STALE FROM HERE until the re-read lands. Marked in the same batch that
+      // clears `_svcSaving`, so no editor is enabled over the old graph in between — a second answer
+      // computed from it would PUT over the first (a lost update).
+      svcTopologyReadRef.current = 'loading';
+      setSvcTopologyRead('loading');
       setSvcTopologyReloadKey(k => k + 1);
       return true;
     } catch (e: unknown) {
@@ -9943,8 +9953,12 @@ function EngineeringPageInner() {
    * Write an interview answer to the graph, and keep the legacy config mirror of the PRIMARY panel in
    * step so an autosave cannot write a stale scalar back over the answer. The aggregate service rating
    * is never mirrored into the panel-main scalar.
+   *
+   * 🚨 REFUSED WHILE THE GRAPH IS UNREAD (`guardGraphRead`): every card, dialog, the guided strip and
+   * the readiness panel write through here, so none of them can PUT an answer computed from a graph
+   * that failed to load — or from the one still being re-read after the previous answer.
    */
-  const writeInterviewAnswer = async (next: NonNullable<typeof svcTopology>, what: string) => {
+  const writeInterviewAnswer = guardGraphRead(async (next: NonNullable<typeof svcTopology>, what: string) => {
     const ok = await writeTopology(next, what);
     if (ok) {
       const p0 = next.panels[0];
@@ -9960,7 +9974,7 @@ function EngineeringPageInner() {
       if (Object.keys(patch).length > 0) updateConfig(patch);
     }
     return ok;
-  };
+  }, () => svcTopologyReadRef.current, why => setInterviewRefusal(why));
 
   // ══════════════════════════════════════════════════════════════════════════
   // SYSTEM CONFIG V3 — ONE WAY TO ASK ANY QUESTION, FROM ANY CARD.
@@ -9989,7 +10003,10 @@ function EngineeringPageInner() {
       storageLabel: interviewEquipment.storage?.label ?? null,
       totalUnits: interviewEquipment.storage?.count ?? 0,
     },
-    busy: _svcSaving || !!_archResolving,
+    // Disabled while the graph is unread or being re-read after a write — the same rule the write path
+    // enforces, so no editor offers an answer that would be computed from a stale graph.
+    busy: _svcSaving || !!_archResolving || unreadGraphRefusal(svcTopologyRead) !== null,
+    graphRead: svcTopologyRead,
     apply: applyInterviewAnswer,
     onRecordCoupling: (coupling: string) => resolveElectricalArchitecture(coupling),
   };
@@ -11569,7 +11586,8 @@ function EngineeringPageInner() {
                         written to the service model through `apply` (the one write path, which mirrors
                         the first panel into the legacy config). 🚨 No `config.mainPanelAmps ?? 200`
                         "Max PV" strip: the 120% verdict is the engine's per-panel check, and a FAIL
-                        offers derate-main / upgrade-bus as edits of THAT panel. */}
+                        lists derate-main / upgrade-bus as proposed work, never written as THAT
+                        panel's rating. */}
                     <div className="eng-panel scroll-mt-4" id="sc-card-service">
                       <ExistingElectricalServiceCard {...interviewEditorContext} interview={systemConfigInterview}
                                                      error={_svcError} graphRead={svcTopologyRead} />

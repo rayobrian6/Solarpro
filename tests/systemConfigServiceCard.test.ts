@@ -19,10 +19,10 @@ import { buildRaysIntendedJob } from '@/lib/electrical/fixtures/tesla400aTwoGate
 import { buildNormalResidence200A } from '@/lib/electrical/fixtures/normalResidence200a';
 import { evaluateServiceTopology, type ServiceTopology } from '@/lib/electrical/serviceTopology';
 import {
-  BUSBAR_RATINGS, MAIN_BREAKER_RATINGS, busbarRemedies, existingNeedField, existingServiceNeeds,
-  panelBusbarCheck, serviceCardLayout, withRecorded,
+  BUSBAR_RATINGS, MAIN_BREAKER_RATINGS, busbarRemedies, existingNeedField, existingRecordedFacts, existingServiceNeeds,
+  panelBusbarCheck, panelRecordedFacts, serviceCardLayout, withRecorded, withoutPresetPanelRatings,
 } from '@/lib/electrical/systemConfigServiceCard';
-import { homeOf } from '@/lib/electrical/systemConfigPlacement';
+import { allInterviewItems, homeOf } from '@/lib/electrical/systemConfigPlacement';
 
 const ok = (r: AnswerResult): ServiceTopology => { if (r.ok === false) throw new Error(r.refused); return r.topology; };
 const pv20 = resolvePvArrayDesign({ placedModuleCount: 20, selectedPanelId: 'panel-std440' });
@@ -164,7 +164,9 @@ describe('the 120% rule on THIS panel — the engine\'s verdict, and its remedie
     expect(r.upgradeBus).toEqual([{ amps: 225, allowsA: 70 }, { amps: 320, allowsA: 184 }, { amps: 400, allowsA: 280 }]);
   });
 
-  it('…and writing a remedy through answerPanel is what turns the engine\'s verdict to PASS', () => {
+  // The card lists these as proposed work and never writes them; once the work is done, the
+  // installed rating recorded on the panel is what the engine re-checks — and the allowances agree.
+  it('…and once the remedy is installed and recorded through answerPanel, the engine\'s verdict is PASS', () => {
     const derated = ok(answerPanel(failing, 'msp-1', { mainBreakerA: 175 }));
     const c = panelBusbarCheck(derated, evaluateServiceTopology(derated).checks, 'msp-1');
     expect(c?.conclusion).toBe('PASS');
@@ -192,5 +194,82 @@ describe('rating ladders', () => {
     expect(withRecorded(BUSBAR_RATINGS, 180)).toContain(180);
     expect(withRecorded(BUSBAR_RATINGS, 200)).toEqual([...BUSBAR_RATINGS]);
     expect(withRecorded(BUSBAR_RATINGS, null)).toEqual([...BUSBAR_RATINGS]);
+  });
+});
+
+describe('never a preset where a reading belongs, and never a silent discard', () => {
+  it('withoutPresetPanelRatings: the panel the preset built keeps its place and label, but main / bus are asked', () => {
+    const r = withoutPresetPanelRatings(answerServiceRating(null, 200));
+    const t = ok(r);
+    expect(t.panels.map(p => [p.label, p.mainBreakerA, p.busbarRatingA])).toEqual([['MSP #1', null, null]]);
+    expect(r.ok && r.did).toBe('200 A service with one 200 A main panel; MSP #1 — main breaker and busbar to be read off the panel label');
+    // Read back, the row is a question — not "Installer entered".
+    expect(serviceCardLayout(interviewOf(t), t).panels[0].item).toMatchObject({ state: 'needs-answer', source: 'Not established' });
+  });
+
+  it('…a distribution rebuild likewise; a refusal and a graph with no panels pass through untouched', () => {
+    const two = ok(withoutPresetPanelRatings(answerDistribution(ok(answerServiceRating(null, 400)), 'two-main-panels')));
+    expect(two.branches.map(b => b.ratedAmps)).toEqual([200, 200]);
+    expect(two.panels.map(p => [p.mainBreakerA, p.busbarRatingA])).toEqual([[null, null], [null, null]]);
+    const refused = answerDistribution(buildRaysIntendedJob().topology, 'one-main-panel');
+    expect(refused.ok).toBe(false);
+    expect(withoutPresetPanelRatings(refused)).toBe(refused);
+    const bare = answerServiceRating(null, 400);
+    expect(withoutPresetPanelRatings(bare)).toBe(bare);
+  });
+
+  it('panelRecordedFacts: one line per panel that has anything recorded', () => {
+    const t = ok(answerPanel(ok(answerDistribution(ok(answerServiceRating(null, 400)), 'two-main-panels')), 'msp-2',
+      { mainBreakerA: null, busbarRatingA: null, manufacturer: 'Eaton' }));
+    expect(panelRecordedFacts(t)).toEqual(['MSP #1: Main 200 A · Bus 200 A', 'MSP #2: Eaton']);
+    expect(panelRecordedFacts(ok(withoutPresetPanelRatings(answerServiceRating(null, 200))))).toEqual([]);
+    expect(panelRecordedFacts(null)).toEqual([]);
+  });
+
+  it('existingRecordedFacts: what a site visit read — empty when nothing was', () => {
+    const rays = buildRaysIntendedJob().topology;
+    expect(existingRecordedFacts(rays.service.existingEquipment)).toEqual(['Eaton']);
+    const read = ok(answerExistingService(rays, { existing: true, sccrA: 22_000, verified: true }));
+    expect(existingRecordedFacts(read.service.existingEquipment)).toEqual(['Eaton', '22 kA AIC', 'read on site']);
+    expect(existingRecordedFacts(ok(answerExistingService(ok(answerServiceRating(null, 200)), { existing: true }))
+      .service.existingEquipment)).toEqual([]);
+    expect(existingRecordedFacts(null)).toEqual([]);
+  });
+});
+
+describe('a split the rating no longer asks about is never stranded', () => {
+  const two400 = () => ok(answerDistribution(ok(answerServiceRating(null, 400)), 'two-main-panels'));
+
+  it('400 A → 200 A with two MSPs: the distribution stays, FAILS in the engine\'s own words, and offers one panel', () => {
+    const t = ok(answerServiceRating(two400(), 200));
+    const iv = interviewOf(t);
+    expect(allInterviewItems(iv).find(i => i.id === 'service.distribution')).toBeUndefined();   // no longer asked
+    const branchSum = iv.evaluation!.checks.find(c => c.id === 'service.branch-sum')!;
+    expect(branchSum.conclusion).toBe('FAIL');
+    const d = serviceCardLayout(iv, t).distribution!;
+    expect(d).toMatchObject({
+      id: 'service.distribution', state: 'fails', value: null, why: branchSum.detail, answer: '2 main panels (200 A + 200 A)',
+    });
+    expect(d.options).toEqual([{ value: 'one-main-panel', label: 'One 200 A main panel' }]);
+  });
+
+  it('a 400 A single branch left on a 200 A service is stranded too (one branch, but it FAILS the rating)', () => {
+    const t = ok(answerServiceRating(ok(answerDistribution(ok(answerServiceRating(null, 400)), 'one-main-panel')), 200));
+    expect(serviceCardLayout(interviewOf(t), t).distribution).toMatchObject({ state: 'fails', answer: 'One 400 A main panel' });
+  });
+
+  it('the asked question on a split that no longer fits (two 200 A on 320 A) FAILS with nothing pressed', () => {
+    const t = ok(answerServiceRating(two400(), 320));
+    const d = serviceCardLayout(interviewOf(t), t).distribution!;
+    expect(d.state).toBe('fails');
+    expect(d.value).toBeNull();
+    expect(d.options?.map(o => o.value)).toEqual(['one-main-panel', 'two-main-panels', 'custom']);
+  });
+
+  it('a plain 200 A house and a fitting 400 A split are untouched', () => {
+    const h = ok(answerServiceRating(null, 200));
+    expect(serviceCardLayout(interviewOf(h), h).distribution).toBeNull();
+    const t = two400();
+    expect(serviceCardLayout(interviewOf(t), t).distribution).toMatchObject({ state: 'answered', value: 'two-main-panels' });
   });
 });

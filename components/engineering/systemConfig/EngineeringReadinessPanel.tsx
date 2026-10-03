@@ -79,6 +79,7 @@ export function EngineeringReadinessPanel(props: EngineeringReadinessPanelProps)
   const ctx = {
     topology: props.topology, pvArray: props.pvArray, derivedStrings: props.derivedStrings,
     equipment: props.equipment, busy: props.busy, apply: props.apply, onRecordCoupling: props.onRecordCoupling,
+    graphRead: props.graphRead,
   };
 
   return (

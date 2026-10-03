@@ -13,7 +13,10 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import type { InterviewItem, SystemConfigInterview } from '@/lib/electrical/systemConfigInterview';
-import type { PanelBoard, ServiceTopology, TopologyCheck } from '@/lib/electrical/serviceTopology';
+import type {
+  ExistingServiceEquipment, PanelBoard, ServiceTopology, TopologyCheck,
+} from '@/lib/electrical/serviceTopology';
+import type { AnswerResult } from '@/lib/electrical/systemConfigAnswers';
 import { NEC_STANDARD_OCPD } from '@/lib/electrical/stdSizes';
 import { maxLoadSideBackfeedA } from '@/lib/nec/rule705_12';
 import { allInterviewItems } from '@/lib/electrical/systemConfigPlacement';
@@ -51,7 +54,11 @@ export function withRecorded(ladder: readonly number[], recorded: number | null 
 export interface ServiceCardLayout {
   rating: InterviewItem | null;
   system: InterviewItem | null;
-  /** Only when the interview asks it (a service large enough to be split). */
+  /**
+   * When the interview asks it (a service large enough to be split) — and ALSO when a split is
+   * recorded that the rating no longer asks about (400 A → 200 A with two MSPs still on it), so the
+   * card can collapse it instead of stranding it. See `strandedDistribution`.
+   */
   distribution: InterviewItem | null;
   /** One per panelboard on the graph, in the graph's order. */
   panels: Array<{ panel: PanelBoard; item: InterviewItem | null }>;
@@ -65,21 +72,119 @@ export interface ServiceCardLayout {
 
 /** What the Existing Electrical Service card shows, read from the LIVE interview and the graph. */
 export function serviceCardLayout(
-  interview: Pick<SystemConfigInterview, 'sections'>, t: ServiceTopology | null,
+  interview: Pick<SystemConfigInterview, 'sections'> & Partial<Pick<SystemConfigInterview, 'evaluation'>>,
+  t: ServiceTopology | null,
 ): ServiceCardLayout {
   const all = allInterviewItems(interview);
   const byId = (id: string) => all.find(i => i.id === id) ?? null;
   const panels = (t?.panels ?? []).map(panel => ({ panel, item: byId(`service.panel.${panel.id}`) }));
+  const branchSum = branchSumCheck(interview.evaluation?.checks);
+  const asked = byId('service.distribution');
   return {
     rating: byId('service.rating'),
     system: byId('service.system'),
-    distribution: byId('service.distribution'),
+    // 🚨 A recorded split that no longer fits the rating is not "answered": no option is pressed, so
+    // re-choosing the one that is recorded by count (two panels on a 320 A service) is not a no-op.
+    distribution: asked
+      ? (branchSum?.conclusion === 'FAIL' ? { ...asked, state: 'fails', value: null, why: branchSum.detail } : asked)
+      : strandedDistribution(t, branchSum),
     panels,
     multiPanel: panels.length > 1,
     faultCurrent: byId('service.fault-current'),
     existing: byId('service.existing'),
     existingNeeds: existingServiceNeeds(interview),
   };
+}
+
+/** The engine's verdict on whether the service's branches fit its rating — read, never recomputed. */
+function branchSumCheck(checks: ReadonlyArray<TopologyCheck> | null | undefined): TopologyCheck | null {
+  return checks?.find(c => c.id === 'service.branch-sum') ?? null;
+}
+
+/**
+ * The distribution question for a split the rating no longer asks about.
+ *
+ * The interview asks how a service is distributed only above 225 A. Lower a 400 A service with two
+ * 200 A MSPs to 200 A and the question disappears while both MSPs stay — the engine FAILS the branch
+ * sum and the card had no control left to collapse them. So whenever the graph has more than one
+ * branch, or its branches FAIL the rating, the card keeps offering "One N A main panel". No option
+ * reads as pressed: the recorded split is stated as the answer, and the engine's verdict as the why.
+ */
+export function strandedDistribution(t: ServiceTopology | null, branchSum: TopologyCheck | null): InterviewItem | null {
+  if (!t || t.service.ratedAmps === null) return null;
+  const fails = branchSum?.conclusion === 'FAIL';
+  if (t.branches.length < 2 && !fails) return null;
+  const rated = t.service.ratedAmps;
+  const n = t.branches.length;
+  return {
+    id: 'service.distribution',
+    section: 'service',
+    question: `How is the ${rated} A service distributed?`,
+    state: fails ? 'fails' : 'answered',
+    answer: n === 1 ? `One ${t.branches[0].ratedAmps} A main panel`
+      : `${n} main panels (${t.branches.map(b => `${b.ratedAmps} A`).join(' + ')})`,
+    source: 'Installer entered',
+    options: [{ value: 'one-main-panel', label: `One ${rated} A main panel` }],
+    value: null,
+    ...(fails && branchSum ? { why: branchSum.detail } : {}),
+    owner: 'Installer',
+    blocks: ['busbar checks', 'backup', 'SLD'],
+  };
+}
+
+// ── Never a preset where a reading belongs ──────────────────────────────────
+
+/**
+ * The service built from a rating or a distribution, WITHOUT the preset panel ratings.
+ *
+ * `buildServiceFromPreset` gives each new main panel main = bus = its branch rating. Those are facts
+ * read off the panel's label, not consequences of the service rating: a 200 A service can have a
+ * 225 A bus, and NEC 705.12(B) allows 70 A on that bus where it allows 40 A on a 200 A one. Written
+ * as presets they read back as "Installer entered" and the 120% check ran on a busbar nobody had
+ * entered. So the card leaves them blank and asks for them (the panel row is a needs-answer item
+ * until both are read). A refusal passes through untouched.
+ */
+export function withoutPresetPanelRatings(r: AnswerResult): AnswerResult {
+  if (r.ok === false || r.topology.panels.length === 0) return r;
+  const panels = r.topology.panels.map(p => ({ ...p, mainBreakerA: null, busbarRatingA: null }));
+  const head = r.did.split(';')[0].trim();
+  return {
+    ok: true,
+    topology: { ...r.topology, panels },
+    did: `${head}; ${panels.map(p => p.label).join(', ')} — main breaker and busbar to be read off the panel label`,
+  };
+}
+
+/**
+ * What the installer has recorded on the panels — what a rebuild of the distribution would discard.
+ * One line per panel that has anything: "MSP #1: Main 200 A · Bus 225 A · Eaton".
+ */
+export function panelRecordedFacts(t: ServiceTopology | null): string[] {
+  return (t?.panels ?? []).flatMap(p => {
+    const facts = [
+      p.mainBreakerA != null ? `Main ${p.mainBreakerA} A` : null,
+      p.busbarRatingA != null ? `Bus ${p.busbarRatingA} A` : null,
+      p.manufacturer ? p.manufacturer : null,
+      p.sccrA != null ? `${p.sccrA / 1000} kA` : null,
+    ].filter((f): f is string => f !== null);
+    return facts.length > 0 ? [`${p.label}: ${facts.join(' · ')}`] : [];
+  });
+}
+
+/**
+ * What was read off an existing service assembly — what declaring it "new" would discard. Empty ⇒
+ * nothing recorded, so there is nothing to lose.
+ */
+export function existingRecordedFacts(ex: ExistingServiceEquipment | null | undefined): string[] {
+  if (!ex) return [];
+  return [
+    ex.manufacturer,
+    ex.catalogNumber,
+    ex.mainArrangement ? `main: ${ex.mainArrangement}` : null,
+    ex.feederArrangement ? `feeders: ${ex.feederArrangement}` : null,
+    ex.sccrA != null ? `${ex.sccrA / 1000} kA AIC` : null,
+    ex.verified ? 'read on site' : null,
+  ].filter((f): f is string => !!f);
 }
 
 /** The `engineering.needs.service.existingEquipment.*` items, in the interview's order. */
@@ -131,11 +236,17 @@ export interface BusbarRemedies {
 
 /**
  * The 120% REMEDIES for a panel whose busbar check FAILS — what used to be the MAIN_BREAKER_DERATE /
- * PANEL_UPGRADE "interconnection methods". They are not ways to connect; they change THIS panel's
- * main breaker or busbar, written through `answerPanel`, after which the engine re-evaluates. Each
- * option states the allowance it would give by the one 705.12(B) formula; whether that is enough is
- * the engine's verdict on the next evaluation, not this list's. Offered only on a FAIL, and only when
- * both of the panel's ratings are recorded (a remedy for a figure nobody entered is a guess).
+ * PANEL_UPGRADE "interconnection methods". They are not ways to connect, and they are PROPOSED WORK,
+ * not readings: a derate means buying and swapping a breaker (and a load calculation showing the
+ * panel's load still fits it); a busbar upgrade means a different panelboard. Each option states the
+ * allowance it would give by the one 705.12(B) formula.
+ *
+ * 🚨 NEVER WRITTEN AS THE PANEL'S RATING. Writing "175 A" into `mainBreakerA` would erase the fact
+ * that a 200 A main is installed, turn the FAIL into a PASS and record nothing that says a breaker
+ * must be bought — the graph has no place for proposed work yet. The card lists these as proposals;
+ * the installer records the panel's rating once the work is actually done. Offered only on a FAIL,
+ * and only when both of the panel's ratings are recorded (a remedy for a figure nobody entered is a
+ * guess).
  */
 export function busbarRemedies(panel: PanelBoard, check: TopologyCheck | null): BusbarRemedies | null {
   if (!check || check.conclusion !== 'FAIL') return null;

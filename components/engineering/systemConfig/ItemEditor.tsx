@@ -24,14 +24,12 @@
 import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { ServiceTopology, SolarCoupling, BackupDomain } from '@/lib/electrical/serviceTopology';
-import { SERVICE_PHASES, servicePhaseInfo } from '@/lib/electrical/serviceTopology';
 import type { PvArrayDesign } from '@/lib/electrical/pvArrayDesign';
 import type { FactSource, InterviewItem } from '@/lib/electrical/systemConfigInterview';
 import {
-  answerServiceRating, answerElectricalSystem, answerDistribution, answerPanel,
   answerStorageLanding, answerSystemsArrangement, answerInterconnection,
   answerIsolationRequired, answerIsolationArrangement, answerIsolationAccepted, answerPvLanding,
-  answerAvailableFaultCurrent, answerExistingService, type AnswerResult,
+  type AnswerResult,
 } from '@/lib/electrical/systemConfigAnswers';
 import {
   DISCONNECT_ITEM_PREFIX, METER_COLLAR_ITEM_ID, UTILITY_ITEM_PREFIX, disconnectRoleOf,
@@ -43,14 +41,13 @@ import { UtilityDisconnectsEditor } from '@/components/engineering/systemConfig/
 import { SystemEquipmentEditor, type SystemEquipmentSelection } from '@/components/engineering/systemConfig/SystemEquipmentEditor';
 import { LoadAnalysisEditor } from '@/components/engineering/systemConfig/LoadAnalysisEditor';
 import { ExistingServiceVerifyForm } from '@/components/engineering/systemConfig/cards/ExistingServiceVerifyForm';
+import {
+  DistributionControl, ElectricalSystemSelect, ExistingServiceLine, FaultCurrentRow, PanelRow, ServiceRatingSelect,
+} from '@/components/engineering/systemConfig/cards/ServiceControls';
 import { EXISTING_SERVICE_NEED_PREFIX, existingNeedField } from '@/lib/electrical/systemConfigServiceCard';
 import { StringAssignmentEditor } from '@/components/engineering/systemConfig/StringAssignmentEditor';
 
 export type { SystemEquipmentSelection };
-
-const SERVICE_RATINGS = [100, 125, 150, 200, 225, 320, 400, 600, 800];
-const PANEL_RATINGS = [100, 125, 150, 200, 225, 320, 400];
-const SYSTEMS: Array<[string, string]> = SERVICE_PHASES.map(ph => [ph, servicePhaseInfo(ph).label]);
 
 const box = 'rounded bg-slate-800 px-2 py-1 text-xs text-slate-100 border border-slate-700';
 
@@ -61,6 +58,42 @@ const box = 'rounded bg-slate-800 px-2 py-1 text-xs text-slate-100 border border
  * clears what the installer typed on true alone, so a failed write never throws the answer away.
  */
 export type ApplyAnswer = (r: AnswerResult) => Promise<boolean>;
+
+/** The page's read of the service graph (`svcTopologyRead`). */
+export type GraphRead = 'loading' | 'absent' | 'failed' | 'loaded';
+
+/**
+ * Why nothing may be written over the graph in this read state — null ⇔ an answer may be written.
+ *
+ * 🚨 A NULL GRAPH WHOSE READ FAILED IS NOT "NO SERVICE YET", and a graph being re-read after a write
+ * is not the stored one. An answer is computed FROM the graph in hand; written while the read is
+ * loading or failed, its PUT replaces a stored graph nobody could see (Ray's 400 A two-gateway job,
+ * overwritten by a fresh 200 A one-panel graph), or the previous answer still on its way back.
+ */
+export function unreadGraphRefusal(read: GraphRead | null | undefined): string | null {
+  if (read === 'failed') {
+    return 'The service could not be read. Nothing is written over it until it can be — reload to try again.';
+  }
+  if (read === 'loading') return 'The service is being read. Answer again once it has loaded.';
+  return null;
+}
+
+/**
+ * The page's write, refused while the graph is unread. It wraps the ONE write path
+ * (`writeInterviewAnswer`), so every caller — the cards, the question dialog, the guided strip,
+ * [Answer Next], Review Engineering — gets the same guard, whatever its own UI does.
+ */
+export function guardGraphRead(
+  onWrite: (next: ServiceTopology, what: string) => Promise<boolean>,
+  readState: () => GraphRead | null | undefined,
+  onRefused?: (why: string) => void,
+): (next: ServiceTopology, what: string) => Promise<boolean> {
+  return async (next, what) => {
+    const why = unreadGraphRefusal(readState());
+    if (why) { onRefused?.(why); return false; }
+    return onWrite(next, what);
+  };
+}
 
 /** What every editor needs besides the item: the graph, the Design array and the equipment. */
 export interface ItemEditorContext {
@@ -73,6 +106,11 @@ export interface ItemEditorContext {
   apply: ApplyAnswer;
   /** Records the PV coupling through the architecture decision route (`behavior.pv-connection`). */
   onRecordCoupling?: (coupling: SolarCoupling) => Promise<boolean>;
+  /**
+   * The page's read of the graph. While it is loading or FAILED, editors are disabled and say why;
+   * the write path itself refuses as well (`guardGraphRead`).
+   */
+  graphRead?: GraphRead;
 }
 
 export interface ItemEditorProps extends ItemEditorContext {
@@ -293,6 +331,7 @@ export function QuestionDialog(props: QuestionDialogProps) {
   if (!item) return null;
   const home = homeOf(item.id);
   const editable = hasItemEditor(item, props.topology);
+  const unread = unreadGraphRefusal(props.graphRead);
   return (
     <SystemConfigModal open onClose={onClose} titleId={titleId} testid="question-dialog">
       <div data-item-id={item.id} data-state={item.state} className="space-y-3">
@@ -330,11 +369,15 @@ export function QuestionDialog(props: QuestionDialogProps) {
         {props.error ? (
           <div data-testid="question-error" className="rounded-lg border border-rose-500/40 bg-rose-500/10 p-2 text-xs text-rose-200">{props.error}</div>
         ) : null}
+        {unread ? (
+          <div data-testid="question-unread" className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-200">{unread}</div>
+        ) : null}
 
         {editable ? (
           <div data-testid="question-editor">
             <ItemEditor item={item} topology={props.topology} pvArray={props.pvArray} derivedStrings={props.derivedStrings}
-                        equipment={props.equipment} busy={props.busy} apply={apply} onRecordCoupling={onRecordCoupling} />
+                        equipment={props.equipment} busy={props.busy || unread !== null} apply={apply}
+                        onRecordCoupling={onRecordCoupling} graphRead={props.graphRead} />
           </div>
         ) : (
           <div data-testid="question-no-editor" className="rounded-lg border border-slate-700/60 bg-slate-900/40 p-2 text-[11px] text-slate-400">
@@ -403,23 +446,14 @@ export function ItemEditor(props: ItemEditorProps) {
   }
   if (id.startsWith(LOAD_ANALYSIS_ITEM_ID)) return <LoadAnalysisEditor item={item} topology={t} apply={apply} busy={busy} />;
 
+  // 🚨 THE SERVICE QUESTIONS USE THE SERVICE CARD'S OWN CONTROLS (`cards/ServiceControls.tsx`): the
+  // same ladders (175 A is a main breaker rating), the recorded value always offered, a fault-current
+  // typo refused, a destructive answer confirmed, no preset panel ratings — wherever they are asked.
   if (id === 'service.rating') {
-    return (
-      <select data-testid="answer-service-rating" className={box} disabled={busy}
-              value={t?.service.ratedAmps ?? ''}
-              onChange={e => { const a = Number(e.target.value); if (a > 0) void apply(answerServiceRating(t, a)); }}>
-        <option value="">Choose…</option>
-        {SERVICE_RATINGS.map(a => <option key={a} value={a}>{a} A</option>)}
-      </select>
-    );
+    return <ServiceRatingSelect t={t} item={item} ids="answer" disabled={busy} apply={apply} />;
   }
   if (id === 'service.system' && t) {
-    return (
-      <select data-testid="answer-electrical-system" className={box} disabled={busy} value={String(t.service.phase)}
-              onChange={e => void apply(answerElectricalSystem(t, e.target.value))}>
-        {SYSTEMS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-      </select>
-    );
+    return <ElectricalSystemSelect t={t} item={item} ids="answer" disabled={busy} apply={apply} />;
   }
   // What the engine still needs read off an existing assembly is answered in the Service card's
   // [Verify] form — the same form here, so [Answer Next] can ask it where it stands.
@@ -428,76 +462,26 @@ export function ItemEditor(props: ItemEditorProps) {
     return <ExistingServiceVerifyForm t={t} apply={apply} busy={busy} needed={field ? [field] : []} />;
   }
   if (id === 'service.existing' && t) {
-    const ex = t.service.existingEquipment ?? null;
     return (
       <div className="space-y-2">
-        <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-300">
-          <label className="flex items-center gap-1">
-            <input type="checkbox" data-testid="answer-existing-service" checked={ex !== null} disabled={busy}
-                   onChange={e => void apply(answerExistingService(t, { existing: e.target.checked }))} />
-            Existing equipment on the wall
-          </label>
-          {ex ? (
-            <input data-testid="answer-existing-mfr" className={`w-28 ${box}`} placeholder="Manufacturer"
-                   defaultValue={ex.manufacturer ?? ''} disabled={busy}
-                   onBlur={e => { if ((e.target.value || null) !== ex.manufacturer) void apply(answerExistingService(t, { existing: true, manufacturer: e.target.value })); }} />
-          ) : null}
+        <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] text-slate-300">
+          <ExistingServiceLine t={t} ids="answer" disabled={busy} apply={apply} />
         </div>
-        {ex ? <ExistingServiceVerifyForm t={t} apply={apply} busy={busy} /> : null}
+        {t.service.existingEquipment ? <ExistingServiceVerifyForm t={t} apply={apply} busy={busy} /> : null}
       </div>
     );
   }
   if (id === 'service.fault-current' && t) {
-    return (
-      <label className="flex items-center gap-2 text-[11px] text-slate-400">
-        <input type="number" min={0} step={0.5} data-testid="answer-fault-current" className={`w-24 ${box}`}
-               disabled={busy} placeholder="kA"
-               defaultValue={t.service.availableFaultCurrentA !== null ? t.service.availableFaultCurrentA / 1000 : ''}
-               onBlur={e => {
-                 const ka = e.target.value === '' ? null : Number(e.target.value);
-                 const amps = ka === null ? null : Math.round(ka * 1000);
-                 if (amps !== t.service.availableFaultCurrentA) void apply(answerAvailableFaultCurrent(t, amps));
-               }} />
-        kA — from the utility
-      </label>
-    );
+    return <FaultCurrentRow t={t} item={item} ids="answer" disabled={busy} apply={apply} />;
   }
   if (id === 'service.distribution' && t && item.options) {
-    return (
-      <Radio name="distribution" testid="answer-distribution" options={item.options} value={item.value}
-             disabled={busy}
-             onPick={v => void apply(answerDistribution(t, v as 'one-main-panel' | 'two-main-panels' | 'custom'))} />
-    );
+    return <DistributionControl t={t} item={item} ids="answer" disabled={busy} apply={apply} />;
   }
   if (id.startsWith('service.panel.') && t) {
     const panelId = id.slice('service.panel.'.length);
     const p = t.panels.find(x => x.id === panelId);
     if (!p) return null;
-    return (
-      <div className="grid grid-cols-3 gap-2">
-        <label className="text-[11px] text-slate-400">Main breaker
-          <select data-testid={`answer-panel-main-${p.id}`} className={`mt-0.5 block w-full ${box}`} disabled={busy}
-                  value={p.mainBreakerA ?? ''}
-                  onChange={e => void apply(answerPanel(t, p.id, { mainBreakerA: e.target.value ? Number(e.target.value) : null }))}>
-            <option value="">—</option>
-            {PANEL_RATINGS.map(a => <option key={a} value={a}>{a} A</option>)}
-          </select>
-        </label>
-        <label className="text-[11px] text-slate-400">Busbar
-          <select data-testid={`answer-panel-bus-${p.id}`} className={`mt-0.5 block w-full ${box}`} disabled={busy}
-                  value={p.busbarRatingA ?? ''}
-                  onChange={e => void apply(answerPanel(t, p.id, { busbarRatingA: e.target.value ? Number(e.target.value) : null }))}>
-            <option value="">—</option>
-            {PANEL_RATINGS.map(a => <option key={a} value={a}>{a} A</option>)}
-          </select>
-        </label>
-        <label className="text-[11px] text-slate-400">Manufacturer
-          <input data-testid={`answer-panel-mfr-${p.id}`} className={`mt-0.5 block w-full ${box}`} disabled={busy}
-                 defaultValue={p.manufacturer ?? ''} placeholder="e.g. Eaton"
-                 onBlur={e => { if ((e.target.value || null) !== (p.manufacturer ?? null)) void apply(answerPanel(t, p.id, { manufacturer: e.target.value })); }} />
-        </label>
-      </div>
-    );
+    return <PanelRow t={t} panel={p} item={item} ids="answer" disabled={busy} apply={apply} />;
   }
   if (id === 'behavior.pv-connection' && item.options) {
     const record = props.onRecordCoupling;
