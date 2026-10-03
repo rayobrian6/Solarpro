@@ -189,7 +189,8 @@ describe('ENGINEERING READINESS — counts, release status, the top three, Answe
   it('…and answering an item that unlocks nothing new drops the count by exactly one', async () => {
     const writes = mountLivePanel(house200());
     const before = requiredQueue(interviewOf(house200()));
-    fireEvent.click(within(screen.getByTestId('readiness-next-1')).getByRole('button'));   // "Choose the interconnection method"
+    // [0] the fault current, [1] existing or new, [2] "Choose the interconnection method"
+    fireEvent.click(within(screen.getByTestId('readiness-next-2')).getByRole('button'));
     const dialog = screen.getByTestId('question-dialog');
     expect(dialog.querySelector('[data-item-id]')?.getAttribute('data-item-id')).toBe('behavior.interconnection');
     fireEvent.click(within(within(dialog).getByTestId('answer-interconnection-load-side-busbar')).getByRole('radio'));

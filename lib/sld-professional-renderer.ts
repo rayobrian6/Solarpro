@@ -45,6 +45,8 @@ import {
   governingArticleFor as poiArticle,
   storageUnitLabel as storageUnitLabelSld,
   serviceRatingLabel as serviceRatingLabelSld,
+  serviceExistingOrNew as serviceExistingOrNewSld,
+  existingServiceReading as existingServiceReadingSld,
   sourcesForAggregationInput as sourcesForAggregationInputSld,
   type ServiceTopology as ServiceTopologyForSld,
   type TopologyEvaluation as TopologyEvaluationForSld,
@@ -3198,7 +3200,11 @@ function expansionLinesSld(u: ServiceTopologyForSld['storage'][number]): Section
 }
 
 function serviceDistributionLinesSld(t: ServiceTopologyForSld): SectionLine[] {
-  const ex = t.service.existingEquipment ?? null;
+  // 🚨 THREE ANSWERS, DRAWN AS THREE. A service nobody has called existing or new is not drawn as
+  // new: it says so, in amber, where "CONFIGURATION TO VERIFY" would go. A NEW service states the
+  // decision and claims nothing about the gear — no make, catalog number or AIC has been selected.
+  const answer = serviceExistingOrNewSld(t.service);
+  const ex = existingServiceReadingSld(t.service);
   const distLines: SectionLine[] = [
     { t: `${ex ? 'EXISTING ' : ''}${serviceRatingLabelSld(t)} SERVICE `
         + `${ex ? 'EQUIPMENT' : 'DISTRIBUTION'}`, sz: F.hdr, bold: true },
@@ -3213,6 +3219,10 @@ function serviceDistributionLinesSld(t: ServiceTopologyForSld): SectionLine[] {
       distLines.push({ t: 'CONFIGURATION TO VERIFY', sz: F.tiny, fill: SEC_AMBER, bold: true });
     }
     distLines.push({ t: 'EXISTING — NOT IN SCOPE OF SUPPLY', sz: F.tiny });
+  } else if (answer === 'unanswered') {
+    distLines.push({ t: 'EXISTING OR NEW — NOT ESTABLISHED', sz: F.tiny, fill: SEC_AMBER, bold: true });
+  } else {
+    distLines.push({ t: 'NEW SERVICE EQUIPMENT', sz: F.tiny });
   }
   return distLines;
 }

@@ -135,6 +135,12 @@ describe('🚨 a drawable topology is not necessarily a releasable one', () => {
     // traversal is not an approval, so a job with neither is not resolved.
     for (const dev of t.devices) dev.productId = 'eaton-dg224urk';
     t.interconnection.isolationArrangementAccepted = true;
+    // 🚨 And whether the service equipment is existing or new. Not answered is not "new": a job that
+    // never said is held up by exactly that, in its own words, until it is answered.
+    expect(serviceTopologyReleaseReadiness(t).requirements)
+      .toEqual(['DESIGN INPUT REQUIRED — EXISTING OR NEW SERVICE EQUIPMENT NOT ESTABLISHED']);
+    expect(serviceTopologyReleaseReadiness(t).releaseReady).toBe(false);
+    t.service.existingOrNew = 'new';
     const r = serviceTopologyReleaseReadiness(t);
     expect(r.releaseReady).toBe(true);
     expect(r.requirements).toEqual([]);

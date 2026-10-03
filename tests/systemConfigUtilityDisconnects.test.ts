@@ -66,8 +66,8 @@ describe('meter collar — a utility / AHJ ruling, three states, never assumed',
     expect(q?.owner).toBe('Utility / AHJ');
     expect(q?.options?.map(o => o.value)).toEqual(['permitted', 'not-permitted', 'unknown']);
     // A ruling is owed by the utility, not answered by the installer: the release banner's open
-    // questions are unchanged.
-    expect(iv.openQuestions.map(o => o.id)).toEqual(['behavior.interconnection', 'behavior.isolation']);
+    // questions are unchanged (the house has not said whether its service equipment is existing or new).
+    expect(iv.openQuestions.map(o => o.id)).toEqual(['service.existing', 'behavior.interconnection', 'behavior.isolation']);
   });
 
   it('not asked once the system connects some other way and nobody recorded a ruling', () => {

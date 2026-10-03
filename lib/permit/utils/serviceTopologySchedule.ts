@@ -29,7 +29,7 @@
 import type { ServiceTopology } from '@/lib/electrical/serviceTopology';
 import {
   evaluateServiceTopology, sizeAggregationPanel, governingArticleFor, topologyNodeLabel,
-  isOptionalCheck, serviceRatingLabel,
+  isOptionalCheck, serviceRatingLabel, EXISTING_OR_NEW_TOKEN,
 } from '@/lib/electrical/serviceTopology';
 import {
   equipmentInstancesFromTopology, equipmentQuantities, type EquipmentInstanceKind,
@@ -446,6 +446,11 @@ export function serviceTopologyReleaseReadiness(
   if (needs.includes('interconnection.isolationArrangementAccepted')) {
     requirements.push('JURISDICTION / UTILITY ACCEPTANCE REQUIRED — DER ISOLATION ARRANGEMENT AS DRAWN');
   }
+  // 🚨 NOT ANSWERED IS NOT NEW. Whether the service equipment is already on the wall is the
+  // installer's answer, owed before anything about it can be verified or scoped.
+  if (needs.includes(EXISTING_OR_NEW_TOKEN)) {
+    requirements.push('DESIGN INPUT REQUIRED — EXISTING OR NEW SERVICE EQUIPMENT NOT ESTABLISHED');
+  }
   if (needs.some(n => n.startsWith('service.existingEquipment.'))) {
     requirements.push('FIELD VERIFY — EXISTING SERVICE EQUIPMENT CONFIGURATION TO VERIFY');
   }
@@ -468,6 +473,7 @@ export function serviceTopologyReleaseReadiness(
     'poi.supplySideTapConductors', 'aggregation.carriesPremisesLoad',
     'interconnection.isolationArrangement', 'interconnection.isolationArrangementAccepted',
     'loads.model', 'device.productId', 'device.inlineOnNodeId', 'device.ratedAmps',
+    EXISTING_OR_NEW_TOKEN,
   ]);
   for (const n of needs) {
     if (covered.has(n)) continue;

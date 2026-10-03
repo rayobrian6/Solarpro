@@ -20,7 +20,7 @@
 import {
   createServiceTopology, addBackupDomain, removeBackupDomain, setDomainEquipment, updatePanel,
   updateDomain, setInterconnection, addPointOfInterconnection, updatePointOfInterconnection,
-  setStoragePvInput, setExistingServiceEquipment, setSolarCoupling,
+  setStoragePvInput, setExistingServiceEquipment, setSolarCoupling, setServiceExistingOrNew,
 } from '@/lib/electrical/topologyAuthoring';
 import {
   buildServiceFromPreset, applyDerArrangement, applyIsolationArrangement,
@@ -29,7 +29,7 @@ import {
 import type {
   ServiceTopology, ServicePhase, PoiRelationship, DerArrangement, BackupDomain, SolarCoupling, PanelBoard,
 } from '@/lib/electrical/serviceTopology';
-import { isServicePhase, servicePhaseInfo } from '@/lib/electrical/serviceTopology';
+import { isServicePhase, servicePhaseInfo, serviceExistingOrNew, existingServiceReading } from '@/lib/electrical/serviceTopology';
 
 export type AnswerResult =
   | { ok: true; topology: ServiceTopology; did: string }
@@ -71,6 +71,9 @@ function carryDecisions(from: ServiceTopology | null, to: ServiceTopology): Serv
     service: {
       ...to.service,
       availableFaultCurrentA: from.service.availableFaultCurrentA,
+      // 🚨 The existing-or-new ANSWER is carried, not just the reading: rebuilding the
+      // distribution must not turn "new" (or "not answered") into the other.
+      existingOrNew: serviceExistingOrNew(from.service),
       existingEquipment: from.service.existingEquipment ?? null,
     },
     solarCoupling: from.solarCoupling ?? null,
@@ -161,7 +164,11 @@ export function answerAvailableFaultCurrent(t: ServiceTopology, amps: number | n
 
 /** What the installer reads off an existing service assembly — every field separately optional. */
 export interface ExistingServiceAnswer {
-  existing: boolean;
+  /**
+   * The answer to "existing or new?": true ⇒ existing, false ⇒ new, null ⇒ not answered (takes a
+   * recorded answer back). Three answers, each recorded as itself — see `ExistingOrNew`.
+   */
+  existing: boolean | null;
   manufacturer?: string | null;
   /** Model / catalog number, off the door label. */
   catalogNumber?: string | null;
@@ -206,14 +213,17 @@ export function soleServicePanel(t: ServiceTopology): PanelBoard | null {
 }
 
 export function answerExistingService(t: ServiceTopology, patch: ExistingServiceAnswer): AnswerResult {
-  if (!patch.existing) {
-    // A NEW assembly brings its own numbers: the sole panel's SCCR that was the OLD assembly's label is
-    // not the new one's (the rule `answerGenerationPanelPart` applies to a new part).
+  // 🚨 "NOT ANSWERED" IS AN ANSWER THE GRAPH CAN HOLD. It used to be indistinguishable from "new",
+  // so taking the answer back recorded "new" — the fabricated decision this distinction exists for.
+  if (patch.existing == null || patch.existing === false) {
+    const answer = patch.existing === false ? 'new' : 'unanswered';
+    // The old assembly's reading goes with it: the sole panel's SCCR that was copied off the OLD
+    // assembly's label is not a new assembly's, nor anyone's once the answer is taken back.
     const sole = soleServicePanel(t);
-    const oldSccr = t.service.existingEquipment?.sccrA ?? null;
-    let next = setExistingServiceEquipment(t, null);
+    const oldSccr = existingServiceReading(t.service)?.sccrA ?? null;
+    let next = setServiceExistingOrNew(t, answer);
     if (sole && oldSccr !== null && sole.sccrA === oldSccr) next = updatePanel(next, sole.id, { sccrA: null });
-    return done(next, 'Service equipment: new');
+    return done(next, answer === 'new' ? 'Service equipment: new' : 'Service equipment: existing or new not answered');
   }
   if (patch.sccrA !== undefined && patch.sccrA !== null && (!Number.isFinite(patch.sccrA) || patch.sccrA <= 0)) {
     return refuse('The AIC / SCCR must be a positive number read off the nameplate, or left blank until it is read.');

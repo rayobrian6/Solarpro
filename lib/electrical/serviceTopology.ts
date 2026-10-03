@@ -193,6 +193,69 @@ export interface ExistingServiceEquipment {
   verified: boolean;
 }
 
+/**
+ * 🚨 EXISTING OR NEW — THREE ANSWERS, NOT TWO.
+ *
+ * Ray (engineering closure, 2026-10-03): "If UNANSWERED is a legitimate semantic state, the
+ * persistence layer must preserve it. Do not force existing or new merely because the database
+ * cannot represent unanswered." This used to be `existingEquipment: X | null`, where null meant
+ * "new" AND "nobody said" — so a service nobody had asked about read back as "New service
+ * equipment … Installer entered", and the field verification an existing assembly owes vanished.
+ * The same class of defect as the recorded-`None` PV inverter that was really "not chosen".
+ *
+ *   'unanswered' — nobody has said. Needs an answer; neither existing nor new is assumed.
+ *   'existing'   — already on the wall: connected to, never replaced or priced, field verified.
+ *   'new'        — new service equipment. Nothing old to verify — and nothing about the new gear
+ *                  (make, catalog number, AIC) is claimed either; it has not been selected.
+ */
+export type ExistingOrNew = 'unanswered' | 'existing' | 'new';
+
+export const EXISTING_OR_NEW: readonly ExistingOrNew[] = ['unanswered', 'existing', 'new'];
+
+export function isExistingOrNew(v: unknown): v is ExistingOrNew {
+  return typeof v === 'string' && (EXISTING_OR_NEW as readonly string[]).includes(v);
+}
+
+/** The requirement an unanswered existing-or-new question names. */
+export const EXISTING_OR_NEW_TOKEN = 'service.existingOrNew';
+
+/**
+ * The one reading of "is the service equipment existing or new?" — every consumer asks this, never
+ * `existingEquipment === null`.
+ *
+ * Details read off an assembly mean it is on the wall, whatever else is recorded beside them: they
+ * are a reading, and a reading is never discarded on the strength of a contradicting flag. Without
+ * details, only an explicit 'existing' / 'new' is an answer. Anything else — absent, null, an
+ * unknown word — is 'unanswered', never 'new'.
+ */
+export function serviceExistingOrNew(
+  service: Pick<UtilityService, 'existingOrNew' | 'existingEquipment'> | null | undefined,
+): ExistingOrNew {
+  if (!service) return 'unanswered';
+  if (service.existingEquipment) return 'existing';
+  return service.existingOrNew === 'existing' || service.existingOrNew === 'new'
+    ? service.existingOrNew : 'unanswered';
+}
+
+/** An existing assembly nothing has been read off yet. */
+export const BLANK_EXISTING_SERVICE_EQUIPMENT: Readonly<ExistingServiceEquipment> = Object.freeze({
+  manufacturer: null, catalogNumber: null, mainArrangement: null,
+  feederArrangement: null, sccrA: null, verified: false,
+});
+
+/**
+ * What has been read off the existing assembly — exactly when the answer is 'existing' (a blank
+ * reading when nothing has been read yet), null otherwise. The engine, the SLD, the interview and
+ * the Service card all read the reading through this, so an 'existing' answer can never show the
+ * field verification in one place and hide it in another.
+ */
+export function existingServiceReading(
+  service: Pick<UtilityService, 'existingOrNew' | 'existingEquipment'> | null | undefined,
+): Readonly<ExistingServiceEquipment> | null {
+  return serviceExistingOrNew(service) === 'existing'
+    ? (service?.existingEquipment ?? BLANK_EXISTING_SERVICE_EQUIPMENT) : null;
+}
+
 export interface UtilityService {
   /**
    * Aggregate service rating. 400 on this job.
@@ -225,13 +288,20 @@ export interface UtilityService {
    */
   availableFaultCurrentA: number | null;
   /**
-   * The service equipment that is already installed, when it is.
+   * What was read off the service equipment that is already installed — present exactly when
+   * `serviceExistingOrNew` is 'existing'. Its configuration is a field-verification item and it is
+   * never replaced by SolarPro's own initiative.
    *
-   * Absent ⇒ new service equipment, which SolarPro engineers and prices. Present ⇒ existing
-   * equipment, whose configuration is a field-verification item and which is never replaced by
-   * SolarPro's own initiative.
+   * 🚨 NULL IS NOT "NEW". Whether the equipment is existing or new is `existingOrNew`; read both
+   * through `serviceExistingOrNew`.
    */
   existingEquipment?: ExistingServiceEquipment | null;
+  /**
+   * The installer's answer to "existing or new?". Absent ⇒ 'unanswered' (see
+   * `serviceExistingOrNew`), so a graph built before the question existed is asked it rather than
+   * told an answer.
+   */
+  existingOrNew?: ExistingOrNew;
 }
 
 // ── Devices, and the roles they play ────────────────────────────────────────
@@ -1468,9 +1538,20 @@ export function evaluateServiceTopology(topology: ServiceTopology): TopologyEval
 
   // ── THE EXISTING SERVICE EQUIPMENT ────────────────────────────────────────
   //
-  // 🚨 EXISTING EQUIPMENT IS A THING TO GO AND READ, NOT A THING TO DESIGN. It is reported only
-  // when the topology says the assembly is already there — a new service has nothing to verify.
-  const existing = topology.service.existingEquipment ?? null;
+  // 🚨 EXISTING EQUIPMENT IS A THING TO GO AND READ, NOT A THING TO DESIGN. It is reported when
+  // the topology says the assembly is already there — and when nobody has said whether it is: an
+  // unanswered question is not "new", and it must not quietly drop the verification an existing
+  // assembly would owe. Only an explicit 'new' has nothing to verify.
+  const existingOrNew = serviceExistingOrNew(topology.service);
+  if (existingOrNew === 'unanswered') {
+    checks.push(unknown('service.existing-equipment', 'site', 'Existing service equipment',
+      `EXISTING OR NEW ${serviceRatingLabel(topology)} SERVICE EQUIPMENT — NOT ESTABLISHED. Nobody has `
+      + 'said whether the service equipment is already installed or is new, so SolarPro assumes '
+      + 'neither: an existing assembly is connected to and its configuration read on site, and new '
+      + 'equipment has not been selected.',
+      [EXISTING_OR_NEW_TOKEN]));
+  }
+  const existing = existingServiceReading(topology.service);
   if (existing) {
     const missing: string[] = [];
     if (!existing.catalogNumber) missing.push('service.existingEquipment.catalogNumber');

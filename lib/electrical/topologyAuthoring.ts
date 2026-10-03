@@ -21,9 +21,11 @@ import type {
   ServiceTopology, ServiceBranch, PanelBoard, BackupDomain, StorageUnit,
   GatewayInstance, ProtectiveDevice, DeviceRole, ServicePhase,
   GenerationUnit, DerAggregationPanel, DerTapPoint, PointOfInterconnection, PoiRelationship,
-  ExistingServiceEquipment, LoadModel, LoadCalculationMethod, SolarCoupling,
+  ExistingServiceEquipment, ExistingOrNew, LoadModel, LoadCalculationMethod, SolarCoupling,
 } from '@/lib/electrical/serviceTopology';
-import { sizeAggregationPanel, servicePhaseInfo } from '@/lib/electrical/serviceTopology';
+import {
+  sizeAggregationPanel, servicePhaseInfo, BLANK_EXISTING_SERVICE_EQUIPMENT,
+} from '@/lib/electrical/serviceTopology';
 import { nextStandardOcpd } from '@/lib/electrical/stdSizes';
 
 /** A new, empty service. Branches, panels and domains are added onto it. */
@@ -44,6 +46,9 @@ export function createServiceTopology(opts: {
       phase,
       // 🚨 NOT ZERO. Nobody has measured it yet, and the SCCR chain must say so.
       availableFaultCurrentA: null,
+      // 🚨 NOT NEW. Nobody has said whether the service equipment is already on the wall.
+      existingOrNew: 'unanswered',
+      existingEquipment: null,
     },
     devices: [],
     branches: [],
@@ -734,21 +739,33 @@ export function selectDeviceProduct(
 /**
  * Declare the service equipment as EXISTING, and patch what has been read off it.
  *
- * Passing `null` says the service equipment is new, which is what removes the field-verification
- * item — not filling the fields in with guesses.
+ * Passing `null` says the service equipment is NEW — an answer the installer gave, recorded as
+ * one — which is what removes the field-verification item, not filling the fields in with guesses.
+ * To take the answer back to "not answered", use `setServiceExistingOrNew(t, 'unanswered')`.
  */
 export function setExistingServiceEquipment(
   t: ServiceTopology,
   patch: Partial<ExistingServiceEquipment> | null,
 ): ServiceTopology {
-  if (patch === null) {
-    return { ...t, service: { ...t.service, existingEquipment: null } };
-  }
-  const current: ExistingServiceEquipment = t.service.existingEquipment ?? {
-    manufacturer: null, catalogNumber: null, mainArrangement: null,
-    feederArrangement: null, sccrA: null, verified: false,
+  if (patch === null) return setServiceExistingOrNew(t, 'new');
+  const current: ExistingServiceEquipment = t.service.existingEquipment ?? { ...BLANK_EXISTING_SERVICE_EQUIPMENT };
+  return {
+    ...t,
+    service: { ...t.service, existingOrNew: 'existing', existingEquipment: { ...current, ...patch } },
   };
-  return { ...t, service: { ...t.service, existingEquipment: { ...current, ...patch } } };
+}
+
+/**
+ * Record the answer to "existing or new?" — all three of them.
+ *
+ * 🚨 THE ANSWER AND THE DETAILS MOVE TOGETHER. 'existing' keeps whatever was read off the assembly
+ * (or starts a blank reading); 'new' and 'unanswered' carry no reading, because there is no
+ * existing assembly to have read — so a reading can never survive under a "new".
+ */
+export function setServiceExistingOrNew(t: ServiceTopology, answer: ExistingOrNew): ServiceTopology {
+  const existingEquipment = answer === 'existing'
+    ? (t.service.existingEquipment ?? { ...BLANK_EXISTING_SERVICE_EQUIPMENT }) : null;
+  return { ...t, service: { ...t.service, existingOrNew: answer, existingEquipment } };
 }
 
 /**

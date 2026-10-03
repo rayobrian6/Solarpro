@@ -93,7 +93,8 @@ export interface Tesla400AOptions {
    * The existing service assembly, when there is one.
    *
    * On the real job there is: an Eaton 400 A meter/service assembly already on the wall whose
-   * internals nobody has read yet. Absent ⇒ new service equipment.
+   * internals nobody has read yet. Absent ⇒ nobody has said whether it is existing or new
+   * (`serviceExistingOrNew` → 'unanswered'), never "new".
    */
   existingServiceEquipment?: Partial<ExistingServiceEquipment>;
   /** The optional dwelling load calculation. Absent on the real job, by product decision. */
@@ -342,6 +343,7 @@ export function buildTesla400ATwoGateway(opts: Tesla400AOptions = {}): Tesla400A
       phase: 'split-240',
       availableFaultCurrentA,
       ...(existingServiceEquipment ? {
+        existingOrNew: 'existing' as const,
         existingEquipment: {
           manufacturer: null, catalogNumber: null, mainArrangement: null,
           feederArrangement: null, sccrA: null, verified: false,

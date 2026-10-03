@@ -60,6 +60,9 @@ function fullySpecified(): ServiceTopology {
   topology.interconnection.isolationArrangementAccepted = true;
   topology.interconnection.isolationArrangementBasis =
     'ComEd interconnection application approved for the arrangement as drawn.';
+  // 🚨 AND WHETHER THE SERVICE EQUIPMENT IS EXISTING OR NEW. Not answered is not "new" — a job that
+  // never said leaves `service.existing-equipment` NOT EVALUATED, which is what this went red to say.
+  topology.service.existingOrNew = 'new';
   return topology;
 }
 

@@ -17,7 +17,7 @@ import { render, screen as page, cleanup, fireEvent, waitFor, act, within } from
 import { buildSystemConfigInterview } from '@/lib/electrical/systemConfigInterview';
 import {
   answerServiceRating, answerElectricalSystem, answerDistribution, answerInterconnection,
-  answerIsolationRequired, answerAvailableFaultCurrent, answerPanel, type AnswerResult,
+  answerIsolationRequired, answerAvailableFaultCurrent, answerPanel, answerExistingService, type AnswerResult,
 } from '@/lib/electrical/systemConfigAnswers';
 import { answerLoadAnalysisMethod, answerPanelDemand } from '@/lib/electrical/systemConfigLoadAnalysis';
 import { resolvePvArrayDesign } from '@/lib/electrical/pvArrayDesign';
@@ -95,6 +95,8 @@ const resolved400 = (): ServiceTopology => {
   t = ok(answerInterconnection(t, 'load-side-busbar'));
   t = ok(answerIsolationRequired(t, false));
   t = ok(answerAvailableFaultCurrent(t, 10_000));
+  // Existing or new is a required answer, never defaulted to new.
+  t = ok(answerExistingService(t, { existing: false }));
   for (const p of t.panels) t = ok(answerPanel(t, p.id, { mainBreakerA: 200, busbarRatingA: 225 }));
   for (const p of t.panels) t = updatePanel(t, p.id, { sccrA: 22_000 });
   t = addProtectiveDevice(t, { label: 'Service disconnect', roles: ['service-disconnect'], ratedAmps: 400 }).topology;

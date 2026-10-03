@@ -15,7 +15,8 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, screen, cleanup, fireEvent, waitFor, within, act } from '@testing-library/react';
 import { buildSystemConfigInterview, type InterviewEquipment } from '@/lib/electrical/systemConfigInterview';
 import {
-  answerServiceRating, answerBackup, answerPvLanding, answerAvailableFaultCurrent, answerStorageLanding, type AnswerResult,
+  answerServiceRating, answerBackup, answerPvLanding, answerAvailableFaultCurrent, answerStorageLanding,
+  answerExistingService, type AnswerResult,
 } from '@/lib/electrical/systemConfigAnswers';
 import { resolvePvArrayDesign } from '@/lib/electrical/pvArrayDesign';
 import { buildRaysIntendedJob } from '@/lib/electrical/fixtures/tesla400aTwoGateway';
@@ -404,7 +405,8 @@ describe('one Powerwall 3: the unit\'s landing is asked where the strings are, n
       gatewayProductId: 'tesla-backup-gateway-3', storageProductId: 'tesla-powerwall-3', totalUnits: 1,
     })), solarCoupling: 'dc-coupled-storage' as const };
     // The service and battery questions above it in the queue, answered — so the strings are next.
-    return ok(answerStorageLanding(ok(answerAvailableFaultCurrent(base, 10_000)), 'gateway-panelboard'));
+    const service = ok(answerExistingService(ok(answerAvailableFaultCurrent(base, 10_000)), { existing: false }));
+    return ok(answerStorageLanding(service, 'gateway-panelboard'));
   };
   const ONE: InterviewEquipment = { ...PW3, storage: { ...PW3.storage!, count: 1 }, gateway: { label: 'Tesla Gateway 3', count: 1 } };
 

@@ -512,7 +512,11 @@ describe('🚨 a SAVED topology can be reopened and EDITED', () => {
   it('🚨 the existing service assembly is a thing to READ, and is never priced', async () => {
     const f = await saveThenReopen();
     fireEvent.click(screen.getByTestId('node-service'));
-    fireEvent.click(screen.getByTestId('inspector-service-existing'));
+    // 🚨 Three answers: a graph nobody answered reads "Not answered", never "new".
+    const existingOrNew = screen.getByTestId('inspector-service-existing') as HTMLSelectElement;
+    expect(existingOrNew.value).toBe('unanswered');
+    expect(screen.queryByTestId('inspector-existing-equipment')).toBeNull();
+    fireEvent.change(existingOrNew, { target: { value: 'existing' } });
     const block = screen.getByTestId('inspector-existing-equipment');
     expect(block.textContent).toContain('configuration to verify');
     fireEvent.change(within(block).getByTestId('inspector-existing-mfr'),
@@ -521,6 +525,7 @@ describe('🚨 a SAVED topology can be reopened and EDITED', () => {
     await waitFor(() => expect(screen.getByTestId('topology-message').textContent).toMatch(/saved/i));
 
     const t = f.stored as any;
+    expect(t.service.existingOrNew).toBe('existing');
     expect(t.service.existingEquipment.manufacturer).toBe('Eaton');
     expect(t.service.existingEquipment.verified).toBe(false);
     // Ray: "Do not automatically add replacement 400 A service distribution equipment."

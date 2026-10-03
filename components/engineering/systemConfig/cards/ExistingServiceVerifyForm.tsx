@@ -16,6 +16,7 @@
 
 import React, { useRef, useState } from 'react';
 import type { ServiceTopology } from '@/lib/electrical/serviceTopology';
+import { existingServiceReading } from '@/lib/electrical/serviceTopology';
 import type { AnswerResult } from '@/lib/electrical/systemConfigAnswers';
 import { answerExistingService } from '@/lib/electrical/systemConfigAnswers';
 import type { ExistingServiceField } from '@/lib/electrical/systemConfigServiceCard';
@@ -36,7 +37,7 @@ export interface ExistingServiceVerifyFormProps {
 const kaOf = (a: number | null | undefined) => (a == null ? '' : String(a / 1000));
 
 export function ExistingServiceVerifyForm({ t, apply, busy, needed = [], onSaved }: ExistingServiceVerifyFormProps) {
-  const ex = t.service.existingEquipment ?? null;
+  const ex = existingServiceReading(t.service);
   const [catalogNumber, setCatalogNumber] = useState(ex?.catalogNumber ?? '');
   const [mainArrangement, setMainArrangement] = useState(ex?.mainArrangement ?? '');
   const [feederArrangement, setFeederArrangement] = useState(ex?.feederArrangement ?? '');

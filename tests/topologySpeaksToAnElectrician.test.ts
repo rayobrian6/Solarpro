@@ -174,6 +174,8 @@ describe('🚨 NEEDS INPUT names the thing and knows where it lives', () => {
       'availableFaultCurrentA', 'calculatedServiceDemandA', 'ratedAmps', 'devices',
       // The optional load analysis, entered once, on the service.
       'loads',
+      // "Existing or new?" — the inspector's existing-or-new select (`inspector-service-existing`).
+      'existingOrNew',
       // The existing assembly's field-verification items.
       'existingEquipment.catalogNumber', 'existingEquipment.mainArrangement',
       'existingEquipment.feederArrangement', 'existingEquipment.sccrA',

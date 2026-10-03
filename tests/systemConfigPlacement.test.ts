@@ -17,7 +17,7 @@ import {
 } from '@/lib/electrical/systemConfigPlacement';
 import {
   answerServiceRating, answerDistribution, answerInterconnection, answerIsolationRequired,
-  answerAvailableFaultCurrent, answerPanel, type AnswerResult,
+  answerAvailableFaultCurrent, answerPanel, answerExistingService, type AnswerResult,
 } from '@/lib/electrical/systemConfigAnswers';
 import { answerLoadAnalysisMethod, answerPanelDemand } from '@/lib/electrical/systemConfigLoadAnalysis';
 import { resolvePvArrayDesign } from '@/lib/electrical/pvArrayDesign';
@@ -55,6 +55,8 @@ const resolved400 = (): ServiceTopology => {
   t = ok(answerInterconnection(t, 'load-side-busbar'));
   t = ok(answerIsolationRequired(t, false));
   t = ok(answerAvailableFaultCurrent(t, 10_000));
+  // Existing or new is answered too — an unanswered one is a required answer, never "new".
+  t = ok(answerExistingService(t, { existing: false }));
   for (const p of t.panels) t = ok(answerPanel(t, p.id, { mainBreakerA: 200, busbarRatingA: 225 }));
   for (const p of t.panels) t = updatePanel(t, p.id, { sccrA: 22_000 });
   t = addProtectiveDevice(t, { label: 'Service disconnect', roles: ['service-disconnect'], ratedAmps: 400 }).topology;
@@ -70,6 +72,7 @@ describe('every item has ONE home card (the spec\'s table)', () => {
     ['service.rating', 'service'], ['service.system', 'service'], ['service.distribution', 'service'],
     ['service.panel.msp-2', 'service'], ['service.fault-current', 'service'], ['service.existing', 'service'],
     ['engineering.needs.service.existingEquipment.sccrA', 'service'],
+    ['engineering.needs.service.existingOrNew', 'service'],
     ['equipment.storage', 'battery'], ['equipment.gateway', 'battery'],
     ['equipment.system.equip.domain-a', 'battery'], ['equipment.system.landing.domain-b', 'battery'],
     ['behavior.storage-landing', 'battery'],
@@ -103,13 +106,14 @@ describe('the required queue — one ordered list, nothing asked twice', () => {
     const iv = withEval(house200());
     const q = requiredQueue(iv).map(i => i.id);
     expect(q).toEqual([
-      'service.fault-current',                       // service
+      'service.fault-current', 'service.existing',   // service — existing or new is asked, never assumed new
       'behavior.interconnection', 'behavior.isolation', // system configuration
       'engineering.needs.interconnection.solarCoupling', 'engineering.disconnect.service-disconnect', // readiness
     ]);
     for (const open of iv.openQuestions) expect(q).toContain(open.id);
     // The same fact the engine waits on, already asked by a question in the queue, is not asked twice.
     expect(q).not.toContain('engineering.needs.service.availableFaultCurrentA');
+    expect(q).not.toContain('engineering.needs.service.existingOrNew');
     expect(q).not.toContain('engineering.needs.interconnection.externalDerIsolationRequired');
     // A ruling that blocks nothing yet (no collar chosen) is not a required answer.
     expect(q).not.toContain('behavior.utility.meter-collar');
@@ -196,7 +200,7 @@ describe('PASS / FAIL / NOT EVALUATED and the release status', () => {
   it('BLOCKED — N required answers, where N is the queue', () => {
     const iv = withEval(house200());
     const s = releaseStatus(iv);
-    expect(s).toEqual({ kind: 'BLOCKED', label: 'BLOCKED — 5 required answers', count: 5 });
+    expect(s).toEqual({ kind: 'BLOCKED', label: 'BLOCKED — 6 required answers', count: 6 });
   });
 
   it('release-eligible with something still to review is ELIGIBLE, never COMPLETE', () => {

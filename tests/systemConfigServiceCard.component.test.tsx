@@ -77,8 +77,9 @@ describe('a plain 200 A house — compact, and NO multi-panel controls', () => {
     expect((screen.getByTestId('svc-panel-main-msp-1') as HTMLSelectElement).value).toBe('200');
     expect((screen.getByTestId('svc-panel-bus-msp-1') as HTMLSelectElement).value).toBe('200');
     expect(screen.getByTestId('svc-fault-current')).toBeTruthy();
-    expect((screen.getByTestId('svc-existing') as HTMLInputElement).checked).toBe(false);
-    expect(screen.getByTestId('svc-existing-new')).toBeTruthy();
+    expect((screen.getByTestId('svc-existing') as HTMLSelectElement).value).toBe('unanswered');
+    expect(screen.getByTestId('svc-existing-unanswered')).toBeTruthy();
+    expect(screen.queryByTestId('svc-existing-new')).toBeNull();
     expect(screen.queryByTestId('svc-verify')).toBeNull();
     // No 120% verdict exists for an un-backed-up panel, so no remedy is offered.
     expect(screen.queryByTestId('svc-panel-busbar-fail-msp-1')).toBeNull();
@@ -117,12 +118,17 @@ describe('a plain 200 A house — compact, and NO multi-panel controls', () => {
     expect(screen.getByTestId('svc-panel-source-msp-2').getAttribute('data-source')).toBe('Installer entered');
   });
 
-  it('unchecked existing equipment is worded as the question it may still be — never "no: new equipment" as a decision', () => {
+  it('🚨 existing or new NOT ANSWERED is the open question — never "new", never "Installer entered"', () => {
     mountLiveCard(house200());
-    const line = screen.getByTestId('svc-existing-new').textContent!;
-    expect(line).toMatch(/^Existing or new\? /);
-    expect(line).toContain('SolarPro designs the service equipment as new');
-    expect(line).not.toMatch(/— no:/);
+    const select = screen.getByTestId('svc-existing') as HTMLSelectElement;
+    expect([...select.options].map(o => [o.value, o.textContent]))
+      .toEqual([['unanswered', 'Not answered'], ['existing', 'Existing — keep it'], ['new', 'New service equipment']]);
+    expect(select.value).toBe('unanswered');
+    expect(screen.getByTestId('svc-existing-line').getAttribute('data-state')).toBe('needs-answer');
+    expect(screen.getByTestId('svc-existing-source').getAttribute('data-source')).toBe('Not established');
+    const line = screen.getByTestId('svc-existing-unanswered').textContent!;
+    expect(line).toContain('SolarPro assumes neither');
+    expect(line).not.toMatch(/as new/);
   });
 
   it('🚨 a service that could not be READ is not "no service": nothing can be answered over it', async () => {
@@ -290,7 +296,7 @@ describe('available fault current — the utility\'s number, compact', () => {
 describe('existing service equipment — "Field verification N items required [Verify]"', () => {
   it('Ray\'s Eaton assembly: the line names the manufacturer and the engine\'s five owed items', () => {
     mountLiveCard(rays());
-    expect((screen.getByTestId('svc-existing') as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByTestId('svc-existing') as HTMLSelectElement).value).toBe('existing');
     expect((screen.getByTestId('svc-existing-mfr') as HTMLInputElement).value).toBe('Eaton');
     expect(screen.getByTestId('svc-existing-status').textContent).toBe('Field verification 5 items required');
     expect(screen.getByTestId('svc-existing-line').getAttribute('data-state')).toBe('needs-verification');
@@ -348,21 +354,38 @@ describe('existing service equipment — "Field verification N items required [V
     expect(within(screen.getByTestId('svc-verify-dialog')).getByTestId('svc-refusal').textContent).toMatch(/^AIC \/ SCCR: enter/);
   });
 
-  it('declaring the equipment existing is one checkbox; with nothing read off it yet, unchecking is one click too', async () => {
+  it('each of the three answers is one choice, written through apply as itself; with nothing read off it, no confirmation', async () => {
     const writes = mountLiveCard(house200());
-    fireEvent.click(screen.getByTestId('svc-existing'));
+    const select = () => screen.getByTestId('svc-existing') as HTMLSelectElement;
+    fireEvent.change(select(), { target: { value: 'existing' } });
     await waitFor(() => expect(writes).toHaveLength(1));
+    expect(writes[0].next.service.existingOrNew).toBe('existing');
     expect(writes[0].next.service.existingEquipment?.verified).toBe(false);
     expect(await screen.findByTestId('svc-existing-mfr')).toBeTruthy();
-    fireEvent.click(screen.getByTestId('svc-existing'));
+    expect(select().value).toBe('existing');
+
+    fireEvent.change(select(), { target: { value: 'new' } });
     await waitFor(() => expect(writes).toHaveLength(2));
+    expect(writes[1].next.service.existingOrNew).toBe('new');
     expect(writes[1].next.service.existingEquipment).toBeNull();
     expect(screen.queryByTestId('svc-confirm-existing')).toBeNull();
+    await waitFor(() => expect(select().value).toBe('new'));
+    expect(screen.getByTestId('svc-existing-new').textContent).toContain('make and ratings are not recorded');
+    expect(screen.getByTestId('svc-existing-source').getAttribute('data-source')).toBe('Installer entered');
+    expect(screen.queryByTestId('svc-verify')).toBeNull();
+
+    // …and "not answered" is an answer the graph keeps — taking it back does not leave "new" behind.
+    fireEvent.change(select(), { target: { value: 'unanswered' } });
+    await waitFor(() => expect(writes).toHaveLength(3));
+    expect(writes[2].next.service.existingOrNew).toBe('unanswered');
+    expect(writes[2].next.service.existingEquipment).toBeNull();
+    await waitFor(() => expect(select().value).toBe('unanswered'));
+    expect(screen.getByTestId('svc-existing-source').getAttribute('data-source')).toBe('Not established');
   });
 
-  it('🚨 unchecking it once something was read off it ASKS first: Keep writes nothing, the confirmation discards', async () => {
+  it('🚨 leaving "existing" once something was read off it ASKS first: Keep writes nothing, the confirmation discards', async () => {
     const writes = mountLiveCard(house200());
-    fireEvent.click(screen.getByTestId('svc-existing'));
+    fireEvent.change(screen.getByTestId('svc-existing'), { target: { value: 'existing' } });
     await waitFor(() => expect(writes).toHaveLength(1));
     const mfr = await screen.findByTestId('svc-existing-mfr');
     fireEvent.change(mfr, { target: { value: 'Square D' } });
@@ -370,20 +393,33 @@ describe('existing service equipment — "Field verification N items required [V
     await waitFor(() => expect(writes).toHaveLength(2));
     expect(writes[1].next.service.existingEquipment?.manufacturer).toBe('Square D');
 
-    fireEvent.click(screen.getByTestId('svc-existing'));
+    fireEvent.change(screen.getByTestId('svc-existing'), { target: { value: 'new' } });
     await flush();
     expect(writes).toHaveLength(2);
-    expect((screen.getByTestId('svc-existing') as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByTestId('svc-existing') as HTMLSelectElement).value).toBe('existing');
     expect(screen.getByTestId('svc-confirm-existing-lost').textContent).toBe('Square D');
     fireEvent.click(screen.getByTestId('svc-confirm-existing-no'));
     await flush();
     expect(writes).toHaveLength(2);
     expect(screen.queryByTestId('svc-confirm-existing')).toBeNull();
 
-    fireEvent.click(screen.getByTestId('svc-existing'));
+    fireEvent.change(screen.getByTestId('svc-existing'), { target: { value: 'new' } });
     fireEvent.click(screen.getByTestId('svc-confirm-existing-yes'));
     await waitFor(() => expect(writes).toHaveLength(3));
     expect(writes[2].next.service.existingEquipment).toBeNull();
+    expect(writes[2].next.service.existingOrNew).toBe('new');
+  });
+
+  it('🚨 taking a read assembly back to "not answered" asks too, and records not-answered — never new', async () => {
+    const writes = mountLiveCard(rays());
+    fireEvent.change(screen.getByTestId('svc-existing'), { target: { value: 'unanswered' } });
+    await flush();
+    expect(writes).toEqual([]);
+    expect(screen.getByTestId('svc-confirm-existing').textContent).toContain('not answered');
+    fireEvent.click(screen.getByTestId('svc-confirm-existing-yes'));
+    await waitFor(() => expect(writes).toHaveLength(1));
+    expect(writes[0].next.service.existingOrNew).toBe('unanswered');
+    expect(writes[0].next.service.existingEquipment).toBeNull();
   });
 
   it('…and on a field-verified Eaton assembly the confirmation names everything the site visit read', async () => {
@@ -392,7 +428,7 @@ describe('existing service equipment — "Field verification N items required [V
       feederArrangement: 'One feeder to each MSP', sccrA: 22_000, verified: true,
     }));
     const writes = mountLiveCard(verified);
-    fireEvent.click(screen.getByTestId('svc-existing'));
+    fireEvent.change(screen.getByTestId('svc-existing'), { target: { value: 'new' } });
     await flush();
     expect(writes).toEqual([]);
     const lost = [...screen.getByTestId('svc-confirm-existing-lost').querySelectorAll('li')].map(li => li.textContent);
@@ -471,7 +507,7 @@ describe('[Answer Next] asks the existing-equipment items with the SAME form the
     const item = findInterviewItem(interviewOf(t), 'service.existing')!;
     render(<QuestionDialog {...ctxFor(t, async () => true)} item={item} onClose={() => undefined} />);
     const editor = screen.getByTestId('question-editor');
-    expect((within(editor).getByTestId('answer-existing-service') as HTMLInputElement).checked).toBe(true);
+    expect((within(editor).getByTestId('answer-existing-service') as HTMLSelectElement).value).toBe('existing');
     expect(within(editor).getByTestId('svc-verify-form')).toBeTruthy();
   });
 
@@ -537,10 +573,20 @@ describe('[Answer Next] / the question dialog asks a service question with the C
 
   it('declaring an existing assembly new from the dialog asks first, as the card does', async () => {
     const { writes, editor } = dialogFor(rays(), 'service.existing');
-    fireEvent.click(within(editor).getByTestId('answer-existing-service'));
+    fireEvent.change(within(editor).getByTestId('answer-existing-service'), { target: { value: 'new' } });
     await flush();
     expect(writes).toEqual([]);
     expect(within(editor).getByTestId('answer-confirm-existing-lost').textContent).toBe('Eaton');
+  });
+
+  it('🚨 an unanswered existing-or-new is asked in the dialog with the card\'s select, and the answer is written as itself', async () => {
+    const { writes, editor } = dialogFor(house200(), 'service.existing');
+    const select = within(editor).getByTestId('answer-existing-service') as HTMLSelectElement;
+    expect(select.value).toBe('unanswered');
+    fireEvent.change(select, { target: { value: 'new' } });
+    await waitFor(() => expect(writes).toHaveLength(1));
+    expect(writes[0].service.existingOrNew).toBe('new');
+    expect(writes[0].service.existingEquipment).toBeNull();
   });
 });
 

@@ -459,8 +459,19 @@ describe('the existing service equipment is read, never designed', () => {
 
   it('a NEW service has nothing to verify, so it raises no item at all', () => {
     const { topology } = buildTesla400ATwoGateway();
+    const declaredNew = setExistingServiceEquipment(topology, null);
+    expect(declaredNew.service.existingOrNew).toBe('new');
+    expect(declaredNew.service.existingEquipment ?? null).toBeNull();
+    expect(check(declaredNew, 'service.existing-equipment')).toBeUndefined();
+  });
+
+  it('🚨 …but a service NOBODY called existing or new is not "new": it is asked, and nothing is verified-away', () => {
+    const { topology } = buildTesla400ATwoGateway();
     expect(topology.service.existingEquipment ?? null).toBeNull();
-    expect(check(topology, 'service.existing-equipment')).toBeUndefined();
+    const c = check(topology, 'service.existing-equipment');
+    expect(c?.conclusion).toBe('NOT_EVALUATED');
+    expect(c?.requires).toEqual(['service.existingOrNew']);
+    expect(c?.detail).toContain('EXISTING OR NEW 400 A SERVICE EQUIPMENT — NOT ESTABLISHED');
   });
 
   it('🚨 SolarPro does not order the existing assembly, or the switches it has not chosen', () => {

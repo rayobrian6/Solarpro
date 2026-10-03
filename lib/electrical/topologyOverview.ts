@@ -21,8 +21,8 @@
 
 import {
   evaluateServiceTopology, OPTIONAL_REQUIREMENT_TOKENS, solarCouplingLabel, serviceRatingLabel,
-  servicePhaseInfo, isServicePhase, isSiteLevelCheck,
-  type ServiceTopology, type TopologyEvaluation, type TopologyCheck,
+  servicePhaseInfo, isServicePhase, isSiteLevelCheck, serviceExistingOrNew, EXISTING_OR_NEW_TOKEN,
+  type ServiceTopology, type TopologyEvaluation, type TopologyCheck, type ExistingOrNew,
 } from '@/lib/electrical/serviceTopology';
 import { foldConclusions, type EngineeringConclusion } from '@/lib/engineering/engineeringStatus';
 
@@ -192,6 +192,8 @@ export interface ServiceSummary {
   isolationSwitchCount: number;
   /** Is the service equipment already on the wall? Changes what SolarPro may add and price. */
   serviceEquipmentIsExisting: boolean;
+  /** The installer's answer to "existing or new?" — 'unanswered' is not "new". */
+  serviceExistingOrNew: ExistingOrNew;
   /** Items somebody actually has to resolve. Excludes the optional calculations. */
   requiredCount: number;
   /** Optional calculations nobody is obliged to run. Counted apart, never added to the above. */
@@ -329,6 +331,7 @@ export function labelForToken(token: string, t: ServiceTopology): string {
     'calculatedDemandA': 'Branch load calculation',
     'ocpdAmps': 'Branch OCPD rating',
     // ── The service assembly that is already on the wall ───────────────────
+    [EXISTING_OR_NEW_TOKEN]: 'Whether the service equipment is existing (connected to) or new',
     'service.existingEquipment.catalogNumber': 'Existing service equipment — model / catalog number',
     'service.existingEquipment.mainArrangement':
       'Existing service equipment — internal main / disconnect arrangement',
@@ -403,6 +406,8 @@ function ownerForToken(token: string): RequirementOwner {
   if (token === 'service.availableFaultCurrentA') return 'utility-must-provide';
   // Facts about an assembly already on the wall: somebody goes and reads them.
   if (token.startsWith('service.existingEquipment.')) return 'field-verification';
+  // Whether there IS such an assembly is the installer's answer about the job's scope.
+  if (token === EXISTING_OR_NEW_TOKEN) return 'design-decision';
   // Choosing the actual part, and choosing which path a switch sits in, are both the designer's.
   if (token === 'device.productId' || token === 'device.inlineOnNodeId'
       || token === 'aggregation.productId') return 'design-decision';
@@ -463,6 +468,9 @@ function focusFor(check: TopologyCheck, token: string, t: ServiceTopology): Over
   // the whole house.
   if (token === 'loads.model') {
     return { kind: 'service', nodeId: 'service', field: 'loads' };
+  }
+  if (token === EXISTING_OR_NEW_TOKEN) {
+    return { kind: 'service', nodeId: 'service', field: 'existingOrNew' };
   }
   if (token.startsWith('service.existingEquipment.')) {
     return {
@@ -698,7 +706,8 @@ export function buildServiceOverview(
       batteryModelLabel,
       isolationSwitchCount: topology.devices
         .filter(d => d.roles.includes('der-isolation-disconnect')).length,
-      serviceEquipmentIsExisting: !!topology.service.existingEquipment,
+      serviceEquipmentIsExisting: serviceExistingOrNew(topology.service) === 'existing',
+      serviceExistingOrNew: serviceExistingOrNew(topology.service),
       requiredCount: requiredInputs.filter(i => i.owner !== 'optional-calculation').length,
       optionalCount: requiredInputs.filter(i => i.owner === 'optional-calculation').length,
       branchCount: topology.branches.length,

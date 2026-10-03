@@ -63,10 +63,12 @@ import type {
   ServiceTopology, ServiceBranch, PanelBoard, BackupDomain, StorageUnit,
   ProtectiveDevice, GatewayInstance, DeviceRole,
   GenerationUnit, DerAggregationPanel, DerAggregationInput, PointOfInterconnection,
-  PoiRelationship, ExistingServiceEquipment, LoadModel, LoadCalculationMethod, PanelLoad,
+  PoiRelationship, ExistingServiceEquipment, ExistingOrNew, LoadModel, LoadCalculationMethod, PanelLoad,
   ServicePhase,
 } from '@/lib/electrical/serviceTopology';
-import { isServicePhase, servicePhaseInfo } from '@/lib/electrical/serviceTopology';
+import {
+  isServicePhase, servicePhaseInfo, isExistingOrNew, BLANK_EXISTING_SERVICE_EQUIPMENT,
+} from '@/lib/electrical/serviceTopology';
 
 /**
  * Bumped only when the stored shape changes in a way a reader must know about.
@@ -86,8 +88,13 @@ import { isServicePhase, servicePhaseInfo } from '@/lib/electrical/serviceTopolo
  * selected part, and each storage unit's commissioned output configuration, PV assignment and
  * manufacturer DC-input limits. A version-3 graph reloads with no coupling recorded, which is
  * exactly what it was: a design whose consumers each inferred one.
+ *
+ * 5 — the installer's answer to "existing or new service equipment?" (`service.existingOrNew`:
+ * 'unanswered' | 'existing' | 'new'), stored beside the reading. Earlier graphs carry only the
+ * reading, and a null reading on them is ambiguous, so they read back 'existing' when they hold a
+ * reading and 'unanswered' otherwise — never 'new' (see `parseExistingOrNew`).
  */
-export const SERVICE_TOPOLOGY_SCHEMA_VERSION = 4;
+export const SERVICE_TOPOLOGY_SCHEMA_VERSION = 5;
 
 export interface StoredServiceTopology {
   schemaVersion: number;
@@ -186,6 +193,39 @@ function parseExistingEquipment(v: unknown): ExistingServiceEquipment | null {
     sccrA: numOrNull(v.sccrA),
     verified: v.verified === true,
   };
+}
+
+/**
+ * "Existing or new?" — three answers, read back as three.
+ *
+ * 🚨 THE STORED BYTES DECIDE, AND NULL NEVER PROVES "NEW". This used to collapse an absent field
+ * and a null into the same null, and every consumer read that null as "new service equipment …
+ * Installer entered" — so an unanswered question came back answered, and the verification an
+ * existing assembly owes was dropped. Ray: "Preserve UNANSWERED / EXISTING / NEW distinctly."
+ *
+ *   explicit `existingOrNew`            → exactly that answer (schema 5+ writers always store it).
+ *   a reading (`existingEquipment` {…}) → 'existing'. Only an "existing" answer ever wrote one, and
+ *                                         a reading is never discarded on a contradicting flag.
+ *   `existingOrNew: 'existing'`, no
+ *     reading                           → 'existing' with a blank reading (nothing read yet).
+ *   anything else on a pre-5 row        → 'unanswered'. A legacy `existingEquipment: null` CANNOT
+ *                                         mean "new": since schema 3 the write path stored the
+ *                                         PARSED graph, and this function used to emit `null` for
+ *                                         an absent field — so "the installer chose new" and
+ *                                         "nobody ever asked" are byte-identical on those rows,
+ *                                         and `carryDecisions` wrote the same null on every
+ *                                         distribution rebuild. Asking again costs one click;
+ *                                         inventing "new" drops a field verification.
+ */
+function parseExistingOrNew(service: Record<string, unknown> | null): {
+  existingOrNew: ExistingOrNew; existingEquipment: ExistingServiceEquipment | null;
+} {
+  const reading = parseExistingEquipment(service?.existingEquipment);
+  const stated = isExistingOrNew(service?.existingOrNew) ? service?.existingOrNew : null;
+  if (reading || stated === 'existing') {
+    return { existingOrNew: 'existing', existingEquipment: reading ?? { ...BLANK_EXISTING_SERVICE_EQUIPMENT } };
+  }
+  return { existingOrNew: stated === 'new' ? 'new' : 'unanswered', existingEquipment: null };
 }
 
 const LOAD_METHODS: LoadCalculationMethod[] = [
@@ -524,7 +564,7 @@ export function parseServiceTopology(
         voltage,
         phase,
         availableFaultCurrentA: numOrNull(service?.availableFaultCurrentA),
-        existingEquipment: parseExistingEquipment(service?.existingEquipment),
+        ...parseExistingOrNew(service),
       },
       devices,
       branches,

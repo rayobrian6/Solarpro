@@ -24,6 +24,7 @@
 import React, { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { ServiceTopology, SolarCoupling, BackupDomain, PanelBoard } from '@/lib/electrical/serviceTopology';
+import { existingServiceReading } from '@/lib/electrical/serviceTopology';
 import type { PvArrayDesign } from '@/lib/electrical/pvArrayDesign';
 import type { FactSource, InterviewItem } from '@/lib/electrical/systemConfigInterview';
 import {
@@ -36,7 +37,9 @@ import {
 } from '@/lib/electrical/systemConfigUtilityDisconnects';
 import { SYSTEM_EQUIPMENT_PREFIX, parseSystemEquipmentItemId } from '@/lib/electrical/systemConfigSystemEquipment';
 import { LOAD_ANALYSIS_ITEM_ID } from '@/lib/electrical/systemConfigLoadAnalysis';
-import { CARD_TITLE, PV_STRING_ASSIGNMENT_NEED, homeOf } from '@/lib/electrical/systemConfigPlacement';
+import {
+  CARD_TITLE, EXISTING_OR_NEW_NEED, PV_STRING_ASSIGNMENT_NEED, homeOf,
+} from '@/lib/electrical/systemConfigPlacement';
 import { UtilityDisconnectsEditor } from '@/components/engineering/systemConfig/UtilityDisconnectsEditor';
 import { SystemEquipmentEditor, type SystemEquipmentSelection } from '@/components/engineering/systemConfig/SystemEquipmentEditor';
 import { LoadAnalysisEditor } from '@/components/engineering/systemConfig/LoadAnalysisEditor';
@@ -136,7 +139,8 @@ export function applyVia(
 
 /** Items whose editor takes several separate writes (a dialog stays open between them). */
 export function isMultiFieldItem(itemId: string): boolean {
-  return itemId.startsWith('service.panel.') || itemId === 'service.existing' || itemId === 'behavior.isolation'
+  return itemId.startsWith('service.panel.') || itemId === 'service.existing' || itemId === EXISTING_OR_NEW_NEED
+    || itemId === 'behavior.isolation'
     || itemId.startsWith(DISCONNECT_ITEM_PREFIX) || itemId === LOAD_ANALYSIS_ITEM_ID
     || itemId === GENERATION_PANELS_ITEM_ID || itemId.startsWith(SCCR_NEED_PREFIX);
 }
@@ -163,7 +167,9 @@ export function hasItemEditor(item: InterviewItem, t: ServiceTopology | null): b
   // and SCCR, and a panelboard's own SCCR.
   if (id === GENERATION_PANELS_ITEM_ID) return (t.aggregationPanels ?? []).length > 0;
   if (id.startsWith(SCCR_NEED_PREFIX)) return panelOfSccrNeed(id, t) !== null;
-  if (id.startsWith(EXISTING_SERVICE_NEED_PREFIX)) return !!t.service.existingEquipment;
+  if (id.startsWith(EXISTING_SERVICE_NEED_PREFIX)) return existingServiceReading(t.service) !== null;
+  // "Existing or new?" not answered is answered with the Service card's own existing-or-new control.
+  if (id === EXISTING_OR_NEW_NEED) return true;
   if (id.startsWith(UTILITY_ITEM_PREFIX)) return id === METER_COLLAR_ITEM_ID && !!item.options;
   if (id.startsWith(DISCONNECT_ITEM_PREFIX)) return disconnectRoleOf(id) !== null;
   if (id.startsWith(SYSTEM_EQUIPMENT_PREFIX)) {
@@ -494,17 +500,17 @@ export function ItemEditor(props: ItemEditorProps) {
   }
   // What the engine still needs read off an existing assembly is answered in the Service card's
   // [Verify] form — the same form here, so [Answer Next] can ask it where it stands.
-  if (id.startsWith(EXISTING_SERVICE_NEED_PREFIX) && t?.service.existingEquipment) {
+  if (id.startsWith(EXISTING_SERVICE_NEED_PREFIX) && t && existingServiceReading(t.service)) {
     const field = existingNeedField(id);
     return <ExistingServiceVerifyForm t={t} apply={apply} busy={busy} needed={field ? [field] : []} />;
   }
-  if (id === 'service.existing' && t) {
+  if ((id === 'service.existing' || id === EXISTING_OR_NEW_NEED) && t) {
     return (
       <div className="space-y-2">
         <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] text-slate-300">
           <ExistingServiceLine t={t} ids="answer" disabled={busy} apply={apply} />
         </div>
-        {t.service.existingEquipment ? <ExistingServiceVerifyForm t={t} apply={apply} busy={busy} /> : null}
+        {existingServiceReading(t.service) ? <ExistingServiceVerifyForm t={t} apply={apply} busy={busy} /> : null}
       </div>
     );
   }

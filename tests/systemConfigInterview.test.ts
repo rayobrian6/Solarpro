@@ -15,7 +15,7 @@ import {
 } from '@/lib/electrical/systemConfigInterview';
 import {
   answerServiceRating, answerDistribution, answerPanel, answerBackup, answerInterconnection,
-  answerIsolationRequired, answerPvLanding, answerStorageLanding,
+  answerIsolationRequired, answerPvLanding, answerStorageLanding, answerExistingService,
 } from '@/lib/electrical/systemConfigAnswers';
 import { resolvePvArrayDesign } from '@/lib/electrical/pvArrayDesign';
 import { buildRaysIntendedJob } from '@/lib/electrical/fixtures/tesla400aTwoGateway';
@@ -65,16 +65,20 @@ describe('the ordinary 200 A house is easy', () => {
       'behavior.storage-landing', 'behavior.pv-landing', 'behavior.pv-connection']) {
       expect(asked, `a 200 A micro house was asked ${never}`).not.toContain(never);
     }
-    // What IS still asked is real: where it connects, and the utility's disconnect rule.
-    expect(iv.openQuestions.map(q => q.id)).toEqual(['behavior.interconnection', 'behavior.isolation']);
+    // What IS still asked is real: whether the service equipment is existing or new (never assumed
+    // new), where it connects, and the utility's disconnect rule.
+    expect(iv.openQuestions.map(q => q.id)).toEqual(['service.existing', 'behavior.interconnection', 'behavior.isolation']);
   });
 
-  it('two answers later it is release-ready (control: an unanswered interconnection blocks release)', () => {
+  it('three answers later it is release-ready (control: an unanswered interconnection blocks release)', () => {
     let t = (answerServiceRating(null, 200) as { topology: ServiceTopology }).topology;
     const before = buildSystemConfigInterview(base({ topology: t, evaluation: evaluateServiceTopology(t) }));
     expect(before.release.releaseReady).toBe(false);
     t = (answerInterconnection(t, 'load-side-busbar') as { topology: ServiceTopology }).topology;
     t = (answerIsolationRequired(t, false) as { topology: ServiceTopology }).topology;
+    // 🚨 Existing or new is the installer's answer, not a default: until it is given it stays open.
+    expect(buildSystemConfigInterview(base({ topology: t })).openQuestions.map(q => q.id)).toEqual(['service.existing']);
+    t = (answerExistingService(t, { existing: false }) as { topology: ServiceTopology }).topology;
     const iv = buildSystemConfigInterview(base({ topology: t }));
     expect(iv.openQuestions).toEqual([]);
     // With the engine's verdicts in hand, what is still owed is NAMED with its owner — the utility's

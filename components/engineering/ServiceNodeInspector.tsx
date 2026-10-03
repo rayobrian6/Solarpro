@@ -22,12 +22,13 @@ import {
   updateService, updateBranch, updatePanel, updateDomain, setDomainEquipment,
   removeBackupDomain, addProtectiveDevice, removeProtectiveDevice, setInterconnection,
   updateAggregationPanel, updatePointOfInterconnection, recommendAggregationRatings,
-  setExistingServiceEquipment, setLoadModel, setPanelLoad,
+  setExistingServiceEquipment, setServiceExistingOrNew, setLoadModel, setPanelLoad,
   placeDevice, placeDeviceInline, selectDeviceProduct,
   setSolarCoupling, selectAggregationProduct,
 } from '@/lib/electrical/topologyAuthoring';
 import {
-  governingArticleFor, resolveDemands, SERVICE_PHASES, servicePhaseInfo,
+  governingArticleFor, resolveDemands, SERVICE_PHASES, servicePhaseInfo, serviceExistingOrNew,
+  isExistingOrNew,
 } from '@/lib/electrical/serviceTopology';
 import type { LoadCalculationMethod } from '@/lib/electrical/serviceTopology';
 
@@ -187,20 +188,21 @@ export function ServiceNodeInspector({
             🚨 EXISTING EQUIPMENT IS READ, NOT DESIGNED. Ray's job has an Eaton 400 A assembly
             already there whose internals nobody has opened. SolarPro must say
             "CONFIGURATION TO VERIFY" and must not quietly add replacement service gear. */}
+        {/* 🚨 THREE ANSWERS: not answered is kept as not answered, never read as new. */}
         <div className="sm:col-span-2">
-          <label className="flex items-start gap-2 text-xs text-slate-300">
-            <input type="checkbox" data-testid="inspector-service-existing" className="mt-0.5"
-                   checked={!!s.existingEquipment}
-                   onChange={e => onChange(setExistingServiceEquipment(
-                     topology, e.target.checked ? {} : null))} />
-            <span>
-              The service equipment is already installed
-              <span className="block text-[10px] text-slate-500">
-                SolarPro connects to it. It is not priced, not scheduled as new, and its internals
-                are field-verified rather than assumed.
-              </span>
-            </span>
-          </label>
+          <Field label="Existing or new service equipment" focused={isFocus('existingOrNew')}
+                 hint="Existing: SolarPro connects to it — not priced, not scheduled as new, internals field-verified rather than assumed.">
+            <select data-testid="inspector-service-existing"
+                    className={`mt-1 ${box} ${isFocus('existingOrNew') ? ring : ''}`}
+                    value={serviceExistingOrNew(s)}
+                    onChange={e => {
+                      if (isExistingOrNew(e.target.value)) onChange(setServiceExistingOrNew(topology, e.target.value));
+                    }}>
+              <option value="unanswered">Not answered</option>
+              <option value="existing">Existing — already installed</option>
+              <option value="new">New service equipment</option>
+            </select>
+          </Field>
         </div>
 
         {s.existingEquipment ? (

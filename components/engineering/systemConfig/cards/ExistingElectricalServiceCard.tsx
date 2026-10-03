@@ -11,7 +11,8 @@
 //   Distribution  (One 400 A main panel) (Two 200 A main panels) (Other / custom)   ← only when asked
 //   MSP #1  Main [200 ▼]  Bus [200 ▼]  [Eaton]                                       ← one row per panel
 //   Available fault current [   ] kA from the utility
-//   ☑ Existing service equipment · [Eaton] · Field verification 5 items required [Verify]
+//   Service equipment [Existing — keep it ▼] · [Eaton] · Field verification 5 items required [Verify]
+//                     (Not answered / Existing — keep it / New service equipment)
 //
 // A plain 200 A / one-MSP house shows one compact panel row and NO multi-panel controls: the
 // interview does not ask a 200 A service how it is split. A panel whose NEC 705.12(B) check FAILS
@@ -28,6 +29,7 @@
 import React, { useId, useMemo, useState } from 'react';
 import { Shield } from 'lucide-react';
 import type { SystemConfigInterview } from '@/lib/electrical/systemConfigInterview';
+import { serviceExistingOrNew, existingServiceReading } from '@/lib/electrical/serviceTopology';
 import {
   existingNeedField, panelBusbarCheck, serviceCardLayout, type ExistingServiceField,
 } from '@/lib/electrical/systemConfigServiceCard';
@@ -66,7 +68,8 @@ export function ExistingElectricalServiceCard(props: ExistingElectricalServiceCa
     return props.apply(r);
   };
 
-  const ex = t?.service.existingEquipment ?? null;
+  const answer = serviceExistingOrNew(t?.service);
+  const ex = existingServiceReading(t?.service);
   const needFields = layout.existingNeeds
     .map(i => existingNeedField(i.id)).filter((f): f is ExistingServiceField => f !== null);
   const checks = interview.evaluation?.checks ?? null;
@@ -152,7 +155,8 @@ export function ExistingElectricalServiceCard(props: ExistingElectricalServiceCa
       {t && layout.existing ? (
         <div data-testid="svc-existing-line" data-state={layout.existing.state}
              className="mt-3 flex flex-wrap items-center gap-x-1.5 gap-y-1 rounded-lg border border-slate-700/40 bg-slate-900/50 p-2 text-[11px] text-slate-300">
-          <ExistingServiceLine t={t} ids="svc" disabled={locked} apply={apply}>
+          <ExistingServiceLine t={t} ids="svc" disabled={locked} apply={apply}
+                               chip={<ProvenanceChip compact source={layout.existing.source} testid="svc-existing-source" />}>
             <span className="text-slate-600">·</span>
             <span data-testid="svc-existing-status" className={needFields.length > 0 || !ex?.verified ? 'text-amber-300' : 'text-emerald-300'}>
               {needFields.length > 0
@@ -164,12 +168,15 @@ export function ExistingElectricalServiceCard(props: ExistingElectricalServiceCa
               Verify
             </button>
           </ExistingServiceLine>
-          {/* Unchecked is also what the graph holds when nobody has said anything, so it is worded as
-              the question it may still be — with what SolarPro does meanwhile — never as a decision. */}
-          {!ex ? (
+          {/* 🚨 Not answered is said as the open question it is — SolarPro assumes neither existing nor
+              new meanwhile. New states the decision and claims nothing about the new gear. */}
+          {answer === 'unanswered' ? (
+            <span data-testid="svc-existing-unanswered" className="text-slate-400">
+              Is the service equipment already on the wall? Until it is answered, SolarPro assumes neither.
+            </span>
+          ) : answer === 'new' ? (
             <span data-testid="svc-existing-new" className="text-slate-400">
-              Existing or new? Unchecked, SolarPro designs the service equipment as new — check it if the
-              equipment is already on the wall.
+              Nothing existing to verify. The new equipment's make and ratings are not recorded here.
             </span>
           ) : null}
         </div>

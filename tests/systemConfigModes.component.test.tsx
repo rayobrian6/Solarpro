@@ -55,7 +55,7 @@ function renderPanel(iv = interview) {
 
 describe('the same engineering state, three ways through it', () => {
   it('fixture: the open questions are still asked, and the queue holds every one of them', () => {
-    expect(interview.openQuestions.map(q => q.id)).toEqual(['behavior.interconnection', 'behavior.isolation']);
+    expect(interview.openQuestions.map(q => q.id)).toEqual(['service.existing', 'behavior.interconnection', 'behavior.isolation']);
     const q = requiredQueue(interview).map(i => i.id);
     for (const open of interview.openQuestions) expect(q).toContain(open.id);
   });

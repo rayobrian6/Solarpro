@@ -340,7 +340,10 @@ export function ServiceTopologyBuilder({
           <span className="text-lg font-black text-slate-100">
             {summary.serviceAmpsLabel} service
             {summary.serviceEquipmentIsExisting
-              ? <span className="ml-1 text-xs font-bold text-amber-300">(existing)</span> : null}
+              ? <span className="ml-1 text-xs font-bold text-amber-300">(existing)</span>
+              : summary.serviceExistingOrNew === 'new'
+                ? <span className="ml-1 text-xs font-bold text-slate-400">(new)</span>
+                : <span data-testid="topology-existing-unanswered" className="ml-1 text-xs font-bold text-sky-300">(existing or new: not answered)</span>}
           </span>
           {summary.systemsLabel ? (
             <span data-testid="topology-systems" className="text-sm font-bold text-slate-100">

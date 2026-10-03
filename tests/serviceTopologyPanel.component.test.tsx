@@ -153,6 +153,8 @@ describe('🚨 NOT EVALUATED names what would settle it', () => {
     // purchase and a proven traversal is not an approval.
     for (const dev of t.devices) dev.productId = 'eaton-dg224urk';
     t.interconnection.isolationArrangementAccepted = true;
+    // And whether the service equipment is existing or new — not answered is not "new".
+    t.service.existingOrNew = 'new';
     render(<ServiceTopologyPanel topology={t} />);
     expect(screen.queryByTestId('topology-required-inputs')).toBeNull();
   });

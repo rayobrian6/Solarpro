@@ -111,7 +111,9 @@ describe('serviceCardLayout — the card shows what the interview asks, and noth
     expect(l.panels[0].item?.id).toBe('service.panel.msp-1');
     expect(l.multiPanel).toBe(false);
     expect(l.faultCurrent?.id).toBe('service.fault-current');
-    expect(l.existing?.answer).toBe('New service equipment (engineered by SolarPro)');
+    // 🚨 Nobody has said whether the equipment is existing or new: it is asked, never answered "new".
+    expect(l.existing).toMatchObject({ state: 'needs-answer', source: 'Not established' });
+    expect(l.existing?.answer).toBeUndefined();
   });
 
   it('400 A: asked how it is split; two 200 A main panels give two MSP rows', () => {

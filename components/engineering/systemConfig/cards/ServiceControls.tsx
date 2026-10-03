@@ -15,8 +15,10 @@
 
 import React, { useState } from 'react';
 import type { InterviewItem } from '@/lib/electrical/systemConfigInterview';
-import type { PanelBoard, ServiceTopology, TopologyCheck } from '@/lib/electrical/serviceTopology';
-import { SERVICE_PHASES, servicePhaseInfo } from '@/lib/electrical/serviceTopology';
+import type { ExistingOrNew, PanelBoard, ServiceTopology, TopologyCheck } from '@/lib/electrical/serviceTopology';
+import {
+  SERVICE_PHASES, servicePhaseInfo, serviceExistingOrNew, existingServiceReading,
+} from '@/lib/electrical/serviceTopology';
 import {
   answerServiceRating, answerElectricalSystem, answerDistribution, answerPanel,
   answerAvailableFaultCurrent, answerExistingService, sccrAmpsFromKa, sccrKaFromAmps, type AnswerResult,
@@ -329,27 +331,52 @@ export function FaultCurrentRow({ t, item, ids, disabled, apply, chip }: {
 // ── Existing service equipment ──────────────────────────────────────────────
 
 /**
- * "Existing service equipment" — the checkbox and, when it is existing, its manufacturer. Unchecking
- * it declares the equipment new, which discards everything read off it on site: when anything is
- * recorded, that is asked first. `children` follow the manufacturer (the card's status and [Verify]).
+ * 🚨 THREE ANSWERS, ONE CONTROL. "Existing or new?" used to be a checkbox, and unchecked meant both
+ * "new" and "nobody has said" — so an unanswered job read as new, with "Installer entered" beside it.
+ * The select holds all three, and "Not answered" is a value the graph keeps across a save.
  */
-export function ExistingServiceLine({ t, ids, disabled, apply, children }: {
-  t: ServiceTopology; ids: ServiceControlIds; disabled: boolean; apply: Apply; children?: React.ReactNode;
+export const EXISTING_OR_NEW_OPTIONS: ReadonlyArray<{ value: ExistingOrNew; label: string }> = [
+  { value: 'unanswered', label: 'Not answered' },
+  { value: 'existing', label: 'Existing — keep it' },
+  { value: 'new', label: 'New service equipment' },
+];
+
+const answerFor = (to: ExistingOrNew) => (to === 'existing' ? true : to === 'new' ? false : null);
+
+/**
+ * "Existing or new?" — the select and, when it is existing, its manufacturer. Moving away from
+ * existing (to new, or back to not answered) discards everything read off it on site: when anything
+ * is recorded, that is asked first. `chip` follows the select (its provenance); `children` follow the
+ * manufacturer (the card's status and [Verify]).
+ */
+export function ExistingServiceLine({ t, ids, disabled, apply, chip, children }: {
+  t: ServiceTopology; ids: ServiceControlIds; disabled: boolean; apply: Apply;
+  chip?: React.ReactNode; children?: React.ReactNode;
 }) {
-  const ex = t.service.existingEquipment ?? null;
-  const [confirming, setConfirming] = useState(false);
+  const answer = serviceExistingOrNew(t.service);
+  const ex = existingServiceReading(t.service);
+  const [pending, setPending] = useState<ExistingOrNew | null>(null);
   const lost = existingRecordedFacts(ex);
-  const markNew = () => { setConfirming(false); void apply(answerExistingService(t, { existing: false })); };
+  const write = (to: ExistingOrNew) => {
+    setPending(null);
+    void apply(answerExistingService(t, { existing: answerFor(to) }));
+  };
   return (
     <>
       <label className="flex items-center gap-1.5 font-semibold text-slate-200">
-        <input type="checkbox" data-testid={IDS[ids].existing} checked={ex !== null} disabled={disabled}
-               onChange={e => {
-                 if (e.target.checked) { void apply(answerExistingService(t, { existing: true })); return; }
-                 if (lost.length > 0) setConfirming(true); else markNew();
-               }} />
-        Existing service equipment
+        Service equipment
+        <select data-testid={IDS[ids].existing} value={answer} disabled={disabled}
+                className={`${box} ${answer === 'unanswered' ? NEEDS : ''}`}
+                onChange={e => {
+                  const to = e.target.value as ExistingOrNew;
+                  if (to === answer) return;
+                  if (to !== 'existing' && lost.length > 0) { setPending(to); return; }
+                  write(to);
+                }}>
+          {EXISTING_OR_NEW_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
       </label>
+      {chip}
       {ex ? (
         <>
           <span className="text-slate-600">·</span>
@@ -364,11 +391,13 @@ export function ExistingServiceLine({ t, ids, disabled, apply, children }: {
           {children}
         </>
       ) : null}
-      {confirming && ex ? (
+      {pending && ex ? (
         <ConfirmStrip testid={`${IDS[ids].confirm}-existing`} disabled={disabled}
-                      message="Mark the service equipment as new? This discards what was read off it:"
-                      lost={lost} confirmLabel="Discard and mark new"
-                      onCancel={() => setConfirming(false)} onConfirm={markNew} />
+                      message={pending === 'new'
+                        ? 'Mark the service equipment as new? This discards what was read off it:'
+                        : 'Take the answer back to "not answered"? This discards what was read off it:'}
+                      lost={lost} confirmLabel={pending === 'new' ? 'Discard and mark new' : 'Discard and clear'}
+                      onCancel={() => setPending(null)} onConfirm={() => write(pending)} />
       ) : null}
     </>
   );

@@ -20,6 +20,7 @@ import type {
   InterviewItem, SystemConfigInterview, SectionId,
 } from '@/lib/electrical/systemConfigInterview';
 import type { TopologyCheck } from '@/lib/electrical/serviceTopology';
+import { EXISTING_OR_NEW_TOKEN } from '@/lib/electrical/serviceTopology';
 import { LOAD_ANALYSIS_ITEM_ID } from '@/lib/electrical/systemConfigLoadAnalysis';
 import {
   DISCONNECT_ITEM_PREFIX, METER_COLLAR_ITEM_ID, MULTI_GATEWAY_DOC_ITEM_ID, ROLE_NOUN,
@@ -55,6 +56,8 @@ export const CARD_TITLE: Readonly<Record<CardHome, string>> = {
 
 const NEEDS_PREFIX = 'engineering.needs.';
 const EXISTING_EQUIPMENT_NEED = `${NEEDS_PREFIX}service.existingEquipment.`;
+/** "Existing or new?" not answered — the engine's need, asked by the Service card's own control. */
+export const EXISTING_OR_NEW_NEED = `${NEEDS_PREFIX}${EXISTING_OR_NEW_TOKEN}`;
 const DER_ISOLATION_ITEM = disconnectItemId('der-isolation-disconnect');
 /**
  * "Assign PV strings to storage inputs" — what the engine waits on while a unit's PV input has no
@@ -73,7 +76,7 @@ export function homeOf(itemId: string): CardHome {
   if (id === 'design.pv-array') return 'summary';
   // A module conflict / stale string assignment is a required action, not a fact to restate.
   if (id.startsWith('design.')) return 'readiness';
-  if (id.startsWith('service.') || id.startsWith(EXISTING_EQUIPMENT_NEED)) return 'service';
+  if (id.startsWith('service.') || id.startsWith(EXISTING_EQUIPMENT_NEED) || id === EXISTING_OR_NEW_NEED) return 'service';
   // The generation / combiner panels are what the Battery card's "AC aggregation" answer built — their
   // part, busbar and SCCR are chosen behind that card's [Select Equipment].
   if (id === 'equipment.storage' || id === 'equipment.gateway' || id.startsWith(SYSTEM_EQUIPMENT_PREFIX)
@@ -127,6 +130,7 @@ export function isRequiredUnresolved(item: InterviewItem): boolean {
 const NEED_ASKED_BY: ReadonlyArray<[token: string | ((t: string) => boolean), asks: (id: string) => boolean]> = [
   ['service.availableFaultCurrentA', id => id === 'service.fault-current'],
   ['service.existingEquipment.verified', id => id === 'service.existing'],
+  [EXISTING_OR_NEW_TOKEN, id => id === 'service.existing'],
   ['panel.busbarRatingA', id => id.startsWith('service.panel.')],
   ['panel.mainBreakerA', id => id.startsWith('service.panel.')],
   ['pv.stringAssignment', id => id === 'behavior.pv-landing'],
@@ -227,6 +231,7 @@ const NEED_LABEL: Readonly<Record<string, string>> = {
   'service.existingEquipment.mainArrangement': 'Verify the service main / disconnect arrangement',
   'service.existingEquipment.feederArrangement': 'Verify the service feeder arrangement',
   'service.existingEquipment.verified': 'Confirm the service equipment was read on site',
+  [EXISTING_OR_NEW_TOKEN]: 'Say whether the service equipment is existing or new',
   'service.availableFaultCurrentA': 'Get the available fault current from the utility',
   'pv.stringAssignment': 'Assign PV strings to storage inputs',
   'interconnection.solarCoupling': 'Record how the PV connects',
@@ -278,6 +283,8 @@ const subjectOf = (question: string) => question.split(':')[0].trim();
 export function nextActionLabel(item: InterviewItem): string {
   const id = item.id;
   if (id.startsWith(EXISTING_EQUIPMENT_NEED) && item.question.startsWith(VERIFY_EXISTING_GROUP)) return item.question;
+  // Not answered is a question to answer, not equipment to go and verify.
+  if (id === 'service.existing' && item.state === 'needs-answer') return NEED_LABEL[EXISTING_OR_NEW_TOKEN];
   if (id === 'behavior.isolation') {
     return item.value === 'yes' && item.state === 'needs-verification' ? 'Confirm utility isolation acceptance'
       : item.value === 'yes' ? 'Select the utility isolation equipment'

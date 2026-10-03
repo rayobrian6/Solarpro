@@ -32,7 +32,9 @@ import { pvModuleCountSourceLabel } from '@/lib/electrical/pvArrayDesign';
 import type {
   ServiceTopology, SolarCoupling, TopologyEvaluation, PoiRelationship,
 } from '@/lib/electrical/serviceTopology';
-import { isOptionalCheck, servicePhaseInfo, type ServicePhase } from '@/lib/electrical/serviceTopology';
+import {
+  isOptionalCheck, servicePhaseInfo, serviceExistingOrNew, existingServiceReading, type ServicePhase,
+} from '@/lib/electrical/serviceTopology';
 import { buildServiceOverview, REQUIREMENT_OWNERS } from '@/lib/electrical/topologyOverview';
 import { buildUtilityDisconnectsItems, supersededByUtilityDisconnects } from '@/lib/electrical/systemConfigUtilityDisconnects';
 import { buildSystemEquipmentItems, placeSystemEquipmentItems } from '@/lib/electrical/systemConfigSystemEquipment';
@@ -345,24 +347,6 @@ export function buildSystemConfigInterview(input: InterviewInput): SystemConfigI
       blocks: ['SCCR checks', 'release'],
     });
   }
-  if (t) {
-    const ex = t.service.existingEquipment ?? null;
-    service.push({
-      id: 'service.existing',
-      section: 'service',
-      question: 'Is this existing service equipment, and has it been read on site?',
-      state: ex === null ? 'answered' : ex.verified ? 'answered' : 'needs-verification',
-      answer: ex === null ? 'New service equipment (engineered by SolarPro)'
-        : `Existing${ex.manufacturer ? ` ${ex.manufacturer}` : ''} equipment — `
-          + (ex.verified ? 'read on site' : 'configuration to verify on site'),
-      source: ex?.verified ? 'Installer entered' : ex ? 'Not established' : 'Installer entered',
-      why: ex && !ex.verified
-        ? 'Existing equipment is connected to, never replaced or priced, and its internal breaker '
-          + 'arrangement must be read on site rather than assumed.'
-        : undefined,
-      owner: 'Field verification',
-    });
-  }
   // The split is asked only where a split is physically plausible. A 200 A service is one panel.
   if (rated !== null && rated > SPLITTABLE_ABOVE_A && t) {
     const n = t.branches.length;
@@ -403,6 +387,48 @@ export function buildSystemConfigInterview(input: InterviewInput): SystemConfigI
       why: 'NEC 705.12(B) is evaluated on THIS panel’s busbar and main breaker — never the service’s.',
       owner: 'Installer (panel label)',
       blocks: ['busbar check'],
+    });
+  }
+
+  // Asked last in the Service card, as it reads top to bottom: the assembly, once its panels are known.
+  if (t) {
+    // 🚨 THREE ANSWERS. "Not answered" used to read as "New service equipment … Installer entered"
+    // because the graph could not hold it — an answer nobody gave, which also dropped the field
+    // verification an existing assembly owes. Now an unanswered question says so and blocks.
+    const answer = serviceExistingOrNew(t.service);
+    const ex = existingServiceReading(t.service);
+    service.push(answer === 'unanswered' ? {
+      id: 'service.existing',
+      section: 'service',
+      question: 'Is this existing service equipment, and has it been read on site?',
+      state: 'needs-answer',
+      source: 'Not established',
+      why: 'Existing equipment is connected to, never replaced or priced, and its configuration is read '
+        + 'on site; new equipment has nothing old to read. Until it is answered SolarPro assumes neither.',
+      owner: 'Installer (is the service equipment already on the wall?)',
+      blocks: ['service equipment verification', 'release'],
+    } : answer === 'new' ? {
+      id: 'service.existing',
+      section: 'service',
+      question: 'Is this existing service equipment, and has it been read on site?',
+      state: 'answered',
+      // The decision, and nothing more: the new gear's make, catalog number and ratings have not
+      // been selected, so none of them is claimed.
+      answer: 'New service equipment',
+      source: 'Installer entered',
+      owner: 'Installer',
+    } : {
+      id: 'service.existing',
+      section: 'service',
+      question: 'Is this existing service equipment, and has it been read on site?',
+      state: ex?.verified ? 'answered' : 'needs-verification',
+      answer: `Existing${ex?.manufacturer ? ` ${ex.manufacturer}` : ''} equipment — `
+        + (ex?.verified ? 'read on site' : 'configuration to verify on site'),
+      source: ex?.verified ? 'Installer entered' : 'Not established',
+      why: ex?.verified ? undefined
+        : 'Existing equipment is connected to, never replaced or priced, and its internal breaker '
+          + 'arrangement must be read on site rather than assumed.',
+      owner: 'Field verification',
     });
   }
 
