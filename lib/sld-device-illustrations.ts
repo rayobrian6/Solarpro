@@ -440,6 +440,61 @@ function renderTeslaGateway2(cx: number, cy: number, slotW: number, slotH: numbe
   return `<g data-device="tesla-gateway-2">${parts.join('')}</g>`;
 }
 
+// ----- Tesla Backup Gateway 3 (BUI) ----------------------------------------
+// The Powerwall 3 system's whole-home backup controller: a white wall-mount
+// enclosure, wider and squarer than Gateway 2, with a full-height front cover
+// (inset seam), a single status light, the Tesla nameplate on the upper cover
+// and a wiring compartment along the bottom with its conduit knockouts.
+// Proportions approximate (~20 in W × 26 in H); a front elevation, not a render.
+function renderTeslaGateway3(cx: number, cy: number, slotW: number, slotH: number): string {
+  const nativeW = 64;
+  const nativeH = 84;
+  const scale = Math.min(slotW / nativeW, slotH / nativeH);
+  const W = nativeW * scale;
+  const H = nativeH * scale;
+  const x = cx - W / 2;
+  const y = cy - H / 2;
+  const r = Math.max(1.5, W * 0.06);
+
+  const parts: string[] = [];
+  // Body
+  parts.push(rect(x, y, W, H, '#F4F4F2', '#9AA0A6', 0.7, r));
+  // Front cover, inset — the seam that reads as the hinged door
+  parts.push(rect(x + W * 0.07, y + H * 0.05, W * 0.86, H * 0.72, '#FAFAF8', '#D0D4D8', 0.45, r * 0.6));
+  // Status light, centred near the top of the cover
+  parts.push(circleSvg(x + W / 2, y + H * 0.12, Math.max(0.6, W * 0.022), '#4CAF50', '#2E7D32', 0.2));
+  // TESLA nameplate on the upper cover
+  const plateW = W * 0.42;
+  const plateH = H * 0.06;
+  const plateX = x + (W - plateW) / 2;
+  const plateY = y + H * 0.2;
+  parts.push(rect(plateX, plateY, plateW, plateH, '#202124', '#202124', 0.3, 1));
+  parts.push(textSvg(plateX + plateW / 2, plateY + plateH * 0.75, 'TESLA', {
+    size: Math.max(2.4, H * 0.03),
+    fill: '#F4F4F2',
+    bold: true,
+    fit: [plateX, plateY, plateW, plateH],
+  }));
+  // Wiring compartment along the bottom, below the cover
+  const wcY = y + H * 0.8;
+  parts.push(line(x + W * 0.05, wcY, x + W * 0.95, wcY, '#B0B4B8', 0.45));
+  // Conduit knockouts on the bottom face
+  for (const f of [0.2, 0.4, 0.6, 0.8]) {
+    parts.push(circleSvg(x + W * f, y + H * 0.9, Math.max(0.8, W * 0.035), '#E6E8EB', '#9AA0A6', 0.3));
+  }
+  // Mounting tabs
+  parts.push(rect(x - W * 0.02, y + H * 0.12, W * 0.04, H * 0.03, '#B0B4B8', '#9AA0A6', 0.3, 0.5));
+  parts.push(rect(x + W * 0.98, y + H * 0.12, W * 0.04, H * 0.03, '#B0B4B8', '#9AA0A6', 0.3, 0.5));
+  parts.push(rect(x - W * 0.02, y + H * 0.85, W * 0.04, H * 0.03, '#B0B4B8', '#9AA0A6', 0.3, 0.5));
+  parts.push(rect(x + W * 0.98, y + H * 0.85, W * 0.04, H * 0.03, '#B0B4B8', '#9AA0A6', 0.3, 0.5));
+  parts.push(textSvg(x + W / 2, y + H * 0.97, 'GATEWAY 3', {
+    size: Math.max(2.0, H * 0.024),
+    fill: '#5A5E62',
+    bold: false,
+  }));
+  return `<g data-device="tesla-gateway-3">${parts.join('')}</g>`;
+}
+
 // ----- EcoFlow OCEAN Pro Smart Home Panel (BUI) ----------------------------
 // Grid-interconnect + load-control unit that pairs with OCEAN Pro. Anthracite
 // cabinet with blue top strip, visible breaker rows behind front-door glass.
@@ -1834,6 +1889,23 @@ const DEVICE_REGISTRY: Record<string, DeviceIllustration> = {
   },
 };
 
+/**
+ * Illustrations that share a brand::kind slot with another model of the same brand
+ * (Tesla's Gateway 3 beside the Gateway 2 in 'tesla::bui'). Reached only by the
+ * exact model name (`resolveDeviceIllustrationByModel`), never by brand alone.
+ */
+const MODEL_ONLY_ILLUSTRATIONS: DeviceIllustration[] = [
+  {
+    brand: 'tesla',
+    kind: 'bui',
+    label: 'Tesla Backup Gateway 3',
+    sub: 'Powerwall 3 whole-home backup controller · 200A',
+    aspectW: 64,
+    aspectH: 84,
+    render: renderTeslaGateway3,
+  },
+];
+
 // ─── Public API ──────────────────────────────────────────────────────────────
 // Normalise a manufacturer string the same way sld-brand-emblems does so the
 // two registries stay in sync. Duplicated here (not imported) to keep this
@@ -1870,9 +1942,22 @@ export function resolveDeviceIllustration(
   return null;
 }
 
+/**
+ * The illustration for EXACTLY this product, by its catalogue name ('Tesla Backup
+ * Gateway 3'), or null. Brand-only lookup (`resolveDeviceIllustration`) answers
+ * with whichever model holds the brand's slot; a drawing of a different model is
+ * the incorrect artwork Ray ruled out, so a sheet that knows the model asks here.
+ */
+export function resolveDeviceIllustrationByModel(modelName: string | null | undefined): DeviceIllustration | null {
+  if (!modelName) return null;
+  const norm = (v: string) => v.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const want = norm(modelName);
+  return [...Object.values(DEVICE_REGISTRY), ...MODEL_ONLY_ILLUSTRATIONS].find(d => norm(d.label) === want) ?? null;
+}
+
 /** Enumerate all registered illustrations — used by the admin preview page. */
 export function listDeviceIllustrations(): DeviceIllustration[] {
-  return Object.values(DEVICE_REGISTRY);
+  return [...Object.values(DEVICE_REGISTRY), ...MODEL_ONLY_ILLUSTRATIONS];
 }
 
 /** Return true if at least one illustration exists for this brand. */

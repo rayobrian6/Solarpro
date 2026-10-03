@@ -33,7 +33,7 @@ import { isGroundingConductor, type ConductorBundle } from './segment-schedule';
 import { calcDcAcRatio } from './system/calcDcAcRatio';
 import { SLD_SYMBOL_MAP } from './sld-symbols';
 import { emitBrandEmblem } from './sld-brand-emblems';
-import { resolveDeviceIllustration, forPrintedSheet, illustrationBox, type DeviceIllustration } from './sld-device-illustrations';
+import { resolveDeviceIllustration, resolveDeviceIllustrationByModel, forPrintedSheet, illustrationBox, type DeviceIllustration } from './sld-device-illustrations';
 import type { Conductor, WireRun, ConductorType, WireEnvironment } from './sld-types';
 import { getBosDevice, laneCombinerSelection, resolveHybridAcCollection, type HybridAcCollectionPlan, type HybridGatewayInstance } from '@/lib/equipment/integratedBos';
 import { branchRangeText } from '@/lib/equipment/enphaseGatewayMultiplicity';
@@ -3474,8 +3474,8 @@ function panelMarksSld(panel: Parameters<typeof panelRemedyWorkSld>[0] | null | 
 //   · a storage unit — its manufacturer illustration when one exists for EXACTLY that product (the
 //     illustration's own label names the model), else the generic AC battery;
 //   · an expansion — the DC battery pack; a generation / combiner panel — the AC combiner;
-//   · a backup controller — its exact illustration, else the transfer switch (a Gateway 2 picture on a
-//     Gateway 3 is the incorrect artwork Ray ruled out);
+//   · a backup controller — its exact illustration (Tesla Backup Gateway 3 has its own; a Gateway 2
+//     picture on a Gateway 3 is the incorrect artwork Ray ruled out), else the transfer switch;
 //   · the service equipment and each main panel — the main service panel;
 //   · a service disconnect — the circuit breaker; any other disconnect — the AC disconnect.
 // 🚨 THE ART CARRIES NO WORDS. The emblems were authored with labels baked in ("200A / 240V",
@@ -3502,11 +3502,11 @@ function symbolEmblemSld(id: string, slotW: number): SectionEmblem {
 }
 /** A manufacturer illustration — only when its own label IS this product's catalogue name. */
 function exactIllustrationSld(name: string | undefined, kind: 'battery' | 'bui'): SectionEmblem | null {
-  if (!name) return null;
-  const d = resolveDeviceIllustration(name.split(/\s+/)[0], kind);
-  const norm = (v: string) => v.toLowerCase().replace(/[^a-z0-9]/g, '');
-  if (!d || norm(d.label) !== norm(name)) return null;
-  return { kind: `${d.brand}::${d.kind}`, slotW: 36, art: (x, y, w, h) => artOnlySld(d.render(x + w / 2, y + h / 2, w, h)) };
+  const d = resolveDeviceIllustrationByModel(name);
+  if (!d || d.kind !== kind) return null;
+  // Tagged by MODEL ('tesla-backup-gateway-3'), not brand::kind — two models share Tesla's BUI slot.
+  const model = d.label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  return { kind: model, slotW: 36, art: (x, y, w, h) => artOnlySld(d.render(x + w / 2, y + h / 2, w, h)) };
 }
 const essEmblemSld = (u: { label?: string }): SectionEmblem =>
   exactIllustrationSld(u.label, 'battery') ?? symbolEmblemSld('battery-ac', 40);

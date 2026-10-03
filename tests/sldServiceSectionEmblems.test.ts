@@ -51,7 +51,7 @@ describe('every service-section device carries its emblem', () => {
   const emblems = (kind: string) => count(svg, `data-emblem="${kind}"`);
 
   it('Ray\'s job: Powerwall 3 art on the Powerwalls, and artwork on every other device', () => {
-    expect(emblems('tesla::battery'), 'the four Powerwall 3 units').toBe(4);
+    expect(emblems('tesla-powerwall-3'), 'the four Powerwall 3 units').toBe(4);
     expect(emblems('ac-combiner'), 'the two generation panels').toBe(2);
     expect(emblems('msp'), 'the service equipment and MSP #1 / MSP #2').toBe(3);
     expect(emblems('breaker'), 'the service disconnect').toBe(1);
@@ -60,9 +60,17 @@ describe('every service-section device carries its emblem', () => {
     expect(count(svg, 'data-glyph='), 'a device left with a corner glyph instead of its emblem').toBe(0);
   });
 
-  it('🚨 a Gateway 3 is never drawn with the Gateway 2 picture — the generic transfer switch stands in', () => {
-    expect(emblems('ats')).toBe(2);
-    expect(emblems('tesla::bui')).toBe(0);
+  it('🚨 a Gateway 3 is drawn as a Gateway 3 — never with the Gateway 2 picture', () => {
+    expect(emblems('tesla-backup-gateway-3')).toBe(2);
+    expect(emblems('tesla-backup-gateway-2')).toBe(0);
+    expect(svg).toContain('data-device="tesla-gateway-3"');
+    expect(svg).not.toContain('data-device="tesla-gateway-2"');
+  });
+
+  it('a controller with no illustration of its own gets the generic transfer switch', () => {
+    const t = raysJob();
+    const other: ServiceTopology = { ...t, domains: t.domains.map(d => ({ ...d, gateway: { ...d.gateway, label: 'Acme Backup Interface 9' } })) };
+    expect(count(sheet(other), 'data-emblem="ats"')).toBe(2);
   });
 
   it('🚨 manufacturer art only for the exact product: a Powerwall 2 gets the generic AC battery', () => {
@@ -70,7 +78,7 @@ describe('every service-section device carries its emblem', () => {
     const first = t.storage.find(u => u.role === 'inverter-unit')!;
     const pw2: ServiceTopology = { ...t, storage: t.storage.map(u => (u.id === first.id ? { ...u, label: 'Tesla Powerwall 2' } : u)) };
     const s2 = sheet(pw2);
-    expect(count(s2, 'data-emblem="tesla::battery"')).toBe(3);
+    expect(count(s2, 'data-emblem="tesla-powerwall-3"')).toBe(3);
     expect(count(s2, 'data-emblem="battery-ac"')).toBe(1);
   });
 

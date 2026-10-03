@@ -24,40 +24,40 @@
     "bytes": 88639
   },
   "Ray 400 A AC-coupled / micro sheet": {
-    "sha256": "bfac01046f594d2017bbb00e49cbca7058e4ae15dc392ec32578aeeafaab189f",
-    "bytes": 120328
+    "sha256": "20fb0adaee975de119e71421136fe904d303cbc7d1b4375103ebc6d6f3afd28b",
+    "bytes": 120030
   },
   "Ray 400 A AC-coupled / string ext sheet": {
-    "sha256": "09ba648d8ae4a6edc956443a26c06b66e6f5eaf50de109cf347901c12aae035f",
-    "bytes": 127096
+    "sha256": "c9fdb3d8d9561ff40485550874a59acdb6f027a25116ac23d20d7373e59b4911",
+    "bytes": 126798
   },
   "Ray 400 A AC-coupled / string integrated / E-1": {
-    "sha256": "7fd20bbd89b0fdc74a288e05351141d86b30d546fa003b3c567a0f3ef30c0607",
-    "bytes": 76664
+    "sha256": "bcb9842c2e594d4d311633325d64ead686889fef1786b61d581f893660bf0489",
+    "bytes": 76366
   },
   "Tesla 400 A two gateway, coupling unrecorded, expansions": {
-    "sha256": "26d6895826963c481a92dbeced5d6f727725378087a8ccb8f158d0df69a72db8",
-    "bytes": 112646
+    "sha256": "6d7a5baa8236ac16ed3c43e17f5d0fa238d975426258b83e62b38c1ad769eb88",
+    "bytes": 112342
   },
   "normal 200 A residence AC-coupled, 1 PW3": {
-    "sha256": "4f214824b92600b421d43a6eaadceb865c00eb0ffefdaba9f101fede8c9efdb3",
-    "bytes": 85066
+    "sha256": "f8977c3ec45b6680061edec7732bb94b7c5ed56f316581fda494d3fc73a44182",
+    "bytes": 84914
   },
   "normal 200 A residence AC-coupled, 2 PW3 / string": {
-    "sha256": "d44cacbaa4e1ec880fe3a944666cccbfcca68e15e873956c8701382bd907aef0",
-    "bytes": 94230
+    "sha256": "afaeeb33cd17bf0b3d8cdccf33ceb5439b7f73e1cb396ed2622038a04a3384df",
+    "bytes": 94081
   },
   "DC-coupled graph with NO domain": {
     "sha256": "211190bdc1ecb5186b2521017ce1ece73f6b6feb59e7b457f76ccdf138e5a0f0",
     "bytes": 66606
   },
   "Tesla 400 A DC-coupled, ONE common DER aggregation panel (site-wide group)": {
-    "sha256": "447587245ef14caff982d9441ed06d7ed2c9a939d9657f2a6e98e3390012242f",
-    "bytes": 110296
+    "sha256": "05a5f74ce945f182cda859d232361b06f8fbb052376496f62133cf3bae4787b9",
+    "bytes": 109992
   },
   "Ray 400 A DC-coupled, generation panels detached from their systems (site-wide group)": {
-    "sha256": "27111b4f18c690146a397781acd4fd7ad533068705e00b44163bc3170c0c70a9",
-    "bytes": 111562
+    "sha256": "20f24ebc751d45f696d046a9f457fe0b1f56ed484af7b4cee0f3c2130a66f268",
+    "bytes": 111264
   },
   "Ray 400 A DC-coupled / multi-source sheet (two gateways)": {
     "sha256": "afe52d1042f137416b6ec112b740c168e1d38d3dd1611b39d54f237bd58fcdf5",
