@@ -1,8 +1,9 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// Every box in the service section carries the schematic glyph for WHAT IT IS — the service
-// equipment, the service disconnect and each main panel included, not only the storage, gateways and
-// generation panels — and applied 120% remedy work carries the plan-set new-work mark. A glyph never
-// costs a title its wholeness, and no line of a box runs past its border.
+// Ray, on the live sheet: "These aren't emblems." Every device the service graph draws carries the
+// sheet's device ARTWORK (lib/sld-symbols.ts, and a manufacturer illustration only when it is that
+// exact product) — not a text box with a corner glyph. The art carries no words: a baked
+// "200A / 240V" or "NEC 690.17" would be a wrong fact beside the box's real ones. Applied 120% remedy
+// work carries the plan-set new-work mark; titles stay whole; no line runs past its border.
 // ═══════════════════════════════════════════════════════════════════════════
 import { describe, it, expect } from 'vitest';
 import { renderSLDProfessional, type SLDProfessionalInput } from '@/lib/sld-professional-renderer';
@@ -45,20 +46,46 @@ const raysJob = (): ServiceTopology => {
 const failing = () => buildNormalResidence200A({ storageConnection: 'backed-up-panel-busbar' }).topology;
 const derated = () => ok(answerBusbarRemedy(failing(), 'msp-1', { kind: 'replace-main-breaker', mainBreakerA: 150 }));
 
-describe('every service-section box carries the glyph for what it is', () => {
+describe('every service-section device carries its emblem', () => {
   const svg = sheet(raysJob());
+  const emblems = (kind: string) => count(svg, `data-emblem="${kind}"`);
 
-  it('the service equipment, the service disconnect and both main panels have one — not only the DER side', () => {
-    expect(count(svg, 'data-glyph="service"'), 'service equipment').toBe(1);
-    expect(count(svg, 'data-glyph="breaker"'), 'service disconnect').toBe(1);
-    // Two MSPs + two generation panels.
-    expect(count(svg, 'data-glyph="panelboard"'), 'MSP #1, MSP #2 and the two generation panels').toBe(4);
-    expect(count(svg, 'data-glyph="controller"')).toBe(2);
-    expect(count(svg, 'data-glyph="battery-inverter"')).toBe(4);
+  it('Ray\'s job: Powerwall 3 art on the Powerwalls, and artwork on every other device', () => {
+    expect(emblems('tesla::battery'), 'the four Powerwall 3 units').toBe(4);
+    expect(emblems('ac-combiner'), 'the two generation panels').toBe(2);
+    expect(emblems('msp'), 'the service equipment and MSP #1 / MSP #2').toBe(3);
+    expect(emblems('breaker'), 'the service disconnect').toBe(1);
+    expect(emblems('ac-disconnect'), 'the two per-path utility isolation switches').toBe(2);
+    expect(emblems('utility-meter'), 'the revenue meter').toBe(1);
+    expect(count(svg, 'data-glyph='), 'a device left with a corner glyph instead of its emblem').toBe(0);
   });
 
-  it('a title is never split to make room for its glyph', () => {
+  it('🚨 a Gateway 3 is never drawn with the Gateway 2 picture — the generic transfer switch stands in', () => {
+    expect(emblems('ats')).toBe(2);
+    expect(emblems('tesla::bui')).toBe(0);
+  });
+
+  it('🚨 manufacturer art only for the exact product: a Powerwall 2 gets the generic AC battery', () => {
+    const t = raysJob();
+    const first = t.storage.find(u => u.role === 'inverter-unit')!;
+    const pw2: ServiceTopology = { ...t, storage: t.storage.map(u => (u.id === first.id ? { ...u, label: 'Tesla Powerwall 2' } : u)) };
+    const s2 = sheet(pw2);
+    expect(count(s2, 'data-emblem="tesla::battery"')).toBe(3);
+    expect(count(s2, 'data-emblem="battery-ac"')).toBe(1);
+  });
+
+  it('🚨 the art carries no words — no baked rating, code article or caption reaches the sheet', () => {
+    const groups = [...svg.matchAll(/<g data-emblem="[^"]*">([\s\S]*?)<\/g>(?=<|$)/g)].map(m => m[1]);
+    expect(groups.length).toBeGreaterThan(10);
+    for (const g of groups) expect(g, 'an emblem printed its own text').not.toMatch(/<text\b/);
+    for (const baked of ['200A / 240V', 'NEC 690.17', 'MAIN SERVICE PANEL', 'TRANSFER SWITCH', 'REV GRADE', 'AC COMBINER']) {
+      expect(texts(svg), baked).not.toContain(baked);
+    }
+  });
+
+  it('the meter keeps its M; a title is never split by its emblem', () => {
     const t = texts(svg);
+    expect(t).toContain('M');
     expect(t).toContain('EXISTING 400 A SERVICE EQUIPMENT');
     expect(t).toContain('400 A SERVICE DISCONNECT');
     expect(t).toContain('MSP #1');
@@ -70,7 +97,7 @@ describe('applied 120% remedy work is marked as new work', () => {
   it('the derated panel carries the new-work mark; the same panel without the remedy does not', () => {
     const applied = sheet(derated());
     expect(count(applied, 'data-mark="new-work"')).toBe(1);
-    expect(count(applied, 'data-glyph="panelboard"')).toBeGreaterThanOrEqual(1);
+    expect(count(applied, 'data-emblem="msp"')).toBeGreaterThanOrEqual(1);
     expect(count(sheet(failing()), 'data-mark="new-work"')).toBe(0);
     expect(count(sheet(ok(answerRemoveBusbarRemedy(derated(), 'msp-1'))), 'data-mark="new-work"')).toBe(0);
   });

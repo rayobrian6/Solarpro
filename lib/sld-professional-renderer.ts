@@ -3397,13 +3397,11 @@ function dcStorageLabelSld(t: ServiceTopologyForSld): string {
 
 /** One line of text in a service-section box. */
 type SectionLine = { t: string; sz: number; bold?: boolean; fill?: string; italic?: boolean };
-type SectionGlyph =
-  | 'controller' | 'battery-inverter' | 'panelboard'
-  | 'service' | 'breaker' | 'switch' | 'poi' | 'battery';
+/** A corner glyph — for a box with no device emblem (a point of interconnection). */
+type SectionGlyph = 'controller' | 'battery-inverter' | 'panelboard' | 'poi';
 /** Ink width of each glyph from its anchor (stubs included) — what the box's text must clear. */
 const SECTION_GLYPH_W: Readonly<Record<SectionGlyph, number>> = {
-  controller: 26, 'battery-inverter': 28, panelboard: 15,
-  service: 22, breaker: 26, switch: 26, poi: 14, battery: 13,
+  controller: 26, 'battery-inverter': 28, panelboard: 15, poi: 14,
 };
 
 /**
@@ -3443,38 +3441,10 @@ function sectionDeviceGlyph(kind: SectionGlyph, gx: number, gy: number, stroke: 
       s.push(ln(gx + 4, gy + dy, gx + 12, gy + dy, { sw: SW_THIN, stroke }));
       s.push(ln(gx + 12, gy + dy, gx + 15, gy + dy - 2.5, { sw: SW_THIN, stroke }));
     }
-  } else if (kind === 'service') {
-    // Service entrance equipment: the utility's conductors arriving (arrow) onto a bus that feeds
-    // the service branches below it.
-    s.push(ln(gx + 11, gy, gx + 11, gy + 6, { sw: SW_MED, stroke }));
-    s.push(`<path d="M${gx + 8.5},${gy + 3.5} L${gx + 11},${gy + 6.5} L${gx + 13.5},${gy + 3.5}" fill="none" stroke="${stroke}" stroke-width="${SW_THIN}"/>`);
-    s.push(ln(gx + 1, gy + 7, gx + 21, gy + 7, { sw: SW_MED, stroke }));
-    for (const dx of [4, 11, 18]) s.push(ln(gx + dx, gy + 7, gx + dx, gy + 13, { sw: SW_THIN, stroke }));
-  } else if (kind === 'breaker') {
-    // A circuit breaker (the service disconnect / main): two terminals bridged by the IEEE arc.
-    s.push(ln(gx - 4, gy + 10, gx + 3, gy + 10, { sw: SW_THIN, stroke }));
-    s.push(ln(gx + 19, gy + 10, gx + 26, gy + 10, { sw: SW_THIN, stroke }));
-    s.push(`<circle cx="${gx + 3}" cy="${gy + 10}" r="1.4" fill="${stroke}"/>`);
-    s.push(`<circle cx="${gx + 19}" cy="${gy + 10}" r="1.4" fill="${stroke}"/>`);
-    s.push(`<path d="M${gx + 3},${gy + 10} A8,8 0 0 1 ${gx + 19},${gy + 10}" fill="none" stroke="${stroke}" stroke-width="${SW_MED}"/>`);
-  } else if (kind === 'switch') {
-    // A disconnect switch, as the sheet's own in-line isolation switches are drawn: a closed hinge,
-    // an open blade, an open far contact.
-    s.push(ln(gx - 4, gy + 10, gx + 3, gy + 10, { sw: SW_THIN, stroke }));
-    s.push(`<circle cx="${gx + 3}" cy="${gy + 10}" r="1.4" fill="${stroke}"/>`);
-    s.push(ln(gx + 3, gy + 10, gx + 16, gy + 3, { sw: SW_MED, stroke }));
-    s.push(`<circle cx="${gx + 19}" cy="${gy + 10}" r="1.6" fill="none" stroke="${stroke}" stroke-width="${SW_THIN}"/>`);
-    s.push(ln(gx + 21, gy + 10, gx + 26, gy + 10, { sw: SW_THIN, stroke }));
   } else if (kind === 'poi') {
     // A point of interconnection: a connection node ringed — where two systems join.
     s.push(`<circle cx="${gx + 7}" cy="${gy + 7}" r="6" fill="none" stroke="${stroke}" stroke-width="${SW_THIN}"/>`);
     s.push(`<circle cx="${gx + 7}" cy="${gy + 7}" r="2" fill="${stroke}"/>`);
-  } else {
-    // A battery (DC storage with no inverter of its own): the long/short plate stack.
-    s.push(ln(gx, gy + 1, gx, gy + 13, { sw: SW_MED, stroke }));
-    s.push(ln(gx + 4, gy + 4, gx + 4, gy + 10, { sw: SW_THIN, stroke }));
-    s.push(ln(gx + 8, gy + 1, gx + 8, gy + 13, { sw: SW_MED, stroke }));
-    s.push(ln(gx + 12, gy + 4, gx + 12, gy + 10, { sw: SW_THIN, stroke }));
   }
   return `<g data-glyph="${kind}">${s.join('')}</g>`;
 }
@@ -3489,18 +3459,71 @@ function newWorkBadge(rx: number, ty: number, stroke: string): string {
   return `<g data-mark="new-work"><path d="M${x0 + 7},${y0} L${x0 + 14},${y0 + 13} L${x0},${y0 + 13} Z" fill="${WHT}" stroke="${stroke}" stroke-width="${SW_THIN}"/>`
     + txt(x0 + 7, +(y0 + 11.6).toFixed(2), 'N', { sz: MIN_TYPE_UU, bold: true, anc: 'middle', fill: stroke }) + '</g>';
 }
-/** The glyph for a service-chain device, by what it is. */
-function deviceGlyphSld(roles: readonly string[]): SectionGlyph {
-  return roles.includes('service-disconnect') ? 'breaker' : 'switch';
-}
-/** A panelboard's corner marks: the panelboard symbol, and the new-work mark when a remedy is applied. */
-function panelMarksSld(panel: Parameters<typeof panelRemedyWorkSld>[0] | null | undefined):
-  { glyph: SectionGlyph; badge?: 'new-work' } {
-  return { glyph: 'panelboard', ...(panel && panelRemedyWorkSld(panel) ? { badge: 'new-work' as const } : {}) };
+/** A panelboard's marks: the main-service-panel emblem, and the new-work mark when a remedy is applied. */
+function panelMarksSld(panel: Parameters<typeof panelRemedyWorkSld>[0] | null | undefined, corner = false):
+  { emblem: SectionEmblem; badge?: 'new-work' } {
+  return { emblem: corner ? cornerEmblemSld(PANEL_EMBLEM_SLD()) : PANEL_EMBLEM_SLD(), ...(panel && panelRemedyWorkSld(panel) ? { badge: 'new-work' as const } : {}) };
 }
 
-/** A box's corner marks: its schematic glyph (top-left) and the new-work mark (top-right). */
-type SectionMarks = { glyph?: SectionGlyph; badge?: 'new-work' };
+// ── SERVICE-SECTION EMBLEMS ─────────────────────────────────────────────────
+//
+// Ray, on the live sheet: "These aren't emblems." The PV array and the junction box were drawn with
+// the sheet's device artwork (lib/sld-symbols.ts) while every box the service graph added was a text
+// box with a corner glyph. Each service-section device now carries its artwork in a slot at the left
+// of its box, the facts beside it:
+//   · a storage unit — its manufacturer illustration when one exists for EXACTLY that product (the
+//     illustration's own label names the model), else the generic AC battery;
+//   · an expansion — the DC battery pack; a generation / combiner panel — the AC combiner;
+//   · a backup controller — its exact illustration, else the transfer switch (a Gateway 2 picture on a
+//     Gateway 3 is the incorrect artwork Ray ruled out);
+//   · the service equipment and each main panel — the main service panel;
+//   · a service disconnect — the circuit breaker; any other disconnect — the AC disconnect.
+// 🚨 THE ART CARRIES NO WORDS. The emblems were authored with labels baked in ("200A / 240V",
+// "NEC 690.17", "MAIN SERVICE PANEL") — on a 400 A service or a utility isolation switch those are
+// wrong facts in a box whose text states the right ones. Every <text> is stripped from embedded art;
+// the box's text is the only statement of make, model and rating.
+
+type SectionEmblem = {
+  kind: string; slotW: number; art: (x: number, y: number, w: number, h: number) => string;
+  /** Drawn small in the box's top-left corner instead of in a left slot — for a layout with a fixed
+   *  horizontal budget, whose boxes cannot widen and must not grow. */
+  corner?: boolean;
+};
+/** Corner emblem size: big enough to read as the device, small enough to sit beside the title. */
+const CORNER_EMBLEM_W = 30, CORNER_EMBLEM_H = 26;
+const cornerEmblemSld = (e: SectionEmblem): SectionEmblem => ({ ...e, corner: true });
+
+/** Embedded artwork with every baked label removed. */
+function artOnlySld(svg: string): string {
+  return svg.replace(/<text\b[^>]*>[\s\S]*?<\/text>/g, '');
+}
+function symbolEmblemSld(id: string, slotW: number): SectionEmblem {
+  return { kind: id, slotW, art: (x, y, w, h) => artOnlySld(embedSymbol(id, x + w / 2, y + h / 2, w, h)) };
+}
+/** A manufacturer illustration — only when its own label IS this product's catalogue name. */
+function exactIllustrationSld(name: string | undefined, kind: 'battery' | 'bui'): SectionEmblem | null {
+  if (!name) return null;
+  const d = resolveDeviceIllustration(name.split(/\s+/)[0], kind);
+  const norm = (v: string) => v.toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (!d || norm(d.label) !== norm(name)) return null;
+  return { kind: `${d.brand}::${d.kind}`, slotW: 36, art: (x, y, w, h) => artOnlySld(d.render(x + w / 2, y + h / 2, w, h)) };
+}
+const essEmblemSld = (u: { label?: string }): SectionEmblem =>
+  exactIllustrationSld(u.label, 'battery') ?? symbolEmblemSld('battery-ac', 40);
+const EXP_EMBLEM_SLD = (): SectionEmblem => symbolEmblemSld('battery-dc', 40);
+const gatewayEmblemSld = (gw: { label: string }): SectionEmblem =>
+  exactIllustrationSld(gw.label, 'bui') ?? symbolEmblemSld('ats', 56);
+const GEN_EMBLEM_SLD = (): SectionEmblem => symbolEmblemSld('ac-combiner', 52);
+const PANEL_EMBLEM_SLD = (): SectionEmblem => symbolEmblemSld('msp', 42);
+const deviceEmblemSld = (roles: readonly string[]): SectionEmblem =>
+  roles.includes('service-disconnect') ? symbolEmblemSld('breaker', 46) : symbolEmblemSld('ac-disconnect', 46);
+/** A box with an emblem is never shorter than this, so the artwork stays legible. */
+const EMBLEM_MIN_H = 50;
+/** How much wider an emblem box is than its text box — the slot and its gutter. */
+const emblemInsetSld = (e: SectionEmblem | undefined) => (e && !e.corner ? e.slotW + 10 : 0);
+
+/** A box's corner marks: its emblem (left slot) or schematic glyph (top-left), and the new-work mark. */
+type SectionMarks = { glyph?: SectionGlyph; badge?: 'new-work'; emblem?: SectionEmblem };
 
 /** `wrapWords`, but a parenthesised group — a code citation like "(NEC 705.12(B))" — is never split. */
 function wrapWordsKeepGroups(line: string, maxW: number, sz: number, bold = false): string[] {
@@ -3536,20 +3559,25 @@ function wrapWordsKeepGroups(line: string, maxW: number, sz: number, bold = fals
 function wrapSectionLines(lines: SectionLine[], w: number, marks: SectionMarks = {}):
   { lines: SectionLine[]; headerDx: number; topPad: number } {
   const out: SectionLine[] = [];
+  // An emblem takes the left of the box; the text wraps in what is left, exactly as wide as the box
+  // was before it (the box constants widened by the slot), so no fact re-wraps.
+  const tw = w - emblemInsetSld(marks.emblem);
   for (const l of lines) {
-    for (const piece of wrapToWidth(l.t, w - 14, l.sz)) {
-      const sub = textWidthUu(piece, l.sz, l.bold) > w - 4 ? wrapWordsKeepGroups(piece, w - 14, l.sz, l.bold) : [piece];
+    for (const piece of wrapToWidth(l.t, tw - 14, l.sz)) {
+      const sub = textWidthUu(piece, l.sz, l.bold) > tw - 4 ? wrapWordsKeepGroups(piece, tw - 14, l.sz, l.bold) : [piece];
       for (const t of sub) out.push({ ...l, t });
     }
   }
   let headerDx = 0, topPad = 0;
-  if ((marks.glyph || marks.badge) && out.length > 0) {
-    const left = marks.glyph ? 7 + SECTION_GLYPH_W[marks.glyph] + 3 : 7;
+  const cornerEmblem = marks.emblem?.corner ? marks.emblem : null;
+  if ((!marks.emblem || cornerEmblem) && (marks.glyph || marks.badge || cornerEmblem) && out.length > 0) {
+    const left = cornerEmblem ? 5 + CORNER_EMBLEM_W + 3 : marks.glyph ? 7 + SECTION_GLYPH_W[marks.glyph] + 3 : 7;
     const right = marks.badge ? 21 : 7;
     const hw = textWidthUu(out[0].t, out[0].sz, out[0].bold);
     if (hw > w - 2 * Math.max(left, right)) {
       if (hw <= w - left - right) headerDx = (left - right) / 2;
-      else topPad = 16;
+      // Below the corner mark: a glyph is 14 uu tall, a corner emblem CORNER_EMBLEM_H.
+      else topPad = cornerEmblem ? CORNER_EMBLEM_H : 16;
     }
   }
   return { lines: out, headerDx, topPad };
@@ -3565,18 +3593,25 @@ function sectionCanvas(p: string[], boxes: ServiceSectionBox[]) {
   ) => {
     const { lines: wrapped, headerDx, topPad } = wrapSectionLines(lines, w, o);
     const pitch = Math.max(LBL_PITCH, MIN_TYPE_UU + 2);
-    const h = Math.max(38, wrapped.length * pitch + 12 + topPad);
+    const h = Math.max(o.emblem && !o.emblem.corner ? EMBLEM_MIN_H : 38, wrapped.length * pitch + 12 + topPad);
     // 🚨 THE BOX GROWS WITH ITS TEXT, so an anchor has to say WHICH edge is fixed. A stacked chain
     // anchors its top (or the next box starts inside this one); a row anchors its centre line.
     const cy = o.anchor === 'top' ? cyOrTop + h / 2 : cyOrTop;
     const x = cx - w / 2, y = cy - h / 2;
     p.push(rect(x, y, w, h, { fill: o.fill ?? WHT, stroke: o.stroke ?? BLK, sw: SW_MED, dash: o.dash }));
     // In the top-left corner, inside the border: the text is centred, so the corner is clear.
-    if (o.glyph) p.push(sectionDeviceGlyph(o.glyph, x + 7, y + 5, o.stroke ?? BLK));
+    if (o.emblem?.corner) {
+      p.push(`<g data-emblem="${o.emblem.kind}">${o.emblem.art(x + 5, y + 4, CORNER_EMBLEM_W, CORNER_EMBLEM_H)}</g>`);
+    } else if (o.emblem) {
+      p.push(`<g data-emblem="${o.emblem.kind}">${o.emblem.art(x + 6, y + 6, o.emblem.slotW, h - 12)}</g>`);
+    } else if (o.glyph) {
+      p.push(sectionDeviceGlyph(o.glyph, x + 7, y + 5, o.stroke ?? BLK));
+    }
     if (o.badge === 'new-work') p.push(newWorkBadge(x + w, y, SEC_AMBER));
+    const tcx = cx + emblemInsetSld(o.emblem) / 2;
     let by = y + 8 + topPad + capUu(wrapped[0]?.sz ?? F.sub);
     wrapped.forEach((l, li) => {
-      p.push(txt(li === 0 ? cx + headerDx : cx, +by.toFixed(2), l.t,
+      p.push(txt(li === 0 ? tcx + headerDx : tcx, +by.toFixed(2), l.t,
         { sz: l.sz, bold: l.bold, anc: 'middle', fill: l.fill, italic: l.italic }));
       by += pitch;
     });
@@ -3601,7 +3636,7 @@ type SectionBoxGeom = ReturnType<ReturnType<typeof sectionCanvas>['drawBox']>;
 /** The height `drawBox` will give these lines at this width — the same wrap, the same pitch. */
 function sectionBoxHeight(lines: SectionLine[], w: number, marks: SectionMarks = {}): number {
   const { lines: wrapped, topPad } = wrapSectionLines(lines, w, marks);
-  return Math.max(38, wrapped.length * Math.max(LBL_PITCH, MIN_TYPE_UU + 2) + 12 + topPad);
+  return Math.max(marks.emblem && !marks.emblem.corner ? EMBLEM_MIN_H : 38, wrapped.length * Math.max(LBL_PITCH, MIN_TYPE_UU + 2) + 12 + topPad);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -3701,8 +3736,9 @@ function renderCompactDcServiceSection(
   // Sized so the lines these boxes actually carry wrap once at most: at the column layout's 178 uu
   // a gateway's "NOT EVALUATED — INTERRUPTING RATING REQUIRED" took two lines and a generation panel
   // ran to eleven. Wider boxes are SHORTER boxes, and height is what this sheet is short of.
-  const W_ESS = 168, ESS_GAP = 18, EXP_GAP = 30;
-  const W_GEN = 262, W_GW = 250, W_PNL = 158, W_DIST = 220, W_DEV = 186;
+  // Each box is its text width (as before) plus its emblem's slot and gutter (emblemInsetSld).
+  const W_ESS = 168 + 50, ESS_GAP = 18, EXP_GAP = 30;
+  const W_GEN = 262 + 62, W_GW = 250 + 66, W_PNL = 158 + 52, W_DIST = 220 + 52, W_DEV = 186 + 56;
   /** From the junction box's DC output to where the trunk turns down. */
   const TRUNK_LEG = 36;
   /** Gateway bottom → MSP top: the backup feeder, its label, the CT note and the feeder callout. */
@@ -3753,11 +3789,11 @@ function renderCompactDcServiceSection(
       (inverting.some(h => h.id === u.attachedToUnitId) ? u.attachedToUnitId! : inverting[0]?.id ?? null);
     const ess = (u: SldStorageUnit): RowItem => {
       const lines = storageUnitLinesSld(t, u, true);
-      return { kind: 'ess', u, lines, h: sectionBoxHeight(lines, W_ESS, { glyph: 'battery-inverter' }) };
+      return { kind: 'ess', u, lines, h: sectionBoxHeight(lines, W_ESS, { emblem: essEmblemSld(u) }) };
     };
     const exp = (u: SldStorageUnit): RowItem => {
       const lines = expansionLinesSld(u);
-      return { kind: 'exp', u, lines, h: sectionBoxHeight(lines, W_ESS, { glyph: 'battery' }) };
+      return { kind: 'exp', u, lines, h: sectionBoxHeight(lines, W_ESS, { emblem: EXP_EMBLEM_SLD() }) };
     };
     const expsOf = (hostId: string) => expansions.filter(e => hostOf(e) === hostId).map(exp);
     // Expansions sit on the OUTBOARD side of their host, chained cabinet to cabinet, so a harness
@@ -3798,12 +3834,12 @@ function renderCompactDcServiceSection(
       const lines = generationPanelLinesSld(t, agg);
       const label = agg.outputOcpdA === null
         ? 'GENERATION FEEDER — OUTPUT OCPD NOT EVALUATED' : `${agg.outputOcpdA} A GENERATION FEEDER`;
-      return { agg, lines, h: sectionBoxHeight(lines, W_GEN, { glyph: 'panelboard' }), label };
+      return { agg, lines, h: sectionBoxHeight(lines, W_GEN, { emblem: GEN_EMBLEM_SLD() }), label };
     });
     const gwLines = domain ? gatewayLinesSld(domain.gateway) : null;
     const panelLines = panel ? servicePanelLinesSld(panel) : null;
     const coreW = domain ? W_GW : W_PNL;
-    const coreH = domain ? sectionBoxHeight(gwLines!, W_GW, { glyph: 'controller' })
+    const coreH = domain ? sectionBoxHeight(gwLines!, W_GW, { emblem: gatewayEmblemSld(domain.gateway) })
       : panelLines ? sectionBoxHeight(panelLines, W_PNL, panelMarksSld(panel)) : 38;
     const mspH = domain && panelLines ? sectionBoxHeight(panelLines, W_PNL, panelMarksSld(panel)) : 0;
     const feederLabel = `BACKUP FEEDER — ${amps(panel?.mainBreakerA ?? branch.ratedAmps)}`;
@@ -3894,7 +3930,7 @@ function renderCompactDcServiceSection(
 
   // ── 3. DOWN: HOW TALL EVERYTHING BELOW THE TOP BAND IS ───────────────────
   const distLines = serviceDistributionLinesSld(t);
-  const distH = sectionBoxHeight(distLines, W_DIST, { glyph: 'service' });
+  const distH = sectionBoxHeight(distLines, W_DIST, { emblem: PANEL_EMBLEM_SLD() });
   const bondedAt = new Set(ev.bonding.bondedAtNodeIds);
   const inlineIds = new Set(t.devices.filter(d => !!d.inlineOnNodeId).map(d => d.id));
   const chainDevices = [
@@ -3924,7 +3960,7 @@ function renderCompactDcServiceSection(
     const devTops: number[] = [];
     for (const cd of chainDevices) {
       devTops.push(chainTop);
-      chainTop += sectionBoxHeight(cd.lines, W_DEV, { glyph: deviceGlyphSld(cd.d.roles) }) + gap;
+      chainTop += sectionBoxHeight(cd.lines, W_DEV, { emblem: deviceEmblemSld(cd.d.roles) }) + gap;
     }
     const meterCy = chainTop + mR;
     const gridCy = meterCy + mR + gap;
@@ -3960,8 +3996,8 @@ function renderCompactDcServiceSection(
     // The storage row. Every cabinet's top is the row's top: the DC enters there.
     const itemBoxes = col.row.map((r, k) => drawBox(`${r.kind}-${r.u.id}`, x + col.itemDx[k], rowTop,
       W_ESS, r.lines, r.kind === 'ess'
-        ? { stroke: GREEN, glyph: 'battery-inverter', anchor: 'top' }
-        : { stroke: SEC_DC, dash: '6 4', anchor: 'top', glyph: 'battery' }));
+        ? { stroke: GREEN, emblem: essEmblemSld(r.u), anchor: 'top' }
+        : { stroke: SEC_DC, dash: '6 4', anchor: 'top', emblem: EXP_EMBLEM_SLD() }));
     col.row.forEach((r, k) => { if (r.kind === 'ess') essBoxById.set(r.u.id, itemBoxes[k]); });
     // Each Expansion is chained to its neighbour toward its host: dashed, orange, no OCPD.
     col.row.forEach((r, k) => {
@@ -3998,7 +4034,7 @@ function renderCompactDcServiceSection(
     // current travels: PW3 → branch OCPD → generation panel → feeder → Gateway.
     col.gen.forEach((g, k) => {
       const gb = drawBox(`aggregation-${g.agg.id}`, x, Y(cp.genTops[k]), W_GEN, g.lines,
-        { stroke: GREEN, anchor: 'top', glyph: 'panelboard' });
+        { stroke: GREEN, anchor: 'top', emblem: GEN_EMBLEM_SLD() });
       const nextTop = k + 1 < col.gen.length ? Y(cp.genTops[k + 1]) : Y(below.coreTop);
       p.push(ln(x, gb.bottom, x, nextTop, { sw: SW_MED, stroke: GREEN }));
       // Beside its conductor, on the side away from the service equipment's feeders.
@@ -4013,7 +4049,7 @@ function renderCompactDcServiceSection(
     const coreTop = Y(below.coreTop);
     const core = col.domain
       ? drawBox(`gateway-${col.domain.gateway.id}`, x, coreTop, W_GW, col.gwLines!,
-          { stroke: SEC_BLUE, glyph: 'controller', anchor: 'top' })
+          { stroke: SEC_BLUE, emblem: gatewayEmblemSld(col.domain.gateway), anchor: 'top' })
       : drawBox(`panel-${col.panel?.id ?? col.branch.id}`, x, coreTop, W_PNL,
           col.panelLines ?? [{ t: col.branch.label, sz: F.hdr, bold: true }],
           { anchor: 'top', ...(col.panel ? panelMarksSld(col.panel) : {}) });
@@ -4051,7 +4087,7 @@ function renderCompactDcServiceSection(
 
   // ── 6. THE SERVICE EQUIPMENT, AND EACH BRANCH FEEDER INTO IT ──────────────
   const dist = drawBox('service-distribution', cx.dist, Y(below.distTop), W_DIST, distLines,
-    { anchor: 'top', glyph: 'service' });
+    { anchor: 'top', emblem: PANEL_EMBLEM_SLD() });
   cols.forEach((col, i) => {
     const core = coreBoxes[i];
     const dir = col.outboard === 'L' ? 1 : -1;          // toward the service equipment
@@ -4079,7 +4115,7 @@ function renderCompactDcServiceSection(
       p.push(ln(jogX, ye, xe, ye, { sw: SW_MED }));
     }
     for (const k of knives) {
-      p.push(knifeSwitch(k.sx, y, 40));
+      p.push(`<g data-emblem="ac-disconnect">${artOnlySld(embedSymbol('ac-disconnect', k.sx, y, 40, 34))}</g>`);
       p.push(callout(k.sx, y - 38, calloutN++));
       boxes.push({ id: `inline-callout-${k.dev.id}`, x: k.sx - 10, y: y - 48, w: 20, h: 20,
                    kind: 'device' });
@@ -4108,7 +4144,7 @@ function renderCompactDcServiceSection(
   let lastY = dist.bottom;
   chainDevices.forEach((cd, k) => {
     const b = drawBox(`device-${cd.d.id}`, cx.dist, Y(below.devTops[k]), W_DEV, cd.lines,
-      { anchor: 'top', glyph: deviceGlyphSld(cd.d.roles) });
+      { anchor: 'top', emblem: deviceEmblemSld(cd.d.roles) });
     p.push(ln(cx.dist, lastY, cx.dist, b.top, { sw: SW_MED }));
     // 🚨 THE CANONICAL N-G BOND, WHERE THE TOPOLOGY PUTS IT — once.
     if (bondedAt.has(cd.d.id)) {
@@ -4130,7 +4166,9 @@ function renderCompactDcServiceSection(
   });
   const meterCY = Y(below.meterCy);
   p.push(ln(cx.dist, lastY, cx.dist, meterCY - mR, { sw: SW_MED }));
-  p.push(meterSymbol(cx.dist, meterCY, mR));
+  // The meter's emblem, with the M an SLD reader looks for in its dial (the art's own words stripped).
+  p.push(`<g data-emblem="utility-meter">${artOnlySld(embedSymbol('utility-meter', cx.dist, meterCY, mR * 2, mR * 2))}</g>`);
+  p.push(txt(cx.dist, +(meterCY + capUu(F.hdr) / 2).toFixed(2), 'M', { sz: F.hdr, bold: true, anc: 'middle' }));
   p.push(txt(cx.dist + mR + 8, +(meterCY - 4).toFixed(2), 'REVENUE METER', { sz: F.sub, bold: true, anc: 'start' }));
   p.push(txt(cx.dist + mR + 8, +(meterCY + LBL_PITCH - 4).toFixed(2), opts.utilityName, { sz: F.tiny, anc: 'start' }));
   p.push(callout(cx.dist - mR - 14, meterCY, calloutN++));
@@ -4268,6 +4306,9 @@ export function renderTopologyServiceSection(opts: {
   // So the layout is chosen from the span it actually gets. WIDE puts the panelboard beside its
   // gateway; NARROW stacks it underneath and drops a column. Vertical room is the one thing this
   // sheet has plenty of.
+  // The column layout works to a fixed horizontal budget (the boxes, their feeders and the callouts
+  // between them): its boxes keep their widths, and the text beside each emblem wraps — they grow
+  // DOWN, which this layout stacks for, instead of across, which it cannot afford.
   const W_PANEL = 158, W_GW = 178, W_DIST = 186, W_DEV = 172, W_ESS = 168, W_EXP = 168;
   const MIN_GAP = 46;
   const available = opts.endX - opts.startX;
@@ -4347,7 +4388,7 @@ export function renderTopologyServiceSection(opts: {
     // PANEL — beside its gateway where the sheet is wide enough, stacked under it where it is not.
     let panelBox: ReturnType<typeof drawBox> | null = null;
     if (panel && wide) {
-      panelBox = drawBox(`panel-${panel.id}`, cxPanel, y, W_PANEL, panelLines, panelMarksSld(panel));
+      panelBox = drawBox(`panel-${panel.id}`, cxPanel, y, W_PANEL, panelLines, panelMarksSld(panel, true));
       if (!entryLabel) { entryLabel = panel.label; entryX = panelBox.left; entryY = y; }
       highest = Math.min(highest, panelBox.top);
       lowest = Math.max(lowest, panelBox.bottom);
@@ -4359,7 +4400,7 @@ export function renderTopologyServiceSection(opts: {
       const gw = domain.gateway;
       const gwLines: Line[] = gatewayLinesSld(gw);
       gwBox = drawBox(`gateway-${gw.id}`, cxGw, y, W_GW, gwLines,
-        { stroke: SEC_BLUE, glyph: 'controller' });
+        { stroke: SEC_BLUE, emblem: cornerEmblemSld(gatewayEmblemSld(gw)) });
       highest = Math.min(highest, gwBox.top);
       lowest = Math.max(lowest, gwBox.bottom);
 
@@ -4406,7 +4447,7 @@ export function renderTopologyServiceSection(opts: {
         // NARROW: the panel hangs under its gateway and the feeder is a short drop. Same conductor,
         // same label — only the direction it is drawn in changes.
         panelBox = drawBox(`panel-${panel.id}`, cxGw, gwBox.bottom + 46, W_PANEL, panelLines,
-          { anchor: 'top', ...panelMarksSld(panel) });
+          { anchor: 'top', ...panelMarksSld(panel, true) });
         p.push(ln(cxGw, gwBox.bottom, cxGw, panelBox.top, { sw: SW_MED }));
         const lw = textWidthUu(feederLabel, F.seg);
         p.push(txt(cxGw + 8, +((gwBox.bottom + panelBox.top) / 2).toFixed(2), feederLabel,
@@ -4470,7 +4511,7 @@ export function renderTopologyServiceSection(opts: {
       for (const agg of ownAgg) {
         const genLines: Line[] = generationPanelLinesSld(t, agg);
         const gb = drawBox(`aggregation-${agg.id}`, cxGw, stackTop + 54, W_GW + 26, genLines,
-          { stroke: '#1B5E20', anchor: 'top', glyph: 'panelboard' });
+          { stroke: '#1B5E20', anchor: 'top', emblem: cornerEmblemSld(GEN_EMBLEM_SLD()) });
         aggBoxesInRow.set(agg.id, gb);
         // The feeder up into the controller, with its own callout — and the landing inside listed
         // equipment is a manufacturer question, said on the sheet rather than implied by a line.
@@ -4514,7 +4555,7 @@ export function renderTopologyServiceSection(opts: {
       inverting.forEach((u, k) => {
         const b = drawBox(`ess-${u.id}`, essRow ? essLeft + k * essStep : cxGw,
           essRow ? stackTop + 58 : essY, W_ESS, storageUnitLinesSld(t, u, dcCoupled),
-          { stroke: '#1B5E20', glyph: 'battery-inverter' });
+          { stroke: '#1B5E20', emblem: cornerEmblemSld(essEmblemSld(u)) });
         essBoxes.set(u.id, b);
         // Only a unit the design lands PV on gets a DC conductor drawn to it.
         if (dcCoupled && typeof u.pvDcStcKw === 'number' && u.pvDcStcKw > 0) {
@@ -4557,7 +4598,7 @@ export function renderTopologyServiceSection(opts: {
         const anchor = host ?? essBoxes.values().next().value;
         const ey = (anchor ? anchor.bottom : stackTop) + 56 + k * 62;
         const b = drawBox(`exp-${u.id}`, cxGw, ey, W_EXP, expansionLinesSld(u),
-          { stroke: SEC_DC, dash: '6 4', glyph: 'battery' });
+          { stroke: SEC_DC, dash: '6 4', emblem: cornerEmblemSld(EXP_EMBLEM_SLD()) });
         if (anchor) {
           p.push(ln(cxGw, anchor.bottom, cxGw, b.top, { sw: SW_MED, stroke: SEC_DC, dash: '6 4' }));
           // The label goes LEFT, away from the service chain's column — the same class of defect
@@ -4596,7 +4637,7 @@ export function renderTopologyServiceSection(opts: {
   // supplied. Do not automatically add replacement 400 A service distribution equipment." A drawing
   // that shows it as new service distribution tells an inspector SolarPro is replacing it.
   const distLines: Line[] = serviceDistributionLinesSld(t);
-  const dist = drawBox('service-distribution', cxDist, opts.busY, W_DIST, distLines, { glyph: 'service' });
+  const dist = drawBox('service-distribution', cxDist, opts.busY, W_DIST, distLines, { emblem: cornerEmblemSld(PANEL_EMBLEM_SLD()) });
   highest = Math.min(highest, dist.top);
 
   // Each branch leaves the distribution by its own OCPD and turns to its row.
@@ -4693,7 +4734,7 @@ export function renderTopologyServiceSection(opts: {
       // check used to sit BELOW the symbol, so a narrow corridor produced an UNLABELLED knife switch
       // on a permit sheet with no callout number either: a device an inspector cannot look up.
       // The callout is the identification; the tag is the convenience.
-      p.push(knifeSwitch(sx, y, 40));
+      p.push(`<g data-emblem="ac-disconnect">${artOnlySld(embedSymbol('ac-disconnect', sx, y, 40, 34))}</g>`);
       p.push(callout(sx, y - 38, calloutN++));
       boxes.push({ id: `inline-callout-${dev.id}`, x: sx - 10, y: y - 48, w: 20, h: 20,
                    kind: 'device' });
@@ -4766,7 +4807,7 @@ export function renderTopologyServiceSection(opts: {
         { t: `${amps(s.continuousOutputA)} AC${unit?.usableKwh != null ? ` · ${unit.usableKwh} kWh` : ''}`,
           sz: F.tiny },
         { t: `${amps(s.ocpdA)} OCPD`, sz: F.tiny },
-      ], { stroke: '#1B5E20', anchor: 'top', glyph: 'battery-inverter' });
+      ], { stroke: '#1B5E20', anchor: 'top', emblem: cornerEmblemSld(essEmblemSld(unit ?? {})) });
       sourceBoxes.push(b);
       lowest = Math.max(lowest, b.bottom);
     });
@@ -4778,7 +4819,7 @@ export function renderTopologyServiceSection(opts: {
       let top = sourceBoxes[k].bottom + 34;
       for (const u of exps) {
         const b = drawBox(`exp-${u.id}`, sourceBoxes[k].cx, top, W_EXP, expansionLinesSld(u),
-          { stroke: SEC_DC, dash: '6 4', anchor: 'top', glyph: 'battery' });
+          { stroke: SEC_DC, dash: '6 4', anchor: 'top', emblem: cornerEmblemSld(EXP_EMBLEM_SLD()) });
         p.push(ln(b.cx, sourceBoxes[k].bottom, b.cx, b.top,
           { sw: SW_MED, stroke: SEC_DC, dash: '6 4' }));
         top = b.bottom + 34;
@@ -4818,7 +4859,7 @@ export function renderTopologyServiceSection(opts: {
     }
 
     const aggBox = drawBox(`aggregation-${agg.id}`, derGroupCx, expBottom + 38, W_GW + 40, aggLines,
-      { stroke: '#1B5E20', anchor: 'top', glyph: 'panelboard' });
+      { stroke: '#1B5E20', anchor: 'top', emblem: cornerEmblemSld(GEN_EMBLEM_SLD()) });
     aggBoxes.set(agg.id, aggBox);
     // 🚨 THE AC COLLECTION CONDUCTOR GOES ROUND THE EXPANSION, NOT THROUGH IT.
     //
@@ -4855,7 +4896,7 @@ export function renderTopologyServiceSection(opts: {
         ? [{ t: 'NOT EVALUATED — INTERRUPTING RATING REQUIRED', sz: F.tiny, fill: SEC_AMBER, bold: true } as Line]
         : [{ t: `${d.sccrA} A SCCR`, sz: F.tiny } as Line]),
       ...(d.visibleOpen ? [{ t: 'LOCKABLE · VISIBLE OPEN', sz: F.tiny } as Line] : []),
-    ], { anchor: 'top', glyph: deviceGlyphSld(d.roles) });
+    ], { anchor: 'top', emblem: cornerEmblemSld(deviceEmblemSld(d.roles)) });
     derChain.push({ id: d.id, box: b });
     lowest = Math.max(lowest, b.bottom);
     derY = b.bottom + 34;
@@ -4947,7 +4988,7 @@ export function renderTopologyServiceSection(opts: {
   ];
   for (const d of chainDevices) {
     const lines: Line[] = chainDeviceLinesSld(d);
-    const b = drawBox(`device-${d.id}`, cxDist, chainY, W_DEV, lines, { anchor: 'top', glyph: deviceGlyphSld(d.roles) });
+    const b = drawBox(`device-${d.id}`, cxDist, chainY, W_DEV, lines, { anchor: 'top', emblem: cornerEmblemSld(deviceEmblemSld(d.roles)) });
     p.push(ln(lastX, lastY, cxDist, b.top, { sw: SW_MED }));
     // 🚨 THE CANONICAL N-G BOND, WHERE THE TOPOLOGY PUTS IT — once.
     if (bondedAt.has(d.id)) {
@@ -4980,7 +5021,9 @@ export function renderTopologyServiceSection(opts: {
   const mR = 26;
   const meterCY = chainY + mR;
   p.push(ln(lastX, lastY, cxDist, meterCY - mR, { sw: SW_MED }));
-  p.push(meterSymbol(cxDist, meterCY, mR));
+  // The meter's emblem, with the M an SLD reader looks for in its dial (the art's own words stripped).
+  p.push(`<g data-emblem="utility-meter">${artOnlySld(embedSymbol('utility-meter', cxDist, meterCY, mR * 2, mR * 2))}</g>`);
+  p.push(txt(cxDist, +(meterCY + capUu(F.hdr) / 2).toFixed(2), 'M', { sz: F.hdr, bold: true, anc: 'middle' }));
   p.push(txt(cxDist + mR + 8, +(meterCY - 4).toFixed(2), 'REVENUE METER', { sz: F.sub, bold: true, anc: 'start' }));
   p.push(txt(cxDist + mR + 8, +(meterCY + LBL_PITCH - 4).toFixed(2), opts.utilityName, { sz: F.tiny, anc: 'start' }));
   p.push(callout(cxDist - mR - 14, meterCY, calloutN++));
