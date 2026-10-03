@@ -206,3 +206,33 @@ describe('🚨 400 A split into two 200 A main panels survives the round trip as
     expect(iv.sections.find(s => s.id === 'service')!.items.filter(i => i.id.startsWith('service.panel.'))).toHaveLength(2);
   });
 });
+
+describe('🚨 the Service card\'s [Verify] answer survives the round trip, and the engine stops asking', () => {
+  it('existing assembly → one Verify write (catalog #, arrangements, AIC, read on site) → persisted → reloaded', async () => {
+    const { answerServiceRating, answerExistingService } = await import('@/lib/electrical/systemConfigAnswers');
+    const { existingServiceNeeds } = await import('@/lib/electrical/systemConfigServiceCard');
+    const svc = answerServiceRating(null, 200);
+    if (svc.ok === false) throw new Error(svc.refused);
+    const declared = answerExistingService(svc.topology, { existing: true, manufacturer: 'Eaton' });
+    if (declared.ok === false) throw new Error(declared.refused);
+    await persist(declared.topology);
+    let back = await reload();
+    expect((await interviewOf(back)).sections.flatMap(s => s.items).find(i => i.id === 'service.existing')?.state)
+      .toBe('needs-verification');
+    expect(existingServiceNeeds(await interviewOf(back))).toHaveLength(5);
+    const read = answerExistingService(back, {
+      existing: true, catalogNumber: 'CH42B200', mainArrangement: 'Single 200 A main breaker',
+      feederArrangement: 'None — the MSP is the service equipment', sccrA: 22_000, verified: true,
+    });
+    if (read.ok === false) throw new Error(read.refused);
+    await persist(read.topology);
+    back = await reload();
+    expect(back.service.existingEquipment).toEqual({
+      manufacturer: 'Eaton', catalogNumber: 'CH42B200', mainArrangement: 'Single 200 A main breaker',
+      feederArrangement: 'None — the MSP is the service equipment', sccrA: 22_000, verified: true,
+    });
+    const iv = await interviewOf(back);
+    expect(existingServiceNeeds(iv)).toEqual([]);
+    expect(iv.sections.flatMap(s => s.items).find(i => i.id === 'service.existing')?.state).toBe('answered');
+  });
+});

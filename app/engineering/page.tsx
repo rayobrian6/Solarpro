@@ -125,6 +125,7 @@ import { findInterviewItem } from '@/lib/electrical/systemConfigPlacement';
 import { QuestionDialog, applyVia } from '@/components/engineering/systemConfig/ItemEditor';
 import { EngineeringReadinessPanel } from '@/components/engineering/systemConfig/EngineeringReadinessPanel';
 import { GuidedStrip, revealHomeCard } from '@/components/engineering/systemConfig/GuidedStrip';
+import { ExistingElectricalServiceCard } from '@/components/engineering/systemConfig/cards/ExistingElectricalServiceCard';
 import { EngineeringSummaryFacts } from '@/components/engineering/systemConfig/EngineeringSummaryFacts';
 // Phase 12 — System-wide validation layer.
 import { validateSystem, type ValidationResult } from '@/lib/system/validationEngine';
@@ -11474,14 +11475,18 @@ function EngineeringPageInner() {
                       ) : null}
                     </div>
 
-                    {/* ── Section 1: Main Service Panel — MOVED INTO THE INTERVIEW ─────
-                        🚨 This block showed `config.mainPanelAmps` (a config scalar) beside the graph's
-                        panel values, and a "Max PV (120% rule)" strip that computed
-                        `bus × 1.2 − main` over `?? 200` defaults — a figure from two numbers nobody
-                        entered, which disappeared (`maxPV > 0 ? … : null`) in exactly the failing case.
-                        The service, its panels and their busbars are now answered in the Existing
-                        Service card above and written to the service model; the 120% verdict is the
-                        engine's own per-panel check, shown in the Engineering Result card. */}
+                    {/* ── Section 1: Existing Electrical Service (System Config V3) ─────
+                        Where the old Main Service Panel card was. Rating, electrical system, the
+                        distribution (only when the interview asks it), one row per panelboard, the
+                        available fault current and the existing equipment's field verification — each
+                        written to the service model through `apply` (the one write path, which mirrors
+                        the first panel into the legacy config). 🚨 No `config.mainPanelAmps ?? 200`
+                        "Max PV" strip: the 120% verdict is the engine's per-panel check, and a FAIL
+                        offers derate-main / upgrade-bus as edits of THAT panel. */}
+                    <div className="eng-panel scroll-mt-4" id="sc-card-service">
+                      <ExistingElectricalServiceCard {...interviewEditorContext} interview={systemConfigInterview}
+                                                     error={_svcError} graphRead={svcTopologyRead} />
+                    </div>
                     {/* ── Section 2: PV AC Output Circuit ──────────────────────────── */}
                     <div className="eng-panel">
                       <h3 className="text-sm font-extrabold text-slate-100 mb-1 flex items-center gap-2 tracking-tight">

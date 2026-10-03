@@ -42,6 +42,8 @@ import { CARD_TITLE, homeOf } from '@/lib/electrical/systemConfigPlacement';
 import { UtilityDisconnectsEditor } from '@/components/engineering/systemConfig/UtilityDisconnectsEditor';
 import { SystemEquipmentEditor, type SystemEquipmentSelection } from '@/components/engineering/systemConfig/SystemEquipmentEditor';
 import { LoadAnalysisEditor } from '@/components/engineering/systemConfig/LoadAnalysisEditor';
+import { ExistingServiceVerifyForm } from '@/components/engineering/systemConfig/cards/ExistingServiceVerifyForm';
+import { EXISTING_SERVICE_NEED_PREFIX, existingNeedField } from '@/lib/electrical/systemConfigServiceCard';
 
 export type { SystemEquipmentSelection };
 
@@ -103,6 +105,7 @@ export function hasItemEditor(item: InterviewItem, t: ServiceTopology | null): b
   if (id === 'service.rating') return true;
   if (id === 'behavior.pv-connection') return !!item.options;
   if (!t) return false;
+  if (id.startsWith(EXISTING_SERVICE_NEED_PREFIX)) return !!t.service.existingEquipment;
   if (id.startsWith(UTILITY_ITEM_PREFIX)) return id === METER_COLLAR_ITEM_ID && !!item.options;
   if (id.startsWith(DISCONNECT_ITEM_PREFIX)) return disconnectRoleOf(id) !== null;
   if (id.startsWith(SYSTEM_EQUIPMENT_PREFIX)) {
@@ -417,27 +420,29 @@ export function ItemEditor(props: ItemEditorProps) {
       </select>
     );
   }
+  // What the engine still needs read off an existing assembly is answered in the Service card's
+  // [Verify] form — the same form here, so [Answer Next] can ask it where it stands.
+  if (id.startsWith(EXISTING_SERVICE_NEED_PREFIX) && t?.service.existingEquipment) {
+    const field = existingNeedField(id);
+    return <ExistingServiceVerifyForm t={t} apply={apply} busy={busy} needed={field ? [field] : []} />;
+  }
   if (id === 'service.existing' && t) {
     const ex = t.service.existingEquipment ?? null;
     return (
-      <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-300">
-        <label className="flex items-center gap-1">
-          <input type="checkbox" data-testid="answer-existing-service" checked={ex !== null} disabled={busy}
-                 onChange={e => void apply(answerExistingService(t, { existing: e.target.checked }))} />
-          Existing equipment on the wall
-        </label>
-        {ex ? (
-          <>
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-300">
+          <label className="flex items-center gap-1">
+            <input type="checkbox" data-testid="answer-existing-service" checked={ex !== null} disabled={busy}
+                   onChange={e => void apply(answerExistingService(t, { existing: e.target.checked }))} />
+            Existing equipment on the wall
+          </label>
+          {ex ? (
             <input data-testid="answer-existing-mfr" className={`w-28 ${box}`} placeholder="Manufacturer"
                    defaultValue={ex.manufacturer ?? ''} disabled={busy}
                    onBlur={e => { if ((e.target.value || null) !== ex.manufacturer) void apply(answerExistingService(t, { existing: true, manufacturer: e.target.value })); }} />
-            <label className="flex items-center gap-1">
-              <input type="checkbox" data-testid="answer-existing-verified" checked={ex.verified} disabled={busy}
-                     onChange={e => void apply(answerExistingService(t, { existing: true, verified: e.target.checked }))} />
-              Internals read on site
-            </label>
-          </>
-        ) : null}
+          ) : null}
+        </div>
+        {ex ? <ExistingServiceVerifyForm t={t} apply={apply} busy={busy} /> : null}
       </div>
     );
   }

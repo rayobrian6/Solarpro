@@ -141,21 +141,56 @@ export function answerAvailableFaultCurrent(t: ServiceTopology, amps: number | n
     amps === null ? 'Available fault current cleared' : `Available fault current ${amps} A`);
 }
 
+/** What the installer reads off an existing service assembly — every field separately optional. */
+export interface ExistingServiceAnswer {
+  existing: boolean;
+  manufacturer?: string | null;
+  /** Model / catalog number, off the door label. */
+  catalogNumber?: string | null;
+  /** The internal main / disconnect arrangement, in the words of whoever read it. */
+  mainArrangement?: string | null;
+  /** How the outgoing feeders leave the assembly. */
+  feederArrangement?: string | null;
+  /** AIC / SCCR from its nameplate, in AMPERES. Null ⇒ not read; never inferred from the rating. */
+  sccrA?: number | null;
+  verified?: boolean;
+}
+
+const EXISTING_FIELD_WORDS: ReadonlyArray<[keyof ExistingServiceAnswer, string]> = [
+  ['manufacturer', 'manufacturer'], ['catalogNumber', 'catalog number'], ['mainArrangement', 'main arrangement'],
+  ['feederArrangement', 'feeder arrangement'], ['sccrA', 'AIC / SCCR'],
+];
+
 /**
  * "Is the service already on the wall, and has somebody read it?" — existing equipment is CONNECTED
  * TO, never priced or replaced, and whether its internals were read on site is a field fact the
  * installer states. `verified` is never derived from the fields being filled in.
+ *
+ * The Service card's [Verify] dialog records everything read off the assembly in ONE answer: the
+ * catalog number, the main / feeder arrangement, the AIC / SCCR and whether it was read on site.
+ * A blank text field is "not read" (null), never an empty string the check would count as read; an
+ * AIC that is not a positive number of amperes is refused rather than stored.
  */
-export function answerExistingService(
-  t: ServiceTopology,
-  patch: { existing: boolean; manufacturer?: string | null; verified?: boolean },
-): AnswerResult {
+export function answerExistingService(t: ServiceTopology, patch: ExistingServiceAnswer): AnswerResult {
   if (!patch.existing) return done(setExistingServiceEquipment(t, null), 'Service equipment: new');
+  if (patch.sccrA !== undefined && patch.sccrA !== null && (!Number.isFinite(patch.sccrA) || patch.sccrA <= 0)) {
+    return refuse('The AIC / SCCR must be a positive number read off the nameplate, or left blank until it is read.');
+  }
+  const text = (v: string | null | undefined) => (typeof v === 'string' ? v.trim() || null : null);
   const next = setExistingServiceEquipment(t, {
-    ...(patch.manufacturer !== undefined ? { manufacturer: patch.manufacturer?.trim() || null } : {}),
+    ...(patch.manufacturer !== undefined ? { manufacturer: text(patch.manufacturer) } : {}),
+    ...(patch.catalogNumber !== undefined ? { catalogNumber: text(patch.catalogNumber) } : {}),
+    ...(patch.mainArrangement !== undefined ? { mainArrangement: text(patch.mainArrangement) } : {}),
+    ...(patch.feederArrangement !== undefined ? { feederArrangement: text(patch.feederArrangement) } : {}),
+    ...(patch.sccrA !== undefined ? { sccrA: patch.sccrA } : {}),
     ...(patch.verified !== undefined ? { verified: patch.verified } : {}),
   });
-  return done(next, `Existing service equipment${patch.verified ? ' — read on site' : ''}`);
+  const ex = next.service.existingEquipment;
+  const recorded = EXISTING_FIELD_WORDS
+    .filter(([k]) => patch[k] !== undefined && ex?.[k as keyof typeof ex] != null)
+    .map(([, w]) => w);
+  return done(next, `Existing service equipment${recorded.length ? ` — ${recorded.join(', ')} recorded` : ''}`
+    + `${patch.verified ? ' — read on site' : ''}`);
 }
 
 /** A panel card: main breaker, busbar, manufacturer. Never the service rating. */
