@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { buildRaysIntendedJob } from '../lib/electrical/fixtures/tesla400aTwoGateway';
 
 /**
  * e2e/system-config-interview.spec.ts
@@ -14,6 +15,8 @@ import { expect, test, type Page } from '@playwright/test';
  *   · the PV Design card and the Engineering Summary state 37 modules · 16.28 kW DC from Design;
  *   · "What is the existing service rating?" → 400 A → "How is the 400 A service distributed?" appears
  *     → "Two 200 A main panels" → two panel cards; a RELOAD keeps all of it;
+ *   · Ray's DC-coupled job: the summary, the sheet the page requests, and the stored module record all
+ *     say 37 × 440 W / 16.28 kW / no PV inverter, through an autosave and a reload;
  *   · a plain 200 A service is never asked about distribution, multiple systems or backup;
  *   · "Where does the system connect to the service?" → "Breaker in the panel (load side)" survives a
  *     reload, read back from the store, not from React state.
@@ -70,6 +73,50 @@ test.describe('System Config interview — real browser, real routes, real Postg
     await expect(page.getByTestId('summary-fact-pv-strings')).toContainText('Not derived');
     // The first open question is the service — the array is not asked for, it is known.
     await expect(page.getByTestId('interview-item-service.rating')).toHaveAttribute('data-state', 'needs-answer');
+  });
+
+  test('Ray\'s DC-coupled job: the page, the drawing it requests, and the stored module all say 37 × 440 W', async ({ page }) => {
+    // The defect this exists for was found HERE, not by a unit test: on this exact job the page's
+    // panel-compatibility auto-heal swapped Design's 440 W module for a 620 W one (judged against a
+    // migration-default "enphase" brand on a job with no PV inverter), the autosave wrote it over the
+    // project's module record, and the sheet the page requested drew 37 × 620 W, 22.94 kW DC, as a
+    // microinverter path, with the strings at 20 / 17.
+    const projectId = await seedRaysArray(page);
+    await api(page, 'PUT', `/api/projects/${projectId}/service-topology`, { topology: buildRaysIntendedJob().topology });
+    await openSystemConfig(page, projectId);
+
+    await expect(page.getByTestId('summary-fact-pv-inverter')).toHaveText('None — DC coupled to storage');
+    await expect(page.getByTestId('summary-fact-pv-architecture')).toHaveText('DC coupled to Tesla Powerwall 3');
+    await expect(page.getByTestId('summary-fact-pv-dc-size')).toHaveText('16.28 kW');
+    await expect(page.getByTestId('summary-fact-storage')).toHaveText('4 × Tesla Powerwall 3');
+    await expect(page.getByTestId('summary-fact-ess-max-continuous-ac-output')).toHaveText('46.08 kW (192 A)');
+    await expect(page.getByTestId('summary-fact-backup-controllers')).toHaveText('2 × Tesla Backup Gateway 3');
+    // The page's strings are the sheet's strings: derived against the Powerwall 3 inputs.
+    await expect(page.getByTestId('summary-fact-pv-strings')).toHaveText('5 (9 / 9 / 9 / 8 / 2)');
+
+    // The drawing the page itself requests.
+    const sld = page.waitForResponse(r => r.url().includes('/api/engineering/sld') && r.request().method() === 'POST',
+      { timeout: 90_000 });
+    await page.getByRole('button', { name: /Single-Line Diagram/ }).first().click();
+    const res = await sld;
+    expect(res.status()).toBe(200);
+    const raw = await res.text();
+    let svg = raw;
+    try { svg = String(JSON.parse(raw).svg ?? raw); } catch { /* the route answered with the SVG itself */ }
+    const text = svg.replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/\s+/g, ' ');
+    expect(text).toContain('37 × 440W');
+    expect(text).toContain('37 MODULES · 16.28 kW DC');
+    expect(text).toContain('NONE — DC COUPLED TO STORAGE');
+    expect(text, 'a microinverter path was drawn on a job with no PV inverter').not.toMatch(/MICROINVERTERS/);
+    expect(text).not.toMatch(/620W|22\.94 kW/);
+
+    // …and after the page has autosaved and reloaded, the project's module record is still Design's.
+    await page.reload();
+    await expect(page.getByTestId('system-config-interview')).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByTestId('interview-summary-design')).toContainText('37 modules · 440 W · 16.28 kW DC');
+    const stored = await page.request.get(`/api/projects/${projectId}`, { headers: { 'X-Dev-Auth': 'bypass' } });
+    const body = await stored.json() as { data?: { selectedPanel?: { id?: string } } };
+    expect(body.data?.selectedPanel?.id, 'the module record was rewritten by an automatic writer').toBe('panel-fence-ps1');
   });
 
   test('a plain 200 A service is asked nothing about distribution, systems or backup', async ({ page }) => {
