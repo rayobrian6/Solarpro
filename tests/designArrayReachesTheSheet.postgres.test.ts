@@ -204,6 +204,10 @@ describe('🚨 Ray\'s resolved DC-coupled job — the array survives the retired
     expect(counts.reduce((a, b) => a + b, 0), `strings ${m![2]} must cover exactly 37 modules`).toBe(37);
     // Not the phantom's 2 × 10.
     expect(counts).not.toEqual([10, 10]);
+    // And the voltage the sheet states is inside the Powerwall 3's published 550 V PV input.
+    const v = t.match(/Max System Voltage \(690\.7\(A\)\)\s*([\d.]+)\s*V/);
+    expect(v, 'the sheet states its NEC 690.7 maximum system voltage').not.toBeNull();
+    expect(Number(v![1])).toBeLessThanOrEqual(550);
   });
 
   it('the exported PDF route draws the same array from the same body', async () => {
