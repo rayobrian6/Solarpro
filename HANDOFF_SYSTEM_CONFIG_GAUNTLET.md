@@ -38,7 +38,7 @@ then this session's commits). Base for every claim below is `dev` @ `4375ba3`.
 | 9 | Engineering Summary / Intelligence consume engineered facts | **PRODUCTION-PATH PROVEN** (facts) | `summaryFacts` — PV inverter NONE, ESS output separate (46.08 kW / 192 A on Ray's job); assistant context from the same facts |
 | 10 | SLD cleanup | **ADVERSARIAL PROVEN** | title block + subtitle precise; storage named from the graph; DC landing drawn only where decided; compact top-down DC-coupled layout (`41ed4b9`: PV on top, one column per system, service equipment between; 24 layout tests, 11 mutants red) with every non-DC sheet pinned byte-for-byte (`55e1a7a`, 17 goldens). Ray's sheet re-rendered through the route after the merge: 37 × 440 W, 9/9/9/8/2 at 529.9 V |
 | 11 | BOM / permit / planset / pricing consistency | BOM **ADVERSARIAL PROVEN** · permit **NOT CHANGED — needs Ray** · pricing unchanged (already Design) | `e0bbac2`: BOM orders/prices 37 × 440 W, no PV inverter line on DC-coupled (13 tests, 11 mutants red). Permit compares and logs only — see Pending #0 |
-| 12 | Remove Service Topology from normal navigation | **NOT DONE — by rule** | System Config is not at parity yet (see Pending) and Ray has not live-accepted. The tab stays. |
+| 12 | Remove Service Topology from normal navigation | **NOT DONE — by rule** | Most of the tab's capability now exists in System Config (Pending #2 lists what does not) and Ray has not live-accepted. The tab stays; the internal model is untouched. |
 | 13 | Simple 200 A regression | **ADVERSARIAL PROVEN** | the 200 A house asks only interconnection + utility disconnect; no systems/backup/distribution questions |
 | 14 | Brand-family regression | **ADVERSARIAL PROVEN** | `tests/brandFamiliesSurviveTheArrayProjection.postgres.test.ts` (30): micro, string, AC-coupled ×2, PW3 beside a string inverter, DC-coupled, plain 200 A, control |
 | 15 | Three-phase structural regression | **ADVERSARIAL PROVEN** | `tests/threePhaseIsNotCoercedToResidential.test.ts` (26) + wizard (8); 9 mutations red |
@@ -72,6 +72,18 @@ then this session's commits). Base for every claim below is `dev` @ `4375ba3`.
 - `55e1a7a` / `41ed4b9` (agent, reviewed) compact top-down layout for the DC-coupled service section;
   every non-DC sheet pinned byte-for-byte first.
 - `c01df5d` Guided leads one question at a time; Auto and Manual over the same answers.
+- Parity, merged with their review fixes: `3df774e`+`bd30475` utility facts & disconnecting means;
+  `a18b291`+`9d83286` per-system equipment, landing and partial backup; `d30533e`+`633aa64` the
+  optional load analysis; second review round `09bac7a` (a new part brings its own rating, in the one
+  shared writer) and `ec6ed9c` (shared generation panels, per-product storage wording).
+- `241c4d7` / `da6c00e` the merge glue (editor `apply` result typing); `220e609` the release banner never
+  says "complete" with a card still to review, and a superseded recorded demand FAIL is described per
+  path; `d52b525` the meter-collar browser test.
+- `dec99e1` (found in the browser) no PV AC rating on a design with no PV inverter. The header said
+  "7.60 kW AC" on Ray's job. The permit payloads keep their legacy figure, frozen for the digest;
+  see Pending #0. `9cf6554` no "Recommended" Enphase fleet on a DC-coupled job.
+- `c3a1bc1` on AC-coupled jobs the recorded inverter is the sizing hint — a stale brand cannot turn a
+  Sunny Boy sheet into a microinverter path.
 - `c0a0273` (found in the browser, on Ray's job) **an inverter gate can no longer replace the module
   Design placed.** The production page swapped Design's 440 W module for a 620 W one (panel gate vs a
   migration-default "enphase" brand on a job with no PV inverter), the autosave wrote it over
@@ -90,13 +102,21 @@ then this session's commits). Base for every claim below is `dev` @ `4375ba3`.
 | System Config strings 20 / 17 vs the sheet's 9 / 9 / 9 / 8 / 2 | Ray's job | `c0a0273` (page derives against the storage window) |
 
 ## Current State
-- Branch `claude/quirky-pasteur-iqi5aq`, pushed for review (never `master`, nothing deployed).
-- Full vitest at `801e28f` (clean snapshot, `--no-file-parallelism`): **19 failed / 16571 passed** — the
-  19 are test-for-test the clean `dev` @ `4375ba3` baseline's (dev: 19 failed / 16411 passed). Commits
-  after it (`55e1a7a`, `41ed4b9`, `c01df5d`) ran their own and every renderer-reaching suite (335 + 5).
+- Branch `claude/quirky-pasteur-iqi5aq`, pushed for review (never `master`, nothing deployed). No PR opened.
+- Full vitest at `d52b525` (clean snapshot, `--no-file-parallelism`): **20 failed / 16782 passed**. 19 are,
+  test for test, the clean `dev` @ `4375ba3` baseline's (dev: 19 failed / 16411 passed). The 20th,
+  `adminHealthShowsOnlyMeasuredStatus` "no invented latency reaches the screen", is intermittent on
+  clean `dev` too (failed 2 of 4 isolated runs there); no admin/health file is touched by this branch.
+  Queued as its own task.
+- After `d52b525`: `dec99e1` and `9cf6554` are page-display changes. All 80 suites that read the
+  page source pass (1 baseline failure), as do the System Config suites.
 - `tsc --noEmit --skipLibCheck` 0 errors; eslint 0 errors on every changed file.
-- Browser: `e2e/system-config-interview.spec.ts` 4/4 on `next build` + `SOLARPRO_LOCAL_PG=1`
-  (README procedure; the container's Playwright needs `executablePath: '/opt/pw-browsers/chromium'`).
+- Browser: `e2e/system-config-interview.spec.ts` **5/5 at `9cf6554`**, on `next build` +
+  `SOLARPRO_LOCAL_PG=1`. Follow the README procedure; this container's Playwright needs
+  `executablePath: '/opt/pw-browsers/chromium'`. Ray's job with every card open: zero page errors.
+- In the full-suite environment, `phase1a-migration-governance` "no path writes to the migration ledger"
+  fails only because the agent worktrees sit under `.claude/worktrees/`. That directory is not in the
+  repo, so a clean checkout passes.
 
 ## Pending Work (priority order)
 0. **RAY DECISION — the permit states the wrong DC size, and fixing it moves the digest.**
@@ -107,7 +127,9 @@ then this session's commits). Base for every claim below is `dev` @ `4375ba3`.
    of every permit regenerated afterwards (an approved one would need re-approval). The fix is one line —
    `totalDcKw: pvArray.dcStcKw ?? totalKw` (plus the module identity from `pvModule`) — and is held for
    Ray's go-ahead with an approval-ledger plan. The permit route now LOGS the disagreement
-   (`comparePermitArrayWithDesign`), it does not correct it.
+   (`comparePermitArrayWithDesign`), it does not correct it. The same applies to the permit's `totalAcKw`.
+   It still posts 7.6 kW for an inverter-less fleet entry, via `legacyPermitAcKw`, which nothing else
+   reads. Every other surface now says "no PV AC rating" (`dec99e1`).
 1. **Ray's live acceptance** of System Config on his job — nothing is LIVE ACCEPTED.
 1a. **Projects an earlier auto-heal already rewrote.** `c0a0273` stops new rewrites and makes an
    affected project SAY so (design.module-conflict fails, naming both modules) — it does not pick a
@@ -115,13 +137,30 @@ then this session's commits). Base for every claim below is `dev` @ `4375ba3`.
    module in Design. A bulk repair would need the original module from an audit trail SolarPro does not
    keep for `selected_equipment`; not attempted.
 1b. `subSystems.<key>.ecosystemBrand` is stamped `'enphase'` with `source: 'migration'` on projects
-   that never chose a brand. It is now inert on DC-coupled / storage-only jobs (no brand hints reach the
-   route); on an AC-coupled job a stale brand hint can still drive the route's brand override — the
-   AC-coupled arm of Rule Eleven asserts the inverter id but not the brand. Same class, not yet closed.
-2. **Parity gaps that keep the Service Topology tab** (step 12): per-system gateway / expansion choice,
-   per-system storage-landing override in the UI (the writer supports it), the four disconnect roles,
-   NEC 220 load model, meter-collar-permitted as its own utility fact. Until these exist in System Config,
-   removing the tab would remove capability.
+   that never chose a brand. It can no longer re-architect a drawing: DC-coupled / storage-only jobs
+   drop the brand hints (`c0a0273`), AC-coupled jobs size the recorded inverter (`c3a1bc1`). The stamp
+   itself is still written by the migration path and still feeds the page's own (display-only) sizing
+   recommendation — cleaning the stored value is a data decision, not made here.
+2. **Parity gaps that keep the Service Topology tab** (step 12). Closed this session (three slices, each
+   adversarially reviewed twice): per-system controller / batteries / expansions, per-system battery
+   landing, partial backup (which panels), the meter-collar ruling as its own utility fact, the four
+   disconnecting means (add / place / part / rating / SCCR, each with its own engine verdict), the
+   multi-gateway manufacturer-document requirement, and the optional NEC 220 load analysis. **Still
+   only in the tab** (reported by the slice authors and reviewers, not hidden):
+   - a system's "Fed by" branch, "Generation in this domain (A)", and one system backing up several
+     panels (System Config's partial backup makes one system per panel);
+   - the commissioned output setting (`outputConfigKw`) and more than one expansion per battery (the
+     authoring model pairs one expansion per battery);
+   - removing a system that carries a connection point, a generation panel or an in-line switch
+     (System Config refuses and sends it to Advanced — nothing cascades);
+   - a disconnect's lockable / visible-open flags and one device holding two roles; per-role placement
+     filtering; registering the multi-gateway document as present (no writer exists anywhere);
+   - "the storage's own listing provides its disconnecting means" (stays NEEDS VERIFICATION);
+   - the load model's `otherDemandA`, `basis` and the separate recorded service demand.
+   Also: a seeded isolation-switch rating still satisfies the in-line check *before* any part is
+   chosen (`applyIsolationArrangement` seeds the path rating); once a part is chosen it must state its
+   own (`09bac7a`). A per-system product change writes the graph, not `selected_equipment`.
+   Until these exist in System Config — and Ray live-accepts — the tab stays.
 3. Vmp/Imp still fall back to the string engine's defaults for a legacy request that names a module
    without them (the projection and the page always supply them). Remove the default once no caller can
    reach it.
@@ -132,6 +171,11 @@ then this session's commits). Base for every claim below is `dev` @ `4375ba3`.
    keep the as-issued bytes.
 6. `lib/system/buildInverterConfig.ts` `DEFAULT_PANEL_ID_FENCE = 'nexus-ps-mnb108-440w'` names no
    catalogue row (the SolFence module is `panel-fence-ps1`).
+7. Catalogue data question for Ray: `panel-fence-ps1` (Nexus PS-MNB108(HCBF)-440W) is catalogued at
+   Voc 51.2 V / Isc 10.92 A. Ray's sheet now prints these figures. They look high for a 108-cell
+   module; the datasheet should confirm them, because every string length on his job follows from Voc.
+8. The page's own sizing recommendation still runs for the migration-default brand on DC-coupled
+   jobs. It is now invisible there (`9cf6554`) and inert on the drawing (`c0a0273`), but it still runs.
 
 ## Architecture Notes
 - **One physical array:** `resolvePvArrayDesign` (isomorphic). Browser: `pvArray` memo in the page;
