@@ -873,10 +873,13 @@ export function buildSystemConfigInterview(input: InterviewInput): SystemConfigI
     source: rated !== null ? 'Installer entered' : 'Not established' });
   if (t && t.panels.length > 0) {
     const sizes = [...new Set(t.panels.map(p => p.busbarRatingA))];
+    const noun = `main panel${t.panels.length === 1 ? '' : 's'}`;
     facts.push({
       label: 'Distribution',
-      value: sizes.length === 1 ? `${t.panels.length} × ${sizes[0] ?? '—'} A main panel${t.panels.length === 1 ? '' : 's'}`
-        : t.panels.map(p => `${p.label} ${p.busbarRatingA ?? '—'} A`).join(' · '),
+      // A bus rating nobody has entered is said so — never drawn as "— A".
+      value: sizes.length === 1
+        ? (sizes[0] == null ? `${t.panels.length} ${noun} — bus rating not entered` : `${t.panels.length} × ${sizes[0]} A ${noun}`)
+        : t.panels.map(p => `${p.label} ${p.busbarRatingA != null ? `${p.busbarRatingA} A` : 'bus not entered'}`).join(' · '),
       source: 'Installer entered',
     });
   }

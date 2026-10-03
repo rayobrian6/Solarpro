@@ -185,6 +185,11 @@ test.describe('System Config V3 — the existing cards, real browser, real route
     await expect(page.getByTestId('svc-distribution-two-main-panels')).toBeVisible();
     await Promise.all([graphWrite(page), page.getByTestId('svc-distribution-two-main-panels').click()]);
     await expect(page.locator('[data-testid^="svc-panel-main-"]')).toHaveCount(2);
+    // The split never presets the panels' ratings — the installer enters each bus.
+    await expect(page.getByTestId('summary-fact-distribution')).toHaveText('2 main panels — bus rating not entered');
+    const buses = page.locator('select[data-testid^="svc-panel-bus-"]');
+    await expect(buses).toHaveCount(2);
+    for (let i = 0; i < 2; i++) await Promise.all([graphWrite(page), buses.nth(i).selectOption('200')]);
     await reloadSystemConfig(page);
     await expect(page.getByTestId('svc-rating')).toHaveValue('400');
     await expect(page.locator('[data-testid^="svc-panel-main-"]')).toHaveCount(2);
