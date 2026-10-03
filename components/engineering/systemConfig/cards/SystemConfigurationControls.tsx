@@ -75,17 +75,20 @@ export interface SystemConfigurationControlsProps extends ItemEditorContext {
  */
 function useCardApply(p: SystemConfigurationControlsProps): { apply: ApplyAnswer; refusal: string | null } {
   const [refusal, setRefusal] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
   const apply: ApplyAnswer = async r => {
     if (r.ok === false) { setRefusal(r.refused); return false; }
     setRefusal(null);
     const ok = await p.apply(r);
+    // A select writes the server inline: a failed write is shown here, on the card, not lost.
+    setFailed(!ok);
     if (ok) {
       const token = legacyInterconnectionMirror(r.topology, p.legacyInterconnectionMethod);
       if (token !== null) p.onLegacyInterconnection?.(token);
     }
     return ok;
   };
-  return { apply, refusal };
+  return { apply, refusal: refusal ?? (failed ? (p.error ?? 'Not saved — the answer could not be written. Try again.') : null) };
 }
 
 // ── Small parts ─────────────────────────────────────────────────────────────

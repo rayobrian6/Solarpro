@@ -60,6 +60,8 @@ interface Mount {
   legacy?: string;
   legacyBusbarFails?: boolean;
   expanded?: boolean;
+  /** The server refuses every write (PUT /service-topology 4xx / network) with this page error. */
+  failWith?: string;
 }
 
 /** The card as the page mounts it: every accepted write becomes the graph the interview is rebuilt from. */
@@ -78,7 +80,11 @@ function mountCard(m: Mount) {
     });
     const props = {
       interview, topology: t, pvArray, derivedStrings: [], equipment: m.selection ?? NO_SELECTION, busy: false,
-      apply: applyVia(async (next: ServiceTopology) => { writes.push(next); setT(next); return true; }),
+      apply: applyVia(async (next: ServiceTopology) => {
+        if (m.failWith) return false;
+        writes.push(next); setT(next); return true;
+      }),
+      error: m.failWith ?? null,
       legacyInterconnectionMethod: legacy,
       onLegacyInterconnection: (token: string) => { mirrored.push(token); setLegacy(token); },
       onGoToCard,
@@ -110,6 +116,15 @@ describe('INTERCONNECTION — one control over the service graph', () => {
     for (const id of ['sys-interconnection', 'sys-backup', 'sys-systems', 'sys-isolation', 'sys-meter-collar']) {
       expect(screen.queryByTestId(id), id).toBeNull();
     }
+  });
+
+  it('a write the server refuses is shown on the card — the select does not fail silently', async () => {
+    const { writes, mirrored } = mountCard({ topology: house200(), failWith: 'Could not save the service: 401' });
+    expect(screen.queryByTestId('sys-refusal')).toBeNull();
+    pick('sys-interconnection', 'load-side-busbar');
+    await waitFor(() => expect(screen.getByTestId('sys-refusal').textContent).toContain('Could not save the service: 401'));
+    expect(writes).toHaveLength(0);
+    expect(mirrored).toHaveLength(0);
   });
 
   it('a plain 200 A house: the interview\'s connection choices only — no 120% remedy offered as a connection type, no backup, no systems', () => {

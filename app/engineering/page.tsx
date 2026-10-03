@@ -13425,7 +13425,7 @@ function EngineeringPageInner() {
                         {/* Meter collar permitted? — the utility / AHJ ruling (behavior.utility.meter-collar),
                             beside the utility meter and only while it matters. */}
                         <MeterCollarControl {...interviewEditorContext} interview={systemConfigInterview}
-                                            className="col-span-2"
+                                            className="col-span-2" error={_svcError}
                                             legacyInterconnectionMethod={config.interconnectionMethod} />
                         <div className="col-span-2">
                           <label className="eng-label">
