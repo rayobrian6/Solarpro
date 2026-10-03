@@ -269,8 +269,14 @@ export function buildLoadAnalysisItems(input: InterviewInput): InterviewItem[] {
         .filter(c => DEMAND_COMPARISON_CHECK_IDS.has(c.id) && c.conclusion === 'FAIL');
   // The analysis replaces the recorded figures only once the engineering evaluates it whole.
   const replaced = pic.complete && !pic.methodOutOfScope;
+  // Per recorded FAIL: is that same path (check id + scope) now evaluated from the analysis, or is it
+  // simply no longer read? A path whose panelboards all have figures is evaluated again — saying
+  // "nothing evaluates this demand" there contradicted the engine's own row beneath it.
+  const liveOf = (c: { id: string; scope: string }) => consuming.find(x => x.id === c.id && x.scope === c.scope);
+  const unreadFails = recordedFails.filter(c => { const live = liveOf(c); return !live || live.conclusion === 'NOT_EVALUATED'; });
+  const reEvaluated = recordedFails.filter(c => !unreadFails.includes(c));
   /** A recorded FAIL the engineering no longer reads, with nothing yet in its place. */
-  const failNoLongerRead = pic.recordedSuperseded && recordedFails.length > 0 && !replaced;
+  const failNoLongerRead = pic.recordedSuperseded && unreadFails.length > 0 && !replaced;
 
   // 🚨 EMPTY OR PARTIAL IS THE INSTALLER'S OWN ENTRY, NEVER AN AMBER STATE. An optional analysis
   // half filled in holds nothing up, so it must not turn the Engineering card amber by itself.
@@ -336,7 +342,13 @@ export function buildLoadAnalysisItems(input: InterviewInput): InterviewItem[] {
 
   // 🚨 THE RECORDED DEMAND, BEFORE AND AFTER THE FIRST FIGURE — never replaced in silence.
   if (recorded !== null) {
-    const verdicts = recordedFails.map(c => c.detail).join(' ');
+    const verdicts = (pic.recordedSuperseded ? unreadFails : recordedFails).map(c => c.detail).join(' ');
+    // A recorded FAIL on a path the analysis now evaluates is still disclosed — with what the analysis
+    // concludes for that path beside it.
+    const nowEvaluated = pic.recordedSuperseded && reEvaluated.length > 0
+      ? ` It failed — ${reEvaluated.map(c => c.detail).join(' ')} Now evaluated from the analysis: ${
+          reEvaluated.map(c => { const live = liveOf(c)!; return `${live.title} — ${live.conclusion}`; }).join('; ')}.`
+      : '';
     items.push({
       id: RECORDED_DEMAND_ITEM_ID,
       section: 'engineering',
@@ -345,7 +357,8 @@ export function buildLoadAnalysisItems(input: InterviewInput): InterviewItem[] {
         : failNoLongerRead ? 'needs-verification' : 'answered',
       answer: pic.recordedSuperseded
         ? `The demand recorded directly (${recorded}) is superseded by this analysis and no longer read.`
-          + (recordedFails.length > 0 ? ` It failed — ${verdicts}` : '')
+          + (unreadFails.length > 0 ? ` It failed, and nothing evaluates that now — ${verdicts}` : '')
+          + nowEvaluated
         : `The demand recorded directly (${recorded}) is read until the first panelboard figure is entered, `
           + 'which supersedes it.' + (recordedFails.length > 0 ? ` It fails — ${verdicts}` : ''),
       source: 'Installer entered',

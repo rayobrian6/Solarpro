@@ -363,7 +363,7 @@ describe('🚨 a demand recorded directly is never replaced in silence', () => {
     const r = item(t, RECORDED_DEMAND_ITEM_ID)!;
     expect(r.state).toBe('needs-verification');
     expect(r.answer).toBe('The demand recorded directly (450.0 A service demand) is superseded by this analysis and '
-      + `no longer read. It failed — ${FAILED}`);
+      + `no longer read. It failed, and nothing evaluates that now — ${FAILED}`);
     expect(r.why).toMatch(/^Nothing evaluates this demand now\./);
     expect(r.why).toMatch(/remove the analysis and the recorded demand is read again\.$/);
     expect(item(t)?.answer).toContain('supersedes the demand recorded directly (450.0 A service demand)');
@@ -376,7 +376,7 @@ describe('🚨 a demand recorded directly is never replaced in silence', () => {
     const t = withFigures(over(), 'standard-220-part-iii', { 'msp-1': 92, 'msp-2': 80 });
     const r = item(t, RECORDED_DEMAND_ITEM_ID)!;
     expect(r.state).toBe('answered');
-    expect(r.answer).toContain(`superseded by this analysis and no longer read. It failed — ${FAILED}`);
+    expect(r.answer).toContain(`superseded by this analysis and no longer read. It failed — ${FAILED} Now evaluated from the analysis:`);
     expect(item(t, 'engineering.loads.check.service.demand.site')?.answer)
       .toBe('PASS — 172.0 A calculated demand against a 400 A service.');
     expect(engineering(t).status).toBe('complete');
@@ -395,7 +395,20 @@ describe('🚨 a demand recorded directly is never replaced in silence', () => {
     const r = item(t, RECORDED_DEMAND_ITEM_ID)!;
     expect(r.state).toBe('needs-verification');
     expect(r.answer).toBe(`The demand recorded directly (250.0 A on ${base.branches[0].label}) is superseded by this `
-      + 'analysis and no longer read. It failed — 250.0 A exceeds the 200 A branch.');
+      + 'analysis and no longer read. It failed, and nothing evaluates that now — 250.0 A exceeds the 200 A branch.');
+  });
+
+  it('a recorded FAIL on a path the analysis now evaluates is not called "unread" — the row agrees with the engine', () => {
+    // Second review round: with MSP #1 (the only panel on that path) entered, the engine evaluates the
+    // path from the model, yet the row said "Nothing evaluates this demand now" beside the engine's verdict.
+    const base = resolved400();
+    const t = withFigures({ ...base, branches: base.branches.map(b => b.id === base.branches[0].id
+      ? { ...b, calculatedDemandA: 250 } : b) }, 'standard-220-part-iii', { 'msp-1': 92 });
+    const r = item(t, RECORDED_DEMAND_ITEM_ID)!;
+    expect(r.answer).not.toMatch(/nothing evaluates that now/);
+    expect(r.answer).toMatch(/It failed — 250\.0 A exceeds the 200 A branch\. Now evaluated from the analysis: .* — PASS\./);
+    expect(r.state, 'amber over a path the engine evaluates and passes').toBe('answered');
+    expect(r.why ?? '').not.toMatch(/Nothing evaluates this demand now/);
   });
 
   it('a recorded demand that passed is still disclosed, but nothing turns amber', () => {

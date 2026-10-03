@@ -196,7 +196,7 @@ describe('🚨 the optional load analysis, answered in System Config, survives t
     const iv = await interviewOf(r.topology);
     expect(iv.item('engineering.loads.recorded')?.state).toBe('needs-verification');
     expect(iv.item('engineering.loads.recorded')?.answer).toBe('The demand recorded directly (450.0 A service demand) '
-      + 'is superseded by this analysis and no longer read. It failed — 450.0 A calculated demand exceeds the 400 A service.');
+      + 'is superseded by this analysis and no longer read. It failed, and nothing evaluates that now — 450.0 A calculated demand exceeds the 400 A service.');
   });
 
   it('remove → PUT → GET: the model is gone after the reload and the item is "None — optional" again', async () => {

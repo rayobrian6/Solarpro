@@ -152,6 +152,10 @@ export function SystemConfigInterview(props: SystemConfigInterviewProps) {
 function ReleaseBanner({ interview }: { interview: Interview }) {
   const r = interview.release;
   const open = interview.openQuestions;
+  // Eligible for release is not the same as nothing left to look at: a card can still hold items to
+  // review (a ruling to verify, a recorded figure an analysis superseded). "Complete" is said only
+  // when every card is.
+  const toReview = interview.sections.filter(s => s.status !== 'complete');
   return (
     <div data-testid="interview-release"
          data-drawable={r.drawable ? 'yes' : 'no'} data-release-ready={r.releaseReady ? 'yes' : 'no'}
@@ -160,7 +164,8 @@ function ReleaseBanner({ interview }: { interview: Interview }) {
            : 'border-slate-700 bg-slate-900/60'}`}>
       <div className="flex flex-wrap items-center gap-3 text-xs">
         <span className="font-black text-slate-100">
-          {r.releaseReady ? 'Engineering complete — eligible for release'
+          {r.releaseReady && toReview.length === 0 ? 'Engineering complete — eligible for release'
+            : r.releaseReady ? `Eligible for release — ${toReview.length} card${toReview.length === 1 ? '' : 's'} to review (${toReview.map(s => s.title).join(', ')})`
             : open.length > 0 ? `${open.length} question${open.length === 1 ? '' : 's'} need your answer`
               : 'Engineering needs review before release'}
         </span>

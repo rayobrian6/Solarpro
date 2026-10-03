@@ -86,3 +86,24 @@ describe('the same interview, three ways through it', () => {
     }
   });
 });
+
+describe('the banner never says "complete" while a card still has something to review', () => {
+  it('release-eligible with a card needing verification reads "Eligible for release — N card to review", not "Engineering complete"', () => {
+    const reviewing = {
+      ...interview,
+      release: { drawable: true, releaseReady: true, blockers: [] },
+      sections: interview.sections.map(s => (s.id === 'engineering' ? { ...s, status: 'needs-verification' as const } : { ...s, status: 'complete' as const })),
+      openQuestions: [],
+    };
+    render(
+      <SystemConfigInterview
+        interview={reviewing} topology={topology} pvArray={pvArray} derivedStrings={[]}
+        equipment={{ gatewayProductId: null, storageProductId: null, storageLabel: null, totalUnits: 0 }}
+        mode="auto" busy={false} error={null} onWrite={async () => true} onRecordCoupling={async () => true}
+      />,
+    );
+    const banner = screen.getByTestId('interview-release');
+    expect(banner.textContent).toMatch(/Eligible for release — 1 card to review \(Engineering Result\)/);
+    expect(banner.textContent).not.toMatch(/Engineering complete/);
+  });
+});

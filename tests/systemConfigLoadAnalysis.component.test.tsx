@@ -238,7 +238,7 @@ describe('🚨 the card never lets a FAIL go quietly', () => {
 
     const row = screen.getByTestId('interview-item-engineering.loads.recorded');
     expect(row.getAttribute('data-state')).toBe('needs-verification');
-    expect(row.textContent).toMatch(/no longer read\. It failed — 450\.0 A calculated demand exceeds the 400 A service\./);
+    expect(row.textContent).toMatch(/no longer read\. It failed, and nothing evaluates that now — 450\.0 A calculated demand exceeds the 400 A service\./);
     expect(row.textContent).toMatch(/Nothing evaluates this demand now/);
     expect(screen.getByTestId('interview-section-engineering').getAttribute('data-status')).toBe('needs-verification');
     expect(screen.queryByTestId('answer-loads-supersedes')).toBeNull();
