@@ -117,7 +117,7 @@ import { gateMayReplaceModule, moduleSwapWithheld } from '@/lib/electrical/modul
 import { deriveStorageDcStrings } from '@/lib/electrical/storageDcStrings';
 import { dcStringLimits } from '@/lib/electrical/dcStringLimits';
 import { buildSystemConfigInterview, type InterviewEquipment } from '@/lib/electrical/systemConfigInterview';
-import { selectionPairOf, controllersByProduct } from '@/lib/electrical/systemConfigSystemEquipment';
+import { selectionPairOf, controllersByProduct, storageByProduct } from '@/lib/electrical/systemConfigSystemEquipment';
 import { evaluateServiceTopology } from '@/lib/electrical/serviceTopology';
 import SystemConfigInterview from '@/components/engineering/systemConfig/SystemConfigInterview';
 // Phase 12 — System-wide validation layer.
@@ -9849,6 +9849,8 @@ function EngineeringPageInner() {
         pvInput: !!(bat?.pvInput) || graphUnits.some(u => !!u.pvInputLimits),
         backupCapable: !!bat?.backupCapable,
         requiresGateway: !!bat?.requiresGateway,
+        // Different batteries on different systems are stated per product, not as the first × N.
+        products: storageByProduct(svcTopology),
       } : null,
       gateway: gatewayProductId ? {
         label: pair.gateway?.label ?? (gw ? `${gw.manufacturer} ${gw.model}` : null),

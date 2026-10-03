@@ -38,7 +38,7 @@ import type {
 import type {
   InterviewInput, InterviewItem, InterviewOption, ItemState,
 } from '@/lib/electrical/systemConfigInterview';
-import { answerBackup, answerStorageLanding, type AnswerResult } from '@/lib/electrical/systemConfigAnswers';
+import { answerBackup, answerStorageLanding, landsOnSharedPanel, type AnswerResult } from '@/lib/electrical/systemConfigAnswers';
 import {
   setDomainEquipment, setStoragePvInput, addBackupDomain, updatePanel, updateDomain, removeBackupDomain,
 } from '@/lib/electrical/topologyAuthoring';
@@ -218,17 +218,9 @@ export function systemDependents(t: ServiceTopology, d: BackupDomain): string[] 
   return [...aggs.map(a => a.label), ...pois.map(p => p.label), ...devices.map(x => x.label)];
 }
 
-/**
- * 🚨 A SITE-WIDE GENERATION PANEL IS NOT ONE SYSTEM'S PANEL. The common-aggregation arrangement
- * builds ONE panel (no `domainId`) taking every system's battery circuits, with ONE connection.
- * A system whose batteries land there is combined with the others: where its batteries land is not
- * its own question, and re-equipping it changes that panel's circuits — never builds it a second one.
- */
-export function landsOnSharedPanel(t: ServiceTopology, d: BackupDomain): boolean {
-  if (t.interconnection.derArrangement === 'common-aggregation') return true;
-  const owned = new Set([d.id, ...d.storageUnitIds]);
-  return (t.aggregationPanels ?? []).some(a => !a.domainId && a.inputs.some(i => owned.has(i.sourceId)));
-}
+// `landsOnSharedPanel` lives with the answers (systemConfigAnswers.ts) so the all-systems landing
+// answer can obey it too; re-exported here for this module's callers.
+export { landsOnSharedPanel };
 
 /**
  * The site-wide panel this system's battery circuits are wired into one by one, if any — the panel
@@ -562,7 +554,9 @@ export function answerSystemEquipment(
 
   // Which panel the system's battery circuits are in decides what a new set of batteries changes.
   const ownPanel = (t.aggregationPanels ?? []).some(a => a.domainId === d.id);
-  const shared = ownPanel ? null : sharedBatteryPanel(t, d, f.inverting);
+  // A site-wide panel holding this system's battery circuits is rebuilt whether or not the system
+  // also has its own panel — left alone, it kept a circuit for a battery that no longer exists.
+  const shared = sharedBatteryPanel(t, d, f.inverting);
   if (inverterSetChanged && shared?.partial) {
     return refuse(`Only some of ${d.label}’s batteries land in ${shared.panel.label}, which the other systems `
       + 'share. Which of the new batteries land there is not SolarPro’s to decide — change it in Advanced.');
@@ -606,7 +600,8 @@ export function answerSystemEquipment(
     const hadProduct = (t.aggregationPanels ?? []).some(a => a.domainId === d.id && !!a.productId);
     next = applyPerSystemGenerationPanels(next, [d.id]).topology;
     notes.push(`its generation panel was rebuilt from the new batteries${hadProduct ? ' — choose its enclosure again' : ''}`);
-  } else if (inverterSetChanged && shared) {
+  }
+  if (inverterSetChanged && shared) {
     const now = rebuiltInverting();
     next = replaceBatteryCircuits(next, shared.panel.id, new Set(f.inverting.map(u => u.id)), now);
     notes.push(`${shared.panel.label} now takes its ${plural(now.length, 'battery circuit', 'battery circuits')}; `
@@ -766,6 +761,19 @@ export function selectionPairOf(
 }
 
 /** Each backup controller product in the graph, with how many systems use it, in system order. */
+/** The inverting batteries on the graph, grouped by product, in order of first appearance. */
+export function storageByProduct(
+  t: ServiceTopology | null | undefined,
+): Array<{ productId: string; label: string | null; count: number }> {
+  const out: Array<{ productId: string; label: string | null; count: number }> = [];
+  for (const u of (t?.storage ?? []).filter(x => x.role === 'inverter-unit')) {
+    const row = out.find(x => x.productId === u.productId);
+    if (row) row.count += 1;
+    else out.push({ productId: u.productId, label: u.label ?? null, count: 1 });
+  }
+  return out;
+}
+
 export function controllersByProduct(
   t: ServiceTopology | null | undefined,
 ): Array<{ productId: string; label: string | null; count: number }> {

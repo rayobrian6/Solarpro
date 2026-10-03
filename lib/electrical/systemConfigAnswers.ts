@@ -247,6 +247,26 @@ export function answerSystemBatteries(
  * The three answers ARE `BackupDomain.storageConnection`, and the generation panel is BUILT (one per
  * system, sized from that system's own batteries) or removed exactly as the wizard did.
  */
+/**
+ * 🚨 A SITE-WIDE GENERATION PANEL IS NOT ONE SYSTEM'S PANEL. The common-aggregation arrangement
+ * builds ONE panel (no `domainId`) taking the systems' battery circuits, with ONE connection. A system
+ * whose batteries (or whose bus) land there is combined with the others: where its batteries land is
+ * not its own question, and re-equipping it changes that panel's circuits — never builds it a second.
+ *
+ * Only a system the site-wide panel ACTUALLY takes is combined — a common-aggregation job that
+ * aggregates only some systems leaves the others theirs to answer. A system with no batteries yet,
+ * recorded as landing in a generation panel on a job combined in the one site-wide panel, lands there.
+ */
+export function landsOnSharedPanel(t: ServiceTopology, d: BackupDomain): boolean {
+  const siteWide = (t.aggregationPanels ?? []).filter(a => !a.domainId);
+  if (siteWide.length === 0) return false;
+  const owned = new Set([d.id, ...d.storageUnitIds]);
+  if (siteWide.some(a => a.inputs.some(i => owned.has(i.sourceId)))) return true;
+  const hasBatteries = d.storageUnitIds.some(id => t.storage.find(u => u.id === id)?.role === 'inverter-unit');
+  return !hasBatteries && d.storageConnection === 'der-aggregation-panel'
+    && t.interconnection.derArrangement === 'common-aggregation' && siteWide.length === 1;
+}
+
 export function answerStorageLanding(
   t: ServiceTopology,
   value: Exclude<BackupDomain['storageConnection'], 'unresolved'>,
@@ -254,6 +274,17 @@ export function answerStorageLanding(
 ): AnswerResult {
   const ids = domainIds ?? t.domains.map(d => d.id);
   if (ids.length === 0) return refuse('There is no backed-up system to answer this for.');
+  // The all-systems answer obeys the same rule as the per-system one: a system combined in the
+  // site-wide panel cannot be landed elsewhere (its circuits would stay on the shared panel) nor
+  // given a second panel beside it.
+  const combined = ids.map(id => t.domains.find(d => d.id === id))
+    .filter((d): d is BackupDomain => !!d && landsOnSharedPanel(t, d));
+  if (combined.length > 0) {
+    const shared = (t.aggregationPanels ?? []).find(a => !a.domainId);
+    return refuse(`${combined.map(d => d.label).join(' and ')} ${combined.length === 1 ? 'is' : 'are'} combined `
+      + `with the other systems in ${shared ? shared.label : 'one generation panel'}, so where the batteries `
+      + 'land is decided by how the systems connect to the service. Change that, or edit it in Advanced.');
+  }
   let next = value === 'der-aggregation-panel'
     ? applyPerSystemGenerationPanels(t, ids).topology
     : clearPerSystemGenerationPanels(t, ids);

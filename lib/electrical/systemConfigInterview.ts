@@ -154,6 +154,11 @@ export interface InterviewEquipment {
     backupCapable: boolean;
     /** The manufacturer requires a gateway / controller with it. */
     requiresGateway: boolean;
+    /**
+     * Each battery product installed and how many — where the systems use different ones, storage is
+     * stated per product ("2 × A · 2 × B"), never as the first one times the total.
+     */
+    products?: ReadonlyArray<{ label: string | null; count: number }>;
   } | null;
   gateway: {
     label: string | null;
@@ -171,6 +176,12 @@ const controllersInWords = (gw: NonNullable<InterviewEquipment['gateway']>): str
   gw.products && gw.products.length > 1
     ? gw.products.map(p => `${p.count} × ${p.label ?? 'gateway'}`).join(' · ')
     : `${gw.count} × ${gw.label ?? 'gateway'}`;
+
+/** The batteries in words: one product ⇒ "4 × A"; several ⇒ "2 × A · 2 × B". */
+const storageInWords = (st: NonNullable<InterviewEquipment['storage']>): string =>
+  st.products && st.products.length > 1
+    ? st.products.map(p => `${p.count} × ${p.label ?? 'battery'}`).join(' · ')
+    : `${st.count} × ${st.label ?? 'battery'}`;
 
 export interface InterviewInput {
   pvArray: PvArrayDesign;
@@ -420,7 +431,7 @@ export function buildSystemConfigInterview(input: InterviewInput): SystemConfigI
       question: 'Is storage being installed?',
       state: 'answered',
       // No battery in the selection is "none selected" — not a recorded decision that there is none.
-      answer: hasStorage ? `${eq.storage!.count} × ${eq.storage!.label ?? 'battery'}` : 'None selected',
+      answer: hasStorage ? storageInWords(eq.storage!) : 'None selected',
       source: 'Selected equipment',
     });
     if (hasStorage && eq.storage!.requiresGateway) {
@@ -742,7 +753,7 @@ export function buildSystemConfigInterview(input: InterviewInput): SystemConfigI
         + (t ? ` · ${phaseLabel(t.service.phase)}` : '')),
     sectionOf('equipment', 'Equipment', equipment, [
       equipment[0].answer ? `PV inverter: ${equipment[0].answer}` : 'PV inverter not chosen',
-      hasStorage ? `${eq.storage!.count} × ${eq.storage!.label ?? 'battery'}` : 'No storage selected',
+      hasStorage ? storageInWords(eq.storage!) : 'No storage selected',
       eq.gateway && eq.gateway.count > 0 ? controllersInWords(eq.gateway) : null,
     ].filter(Boolean).join(' · ')),
     sectionOf('behavior', 'System Behavior & Connection', behavior,
@@ -800,7 +811,7 @@ export function buildSystemConfigInterview(input: InterviewInput): SystemConfigI
     const counts = input.derivedStrings.map(x => x.panelCount);
     facts.push({ label: 'PV strings', value: `${counts.length} (${counts.join(' / ')})`, source: 'SolarPro calculation' });
   }
-  facts.push({ label: 'Storage', value: hasStorage ? `${eq.storage!.count} × ${eq.storage!.label ?? 'battery'}` : 'None selected',
+  facts.push({ label: 'Storage', value: hasStorage ? storageInWords(eq.storage!) : 'None selected',
     source: 'Selected equipment' });
   const essA = input.evaluation?.storageSummary.totalContinuousOutputA ?? null;
   if (hasStorage) {

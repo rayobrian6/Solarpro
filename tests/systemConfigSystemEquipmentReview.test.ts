@@ -296,3 +296,53 @@ describe('different controllers on different systems are stated per product', ()
     expect(same.summaryFacts.find(f => f.label === 'Backup controllers')?.value).toBe('2 × Tesla Backup Gateway 3');
   });
 });
+
+// ── Second verification round (the fix's own reviewer) ─────────────────────────────────────────────
+describe('🚨 second review round — a shared panel never keeps a battery that is gone', () => {
+  it('own panel AND a site-wide panel holding the batteries: a count change rebuilds BOTH', async () => {
+    const { answerStorageLanding } = await import('@/lib/electrical/systemConfigAnswers');
+    void answerStorageLanding;
+    const ca = ok(answerSystemsArrangement(buildRaysIntendedJob().topology, 'common-aggregation'));
+    const t = ok(answerSystemEquipment(ca, 'domain-a', { storageUnits: 1 }));
+    const units = new Set(t.storage.map(u => u.id));
+    const dangling = (t.aggregationPanels ?? []).flatMap(p => p.inputs
+      .filter(i => i.sourceId.startsWith('domain-a-ess') && !units.has(i.sourceId))
+      .map(i => `${p.id}:${i.sourceId}`));
+    expect(dangling, 'a generation panel kept a circuit for a battery that no longer exists').toEqual([]);
+  });
+
+  it('a common-aggregation job that aggregates only System 1 leaves System 2 its own landing question', async () => {
+    const { landsOnSharedPanel } = await import('@/lib/electrical/systemConfigAnswers');
+    const t = buildTesla400ATwoGateway({ powerwallsPerSystem: 2, derArrangement: 'common-aggregation', aggregateOnlyFirstDomain: true }).topology;
+    const b = t.domains.find(d => d.id === 'domain-b')!;
+    expect(landsOnSharedPanel(t, b), 'System 2 was called combined though no shared panel takes its batteries').toBe(false);
+    expect(answerSystemLanding(t, 'domain-b', 'gateway-panelboard').ok).toBe(true);
+    // Control: System 1 IS on the shared panel.
+    expect(landsOnSharedPanel(t, t.domains.find(d => d.id === 'domain-a')!)).toBe(true);
+  });
+
+  it('the all-systems landing answer obeys the same rule — it cannot strand batteries on the shared panel', async () => {
+    const { answerStorageLanding } = await import('@/lib/electrical/systemConfigAnswers');
+    const ca = ok(answerSystemsArrangement(buildRaysIntendedJob().topology, 'common-aggregation'));
+    for (const v of ['gateway-panelboard', 'der-aggregation-panel'] as const) {
+      const r = answerStorageLanding(ca, v);
+      expect(r.ok, `all-systems '${v}' was accepted on a common-aggregation job`).toBe(false);
+      expect(refusedText(r)).toMatch(/combined with the other systems/);
+    }
+  });
+});
+
+describe('🚨 second review round — different batteries per system are stated per product', () => {
+  it('2 × IQ Battery 5P on System 1 and 2 × Powerwall 3 on System 2 read "2 × … · 2 × …", never "4 × first"', async () => {
+    const { storageByProduct } = await import('@/lib/electrical/systemConfigSystemEquipment');
+    const t = ok(answerSystemEquipment(buildRaysIntendedJob().topology, 'domain-a',
+      { gatewayProductId: SC3, storageProductId: IQ5P, storageUnits: 2 }));
+    const products = storageByProduct(t);
+    expect(products.map(p => p.count)).toEqual([2, 2]);
+    const x = iv(t, { ...PW3_EQ, storage: { ...PW3_EQ.storage!, count: 4, products } });
+    const fact = x.summaryFacts.find(f => f.label === 'Storage')?.value ?? '';
+    expect(fact).toMatch(/^2 × .* · 2 × .*$/);
+    expect(fact).not.toMatch(/^4 ×/);
+    expect(item(x, 'equipment.storage')?.answer).toBe(fact);
+  });
+});
