@@ -26,6 +26,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import type { ComputedSolarCoupling } from '@/lib/computed-system';
+import type { PvArrayDesign } from '@/lib/electrical/pvArrayDesign';
 
 /**
  * 🚨 THE TOPOLOGY TOKEN FOR "NOBODY HAS SAID", used by BOTH renderings.
@@ -45,6 +46,60 @@ import type { ComputedSolarCoupling } from '@/lib/computed-system';
  */
 export const TOPOLOGY_UNRESOLVED_TOKEN = 'ARCHITECTURE_REQUIRES_RESOLUTION';
 
+/**
+ * 🚨 A DRAWING NEEDS AN ARRAY, AND NEITHER ROUTE MAY INVENT ONE.
+ *
+ * Both SLD routes read `Number(body.totalModules) || 20` and `Number(body.panelWatts) || 400` (plus
+ * a 49.6 V / 10.18 A module nobody selected). That is how a 37 × 440 W design was printed as
+ * 20 × 400 W the moment its inverter fleet was retired: the route did not know the array, so it drew
+ * a different one. Same class as the Fronius Primo this module already removed — an output naming a
+ * physical fact from absence.
+ *
+ * After `projectPvArray` has had its say, a request that still carries no module count, or a count
+ * with no module electricals, is answered with what is missing, why it matters, who owns it and what
+ * it blocks. Storage-only is the one design with legitimately no array.
+ *
+ * Returned as the 422 body; null ⇒ the array is complete enough to draw.
+ */
+export function pvArrayInputRequired(input: Record<string, any>): Record<string, unknown> | null {
+  if (String(input.topologyType ?? '') === 'STORAGE_ONLY') return null;
+  const modules = Number(input.totalModules) || 0;
+  const missing: Array<{ fact: string; why: string; owner: string; blocks: string[] }> = [];
+  if (!(modules > 0)) {
+    missing.push({
+      fact: 'PV module count',
+      why: 'The strings, the DC size and the array on the single-line diagram follow from how many '
+        + 'modules are installed. No Design layout was found for this project and none was supplied.',
+      owner: 'Design — place the modules',
+      blocks: ['SLD', 'string design', 'BOM', 'permit'],
+    });
+  } else {
+    // Wattage, Voc and Isc are what the drawn array, its DC size and the NEC 690.7 / 690.8 checks
+    // cannot exist without. (Vmp / Imp still fall back to the string engine's module defaults when a
+    // legacy request names a module without them — every project with a recorded module gets the
+    // real values from `projectPvArray`, and the page sends them on every request.)
+    const absent = (['panelWatts', 'panelVoc', 'panelIsc'] as const)
+      .filter(k => !(Number(input[k]) > 0));
+    if (absent.length > 0) {
+      missing.push({
+        fact: 'PV module model',
+        why: 'Module wattage, Voc and Isc size every string and every DC conductor; without the module '
+          + `they are unknown (${absent.join(', ')} not established).`,
+        owner: 'Design / equipment selection — choose the module',
+        blocks: ['SLD', 'NEC 690.7 voltage check', 'BOM', 'permit'],
+      });
+    }
+  }
+  if (missing.length === 0) return null;
+  return {
+    success: false,
+    error: 'INPUT_REQUIRED',
+    code: 'PV_ARRAY_INPUT_REQUIRED',
+    message: `The single-line diagram cannot be drawn without: ${missing.map(m => m.fact).join(', ')}.`,
+    missing,
+  };
+}
+
 export interface CanonicalSldProjection {
   /**
    * The 409 payload when the architecture must be resolved by a human before anything is drawn.
@@ -61,11 +116,77 @@ export interface CanonicalSldProjection {
   coupling: ComputedSolarCoupling | null;
   /** The electrical revision this artefact is drawn from, for the staleness stamp. */
   revision: string | null;
+  /**
+   * The physical array Design placed, as read from the store on this request. Null only when the
+   * project could not be read at all. Projected onto the input by `projectPvArray`.
+   */
+  pvArray: PvArrayDesign | null;
 }
 
 const NOTHING: CanonicalSldProjection = {
-  refusal: null, applied: false, coupling: null, revision: null,
+  refusal: null, applied: false, coupling: null, revision: null, pvArray: null,
 };
+
+/**
+ * 🚨 THE ARRAY ON THE SHEET IS THE ARRAY DESIGN PLACED.
+ *
+ * Ray's live sheet, after the architecture was finally right (PV INVERTER = NONE, PV DC COUPLED TO
+ * POWERWALL 3), printed `20 × 400 W · 8.00 kW DC · 2 × 10 strings` for a `37 × 440 W · 16.28 kW`
+ * design. The page described the array only as a property of its inverter fleet; the DC-coupled
+ * resolution emptied the fleet; the page posted no module count and no module; and both routes
+ * filled the silence with literals (`|| 20`, `|| 400`).
+ *
+ * Same rule as the architecture fields below: the request may NAME the project, it may not describe
+ * its physical array. Module count and module identity are projected from the stores Design writes,
+ * read on the server, and a disagreement with what the caller posted is logged rather than drawn.
+ *
+ * Where the store has no answer (no layout, no recorded module), the caller's value is left exactly
+ * as posted — this never invents. The routes refuse to fabricate what is still missing.
+ */
+export function projectPvArray(
+  input: Record<string, any>,
+  pv: PvArrayDesign | null | undefined,
+  tag: string,
+): void {
+  if (!pv) return;
+  if (pv.moduleCount !== null) {
+    const posted = Number(input.totalModules) || 0;
+    if (posted !== pv.moduleCount) {
+      console.warn(`[${tag}] PV module count corrected from Design:`
+        + ` posted=${posted || 'none'} design=${pv.moduleCount} (${pv.moduleCountSource})`);
+    }
+    input.totalModules = pv.moduleCount;
+  }
+  const m = pv.module;
+  if (m) {
+    const postedWatts = Number(input.panelWatts) || 0;
+    const postedId = input.panelId != null ? String(input.panelId) : '';
+    if ((postedId && postedId !== m.panelId) || (postedWatts && postedWatts !== m.watts)) {
+      console.warn(`[${tag}] PV module corrected from the project's selection:`
+        + ` posted=${postedId || '(no id)'} ${postedWatts || '?'} W`
+        + ` project=${m.panelId} ${m.watts} W (${pv.moduleSource})`);
+    }
+    input.panelId = m.panelId;
+    input.panelModel = `${m.manufacturer} ${m.model}`;
+    input.panelManufacturer = m.manufacturer;
+    input.panelWatts = m.watts;
+    input.panelVoc = m.voc;
+    input.panelVmp = m.vmp;
+    input.panelIsc = m.isc;
+    input.panelImp = m.imp;
+    input.tempCoeffVoc = m.tempCoeffVoc;
+    input.panelTempCoeffVoc = m.tempCoeffVoc;
+    input.panelTempCoeffIsc = m.tempCoeffIsc;
+    input.maxSeriesFuse = m.maxSeriesFuseRating;
+    input.panelMaxSeriesFuse = m.maxSeriesFuseRating;
+    // A Vmp coefficient posted alongside a different module describes that module, not this one.
+    delete input.tempCoeffVmp;
+  }
+  if (pv.missing.length > 0) {
+    console.warn(`[${tag}] PV array incomplete: `
+      + pv.missing.map(f => `${f.fact} (owner: ${f.owner})`).join('; '));
+  }
+}
 
 /**
  * Project the canonical electrical model onto an SLD input record.
@@ -104,7 +225,12 @@ export async function projectCanonicalArchitecture(
     return { ...NOTHING, refusal: refusal as unknown as Record<string, unknown> };
   }
 
-  if (!model?.topology) return NOTHING;
+  // The physical array is a Design fact, not a service-graph fact: a plain 200 A house with no graph
+  // has an array too, so this runs before the topology gate below.
+  const pvArray = loaded?.pvArray ?? null;
+  projectPvArray(input, pvArray, tag);
+
+  if (!model?.topology) return { ...NOTHING, pvArray };
 
   // ── 🚨 THE CANONICAL ELECTRICAL MODEL DECIDES THE ARCHITECTURE ────────
   // Not the renderer, and not whatever the equipment picker was last left on. A conflict is
@@ -305,5 +431,6 @@ export async function projectCanonicalArchitecture(
     applied: true,
     coupling: model.solarCoupling,
     revision: loaded!.revision,
+    pvArray,
   };
 }

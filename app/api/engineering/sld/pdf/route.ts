@@ -12,7 +12,7 @@ import { getUserFromRequest } from '@/lib/auth';
 // THE one NEC 240.6(A) ladder — never `Math.ceil(x / 5) * 5`.
 import { nextStandardOcpd } from '@/lib/electrical/stdSizes';
 import { unselectedInverterLabel } from '@/lib/permit/utils/helpers';
-import { TOPOLOGY_UNRESOLVED_TOKEN } from '@/lib/electrical/canonicalSldProjection';
+import { TOPOLOGY_UNRESOLVED_TOKEN, pvArrayInputRequired } from '@/lib/electrical/canonicalSldProjection';
 import { handleRouteDbError } from '@/lib/db-neon';
 import { renderSLDProfessional, SLDProfessionalInput } from '@/lib/sld-professional-renderer';
 import { sanitizeClientSourceBranches } from '@/lib/permit/utils/sldAdapter';
@@ -202,6 +202,39 @@ export async function POST(req: NextRequest) {
       } catch (e) {
         console.warn('[sld/pdf/POST] canonical electrical read skipped (non-fatal):',
           (e as Error)?.message);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // 🚨 THE EXPORTED SHEET DRAWS THE ARRAY DESIGN PLACED, OR SAYS WHAT IS MISSING.
+    //
+    // This route read `Number(buildInput.totalModules) || 20` and `panelWatts … || 400` — the same
+    // literals that drew Ray's 37 × 440 W design as 20 × 400 W on the Diagram tab. The canonical
+    // projection above has already supplied the array from Design where the project records one.
+    // The older `panelSpecs[0]` request shape is folded in first (it names a module, it does not
+    // invent one), and anything still missing is refused with what, why, whose and what it blocks.
+    // ═══════════════════════════════════════════════════════════════════
+    {
+      const _fps = Array.isArray(buildInput.panelSpecs) ? buildInput.panelSpecs[0] : null;
+      if (_fps && typeof _fps === 'object') {
+        const _pairs: Array<[string, string]> = [
+          ['panelWatts', 'watts'], ['panelVoc', 'voc'], ['panelIsc', 'isc'],
+          ['panelVmp', 'vmp'], ['panelImp', 'imp'],
+        ];
+        for (const [k, src] of _pairs) {
+          if (buildInput[k] == null && _fps[src] != null) buildInput[k] = _fps[src];
+        }
+        if (!buildInput.panelModel && _fps.model) {
+          buildInput.panelModel = `${_fps.manufacturer ?? ''} ${_fps.model}`.trim();
+        }
+      }
+      // A hybrid export carries one validated lane per array, each with its own module facts, and
+      // switches to the multi-lane renderer below — the top-level fields are not what it draws.
+      const _pvRefusal = sanitizeClientSourceBranches(buildInput.sources)
+        ? null : pvArrayInputRequired(buildInput);
+      if (_pvRefusal) {
+        console.warn('[sld/pdf/POST] REFUSED: ' + String(_pvRefusal.message));
+        return NextResponse.json(_pvRefusal, { status: 422 });
       }
     }
 
@@ -430,7 +463,7 @@ export async function POST(req: NextRequest) {
       // hybrid sheet — the one that reaches the permit package — silently
       // dropped the selection the on-screen single-lane sheet honoured.
       selectedCombinerId:      buildInput.selectedCombinerId ? String(buildInput.selectedCombinerId) : null,
-      totalModules:            Number(buildInput.totalModules)           || 20,
+      totalModules:            Number(buildInput.totalModules)           || 0,
       // 🚨 NOT `|| 2`. The engine pass above sets this from the derivation; the literal was a
       // fabricated string count on a printed sheet.
       totalStrings:            Number(buildInput.totalStrings) || 0,
@@ -440,10 +473,12 @@ export async function POST(req: NextRequest) {
                                  && buildInput.stringPanelCounts.length > 0
                                  ? buildInput.stringPanelCounts.map(Number)
                                  : undefined,
-      panelModel:              String(buildInput.panelModel ?? (firstPanelSpec ? `${firstPanelSpec.manufacturer} ${firstPanelSpec.model}` : 'Q.PEAK DUO BLK ML-G10+ 400W')),
-      panelWatts:              Number(buildInput.panelWatts ?? firstPanelSpec?.watts)   || 400,
-      panelVoc:                Number(buildInput.panelVoc   ?? firstPanelSpec?.voc)     || 49.6,
-      panelIsc:                Number(buildInput.panelIsc   ?? firstPanelSpec?.isc)     || 10.18,
+      // No literal module: `pvArrayInputRequired` above refused any request that reached here
+      // without these, so a fallback could only ever name a product nobody selected.
+      panelModel:              String(buildInput.panelModel ?? (firstPanelSpec ? `${firstPanelSpec.manufacturer} ${firstPanelSpec.model}` : 'PV MODULE — MODEL NOT RECORDED')),
+      panelWatts:              Number(buildInput.panelWatts ?? firstPanelSpec?.watts)   || 0,
+      panelVoc:                Number(buildInput.panelVoc   ?? firstPanelSpec?.voc)     || 0,
+      panelIsc:                Number(buildInput.panelIsc   ?? firstPanelSpec?.isc)     || 0,
       dcWireGauge:             String(buildInput.dcWireGauge             ?? '#10 AWG'),
       dcConduitType:           String(buildInput.dcConduitType ?? buildInput.conduitType ?? 'EMT'),
       dcOCPD:                  Number(buildInput.dcOCPD)                 || 20,

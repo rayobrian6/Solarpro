@@ -24,6 +24,7 @@ import { resolveElectricalProject } from '@/lib/electrical/projectModel';
 import { electricalRevision } from '@/lib/electrical/revision';
 import { buildRaysIntendedJob } from '@/lib/electrical/fixtures/tesla400aTwoGateway';
 import type { LoadedElectricalProject } from '@/lib/electrical/loadElectricalProject';
+import { resolvePvArrayDesign } from '@/lib/electrical/pvArrayDesign';
 
 const ROOT = join(__dirname, '..');
 const src = (...p: string[]) => readFileSync(join(ROOT, ...p), 'utf8');
@@ -46,6 +47,7 @@ function loaded(moduleCount = 72, inverterId: string | null = null): LoadedElect
     },
     // No refreshes: this fixture is built from the current catalogue, so nothing is stale.
     refreshes: [],
+    pvArray: resolvePvArrayDesign({ layoutTotalPanels: moduleCount }),
   };
 }
 

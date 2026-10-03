@@ -112,6 +112,8 @@ import {
 // MUST read from CAD → SystemDefinition → config (fallback), never directly
 // from inverter.strings[].panelCount (which can be stale).
 import { resolveSystemPanelCount } from '@/lib/system/panelCountSource';
+import { resolvePvArrayDesign, pvModuleCountSourceLabel, pvModuleSourceLabel } from '@/lib/electrical/pvArrayDesign';
+import { dcStringLimits } from '@/lib/electrical/dcStringLimits';
 // Phase 12 — System-wide validation layer.
 import { validateSystem, type ValidationResult } from '@/lib/system/validationEngine';
 import { ValidationPanel } from '@/components/engineering/ValidationPanel';
@@ -3123,8 +3125,75 @@ function EngineeringPageInner() {
     return STRING_INVERTERS.find(i => i.id === id);
   };
 
-  const totalPanels = config.inverters.reduce((sum, inv) =>
+  // ══════════════════════════════════════════════════════════════════════════
+  // 🚨 THE STRING ASSIGNMENT IS NOT THE ARRAY.
+  //
+  // This sum used to be called `totalPanels`, and ~80 consumers — the summary cards, the SLD and
+  // PDF requests, the compliance payload, the browser's electrical model — read it as "how many
+  // modules does this project have". It is how many modules the ACTIVE STRING ASSIGNMENT covers.
+  // On a DC-coupled job the standalone inverter fleet is retired, the assignment is empty, and the
+  // array disappeared with it: Ray's live sheet printed 20 × 400 W for a 37 × 440 W design.
+  //
+  // So it carries its real name, and is used only where the assignment itself is the subject
+  // (staleness checks, the legacy no-Design fallback). `totalPanels` below is the PHYSICAL array.
+  // ══════════════════════════════════════════════════════════════════════════
+  const fleetModuleSum = config.inverters.reduce((sum, inv) =>
     sum + inv.strings.reduce((s2, str) => s2 + str.panelCount, 0), 0);
+
+  // ─── MASTER TASK — SOURCE OF TRUTH for system panel count ─────────────
+  // Priority (non-negotiable):
+  //   1. projectLayout.panels.length     (CAD placed panels — authoritative)
+  //   2. projectLayout.totalPanels       (CAD precomputed total)
+  //   3. config.systemDefinition.layout.totalPanels (SystemDefinition)
+  //   4. fleetModuleSum (config fallback) — only when no CAD/SD available
+  //
+  // Downstream consumers MUST use `systemPanelCount` (or `totalPanels`, which is now the same
+  // physical array) rather than the fleet sum for:
+  //   • sizing engine input
+  //   • inverter card display
+  //   • ComputedSystem input
+  // This fixes the bug where CAD places 36 panels but the inverter card
+  // still renders a stale 10-panel string config.
+  const resolvedPanelCount = useMemo(() => {
+    const sd = (config as unknown as { systemDefinition?: unknown })
+      .systemDefinition as Parameters<typeof resolveSystemPanelCount>[0]['systemDefinition'];
+    return resolveSystemPanelCount({
+      cad: projectLayout,
+      systemDefinition: sd ?? null,
+      configFallback: fleetModuleSum,
+    });
+  }, [projectLayout, fleetModuleSum, config]);
+  const systemPanelCount = resolvedPanelCount.value;
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // 🚨 THE PHYSICAL PV ARRAY — FROM DESIGN, INDEPENDENT OF ANY INVERTER.
+  //
+  //   PHYSICAL PV DESIGN ≠ INVERTER FLEET
+  //
+  // Count from the Design layout; module from `projects.selected_equipment` (then Design Studio's
+  // recorded module); the string assignment only where neither exists (a manual engineering entry).
+  // The server's canonical SLD projection runs the SAME resolver over the same stores, so the page
+  // and the drawing cannot describe two arrays. Removing an inverter cannot remove a module.
+  // ══════════════════════════════════════════════════════════════════════════
+  const pvArray = useMemo(() => {
+    const sd = (config as unknown as { systemDefinition?: { layout?: { totalPanels?: number }; totalPanels?: number } })
+      .systemDefinition;
+    return resolvePvArrayDesign({
+      placedModuleCount: Array.isArray(projectLayout?.panels) ? projectLayout.panels.length : null,
+      layoutTotalPanels: projectLayout?.totalPanels ?? null,
+      systemDefinitionTotal: sd?.layout?.totalPanels ?? sd?.totalPanels ?? null,
+      selectedPanelId: canonicalPanelId,
+      designElectricalPanelId: projectLayout?.designElectrical?.panelId ?? null,
+      engineeringStrings: config.inverters.flatMap(inv => inv.strings.map(str => ({
+        panelId: str.panelId, panelCount: str.panelCount,
+      }))),
+      placedModuleWatts: Array.isArray(projectLayout?.panels) ? (projectLayout.panels[0]?.wattage ?? null) : null,
+    });
+  }, [projectLayout, canonicalPanelId, config]);
+  /** The array's module, as a catalogue-shaped record for the consumers that read panel specs. */
+  const pvModule = pvArray.module as (NonNullable<typeof pvArray.module> & Record<string, any>) | null;
+  /** 🚨 THE PHYSICAL MODULE COUNT. Design's, not the string assignment's. */
+  const totalPanels = pvArray.moduleCount ?? 0;
 
   // The composition is derived, never stored: one fact, one owner, and a provenance for each.
   useEffect(() => {
@@ -3133,10 +3202,12 @@ function EngineeringPageInner() {
       selectedEquipment: {
         inverterId: config.inverters[0]?.inverterId ?? null,
         inverterType: config.inverters[0]?.type ?? null,
-        moduleCount: totalPanels,
+        // The array Design placed — the same fact the server's model reads off the layout — so the
+        // browser's revision does not drift from the server's the moment a fleet is retired.
+        moduleCount: pvArray.moduleCount,
       },
     }));
-  }, [svcTopology, config.inverters, totalPanels]);
+  }, [svcTopology, config.inverters, pvArray.moduleCount]);
 
   // ══════════════════════════════════════════════════════════════════════════
   // 🚨 DOES THE PV LAND ON THE STORAGE'S OWN DC INPUTS? ONE ANSWER, FOR EVERY CONSUMER.
@@ -3351,31 +3422,6 @@ function EngineeringPageInner() {
   }, [sldSvg, sldRevision, liveElectricalRevision]);
 
 
-  // ─── MASTER TASK — SOURCE OF TRUTH for system panel count ─────────────
-  // Priority (non-negotiable):
-  //   1. projectLayout.panels.length     (CAD placed panels — authoritative)
-  //   2. projectLayout.totalPanels       (CAD precomputed total)
-  //   3. config.systemDefinition.layout.totalPanels (SystemDefinition)
-  //   4. totalPanels (config fallback)   — only when no CAD/SD available
-  //
-  // Downstream consumers MUST use `systemPanelCount` instead of
-  // `totalPanels` for:
-  //   • sizing engine input
-  //   • inverter card display
-  //   • ComputedSystem input
-  // This fixes the bug where CAD places 36 panels but the inverter card
-  // still renders a stale 10-panel string config.
-  const resolvedPanelCount = useMemo(() => {
-    const sd = (config as unknown as { systemDefinition?: unknown })
-      .systemDefinition as Parameters<typeof resolveSystemPanelCount>[0]['systemDefinition'];
-    return resolveSystemPanelCount({
-      cad: projectLayout,
-      systemDefinition: sd ?? null,
-      configFallback: totalPanels,
-    });
-  }, [projectLayout, totalPanels, config]);
-  const systemPanelCount = resolvedPanelCount.value;
-
   // ── HYBRID partition (roof/ground/fence) from per-panel design stamps ──────
   // The engineering pipeline historically treated the whole project as ONE
   // config.systemType: a 51-roof/26-ground/17-fence design got fence structural
@@ -3447,11 +3493,11 @@ function EngineeringPageInner() {
     return { fleets, synthesized, excluded };
   }, [subSystemCounts, fleetDiag, config]);
 
-  const totalWatts = config.inverters.reduce((sum, inv) =>
-    sum + inv.strings.reduce((s2, str) => {
-      const panel = getPanelById(str.panelId);
-      return s2 + str.panelCount * (panel?.watts || 400);
-    }, 0), 0);
+  // 🚨 DC SIZE IS THE DESIGN'S ARRAY × ITS MODULE — not Σ strings × (panel?.watts || 400). With the
+  // fleet retired that sum was 0.00 kW on the summary while Design held 16.28 kW; with a stale panel
+  // on a string it silently became 400 W per module. Null (not established) reads as 0 here and the
+  // summary says why beside it.
+  const totalWatts = pvArray.dcStcW ?? 0;
   const totalKw = (totalWatts / 1000).toFixed(2);
   const totalInverterKw = config.inverters.reduce((sum, inv) => {
     const invData = getInvById(inv.inverterId, inv.type) as any;
@@ -3500,7 +3546,15 @@ function EngineeringPageInner() {
     const firstInv = fleet[0];
     const firstStr = firstInv?.strings[0];
     const invData = firstInv ? getInvById(firstInv.inverterId, firstInv.type) as any : null;
-    const panelData = firstStr ? getPanelById(firstStr.panelId) as any : null;
+    // 🚨 THE MODULE IS THE ARRAY'S, not only the first string's. With no fleet (a DC-coupled job,
+    // whose standalone inverter was retired) `firstStr` is absent and this fell to a 400 W / 41.6 V
+    // module nobody chose — so every number the Sizing and summary surfaces printed described a
+    // different array from the one Design placed.
+    const panelData = (firstStr ? getPanelById(firstStr.panelId) as any : null) ?? pvModule;
+    // 🚨 AND THE DC WINDOW IS THE DEVICE THE STRINGS LAND ON. No inverter on a DC-coupled job means
+    // the storage's published PV input (the same `dcStringLimits` both SLD routes use), not a
+    // phantom 600 V / 100–480 V inverter's defaults. Null for every job with an inverter.
+    const dcLim = !invData ? dcStringLimits(svcTopology, electrical?.solarCoupling ?? null) : null;
 
     // v47.360: 'ecoflow' maps to 'string' for ComputedSystemInput — the compliance
     // engine treats EcoFlow PowerOcean as a string-based hybrid inverter.
@@ -3530,6 +3584,10 @@ function EngineeringPageInner() {
 
     const input: ComputedSystemInput = {
       topology,
+      // 🚨 THE ARCHITECTURE REACHES THE PAGE'S ENGINE TOO. Both SLD routes and the calculate route pass
+      // the canonical coupling; this memo — which feeds the Sizing tab, the summary, the BOM payload and
+      // the PDF export — did not, so a DC-coupled design was computed as a standalone string inverter.
+      solarCoupling: electrical?.solarCoupling ?? null,
       optimizerMaxOutputCurrent,
       // SOURCE OF TRUTH: prefer CAD / SystemDefinition panel count. Falls
       // back to the config-derived totalPanels only when no authoritative
@@ -3556,11 +3614,11 @@ function EngineeringPageInner() {
       inverterAcKw: invData?.acOutputKw ?? (invData?.acOutputW ? invData.acOutputW / 1000 : topology === 'micro' ? 0.290 : 7.6), // v58.4: fallback 0.295->0.290 (IQ8+ datasheet max continuous = 290VA)
       // C7 fix: physical inverter count so multi-inverter AC current / OCPD / schedule qty are sized for ALL units, not just the primary.
       inverterCount: topology === 'micro' ? 1 : Math.max(1, fleet.length),
-      inverterMaxDcV: invData?.maxDcVoltage ?? (topology === 'micro' ? 60 : 600),
-      inverterMpptVmin: invData?.mpptVoltageMin ?? (topology === 'micro' ? 16 : 100),
-      inverterMpptVmax: invData?.mpptVoltageMax ?? (topology === 'micro' ? 60 : 480),
-      inverterMaxInputCurrentPerMppt: invData?.maxInputCurrentPerMppt ?? invData?.maxInputCurrent ?? 13.5,
-      inverterMpptChannels: invData?.mpptChannels ?? (topology === 'micro' ? 1 : 2),
+      inverterMaxDcV: invData?.maxDcVoltage ?? dcLim?.maxDcVoltage ?? (topology === 'micro' ? 60 : 600),
+      inverterMpptVmin: invData?.mpptVoltageMin ?? dcLim?.mpptVoltageMin ?? (topology === 'micro' ? 16 : 100),
+      inverterMpptVmax: invData?.mpptVoltageMax ?? dcLim?.mpptVoltageMax ?? (topology === 'micro' ? 60 : 480),
+      inverterMaxInputCurrentPerMppt: invData?.maxInputCurrentPerMppt ?? invData?.maxInputCurrent ?? dcLim?.maxInputCurrentPerMppt ?? 13.5,
+      inverterMpptChannels: invData?.mpptChannels ?? dcLim?.mpptChannels ?? (topology === 'micro' ? 1 : 2),
       inverterAcCurrentMax: invData?.acOutputCurrentMax ?? (topology === 'micro' ? 1.21 : 32),
       inverterModulesPerDevice: modulesPerDevice,
       inverterBranchLimit: branchLimit,
@@ -3721,13 +3779,15 @@ function EngineeringPageInner() {
       // Without this, the UI SLD display shows a different string count than the
       // user's applied configuration (e.g. 3 physics-derived strings vs 2 user strings).
       // Only applies to string/optimizer/hybrid topology — micro has no DC strings.
+      // An empty fleet carries no assignment: the engine derives one against the real endpoint
+      // rather than being handed nothing dressed as a layout.
       totalStrings: topology !== 'micro'
         ? fleet.reduce((s, inv) => s + inv.strings.length, 0) || undefined
         : undefined,
       // v61.7: Pass actual per-string panel counts from the fleet's strings so
       // computeSystem() performs NEC 690.7 Voc checks on the REAL string lengths,
       // not on equally-divided totalPanels/totalStrings. Prevents false Voc violations.
-      configStringPanelCounts: topology !== 'micro'
+      configStringPanelCounts: topology !== 'micro' && fleet.some(inv => inv.strings.length > 0)
         ? fleet.flatMap(inv => inv.strings.map(s => s.panelCount))
         : undefined,
       maxACVoltageDropPct: 2,
@@ -3891,7 +3951,7 @@ function EngineeringPageInner() {
       return computeMultiSystem([{ ...input, subSystemKey: _fbKey }]);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config, totalPanels, systemPanelCount, compliance.autoDetected, subSystemCounts, fleetDiag, hybridFleetPlan, projectCombinerId]);
+  }, [config, totalPanels, systemPanelCount, compliance.autoDetected, subSystemCounts, fleetDiag, hybridFleetPlan, projectCombinerId, pvModule, svcTopology, electrical?.solarCoupling]);
 
   const computedSystem = computedMulti.aggregate;
 
@@ -6681,11 +6741,13 @@ function EngineeringPageInner() {
     // `totalPanels` is the layout's count. Neither is defaulted here: an absent panel sends nothing
     // and the route keeps its existing behaviour.
     // ══════════════════════════════════════════════════════════════════════
-    const _arrayPanelId = canonicalPanelId
-      ?? config.inverters[0]?.strings[0]?.panelId ?? null;
-    const _arrayPanel = _arrayPanelId ? getPanelById(_arrayPanelId) as any : null;
-    const pvArray = _arrayPanel && totalPanels > 0 ? {
-      panelId: _arrayPanelId,
+    // 🚨 AND THE PAGE'S OWN `pvArray` IS THAT FACT. This block used to say `totalPanels` was "the
+    // layout's count" while `totalPanels` was in fact the string-assignment sum — 0 on exactly the
+    // DC-coupled job this payload exists for, so the array never travelled. It now reads the Design
+    // array (`resolvePvArrayDesign`), which is what the comment always claimed.
+    const _arrayPanel = pvModule;
+    const pvArrayPayload = _arrayPanel && totalPanels > 0 ? {
+      panelId: _arrayPanel.panelId,
       moduleCount: totalPanels,
       panelVoc: _arrayPanel.voc,
       panelVmp: _arrayPanel.vmp,
@@ -6693,7 +6755,7 @@ function EngineeringPageInner() {
       panelImp: _arrayPanel.imp,
       panelWatts: _arrayPanel.watts,
       tempCoeffVoc: _arrayPanel.tempCoeffVoc,
-      tempCoeffVmp: _arrayPanel.tempCoeffVmp,
+      tempCoeffVmp: undefined,
       maxSeriesFuseRating: _arrayPanel.maxSeriesFuseRating,
     } : null;
 
@@ -6710,7 +6772,7 @@ function EngineeringPageInner() {
       projectId: currentProjectId || undefined,
       electrical: {
         inverters: electricalInverters,
-        pvArray,
+        pvArray: pvArrayPayload,
         mainPanelAmps: config.mainPanelAmps,
         systemVoltage: 240,
         // Rooftop temp adder only for roof arrays (cells run hotter on a hot roof).
@@ -6863,7 +6925,7 @@ function EngineeringPageInner() {
         };
       })(),
     };
-  }, [config, totalPanels, sizingRecommendation, projectLayout, subSystemCounts]);
+  }, [config, totalPanels, sizingRecommendation, projectLayout, subSystemCounts, pvModule]);
 
   // ── saveEngineeringOutputs: persist live engine state to project_files ──────
   const saveEngineeringOutputs = useCallback(async (calcData: any) => {
@@ -7377,6 +7439,27 @@ function EngineeringPageInner() {
     setTimeout(() => runCalc(), 100);
   };
 
+  // ══════════════════════════════════════════════════════════════
+  // 🚨 THE ARCHITECTURE BOTH SLD REQUESTS POST — ONE DERIVATION.
+  //
+  // The Diagram request derived this from the canonical coupling first; the PDF export kept its
+  // own copy that guessed `config.batteryBrand ? 'HYBRID_INVERTER' : 'STRING_INVERTER'` — a battery
+  // BRAND deciding how the PV is converted, and "no microinverter, therefore string" on a DC-coupled
+  // job. The routes override it from the model where they can; the page must not post two answers.
+  // ══════════════════════════════════════════════════════════════
+  const sldRequestTopology: string = (() => {
+    const firstInv = config.inverters[0];
+    return electrical?.solarCoupling === 'dc-coupled-storage' ? 'DC_COUPLED_STORAGE'
+      : electrical?.solarCoupling === 'storage-only' ? 'STORAGE_ONLY'
+      : firstInv?.type === 'micro' ? 'MICROINVERTER'
+      : firstInv?.type === 'optimizer' ? 'STRING_WITH_OPTIMIZER'
+      : firstInv?.type === 'ecoflow' ? 'HYBRID_INVERTER'
+      : firstInv ? 'STRING_INVERTER'
+      // 🚨 NO INVERTER AND NO RECORDED COUPLING. Not "string" — unknown. The route reads the
+      // canonical model and will say so; the page must not supply an answer it does not have.
+      : 'UNRESOLVED';
+  })();
+
   // ── V4 SLD fetch (uses /api/engineering/sld — professional renderer) ──────────
   // ── Core SLD fetch helper — returns SVG string or null, no state side-effects ──
   const fetchSLDSvg = async (): Promise<string | null> => {
@@ -7391,7 +7474,9 @@ function EngineeringPageInner() {
       const invData = firstInv
         ? (firstInv.type === 'micro' ? (pageMicro ?? null) : getInvById(firstInv.inverterId, firstInv.type)) as any
         : null;
-      const panelData = firstStr ? getPanelById(firstStr.panelId) as any : null;
+      // 🚨 THE ARRAY'S MODULE, NOT THE FIRST STRING'S. With the fleet retired there is no first string,
+      // and this posted no module — which the route then drew as a 400 W panel nobody placed.
+      const panelData = (firstStr ? getPanelById(firstStr.panelId) as any : null) ?? pvModule;
 
       // Determine V4 topology type
       // v47.358: ecoflow → HYBRID_INVERTER (always has battery capability)
@@ -7409,15 +7494,7 @@ function EngineeringPageInner() {
       // equipment-derived arms stay — micro and optimizer ARE properties of the chosen inverter —
       // but they are reached only after the project's own architecture has had its say.
       // ══════════════════════════════════════════════════════════════
-      const topoType = electrical?.solarCoupling === 'dc-coupled-storage' ? 'DC_COUPLED_STORAGE'
-        : electrical?.solarCoupling === 'storage-only' ? 'STORAGE_ONLY'
-        : firstInv?.type === 'micro' ? 'MICROINVERTER'
-        : firstInv?.type === 'optimizer' ? 'STRING_WITH_OPTIMIZER'
-        : firstInv?.type === 'ecoflow' ? 'HYBRID_INVERTER'
-        : firstInv ? 'STRING_INVERTER'
-        // 🚨 NO INVERTER AND NO RECORDED COUPLING. Not "string" — unknown. The route reads the
-        // canonical model and will say so; the page must not supply an answer it does not have.
-        : 'UNRESOLVED';
+      const topoType = sldRequestTopology;
 
       // Use ComputedSystem for all engineering values — single source of truth
       const sc = compliance.stringConfig;
@@ -7458,10 +7535,13 @@ function EngineeringPageInner() {
                 return sum + Math.ceil(panels / mpd);
               }, 0)
             : undefined,
-          panelModel:     panelData ? `${panelData.manufacturer} ${panelData.model}` : 'Solar Panel',
-          panelWatts:     panelData?.watts || 400,
-          panelVoc:       panelData?.voc || 41.6,
-          panelIsc:       panelData?.isc || 12.26,
+          // 🚨 NO LITERAL MODULE. `'Solar Panel'` / `|| 400` / `|| 41.6` / `|| 12.26` described a
+          // module nobody selected; an absent module now travels as absent, the route reads the
+          // project's own, and if neither knows it the sheet says INPUT REQUIRED instead of drawing.
+          panelModel:     panelData ? `${panelData.manufacturer} ${panelData.model}` : undefined,
+          panelWatts:     panelData?.watts || undefined,
+          panelVoc:       panelData?.voc || undefined,
+          panelIsc:       panelData?.isc || undefined,
           dcWireGauge:    csDcWireGauge,
           dcConduitType:  config.conduitType,
           // Use ComputedSystem OCPD per string
@@ -7509,11 +7589,11 @@ function EngineeringPageInner() {
           // Phase 13.4 — forward parallel-strings cap to the MPPT allocator.
           maxParallelStringsPerMppt: invData?.maxParallelStringsPerMppt,
           // Panel specs for string generation
-          panelVmp:       panelData?.vmp || 41.8,
-          panelImp:       panelData?.imp || 9.57,
-          tempCoeffVoc:   panelData?.tempCoeffVoc || -0.27,
+          panelVmp:       panelData?.vmp || undefined,
+          panelImp:       panelData?.imp || undefined,
+          tempCoeffVoc:   panelData?.tempCoeffVoc ?? undefined,
           tempCoeffVmp:   panelData?.tempCoeffVmp,
-          maxSeriesFuse:  panelData?.maxSeriesFuseRating || 20,
+          maxSeriesFuse:  panelData?.maxSeriesFuseRating || undefined,
           // Design temperature (from jurisdiction auto-detect)
           designTempMin,
           acWireGauge:    csAcWireGauge,
@@ -7647,9 +7727,11 @@ function EngineeringPageInner() {
           // LayoutCandidate that the UI already displays.
           selectedBrand:      config.selectedBrand,
           selectedInverterId: firstInv?.inverterId,
-          panelId:            firstStr?.panelId,
+          // The module the array is made of — the first string's when there is one, else the
+          // Design array's (a retired fleet leaves no string to ask).
+          panelId:            firstStr?.panelId ?? panelData?.panelId ?? panelData?.id,
           systemType:         config.systemType ?? 'roof',
-          panelTempCoeffVoc:  panelData?.tempCoeffVoc ?? -0.27,
+          panelTempCoeffVoc:  panelData?.tempCoeffVoc ?? undefined,
         }),
       });
       if (res.ok) {
@@ -7676,9 +7758,17 @@ function EngineeringPageInner() {
         // the two answers — reporting that as an engine fault would send the operator looking for a
         // bug instead of at the question they have to settle.
         const _isArchRefusal = err?.code === 'ELECTRICAL_ARCHITECTURE_REQUIRES_RESOLUTION';
+        // 🚨 AN INCOMPLETE ARRAY IS A QUESTION WITH AN OWNER, not "INPUT_REQUIRED". The route names
+        // what is missing, why, and who supplies it — print that, so the installer goes to Design
+        // instead of filing a bug.
+        const _pvMissing = err?.code === 'PV_ARRAY_INPUT_REQUIRED' && Array.isArray(err.missing)
+          ? (err.missing as Array<{ fact: string; owner: string }>)
+          : null;
         _sldBlockRef.current = _isArchRefusal
           ? String(err.error || 'ELECTRICAL ARCHITECTURE REQUIRES RESOLUTION')
-          : (err?.error ? String(err.error) : null);
+          : _pvMissing
+            ? `INPUT REQUIRED — ${_pvMissing.map(m => `${m.fact} (${m.owner})`).join('; ')}`
+            : (err?.error ? String(err.error) : null);
         // 🚨 AND THE QUESTION ITSELF, so the operator can answer it instead of reading about it.
         setSldArchRefusal(_isArchRefusal
           ? { conflicts: err.conflicts, choices: err.choices, externalInverter: err.externalInverter }
@@ -15419,18 +15509,19 @@ function EngineeringPageInner() {
                                 // inverter and every hybrid as a non-hybrid —
                                 // `isOptimizer` was populated on this exact object
                                 // and simply never read.
-                                topologyType: computedSystem.isMicro ? 'MICROINVERTER'
-                                  : computedSystem.isOptimizer ? 'STRING_WITH_OPTIMIZER'
-                                  : config.inverters[0]?.type === 'ecoflow' ? 'HYBRID_INVERTER'
-                                  : config.batteryBrand ? 'HYBRID_INVERTER'
-                                  : 'STRING_INVERTER',
+                                // ONE derivation with the Diagram request (see sldRequestTopology).
+                                topologyType: sldRequestTopology,
                                 totalModules: totalPanels,
                                 totalStrings: computedSystem.isMicro ? 0 : (computedSystem.strings?.length ?? 1),
                                 // A micro resolves through pageMicro — the same unit
                                 // `fetchSLDSvg`, the CT control and the BOM use — rather
                                 // than a literal that only happens to equal it today.
-                                inverterManufacturer: (() => { const inv = config.inverters[0]; const d = (inv?.type === 'micro' ? pageMicro : getInvById(inv?.inverterId, inv?.type)) as any; return d?.manufacturer || (computedSystem.isMicro ? 'Enphase' : 'SolarEdge'); })(),
-                                inverterModel: (() => { const inv = config.inverters[0]; const d = (inv?.type === 'micro' ? pageMicro : getInvById(inv?.inverterId, inv?.type)) as any; return d?.model || (computedSystem.isMicro ? 'IQ8+' : 'SE7600H'); })(),
+                                // 🚨 NO NAMED FALLBACK. `|| 'SolarEdge'` / `|| 'SE7600H'` (and Enphase IQ8+) put a
+                                // real product in the nameplate position of the exported sheet whenever the
+                                // project had no inverter — which is exactly a DC-coupled design. Absent
+                                // travels as absent; the route prints INVERTER NOT SELECTED or draws the storage.
+                                inverterManufacturer: (() => { const inv = config.inverters[0]; const d = (inv?.type === 'micro' ? pageMicro : getInvById(inv?.inverterId, inv?.type)) as any; return d?.manufacturer || undefined; })(),
+                                inverterModel: (() => { const inv = config.inverters[0]; const d = (inv?.type === 'micro' ? pageMicro : getInvById(inv?.inverterId, inv?.type)) as any; return d?.model || undefined; })(),
                                 acOutputKw: Number(totalInverterKw),
                                 acOutputAmps: Math.round(Number(totalInverterKw) * 1000 / 240),
                                 acOCPD: csRun('DISCO_TO_METER_RUN')?.ocpdAmps ?? Math.ceil(Math.round(Number(totalInverterKw) * 1000 / 240) * 1.25 / 5) * 5,
@@ -15438,10 +15529,20 @@ function EngineeringPageInner() {
                                 backfeedAmps: hybridSldSources
                                   ? cs.backfeedBreakerAmps
                                   : (csRun('DISCO_TO_METER_RUN')?.ocpdAmps ?? Math.ceil(Math.round(Number(totalInverterKw) * 1000 / 240) * 1.25 / 5) * 5),
-                                panelModel: (() => { const inv = config.inverters[0]; const str = inv?.strings[0]; const p = getPanelById(str?.panelId) as any; return p?.model || 'Solar Panel'; })(),
-                                panelWatts: (() => { const inv = config.inverters[0]; const str = inv?.strings[0]; const p = getPanelById(str?.panelId) as any; return p?.watts || 400; })(),
-                                panelVoc: (() => { const inv = config.inverters[0]; const str = inv?.strings[0]; const p = getPanelById(str?.panelId) as any; return p?.voc || 41.6; })(),
-                                panelIsc: (() => { const inv = config.inverters[0]; const str = inv?.strings[0]; const p = getPanelById(str?.panelId) as any; return p?.isc || 12.26; })(),
+                                // 🚨 THE ARRAY'S MODULE (first string's, else the Design array's) — never
+                                // 'Solar Panel' / 400 W / 41.6 V / 12.26 A. Absent travels as absent and the
+                                // route reads the project's own, or refuses with what is missing.
+                                ...(() => {
+                                  const str = config.inverters[0]?.strings[0];
+                                  const p = ((str ? getPanelById(str.panelId) : null) ?? pvModule) as any;
+                                  return p ? {
+                                    panelId: p.id ?? p.panelId,
+                                    panelModel: `${p.manufacturer} ${p.model}`,
+                                    panelWatts: p.watts, panelVoc: p.voc, panelIsc: p.isc,
+                                    panelVmp: p.vmp, panelImp: p.imp, tempCoeffVoc: p.tempCoeffVoc,
+                                    maxSeriesFuse: p.maxSeriesFuseRating,
+                                  } : {};
+                                })(),
                                 dcWireGauge: csRun('DC_STRING_RUN')?.wireGauge ?? '#10 AWG',
                                 acWireGauge: csRun('DISCO_TO_METER_RUN')?.wireGauge ?? '#8 AWG',
                                 acConduitType: config.conduitType ?? 'EMT',
@@ -15510,7 +15611,9 @@ function EngineeringPageInner() {
                             let errMsg = `PDF export failed (HTTP ${res.status})`;
                             try {
                               const errData = await res.json();
-                              errMsg = errData.error || errData.message || errMsg;
+                              errMsg = errData.code === 'PV_ARRAY_INPUT_REQUIRED' && Array.isArray(errData.missing)
+                                ? `INPUT REQUIRED — ${(errData.missing as Array<{ fact: string; owner: string }>).map(m => `${m.fact} (${m.owner})`).join('; ')}`
+                                : (errData.error || errData.message || errMsg);
                             } catch {
                               try { errMsg = await res.text() || errMsg; } catch { /* ignore */ }
                             }

@@ -41,6 +41,7 @@ import { classifyLegacyInverter } from '@/lib/electrical/legacyInverterEvidence'
 import { readExternalInverterIdentity } from '@/lib/electrical/inverterIdentity';
 import { electricalRevision } from '@/lib/electrical/revision';
 import type { ServiceTopology } from '@/lib/electrical/serviceTopology';
+import { resolvePvArrayDesign, type PvArrayDesign } from '@/lib/electrical/pvArrayDesign';
 
 /**
  * Where each of the model's inputs actually came from on this read — recorded so a diagnostic can
@@ -73,6 +74,16 @@ export interface LoadedElectricalProject {
    * issued with." A historical read (`'as-issued'`) refreshes nothing and reports nothing.
    */
   refreshes: import('@/lib/electrical/hydrateInstances').InstanceRefresh[];
+  /**
+   * 🚨 THE PHYSICAL ARRAY DESIGN PLACED — module count from the layout, module identity from
+   * `selected_equipment`, independent of any inverter fleet. See `lib/electrical/pvArrayDesign.ts`.
+   *
+   * Ray's live sheet printed 20 × 400 W for a 37 × 440 W design because the only array description
+   * any SLD request carried was the page's inverter fleet, which a DC-coupled resolution empties.
+   * The drawing routes now take the array from HERE, read from the store on the server, exactly as
+   * they already take the architecture.
+   */
+  pvArray: PvArrayDesign;
 }
 
 /** Narrow an unknown JSONB cell to a plain object, tolerating the text form some drivers return. */
@@ -154,14 +165,26 @@ export async function loadElectricalProject(
     SELECT p.service_topology,
            p.selected_equipment,
            p.engineering_config,
-           (SELECT lo.total_panels FROM layouts lo
-             WHERE lo.project_id = p.id ORDER BY lo.updated_at DESC LIMIT 1) AS total_panels
+           lo.total_panels,
+           -- The PHYSICAL array: how many modules Design placed, the wattage it stamped on them, and
+           -- the module Design Studio recorded. to_jsonb(lo) rather than the column, so a database
+           -- that predates migration 096 reads NULL instead of failing the whole electrical read.
+           -- NULL (not 0) when the project has no layout row: "no Design" is not "Design placed none".
+           CASE WHEN jsonb_typeof(lo.panels) = 'array'
+                THEN jsonb_array_length(lo.panels) END             AS placed_panels,
+           lo.panels -> 0 ->> 'wattage'                           AS placed_watts,
+           to_jsonb(lo) -> 'design_electrical' ->> 'panelId'     AS design_panel_id
       FROM projects p
+      LEFT JOIN LATERAL (
+        SELECT l.* FROM layouts l
+         WHERE l.project_id = p.id ORDER BY l.updated_at DESC LIMIT 1
+      ) lo ON TRUE
      WHERE p.id = ${projectId} AND p.user_id = ${userId} AND p.deleted_at IS NULL
      LIMIT 1
   ` as Array<{
     service_topology: unknown; selected_equipment: unknown;
     engineering_config: unknown; total_panels: unknown;
+    placed_panels?: unknown; placed_watts?: unknown; design_panel_id?: unknown;
   }>;
   const row = rows[0];
   if (!row) return null;
@@ -181,6 +204,7 @@ export function composeElectricalProject(
   row: {
     service_topology?: unknown; selected_equipment?: unknown;
     engineering_config?: unknown; total_panels?: unknown;
+    placed_panels?: unknown; placed_watts?: unknown; design_panel_id?: unknown;
   },
 ): LoadedElectricalProject {
   const sources: ElectricalLoadSources = {
@@ -245,7 +269,31 @@ export function composeElectricalProject(
     legacyInverter,
   });
 
-  return { projectId, model, revision: electricalRevision(model), sources, refreshes };
+  // ── 🚨 THE PHYSICAL ARRAY — the same resolver the browser runs, over the stores it reads ──
+  // The string assignment is passed ONLY so the resolver can report whether it still represents the
+  // design (and, for a project with no Design layout at all, as the manual entry it is). It never
+  // overrides a Design count.
+  const se = asObject(row.selected_equipment);
+  const engineeringStrings = (Array.isArray(ec?.inverters) ? ec!.inverters as unknown[] : [])
+    .flatMap(inv => {
+      const strs = asObject(inv)?.strings;
+      return Array.isArray(strs) ? strs : [];
+    })
+    .map(str => {
+      const o = asObject(str);
+      return { panelId: typeof o?.panelId === 'string' ? o.panelId : null, panelCount: numOrNull(o?.panelCount) };
+    });
+  const pvArray = resolvePvArrayDesign({
+    placedModuleCount: numOrNull(row.placed_panels),
+    layoutTotalPanels: modules,
+    selectedPanelId: typeof se?.panelId === 'string' ? se.panelId
+      : (typeof asObject(se?.panel)?.id === 'string' ? String(asObject(se?.panel)!.id) : null),
+    designElectricalPanelId: typeof row.design_panel_id === 'string' ? row.design_panel_id : null,
+    engineeringStrings,
+    placedModuleWatts: numOrNull(row.placed_watts),
+  });
+
+  return { projectId, model, revision: electricalRevision(model), sources, refreshes, pvArray };
 }
 
 /**

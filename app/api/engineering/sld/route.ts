@@ -23,7 +23,7 @@ import { sanitizeClientSourceBranches } from '@/lib/permit/utils/sldAdapter';
 import { microBranchCount } from '@/lib/permit/utils/branching';
 import { getThermalDesignBasis } from '@/lib/permit/utils/designTemps';
 import { unselectedInverterLabel } from '@/lib/permit/utils/helpers';
-import { TOPOLOGY_UNRESOLVED_TOKEN } from '@/lib/electrical/canonicalSldProjection';
+import { TOPOLOGY_UNRESOLVED_TOKEN, pvArrayInputRequired } from '@/lib/electrical/canonicalSldProjection';
 // The adopted NEC edition (canonical authority) and the ONE rooftop-adder gate that
 // turns on it. NEC 310.15(B)(3)(c) was deleted for PV by NEC 2017 690.31(A).
 import { getJurisdictionInfo } from '@/lib/jurisdiction';
@@ -344,12 +344,30 @@ export async function POST(req: NextRequest) {
     // Wire length
     const acWireLength = Number(body.acWireLength || body.wireLength) || 60;
 
-    const totalModules = Number(body.totalModules) || 20;
-    const panelVoc     = Number(body.panelVoc)     || 49.6;
-    const panelIsc     = Number(body.panelIsc)     || 10.18;
+    // ══════════════════════════════════════════════════════════════════
+    // 🚨 THE ARRAY IS NOT INVENTED. These six lines were `|| 20`, `|| 49.6`, `|| 10.18`, `|| 41.8`,
+    // `|| 9.57`, `|| 400` — so when Ray's DC-coupled resolution emptied the page's inverter fleet and
+    // the page stopped posting an array, this route drew 20 × 400 W modules nobody placed, sized
+    // 2 × 10 strings for them, and printed 8.00 kW on a 16.28 kW design. The canonical projection now
+    // supplies the array from Design; whatever is still missing is refused with what, why and whose.
+    // ══════════════════════════════════════════════════════════════════
+    {
+      const _pvRefusal = pvArrayInputRequired(body);
+      if (_pvRefusal) {
+        console.warn('[sld/POST] REFUSED: ' + String(_pvRefusal.message));
+        return NextResponse.json(_pvRefusal, { status: 422 });
+      }
+    }
+    const totalModules = Number(body.totalModules) || 0;
+    const panelVoc     = Number(body.panelVoc)     || 0;
+    const panelIsc     = Number(body.panelIsc)     || 0;
+    // ⚠ The one remaining module default, and only for a legacy request that names a module without
+    // its Vmp / Imp: the canonical projection supplies the real values for every project whose module
+    // is recorded, and the page sends them on every request. (0 here would break the MPPT window
+    // check — it derived a 1-module string — so the engine's documented default stands.)
     const panelVmp     = Number(body.panelVmp)     || 41.8;
     const panelImp     = Number(body.panelImp)     || 9.57;
-    const panelWatts   = Number(body.panelWatts)   || 400;
+    const panelWatts   = Number(body.panelWatts)   || 0;
     // ONE THERMAL BASIS PER PACKAGE. The SLD's NEC 690.7(A) cold-Voc correction
     // now reads the same authority as /api/engineering/calculate and the stamped
     // plan set, so the diagram cannot print a corrected Voc the sheet disagrees
@@ -924,8 +942,10 @@ export async function POST(req: NextRequest) {
         panelTempCoeffVoc:             Number(body.panelTempCoeffVoc ?? body.tempCoeffVoc ?? -0.27),
         panelTempCoeffIsc:             Number(body.panelTempCoeffIsc ?? 0.05),
         panelMaxSeriesFuse:            Number(body.panelMaxSeriesFuse ?? body.maxSeriesFuse ?? 20),
-        panelModel:                    String(body.panelModel ?? 'Q.PEAK DUO BLK ML-G10+ 400W'),
-        panelManufacturer:             String(body.panelManufacturer ?? 'Q CELLS'),
+        // No literal module (this named a Q CELLS Q.PEAK DUO nobody selected): the PV gate above
+        // guarantees the electricals, and the name is whatever the project or the caller recorded.
+        panelModel:                    String(body.panelModel ?? 'PV MODULE — MODEL NOT RECORDED'),
+        panelManufacturer:             String(body.panelManufacturer ?? ''),
         inverterManufacturer:          inverterManufacturer,
         inverterModel:                 inverterModel,
         inverterAcKw:                  isMicro
@@ -1062,7 +1082,7 @@ export async function POST(req: NextRequest) {
       topologyType:            topologyType,  // Phase 7: canonical (engine-overridden) topology
       totalModules,
       totalStrings:            resolvedTotalStrings,
-      panelModel:              String(body.panelModel              ?? 'Q.PEAK DUO BLK ML-G10+ 400W'),
+      panelModel:              String(body.panelModel              ?? 'PV MODULE — MODEL NOT RECORDED'),
       panelWatts,
       panelVoc,
       panelIsc,
