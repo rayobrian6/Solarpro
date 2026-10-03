@@ -19,6 +19,8 @@ import { describe, it, expect } from 'vitest';
 import { buildWalls, quadPlanarArea, type ExtrusionFace } from '@/lib/3d/buildingExtrusion';
 import { roofPlaneFromFootprint } from '@/lib/3d/footprintToRoofPlane';
 import { ecefToLatLng, type Cart3 } from '@/lib/roofPlane3D';
+import { buildSectionRoofPlanes } from '@/lib/3d/buildingSection';
+import { applySectionEdit } from '@/lib/3d/sectionEditing';
 
 const LAT = 38.8306;
 const LNG = -89.5343;
@@ -197,5 +199,115 @@ describe('buildWalls', () => {
     const walls = buildWalls(faces, GROUND);
     const shared = 8 - walls.length;
     expect(shared).toBe(2); // one shared edge, counted once per owning face
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// A BLOCK MADE A GABLE IS A CLOSED HOUSE WITH PENTAGON ENDS
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// The inspector's Roof → Gable sends `{ kind: 'gable', pitchDeg }` to
+// `applySectionEdit`. What has to come out the other side, for the Building
+// view to draw a house rather than two floating slopes:
+//   · two faces, the deck gone (a leftover deck under the gable makes the
+//     gable's eave edges look interior and opens both long walls — probe 04c);
+//   · six walls: two eave rectangles and four rake halves whose tops meet at
+//     the ridge, so each gable end is a pentagon;
+//   · the eave the Block was drawn with.
+describe('a Block converted to a gable', () => {
+  const BLOCK_EAVE = 4;
+  const GABLE_PITCH = 30;
+  const WIDTH = 14;   // east-west
+  const DEPTH = 9;    // north-south — the span the ridge rises across
+  const RIDGE = BLOCK_EAVE + (DEPTH / 2) * Math.tan(GABLE_PITCH * DEG);
+
+  function blockAsGable() {
+    const dLng = WIDTH / 2 / mPerDegLng;
+    const dLat = DEPTH / 2 / M_PER_DEG_LAT;
+    // Exactly what finalizeBlock builds: a flat deck over the clicked corners.
+    const block = buildSectionRoofPlanes({
+      id: 'sec-block-1', kind: 'flat', pitchDeg: 0, eaveHeightM: BLOCK_EAVE, groundElevM: GROUND,
+      footprint: [
+        { lat: LAT - dLat, lng: LNG - dLng }, { lat: LAT - dLat, lng: LNG + dLng },
+        { lat: LAT + dLat, lng: LNG + dLng }, { lat: LAT + dLat, lng: LNG - dLng },
+      ],
+      label: 'Flat section', source: 'user-traced', createdAtIso: '2026-10-03T00:00:00.000Z',
+    });
+    expect(block.ok, JSON.stringify(block.refusals)).toBe(true);
+    expect(block.planes.map(p => p.id)).toEqual(['sec-block-1::deck']);
+    const out = applySectionEdit(block.planes, 'sec-block-1', { kind: 'gable', pitchDeg: GABLE_PITCH });
+    expect(out.refusals).toEqual([]);
+    return out;
+  }
+
+  it('keeps the eave, drops the deck, and owns two slopes under one section id', () => {
+    const out = blockAsGable();
+    expect(out.section!.eaveHeightM).toBe(BLOCK_EAVE);
+    expect(out.removedFaceIds).toEqual(['sec-block-1::deck']);
+    expect(out.planes.map(p => p.id).sort()).toEqual(['sec-block-1::slopeA', 'sec-block-1::slopeB']);
+    expect(new Set(out.planes.map(p => p.sectionId))).toEqual(new Set(['sec-block-1']));
+    // To the decimetre: the footprint here is laid out on the round 111 320 m/°,
+    // the builder measures in true metres, and the 9 m span differs by ~1 cm.
+    expect(out.ridgeHeightM!).toBeCloseTo(RIDGE, 1);
+  });
+
+  it('🚨 six walls: two eave rectangles and four rake halves that meet at the ridge', () => {
+    const out = blockAsGable();
+    const faces: ExtrusionFace[] = out.planes.map(p => ({ id: p.id, polygon3D: p.polygon3D! }));
+    const walls = buildWalls(faces, GROUND);
+    expect(walls).toHaveLength(6);
+
+    const above = (h: number) => h - GROUND;
+    // The plane builder may lift the stored outline a few centimetres off the
+    // geometry; 0.2 m tells an eave from a ridge 2.6 m above it with room to spare.
+    const TOL = 0.2;
+    const eaveWalls = walls.filter(w => w.topHeightsM.every(h => Math.abs(above(h) - BLOCK_EAVE) < TOL));
+    const rakeWalls = walls.filter(w => {
+      const [lo, hi] = w.topHeightsM.map(above).sort((a, b) => a - b);
+      return Math.abs(lo - BLOCK_EAVE) < TOL && Math.abs(hi - RIDGE) < TOL;
+    });
+    expect(eaveWalls, 'two full-length eave walls, one under each slope').toHaveLength(2);
+    expect(rakeWalls, 'four rake halves, two at each gable end').toHaveLength(4);
+    // Every wall stands on the section's pad.
+    for (const w of walls) for (const b of w.baseHeightsM) expect(b).toBeCloseTo(GROUND, 6);
+
+    // 🚨 PENTAGON ENDS. At each gable end the two rake halves share their HIGH
+    // corner — the ridge apex — so the end wall reads as one five-cornered
+    // gable, not two triangles with a gap or a box with a roof perched on it.
+    const apex = (w: typeof walls[number]) => {
+      const i = w.topHeightsM[0] > w.topHeightsM[1] ? 0 : 1;
+      return w.plan[i];
+    };
+    const mPerLat = M_PER_DEG_LAT;
+    const dist = (a: { lat: number; lng: number }, b: { lat: number; lng: number }) =>
+      Math.hypot((a.lat - b.lat) * mPerLat, (a.lng - b.lng) * mPerDegLng);
+    const apexes = rakeWalls.map(apex);
+    // Each face's stored polygon is lifted SURFACE_OFFSET_M (0.12 m) along its
+    // own normal, which at 30° moves the two halves' ridge corners 6 cm apart
+    // in plan, in opposite directions. 0.15 m allows exactly that and is still
+    // two orders of magnitude under the 14 m between the two gable ends.
+    const pairs: number[][] = [];
+    for (let i = 0; i < apexes.length; i++) {
+      for (let j = i + 1; j < apexes.length; j++) {
+        if (dist(apexes[i], apexes[j]) < 0.15) pairs.push([i, j]);
+      }
+    }
+    expect(pairs, 'each ridge apex is shared by exactly two rake halves').toHaveLength(2);
+    // …and the two ends are the two ends of the 14 m ridge.
+    expect(dist(apexes[pairs[0][0]], apexes[pairs[1][0]])).toBeCloseTo(WIDTH, 0);
+  });
+
+  it('why the deck has to go: a deck left under the gable opens the long walls', () => {
+    // What the probe saw when a Gable was traced over a Block instead of the
+    // Block being converted: the deck's edges coincide with the gable's eaves,
+    // so both eave walls are classed interior and the house is open.
+    const out = blockAsGable();
+    const block = buildSectionRoofPlanes({
+      ...out.section!, id: 'sec-other', kind: 'flat', pitchDeg: 0, label: 'Flat section',
+    });
+    const faces: ExtrusionFace[] = [...out.planes, ...block.planes]
+      .map(p => ({ id: p.id, polygon3D: p.polygon3D! }));
+    const walls = buildWalls(faces, GROUND);
+    expect(walls.filter(w => w.faceId.startsWith('sec-block-1::'))).not.toHaveLength(6);
   });
 });

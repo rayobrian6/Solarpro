@@ -2730,6 +2730,12 @@ function SolarEngine3D({
   const newRoofEaveHeightMRef = useRef<number>(6);
   useEffect(() => { roofPitchDegRef.current = roofPitchDeg; }, [roofPitchDeg]);
   useEffect(() => { newRoofEaveHeightMRef.current = newRoofEaveHeightM; }, [newRoofEaveHeightM]);
+  // 🚨 AND THE BLOCK'S "NEW BLOCK EAVE" WAS INERT FOR THE SAME REASON. Right-click
+  // finishes a Block through `finalizeBlock`, reached from the same once-at-mount
+  // handler, so it read the mount default of 6 m whatever the input said: a live
+  // probe set the input to 4, drew a Block, and got a 6 m section and a 6 m prism.
+  const newBlockEaveHeightMRef = useRef<number>(DEFAULT_BLOCK_HEIGHT_M);
+  useEffect(() => { newBlockEaveHeightMRef.current = newBlockEaveHeightM; }, [newBlockEaveHeightM]);
   // v64: Gable roof primitive — click 2 eave corners, render 2 sloped faces meeting at ridge.
   // The eave is a rectangle in lat/lng; ridge runs along the long edge at the centroid.
   const gablePtsRef = useRef<Array<{ lat: number; lng: number }>>([]);
@@ -3865,6 +3871,9 @@ function SolarEngine3D({
     const viewer = viewerRef.current;
     const C = (window as any).Cesium;
     if (!viewer || !C) return;
+    // Keyed on `roofPlanes` too, so a Block placed while the view is already on
+    // hides its prism the moment its section reaches the design.
+    syncBlockPrismVisibility(showBuilding3D);
     if (showBuilding3D) {
       try { renderBuildingExtrusion(viewer, C); }
       catch (e) { addLog('WARN', `renderBuildingExtrusion: ${(e as Error).message}`); }
@@ -4546,7 +4555,7 @@ function SolarEngine3D({
     };
 
     /** Nothing stored, or nothing to store it against — fall back to the session's own tiles. */
-    const useSessionOr = (reason: string) => {
+    const drawSessionTilesOr = (reason: string) => {
       const s = fromSessionCache();
       if (s) { draw(s); return; }
       // 🚨 NO PHOTO MEANS NO FLAT MODE. Hiding the mesh with nothing to put in its place would
@@ -4571,7 +4580,7 @@ function SolarEngine3D({
      */
     (async () => {
       if (!onLoadAerialReference) {
-        useSessionOr('Reference imagery is not available in this view.');
+        drawSessionTilesOr('Reference imagery is not available in this view.');
         return;
       }
       setAerialRefStatus({ state: 'loading' });
@@ -4605,12 +4614,12 @@ function SolarEngine3D({
           });
           return;
         }
-        useSessionOr(payload?.reason
+        drawSessionTilesOr(payload?.reason
           || 'No Nearmap workzone could be loaded or acquired for this design.');
       } catch (e: unknown) {
         if (cancelled) return;
         setExpandingImagery(false);
-        useSessionOr(`The aerial reference request failed: ${(e as Error).message}`);
+        drawSessionTilesOr(`The aerial reference request failed: ${(e as Error).message}`);
       }
     })();
 
@@ -7297,8 +7306,63 @@ function SolarEngine3D({
    */
   function editSection(sectionId: string, edit: SectionEdit, label: string, coalesceKey: string): boolean {
     if (!sectionId) return false;
+    const kindBefore = sectionKindIn(roofPlanesRef.current ?? [], sectionId);
     const outcome = applySectionEdit(roofPlanesRef.current ?? [], sectionId, edit);
-    return adoptGeometryOutcome(outcome, label, coalesceKey, `edit on ${sectionId}`);
+    const ok = adoptGeometryOutcome(outcome, label, coalesceKey, `edit on ${sectionId}`);
+    // A Block turned into a gable is a different-looking house; show it as one.
+    if (ok && outcome.section && outcome.section.kind !== kindBefore) {
+      showBuildingWalls(`${sectionId} is now a ${outcome.section.kind} roof`);
+    }
+    return ok;
+  }
+
+  /** The roof kind a section has in this plane list, read off its faces' records. */
+  function sectionKindIn(planes: ReadonlyArray<RoofPlane>, sectionId: string): string | null {
+    const face = planes.find(p => (p.sectionId ?? p.section?.id) === sectionId);
+    return face?.section?.kind ?? null;
+  }
+
+  /**
+   * TURN THE BUILDING VIEW ON, because a section was just created or changed
+   * roof type.
+   *
+   * 🚨 THE WALLS ARE THE HOUSE, AND THEY WERE HIDDEN. `buildWalls` has always
+   * closed a gable with two eave walls and four rake halves meeting at the
+   * ridge — a pentagon at each end — but only while the 🏚 Building toggle was
+   * on, and it defaults off. A person who drew a Block and made it a gable saw
+   * two roof faces floating over the imagery and no house. Turning it on is a
+   * VIEW change: nothing about the design is written, and the toggle still
+   * turns it off again.
+   */
+  function showBuildingWalls(why: string) {
+    if (showBuilding3DRef.current) return;
+    showBuilding3DRef.current = true;
+    setShowBuilding3D(true);
+    addLog('BUILD3D', `Building view on — ${why}`);
+  }
+
+  /**
+   * HIDE A BLOCK'S PRISM WHILE ITS SECTION'S WALLS ARE ON SCREEN.
+   *
+   * 🚨 TWO MASSES IN ONE PLACE. The prism is a separate Cesium box at the
+   * Block's own height, and the Building view draws the section's walls from
+   * the section's own eave. Once the Block is a gable the box pokes through the
+   * gable ends (or stands above them), so while the walls are drawn they are
+   * the massing and the box steps aside.
+   *
+   * Only a prism whose section is in the design is hidden. A Block whose roof
+   * face was refused (no ground elevation yet) has no walls to stand in for
+   * it, and hiding its box would make the tool look as if it did nothing.
+   */
+  function syncBlockPrismVisibility(buildingOn: boolean) {
+    const planes = roofPlanesRef.current ?? [];
+    for (const prism of blockEntitiesRef.current) {
+      const sid = (prism as any)?.__sectionId as string | undefined;
+      const walled = buildingOn && !!sid && planes.some(p => (p.sectionId ?? p.section?.id) === sid);
+      try { prism.show = !walled; } catch { /* ignore */ }
+      const handle = blockHandlesRef.current.find((h: any) => (h as any).__blockId === prism.id);
+      if (handle) { try { handle.show = !walled; } catch { /* ignore */ } }
+    }
   }
 
   /**
@@ -14045,7 +14109,9 @@ function SolarEngine3D({
       } catch { /* ignore */ }
       blockPreviewRef.current = null;
     }
-    const eaveHeightM = newBlockEaveHeightM; // user-settable eave height for new blocks
+    // 🚨 FROM THE REF — see its declaration. This runs inside the right-click
+    // handler registered once at mount, where the state is the mount default.
+    const eaveHeightM = newBlockEaveHeightMRef.current;
     // Average elevation of the click points — that's the ground level for the prism.
     // The drape at Pocahontas IL is ~136m above the WGS84 ellipsoid; using the
     // average click height puts the bottom of the prism flush with the drape.
@@ -14190,9 +14256,13 @@ function SolarEngine3D({
           onRoofPlaneCreated?.(b.plane);
         }
         addLog('SECTION', `flat ${sectionId}: ${outcome.planes.length} face from block`);
+        // The prism now has a section whose walls can stand in for it.
+        try { (prismEntity as any).__sectionId = sectionId; } catch { /* ignore */ }
+        showBuildingWalls(`block section ${sectionId} placed`);
         setStatusMsg(
           `🧱 Block placed — ${pts.length} corners, eave ${eaveHeightM}m, and its flat roof is a ` +
-          'real roof face: place panels on it, edit it in the inspector, and it saves with the design.',
+          'real roof face: place panels on it, edit it in the inspector (Roof → Gable makes it a ' +
+          'house), and it saves with the design.',
         );
       } else {
         const why = outcome.refusals.map(r => r.message).join(' ');
@@ -14319,6 +14389,7 @@ function SolarEngine3D({
 
       const ridge = outcome.ridgeHeightM;
       addLog('SECTION', `${kind} ${sectionId}: ${outcome.planes.length} faces, ridge ${ridge?.toFixed(2)}m, pitch ${roofPitchDegRef.current}°`);
+      showBuildingWalls(`${kind} section ${sectionId} placed`);
       setStatusMsg(
         `🏠 ${kind === 'gable' ? 'Gable' : 'Hip'} section placed — ${outcome.planes.length} roof faces, ` +
         `eave ${newRoofEaveHeightMRef.current.toFixed(1)}m, ridge ${ridge != null ? ridge.toFixed(1) : '?'}m. ` +
@@ -17831,7 +17902,9 @@ function SolarEngine3D({
     const ok = editSection(sid, edit, label, coalesceKey);
     if (ok) {
       const m = inspectorState.section;
-      setStatusMsg(`🏠 ${label}${m ? ` · ${m.label}` : ''} — every face of the section moved together`);
+      setStatusMsg(edit.kind !== undefined
+        ? `🏠 ${label} — same footprint, eave and pad; the walls are on so you can see the house`
+        : `🏠 ${label}${m ? ` · ${m.label}` : ''} — every face of the section moved together`);
     }
   }
 
@@ -19266,6 +19339,7 @@ function SolarEngine3D({
                       />
                       <input
                         type="number" min={1} max={30} step={0.5}
+                        data-testid="new-block-eave"
                         value={newBlockEaveHeightM}
                         onChange={e => {
                           const v = parseFloat(e.target.value);
@@ -20610,6 +20684,12 @@ function SolarEngine3D({
             <SectionInspector
               state={inspectorState}
               onEdit={handleInspectorEdit}
+              /* The studio's "new roof pitch" — the number the Gable and Hip
+                 tools build with — for a section that is given a slope it never
+                 had (a Block's 0° deck asked to become a gable). Read from the
+                 state in render scope; `roofPitchDegRef` is its copy for the
+                 once-at-mount handlers. */
+              newRoofPitchDeg={roofPitchDeg}
               onSelectLevel={(lvl) => { setSelectionLevel(lvl); setSectionRefusal(null); }}
               onNudgeFace={(deltaM) => { if (activeFaceId) nudgeFaceElevation(activeFaceId, deltaM); }}
               onClearSelection={() => { selectRoofFace(null); setStatusMsg('Selection cleared'); }}

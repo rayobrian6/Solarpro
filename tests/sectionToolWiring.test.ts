@@ -223,3 +223,94 @@ describe('🚨 Block emits a real roof face', () => {
     expect(fn).toMatch(/blockHandlesRef\.current\.push\(handleEntity\)/);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// A BLOCK BECOMES A VISIBLE FIVE-POINT GABLE HOUSE
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('🚨 the "New block eave" input reaches the Block', () => {
+  it('finalizeBlock reads it through a ref, not the state its mount-time handler closed over', () => {
+    // Right-click finishes a Block from the Cesium handler registered ONCE at
+    // mount, so `newBlockEaveHeightM` there is the mount default. A live probe
+    // set the input to 4, drew a Block and got a 6 m section (s15).
+    const fn = fnBody('finalizeBlock');
+    expect(fn, 'positive control: the slice is the Block finalizer').toMatch(/kind: 'flat'/);
+    expect(fn).toMatch(/const eaveHeightM = newBlockEaveHeightMRef\.current;/);
+    expect(fn, 'the stale state read is back').not.toMatch(/=\s*newBlockEaveHeightM\s*;/);
+  });
+
+  it('…and the ref follows the input', () => {
+    expect(ENGINE).toMatch(
+      /useEffect\(\(\) => \{ newBlockEaveHeightMRef\.current = newBlockEaveHeightM; \}, \[newBlockEaveHeightM\]\);/);
+  });
+});
+
+describe('🚨 the walls come on when a section is made or changes roof type', () => {
+  it('a Block turns them on once its section is built — and not when the section was refused', () => {
+    const fn = fnBody('finalizeBlock');
+    const okAt = fn.indexOf('if (outcome.ok && outcome.faceBuilds.length > 0)');
+    const elseAt = fn.indexOf('} else {', okAt);
+    expect(okAt, 'positive control: the success branch exists').toBeGreaterThan(-1);
+    expect(elseAt).toBeGreaterThan(okAt);
+    expect(fn.slice(okAt, elseAt)).toMatch(/showBuildingWalls\(/);
+    // A refused Block has no section, so there are no walls to show.
+    expect(fn.slice(elseAt)).not.toMatch(/showBuildingWalls\(/);
+  });
+
+  it('a Gable or Hip turns them on after its faces are emitted, and not on a refusal', () => {
+    const i = ENGINE.indexOf('function finalizeRoofSection(');
+    const body = ENGINE.slice(i, ENGINE.indexOf('function cancelSectionTrace(', i));
+    expect(body.length, 'positive control').toBeGreaterThan(800);
+    const refusal = body.slice(body.indexOf('if (!outcome.ok'), body.indexOf('for (const b of outcome.faceBuilds)'));
+    expect(refusal.length, 'positive control: the refusal branch').toBeGreaterThan(100);
+    expect(refusal).not.toMatch(/showBuildingWalls\(/);
+    const success = body.slice(body.indexOf('onRoofPlaneCreated?.(b.plane)'));
+    expect(success).toMatch(/showBuildingWalls\(/);
+  });
+
+  it('editSection turns them on when the edit changed the roof kind', () => {
+    const fn = fnBody('editSection');
+    expect(fn, 'positive control').toMatch(/applySectionEdit\(/);
+    expect(fn).toMatch(/const kindBefore = sectionKindIn\(roofPlanesRef\.current \?\? \[\], sectionId\)/);
+    expect(fn).toMatch(/if \(ok && outcome\.section && outcome\.section\.kind !== kindBefore\) \{\s*showBuildingWalls\(/);
+  });
+
+  it('turning them on is the toggle itself — the same state the 🏚 Building button flips', () => {
+    const fn = fnBody('showBuildingWalls');
+    expect(fn).toMatch(/showBuilding3DRef\.current = true;/);
+    expect(fn).toMatch(/setShowBuilding3D\(true\)/);
+  });
+});
+
+describe('🚨 a Block prism steps aside while its section’s walls are drawn', () => {
+  it('the Building effect syncs the prisms on every toggle AND every roof change', () => {
+    const at = ENGINE.indexOf('syncBlockPrismVisibility(showBuilding3D);');
+    expect(at, 'the Building effect no longer syncs the prisms').toBeGreaterThan(-1);
+    const effectEnd = ENGINE.indexOf('}, [', at);
+    expect(ENGINE.slice(effectEnd, effectEnd + 120))
+      .toMatch(/\}, \[showBuilding3D, showRoofTexture, simHour, roofPlanes, selectedFaceId, stage\]\)/);
+  });
+
+  it('only a prism whose section is in the design is hidden, and its handle with it', () => {
+    const fn = fnBody('syncBlockPrismVisibility');
+    expect(fn).toMatch(/for \(const prism of blockEntitiesRef\.current\)/);
+    expect(fn).toMatch(/const walled = buildingOn && !!sid && planes\.some\(/);
+    expect(fn).toMatch(/prism\.show = !walled/);
+    expect(fn).toMatch(/handle\.show = !walled/);
+    // The prism is tagged with its section only once the section was built.
+    const block = fnBody('finalizeBlock');
+    const okAt = block.indexOf('if (outcome.ok && outcome.faceBuilds.length > 0)');
+    expect(block.slice(okAt, block.indexOf('} else {', okAt)))
+      .toMatch(/\(prismEntity as any\)\.__sectionId = sectionId/);
+  });
+});
+
+describe('🚨 the inspector is handed the studio’s new-roof pitch', () => {
+  it('<SectionInspector> receives roofPitchDeg, the number the Gable and Hip tools build with', () => {
+    const at = ENGINE.indexOf('<SectionInspector');
+    expect(at).toBeGreaterThan(-1);
+    const el = ENGINE.slice(at, ENGINE.indexOf('/>', ENGINE.indexOf('onDelete={(scope)', at)));
+    expect(el, 'positive control: the slice is the inspector element').toMatch(/onEdit=\{handleInspectorEdit\}/);
+    expect(el).toMatch(/newRoofPitchDeg=\{roofPitchDeg\}/);
+  });
+});

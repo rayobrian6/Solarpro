@@ -348,6 +348,11 @@ export interface SectionEditOutcome {
   removedFaceIds: string[];
 }
 
+/** Said wherever a slope is asked for without a downhill direction — one sentence, one rule. */
+const SHED_DIRECTION_REQUIRED_MESSAGE =
+  'This roof can take a slope, but it needs to know which way it falls. '
+  + 'Choose the downhill direction (or the high edge) and set the pitch again.';
+
 /**
  * Apply one edit to one section and rebuild every face it owns, together.
  *
@@ -460,12 +465,7 @@ export function applySectionEdit(
       // one, the edit is refused and says what is missing.
       const dirAfter = edit.shedAzimuthDeg !== undefined ? edit.shedAzimuthDeg : next.shedAzimuthDeg;
       if (dirAfter === null || dirAfter === undefined || !isFinite(dirAfter)) {
-        return fail([{
-          code: 'SHED_DIRECTION_REQUIRED',
-          message:
-            'This roof can take a slope, but it needs to know which way it falls. '
-            + 'Choose the downhill direction (or the high edge) and set the pitch again.',
-        }]);
+        return fail([{ code: 'SHED_DIRECTION_REQUIRED', message: SHED_DIRECTION_REQUIRED_MESSAGE }]);
       }
     }
     next.pitchDeg = edit.pitchDeg;
@@ -516,6 +516,20 @@ export function applySectionEdit(
       ? null : ((a % 360) + 360) % 360;
   }
   if (edit.label !== undefined) next.label = edit.label;
+
+  // 🚨 A ROOF TURNED INTO A SHED BY NAME NEEDS A DIRECTION JUST AS MUCH.
+  //
+  // The check above only runs when a FLAT section is given a pitch. Asking for
+  // `kind: 'shed'` outright skipped it, and `buildSectionRoofPlanes` then fell
+  // back to south for a deck with no direction — the same invented slope the
+  // check exists to refuse, reached through the roof-type control instead of
+  // the pitch box. A shed at 0° is still a horizontal deck and needs none.
+  if (edit.kind === 'shed' && before.kind !== 'shed' && next.pitchDeg > 0) {
+    const dir = next.shedAzimuthDeg;
+    if (dir === null || dir === undefined || !isFinite(dir)) {
+      return fail([{ code: 'SHED_DIRECTION_REQUIRED', message: SHED_DIRECTION_REQUIRED_MESSAGE }]);
+    }
+  }
 
   if (edit.footprint !== undefined) {
     if (!Array.isArray(edit.footprint)) {

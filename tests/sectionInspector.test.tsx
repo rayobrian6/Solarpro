@@ -23,8 +23,8 @@
 import React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent } from '@testing-library/react';
-import { SectionInspector, type InspectorState } from '@/components/3d/inspector/SectionInspector';
-import { measureSection, measureFaceVertical } from '@/lib/3d/sectionEditing';
+import { SectionInspector, roofKindEdit, type InspectorState } from '@/components/3d/inspector/SectionInspector';
+import { measureSection, measureFaceVertical, applySectionEdit } from '@/lib/3d/sectionEditing';
 import { buildSectionRoofPlanes, sectionFaceId } from '@/lib/3d/buildingSection';
 import { mainSection, EXPECTED, GROUND_MAIN_M } from './fixtures/multiSectionHouse';
 
@@ -583,5 +583,170 @@ describe('🚨 a hand-reshaped section says so instead of silently reverting', (
     expect((screen.getByTestId('inspector-eave') as HTMLInputElement).disabled).toBe(false);
     fireEvent.click(screen.getByTestId('inspector-move-east'));
     expect(onEdit).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ROOF TYPE — a Block becomes a house without being traced a second time
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// `applySectionEdit({ kind })` has converted a section in place (footprint,
+// eave, pad and id kept; faces the new type does not own dropped) for a long
+// time. What was missing was a control that asks for it: the inspector showed
+// the kind as a read-only line, so the only gable a Block could get was a
+// second section traced on top of it — two stacked masses, the deck left
+// underneath, and the walls opened up on both long sides.
+
+/** What the Block tool creates: a flat deck, auto-named, no slope direction. */
+function blockSection(overrides: Record<string, unknown> = {}) {
+  return measureSection({
+    ...mainSection(), id: 'sec-block-1', kind: 'flat', pitchDeg: 0,
+    label: 'Flat section', shedAzimuthDeg: null, ...overrides,
+  } as any, 1);
+}
+
+describe('🚨 the roof type is a control, not a caption', () => {
+  it('shows the four types and marks the one the section is', () => {
+    mount({ ...baseState(), level: 'section', section: blockSection() });
+    for (const k of ['flat', 'shed', 'gable', 'hip']) {
+      expect(screen.getByTestId(`inspector-kind-${k}`), k).toBeTruthy();
+    }
+    expect(screen.getByTestId('inspector-kind-flat').getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByTestId('inspector-kind-gable').getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('🚨 Gable on a Block emits ONE edit — the kind AND the pitch — under one label and one key', () => {
+    // A flat deck is stored at 0°, and a gable at 0° never reaches its ridge
+    // (MIN_RIDGED_PITCH_DEG). Sending the kind alone is refused; sending the
+    // pitch as a SECOND edit leaves an undo step holding a 0° gable.
+    const { onEdit } = mount(
+      { ...baseState(), level: 'section', section: blockSection() },
+      { newRoofPitchDeg: 30 },
+    );
+    fireEvent.click(screen.getByTestId('inspector-kind-gable'));
+    expect(onEdit).toHaveBeenCalledTimes(1);
+    const [edit, label, key] = onEdit.mock.calls[0];
+    expect(edit).toEqual({ kind: 'gable', pitchDeg: 30, label: 'Gable section' });
+    expect(label).toBe('Change roof to Gable');
+    expect(key).toBe('kind:sec-block-1:gable');
+  });
+
+  it('…and with no studio pitch handed over it uses the studio default, 22°', () => {
+    const { onEdit } = mount({ ...baseState(), level: 'section', section: blockSection() });
+    fireEvent.click(screen.getByTestId('inspector-kind-hip'));
+    expect(onEdit.mock.calls[0][0]).toMatchObject({ kind: 'hip', pitchDeg: 22 });
+  });
+
+  it('a section that already slopes keeps its own pitch, and a name somebody typed is kept', () => {
+    // The fixture house is a 30° gable called "House".
+    const { onEdit } = mount(sectionState(), { newRoofPitchDeg: 45 });
+    fireEvent.click(screen.getByTestId('inspector-kind-hip'));
+    expect(onEdit).toHaveBeenCalledTimes(1);
+    expect(onEdit.mock.calls[0][0]).toEqual({ kind: 'hip' });
+    expect(onEdit.mock.calls[0][2]).toBe('kind:sec-main:hip');
+  });
+
+  it('pressing the type it already is does nothing', () => {
+    const { onEdit } = mount({ ...baseState(), level: 'section', section: blockSection() });
+    fireEvent.click(screen.getByTestId('inspector-kind-flat'));
+    expect(onEdit).not.toHaveBeenCalled();
+  });
+
+  it('a hand-reshaped section cannot change type — it would discard the reshape', () => {
+    const { onEdit } = mount({ ...baseState(), level: 'section', section: blockSection(), reshapedFaceCount: 1 });
+    const gable = screen.getByTestId('inspector-kind-gable') as HTMLButtonElement;
+    expect(gable.disabled).toBe(true);
+    fireEvent.click(gable);
+    expect(onEdit).not.toHaveBeenCalled();
+  });
+
+  it('🚨 Shed on a gable with no direction asks which way it falls, then sends kind + direction as one edit', () => {
+    // A gable has no "Slopes down toward" row, so the authority's refusal
+    // ("choose the downhill direction") would point at nothing on screen.
+    const { onEdit } = mount(sectionState());
+    expect(screen.queryByTestId('inspector-kind-shed-direction')).toBeNull();
+    fireEvent.click(screen.getByTestId('inspector-kind-shed'));
+    // The intent still goes to the authority, which refuses it in its own words.
+    expect(onEdit).toHaveBeenCalledTimes(1);
+    expect(onEdit.mock.calls[0][0]).toEqual({ kind: 'shed' });
+    expect(screen.getByTestId('inspector-kind-shed-direction')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('inspector-kind-shed-dir-W'));
+    expect(onEdit).toHaveBeenCalledTimes(2);
+    expect(onEdit.mock.calls[1][0]).toEqual({ kind: 'shed', shedAzimuthDeg: 270 });
+    expect(onEdit.mock.calls[1][1]).toBe('Change roof to Shed');
+    expect(onEdit.mock.calls[1][2]).toBe('kind:sec-main:shed');
+  });
+
+  it('a flat deck is not asked twice — its own direction row is already on screen', () => {
+    const { onEdit } = mount({ ...baseState(), level: 'section', section: blockSection() }, { newRoofPitchDeg: 18 });
+    fireEvent.click(screen.getByTestId('inspector-kind-shed'));
+    expect(onEdit.mock.calls[0][0]).toEqual({ kind: 'shed', pitchDeg: 18, label: 'Shed section' });
+    expect(screen.queryByTestId('inspector-kind-shed-direction')).toBeNull();
+    expect(screen.getByTestId('inspector-slope-direction')).toBeTruthy();
+  });
+});
+
+describe('🚨 the roof-type edit, applied by the REAL authority', () => {
+  // The control emits; `applySectionEdit` decides. These run the emitted edit
+  // through the authority so the refusal the installer reads is the one that
+  // actually runs, not a second copy of the rule in the component.
+  function blockPlanes(footprint = mainSection().footprint) {
+    const built = buildSectionRoofPlanes({
+      ...mainSection(), id: 'sec-block-1', kind: 'flat', pitchDeg: 0, eaveHeightM: 4,
+      label: 'Flat section', shedAzimuthDeg: null, footprint,
+    } as any);
+    expect(built.ok, JSON.stringify(built.refusals)).toBe(true);
+    return built.planes;
+  }
+
+  it('a four-corner Block becomes a two-face gable: same id, same eave, the deck gone', () => {
+    const planes = blockPlanes();
+    const sec = measureSection(planes[0].section as any, 1);
+    const change = roofKindEdit(sec, 'gable', 30)!;
+    const out = applySectionEdit(planes, 'sec-block-1', change.edit);
+    expect(out.refusals).toEqual([]);
+    expect(out.section!.kind).toBe('gable');
+    expect(out.section!.eaveHeightM).toBe(4);
+    expect(out.section!.pitchDeg).toBe(30);
+    expect(out.section!.label).toBe('Gable section');
+    expect(out.planes.map(p => p.id).sort()).toEqual(['sec-block-1::slopeA', 'sec-block-1::slopeB']);
+    expect(out.removedFaceIds).toEqual(['sec-block-1::deck']);
+  });
+
+  it('a five-corner outline is refused with the authority’s own sentence', () => {
+    const fp = mainSection().footprint;
+    const five = [fp[0], fp[1], { lat: (fp[1].lat + fp[2].lat) / 2, lng: fp[1].lng + 0.00002 }, fp[2], fp[3]];
+    const planes = blockPlanes(five);
+    const sec = measureSection(planes[0].section as any, 1);
+    const out = applySectionEdit(planes, 'sec-block-1', roofKindEdit(sec, 'gable', 30)!.edit);
+    expect(out.ok).toBe(false);
+    expect(out.refusals.map(r => r.code)).toContain('RIDGED_ROOF_NEEDS_FOUR_CORNERS');
+    expect(out.planes).toEqual(planes);
+  });
+
+  it('Shed with no direction is refused SHED_DIRECTION_REQUIRED; with one it builds', () => {
+    const planes = blockPlanes();
+    const sec = measureSection(planes[0].section as any, 1);
+    const refused = applySectionEdit(planes, 'sec-block-1', roofKindEdit(sec, 'shed', 20)!.edit);
+    expect(refused.ok).toBe(false);
+    expect(refused.refusals[0].code).toBe('SHED_DIRECTION_REQUIRED');
+    expect(refused.refusals[0].message).toMatch(/which way it falls/i);
+    const ok = applySectionEdit(planes, 'sec-block-1', roofKindEdit(sec, 'shed', 20, 90)!.edit);
+    expect(ok.refusals).toEqual([]);
+    expect(ok.section!.kind).toBe('shed');
+    expect(ok.section!.shedAzimuthDeg).toBe(90);
+  });
+
+  it('🚨 a GABLE turned into a shed with no direction is refused too — south is not invented', () => {
+    // The flat-deck check only ran when a FLAT section was given a pitch, so
+    // `{ kind: 'shed' }` on a gable built a deck falling due south that nobody
+    // chose — `buildSectionRoofPlanes` falls back to 180 for a missing direction.
+    const planes = buildSectionRoofPlanes(mainSection()).planes;
+    const out = applySectionEdit(planes, 'sec-main', { kind: 'shed' });
+    expect(out.ok).toBe(false);
+    expect(out.refusals[0].code).toBe('SHED_DIRECTION_REQUIRED');
+    const withDir = applySectionEdit(planes, 'sec-main', { kind: 'shed', shedAzimuthDeg: 270 });
+    expect(withDir.refusals).toEqual([]);
+    expect(withDir.planes.find(p => p.id === 'sec-main::deck')!.azimuth).toBeCloseTo(270, 0);
   });
 });

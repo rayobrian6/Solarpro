@@ -48,7 +48,9 @@ import type {
   PitchAnchor,
 } from '@/lib/3d/sectionEditing';
 import { FT_PER_M } from '@/lib/3d/sectionEditing';
-import { formatRise12, parseRiseOver12Input, riseOver12 } from '@/lib/3d/pitchFormat';
+import {
+  formatRise12, parseRiseOver12Input, riseOver12, MIN_RIDGED_PITCH_DEG, MAX_PITCH_DEG,
+} from '@/lib/3d/pitchFormat';
 
 export type InspectorLevel = 'none' | 'section' | 'face' | 'wall';
 
@@ -160,8 +162,85 @@ export interface SectionInspectorProps {
    * and "how steep" are answered in one place.
    */
   onSetSlopeAzimuth: (azimuthDeg: number) => void;
+  /**
+   * THE PITCH A ROOF GETS WHEN IT IS GIVEN A SLOPE IT NEVER HAD — the studio's
+   * own "new roof pitch", the same number the Gable and Hip tools build with.
+   *
+   * 🚨 ONLY USED WHEN THE SECTION HAS NO USABLE PITCH OF ITS OWN. A Block's
+   * flat deck is stored at 0°, and a gable or hip at 0° never reaches its ridge
+   * (`MIN_RIDGED_PITCH_DEG`), so choosing Gable on it has to say how steep in
+   * the same edit. A section that already slopes keeps its own pitch.
+   */
+  newRoofPitchDeg?: number;
   /** Rendered as a disabled hint when the section has no editable record. */
   disabled?: boolean;
+}
+
+// ── Roof type ───────────────────────────────────────────────────────────────
+
+type RoofKind = NonNullable<SectionEdit['kind']>;
+
+/** The four roof types, in the order a designer reads them: no slope → most. */
+export const ROOF_KINDS: ReadonlyArray<RoofKind> = ['flat', 'shed', 'gable', 'hip'];
+
+/** Used when the studio hands over no usable new-roof pitch. The studio's own default. */
+const FALLBACK_NEW_ROOF_PITCH_DEG = 22;
+
+/**
+ * The names the tools give a section when they create it. A section still
+ * carrying one of these was never named by a person, so a roof-type change
+ * renames it with the type — otherwise a Block turned into a gable keeps the
+ * header "Flat section" above "Gable roof · 2 faces", which reads as two
+ * different objects. A name somebody typed is never touched.
+ */
+const AUTO_SECTION_LABEL: Record<RoofKind, string> = {
+  flat: 'Flat section', shed: 'Shed section', gable: 'Gable section', hip: 'Hip section',
+};
+
+/**
+ * THE ONE EDIT THAT CHANGES A SECTION'S ROOF TYPE. Pure: it reads the
+ * measurement and returns what the control emits, or null when there is
+ * nothing to change.
+ *
+ * 🚨 ONE EDIT, ONE LABEL, ONE COALESCE KEY — ONE UNDO STEP. The kind, the pitch
+ * it needs and the new name travel together. Emitting the pitch as a second
+ * edit would leave an undo step in between that holds a 0° gable, which the
+ * authority refuses, so Undo would walk into a state that cannot exist.
+ *
+ * 🚨 NOTHING HERE DECIDES WHETHER THE CHANGE IS LEGAL. A five-corner outline
+ * asked to become a gable, or a roof asked to become a shed with no downhill
+ * direction, is sent anyway: `applySectionEdit` refuses it in its own words
+ * (RIDGED_ROOF_NEEDS_FOUR_CORNERS, SHED_DIRECTION_REQUIRED) and the refusal
+ * box shows that sentence. A second copy of those rules in this file would be
+ * free to disagree with the one that runs.
+ */
+export function roofKindEdit(
+  s: SectionMeasurement,
+  kind: RoofKind,
+  newRoofPitchDeg?: number,
+  shedAzimuthDeg?: number,
+): { edit: SectionEdit; label: string; coalesceKey: string } | null {
+  if (!s || s.kind === kind) return null;
+  const edit: SectionEdit = { kind };
+  // A flat deck is stored at 0° whatever its record once said; read it so.
+  const current = s.kind === 'flat' ? 0 : s.pitchDeg;
+  if (kind !== 'flat' && !(isFinite(current) && current >= MIN_RIDGED_PITCH_DEG)) {
+    const wanted = newRoofPitchDeg;
+    edit.pitchDeg = typeof wanted === 'number' && isFinite(wanted)
+      && wanted >= MIN_RIDGED_PITCH_DEG && wanted <= MAX_PITCH_DEG
+      ? wanted : FALLBACK_NEW_ROOF_PITCH_DEG;
+  }
+  if (kind === 'shed' && typeof shedAzimuthDeg === 'number' && isFinite(shedAzimuthDeg)) {
+    edit.shedAzimuthDeg = shedAzimuthDeg;
+  }
+  if ((Object.values(AUTO_SECTION_LABEL) as string[]).includes(s.label)) {
+    edit.label = AUTO_SECTION_LABEL[kind];
+  }
+  return {
+    edit,
+    label: `Change roof to ${KIND_LABEL[kind]}`,
+    coalesceKey: `kind:${s.sectionId}:${kind}`,
+  };
 }
 
 // ── Presentation ────────────────────────────────────────────────────────────
@@ -503,11 +582,32 @@ const DELETE_BTN: React.CSSProperties = {
 export function SectionInspector({
   state, onEdit, onSelectLevel, onNudgeFace, onClearSelection, onDismissRefusal,
   onSetFacePitch, onSetPitchAnchor, previewPitch, onSelectFace, onRebuildFromParameters,
-  onDelete, onSetSlopeAzimuth, disabled,
+  onDelete, onSetSlopeAzimuth, newRoofPitchDeg, disabled,
 }: SectionInspectorProps) {
   const s = state.section;
   const f = state.face;
   const w = state.wall;
+
+  // ── "WHICH WAY DOES IT FALL?", ASKED WHERE THE SHED WAS CHOSEN ────────────
+  //
+  // A gable or hip has no "Slopes down toward" row (it has no single downhill
+  // direction), so the refusal "choose the downhill direction" would point at
+  // a control that is not on screen. When Shed is chosen for a ridged section
+  // with no direction, the eight directions are offered right under the Roof
+  // row, and picking one sends the kind AND the direction as one edit. A flat
+  // deck already shows its own direction row below, so it is not asked twice.
+  const [askShedDirection, setAskShedDirection] = useState(false);
+  useEffect(() => { setAskShedDirection(false); }, [s?.sectionId, s?.kind]);
+
+  const chooseRoofKind = (kind: RoofKind, shedAzimuthDeg?: number) => {
+    if (!s) return;
+    const change = roofKindEdit(s, kind, newRoofPitchDeg, shedAzimuthDeg);
+    if (!change) return;
+    if (kind === 'shed' && s.slopeAzimuthDeg === null && shedAzimuthDeg === undefined && !s.singlePlane) {
+      setAskShedDirection(true);
+    }
+    onEdit(change.edit, change.label, change.coalesceKey);
+  };
 
   // ── WHAT WOULD HAPPEN, LIVE, WHILE THE NUMBER IS BEING TYPED ─────────────
   //
@@ -640,6 +740,61 @@ export function SectionInspector({
             {KIND_LABEL[s.kind] ?? s.kind} roof · {s.faceCount} face{s.faceCount === 1 ? '' : 's'}
             {' · '}{fmtFt(s.planAM, 0)} × {fmtFt(s.planBM, 0)}
           </div>
+
+          {/* ── ROOF TYPE. The edit operation has existed for a long time
+                 (`applySectionEdit({ kind })` keeps the footprint, eave, pad
+                 and id, and drops the faces the new type does not own); what
+                 was missing was any way to ask for it. Without this row a
+                 Block could only become a SHED — pitching a flat deck converts
+                 it to one plane — and the one way to put a gable on it was to
+                 trace a second section on top. ── */}
+          <div style={{ ...ROW, marginBottom: 4 }} data-testid="inspector-roof-kind">
+            <span style={LABEL}>Roof</span>
+            <div style={{ display: 'flex', gap: 3, flex: 1 }}>
+              {ROOF_KINDS.map(kind => {
+                const on = s.kind === kind;
+                return (
+                  <button
+                    key={kind} type="button" data-no-drag
+                    data-testid={`inspector-kind-${kind}`}
+                    aria-pressed={on}
+                    disabled={sectionDisabled}
+                    title={on ? `This is a ${KIND_LABEL[kind].toLowerCase()} roof` : `Make this a ${KIND_LABEL[kind].toLowerCase()} roof`}
+                    onClick={() => chooseRoofKind(kind)}
+                    style={{
+                      flex: 1, padding: '2px 0', borderRadius: 4, fontSize: 9.5, fontWeight: 700,
+                      cursor: sectionDisabled || on ? 'default' : 'pointer',
+                      background: on ? 'rgba(0,229,255,0.18)' : 'rgba(255,255,255,0.05)',
+                      border: `1px solid ${on ? 'rgba(0,229,255,0.55)' : 'rgba(255,255,255,0.10)'}`,
+                      color: on ? '#7fe9ff' : '#9aa8bd',
+                    }}
+                  >{KIND_LABEL[kind]}</button>
+                );
+              })}
+            </div>
+          </div>
+          {askShedDirection && !s.singlePlane ? (
+            <div data-testid="inspector-kind-shed-direction" style={{ margin: '2px 0 6px 84px' }}>
+              <div style={{ fontSize: 9.5, color: '#9aa8bd', marginBottom: 3 }}>
+                Which way does the shed fall?
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
+                {SLOPE_DIRECTIONS.map(d => (
+                  <button
+                    key={d.label} type="button" data-no-drag
+                    data-testid={`inspector-kind-shed-dir-${d.label}`}
+                    disabled={sectionDisabled}
+                    onClick={() => chooseRoofKind('shed', d.deg)}
+                    style={{
+                      padding: '2px 6px', borderRadius: 5, fontSize: 9.5, fontWeight: 800,
+                      cursor: 'pointer', background: 'rgba(255,255,255,0.05)',
+                      border: '1px solid rgba(255,255,255,0.14)', color: '#cfd8e6',
+                    }}
+                  >{d.label}</button>
+                ))}
+              </div>
+            </div>
+          ) : null}
 
           {/* 🚨 EVERY ONE OF THESE IS ABSOLUTE AND PHYSICAL.
                  pad     — elevation of the ground this section stands on
