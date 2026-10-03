@@ -228,9 +228,9 @@ describe('the page: the Battery card is the component, and the write handler mir
     page.slice(page.indexOf('const interviewEquipment = useMemo'), page.indexOf('const systemConfigInterview = useMemo'));
 
   it('writeInterviewAnswer merges the battery mirror — gated on the toggle — into its patch before updateConfig', () => {
-    const at = page.indexOf('const writeInterviewAnswer = async');
+    const at = page.indexOf('const writeInterviewAnswer = guardGraphRead(async');
     expect(at).toBeGreaterThan(0);
-    const body = page.slice(at, page.indexOf('\n  };', at));
+    const body = page.slice(at, page.indexOf('\n  }, () => svcTopologyReadRef.current', at));
     const mirror = body.indexOf('Object.assign(patch, batteryConfigMirror(next, config, { batteryEnabled }));');
     expect(mirror, 'the write handler no longer mirrors the battery selection from the graph — or no longer gates it on Battery Storage ON')
       .toBeGreaterThan(0);

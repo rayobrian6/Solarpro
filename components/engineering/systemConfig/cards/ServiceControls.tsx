@@ -202,11 +202,21 @@ export function PanelRow({ t, panel: p, item, ids, disabled, apply, check = null
   const missing = item?.state === 'needs-answer';
   return (
     <div data-testid={`${id}-${p.id}`} data-state={item?.state}>
-      <div className="grid grid-cols-[minmax(3.5rem,auto)_1fr_1fr_1.2fr] items-center gap-1.5 text-[11px] text-slate-400">
-        <span className="flex min-w-0 flex-col">
-          <span className="truncate font-bold text-slate-200" title={p.label}>{p.label}</span>
+      {/* Two lines so the card reads in the narrow left column: the panel and its maker, then its ratings. */}
+      <div className="flex items-center gap-2 text-[11px] text-slate-400">
+        <span className="flex shrink-0 flex-col">
+          <span className="font-bold text-slate-200" title={p.label}>{p.label}</span>
           {chip}
         </span>
+        <input data-testid={`${id}-mfr-${p.id}`} key={p.manufacturer ?? ''} aria-label={`${p.label} manufacturer`}
+               className={`min-w-0 flex-1 ${box}`} disabled={disabled} defaultValue={p.manufacturer ?? ''} placeholder="Manufacturer"
+               onBlur={e => {
+                 if ((e.target.value.trim() || null) !== (p.manufacturer ?? null)) {
+                   void apply(answerPanel(t, p.id, { manufacturer: e.target.value }));
+                 }
+               }} />
+      </div>
+      <div className="mt-1 grid grid-cols-2 items-center gap-1.5 text-[11px] text-slate-400">
         <label className="flex items-center gap-1">Main
           <select data-testid={`${id}-main-${p.id}`} className={`w-full ${box} ${missing && p.mainBreakerA == null ? NEEDS : ''}`}
                   disabled={disabled} value={p.mainBreakerA ?? ''}
@@ -223,13 +233,6 @@ export function PanelRow({ t, panel: p, item, ids, disabled, apply, check = null
             {withRecorded(BUSBAR_RATINGS, p.busbarRatingA).map(a => <option key={a} value={a}>{a} A</option>)}
           </select>
         </label>
-        <input data-testid={`${id}-mfr-${p.id}`} key={p.manufacturer ?? ''} aria-label={`${p.label} manufacturer`}
-               className={`w-full ${box}`} disabled={disabled} defaultValue={p.manufacturer ?? ''} placeholder="Manufacturer"
-               onBlur={e => {
-                 if ((e.target.value.trim() || null) !== (p.manufacturer ?? null)) {
-                   void apply(answerPanel(t, p.id, { manufacturer: e.target.value }));
-                 }
-               }} />
       </div>
       {remedies && check ? (
         <div data-testid={`${id}-busbar-fail-${p.id}`}

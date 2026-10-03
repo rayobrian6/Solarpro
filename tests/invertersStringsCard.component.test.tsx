@@ -253,7 +253,7 @@ describe('the page mounts the card\'s decisions inside the Inverters & Strings c
     const mount = page.indexOf('<InvertersStringsDecisions {...interviewEditorContext} interview={systemConfigInterview}');
     expect(card).toBeGreaterThan(0);
     expect(mount).toBeGreaterThan(card);
-    expect(mount).toBeLessThan(page.indexOf('{/* Branch Visualization */}', card));
+    expect(mount).toBeLessThan(page.indexOf('{/* Branch Visualization', card));
     const tag = page.slice(mount, page.indexOf('/>', mount));
     expect(tag).toContain('coupling={electrical?.solarCoupling ?? null}');
     expect(tag).toContain('pvInverterState={interviewEquipment.pvInverter.state}');
