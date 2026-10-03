@@ -365,3 +365,63 @@ export function redo(
 export function clearHistory(): GeometryHistory {
   return emptyHistory();
 }
+
+/**
+ * WHAT A HISTORY STEP CHANGED, BY FACE ID — so the renderer can redraw it.
+ *
+ * 🚨 THE DATA WAS RIGHT AND THE PICTURE WAS NOT. Undo and Redo restore the
+ * canonical array, and the autosave stores it, but the renderer never removes
+ * a face because it went missing from a prop (ABSENCE IS NOT INTENT — the
+ * reconcile-deletions block that did deleted a hand-traced garage), and its
+ * restore pass skips any face that is still drawn. So after Block → Gable →
+ * Hip → Undo, the design held a gable while the screen showed hip trapezoids,
+ * two ghost hip ends and the old deck — and Fill Roof then laid modules on the
+ * held slopes, overhanging the drawn outline. Undoing an eave raise left every
+ * face and wall at the raised height.
+ *
+ * This is the explicit list the "absence is not intent" rule asks for. It is
+ * computed by the OWNER of the canonical array, at the moment of the user's own
+ * Undo or Redo, from the two arrays that action swapped — not inferred later by
+ * the renderer from a prop with its own timing. A face that was in neither is
+ * never named, so a face the renderer holds that the design never listed is
+ * untouched.
+ *
+ *   removedFaceIds   in the array before the step and not after it
+ *   reshapedFaceIds  in both, with different geometry, so what is drawn is stale
+ *
+ * A face that came BACK (absent before, present after) is not listed: nothing
+ * is drawn for it, and the renderer's restore pass already draws what is
+ * missing. Pure: ids and plane fields only — still no Cesium type in this file.
+ */
+export interface RestoreRedraw {
+  removedFaceIds: string[];
+  reshapedFaceIds: string[];
+}
+
+/** The fields a face is DRAWN from — see `resolvePlaneGeometry`. */
+const DRAWN_FROM: ReadonlyArray<string> = [
+  'vertices', 'polygon3D', 'origin3D', 'ecefFrame3D', 'pitch', 'azimuth',
+  'planeHeightAtCenterMeters', 'centroidLat', 'centroidLng',
+];
+
+function drawnSignature(p: RoofPlane): string {
+  const rec = p as unknown as Record<string, unknown>;
+  return DRAWN_FROM.map(k => JSON.stringify(rec[k] ?? null)).join('|');
+}
+
+export function restoreRedrawFor(
+  before: ReadonlyArray<RoofPlane> | null | undefined,
+  after: ReadonlyArray<RoofPlane> | null | undefined,
+): RestoreRedraw {
+  const afterById = new Map<string, RoofPlane>();
+  for (const p of after ?? []) if (p?.id) afterById.set(p.id, p);
+  const removedFaceIds: string[] = [];
+  const reshapedFaceIds: string[] = [];
+  for (const p of before ?? []) {
+    if (!p?.id) continue;
+    const next = afterById.get(p.id);
+    if (!next) { removedFaceIds.push(p.id); continue; }
+    if (drawnSignature(p) !== drawnSignature(next)) reshapedFaceIds.push(p.id);
+  }
+  return { removedFaceIds, reshapedFaceIds };
+}

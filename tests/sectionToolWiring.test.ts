@@ -268,11 +268,20 @@ describe('🚨 the walls come on when a section is made or changes roof type', (
     expect(success).toMatch(/showBuildingWalls\(/);
   });
 
-  it('editSection turns them on when the edit changed the roof kind', () => {
+  it('editSection turns them on when the edit changed the roof kind — decided by the tested rule', () => {
+    // The decision itself is behavioural-tested in tests/sectionViewRules.test.ts.
+    // What this guards is that the engine asks THAT rule, with the kind read
+    // BEFORE the edit through the authority's own lookup.
     const fn = fnBody('editSection');
     expect(fn, 'positive control').toMatch(/applySectionEdit\(/);
-    expect(fn).toMatch(/const kindBefore = sectionKindIn\(roofPlanesRef\.current \?\? \[\], sectionId\)/);
-    expect(fn).toMatch(/if \(ok && outcome\.section && outcome\.section\.kind !== kindBefore\) \{\s*showBuildingWalls\(/);
+    const kindAt = fn.indexOf('const kindBefore = sectionKindOf(roofPlanesRef.current, sectionId)');
+    const editAt = fn.indexOf('applySectionEdit(');
+    expect(kindAt, 'the kind is no longer read through sectionKindOf').toBeGreaterThan(-1);
+    expect(kindAt, 'the kind must be read before the edit').toBeLessThan(editAt);
+    expect(fn).toMatch(/if \(ok && editChangedRoofKind\(kindBefore, outcome\)\) \{\s*showBuildingWalls\(/);
+    // 🚨 THE HAND-ROLLED LOOKUP IS GONE. It read the first face's record and
+    // could disagree with the authority — see sectionKindOf.
+    expect(ENGINE).not.toMatch(/function sectionKindIn\(/);
   });
 
   it('turning them on is the toggle itself — the same state the 🏚 Building button flips', () => {
@@ -291,12 +300,15 @@ describe('🚨 a Block prism steps aside while its section’s walls are drawn',
       .toMatch(/\}, \[showBuilding3D, showRoofTexture, simHour, roofPlanes, selectedFaceId, stage\]\)/);
   });
 
-  it('only a prism whose section is in the design is hidden, and its handle with it', () => {
+  it('each prism (and its handle) is shown or hidden by the tested rule, blockPrismHidden', () => {
+    // The rule — refused section shown, walled section hidden while Building
+    // is on, deleted section hidden — is behavioural-tested in
+    // tests/sectionViewRules.test.ts.
     const fn = fnBody('syncBlockPrismVisibility');
     expect(fn).toMatch(/for \(const prism of blockEntitiesRef\.current\)/);
-    expect(fn).toMatch(/const walled = buildingOn && !!sid && planes\.some\(/);
-    expect(fn).toMatch(/prism\.show = !walled/);
-    expect(fn).toMatch(/handle\.show = !walled/);
+    expect(fn).toMatch(/const hidden = blockPrismHidden\(planes, sid, buildingOn\)/);
+    expect(fn).toMatch(/prism\.show = !hidden/);
+    expect(fn).toMatch(/handle\.show = !hidden/);
     // The prism is tagged with its section only once the section was built.
     const block = fnBody('finalizeBlock');
     const okAt = block.indexOf('if (outcome.ok && outcome.faceBuilds.length > 0)');
@@ -312,5 +324,74 @@ describe('🚨 the inspector is handed the studio’s new-roof pitch', () => {
     const el = ENGINE.slice(at, ENGINE.indexOf('/>', ENGINE.indexOf('onDelete={(scope)', at)));
     expect(el, 'positive control: the slice is the inspector element').toMatch(/onEdit=\{handleInspectorEdit\}/);
     expect(el).toMatch(/newRoofPitchDeg=\{roofPitchDeg\}/);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SLICE 1 REVIEW FIXES
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('🚨 a kind change keeps the section selected, so its orphan notice survives', () => {
+  it('adoptGeometryOutcome moves the selection by the tested rule BEFORE it raises the notice', () => {
+    // Live probe p04c: Block, Fill Roof (36 modules on ::deck), select the deck,
+    // Roof: Gable. The notice "36 panels sat on a roof face that this change
+    // removed" was shown at 53929 ms and GONE at 53986 ms, the inspector read
+    // "Nothing selected", and the modules sat inside the attic. The selection
+    // effect cleared the dead ::deck id and selectRoofFace(null) cleared the
+    // notice with it. selectionAfterRebuild is behavioural-tested in
+    // tests/sectionViewRules.test.ts.
+    const fn = fnBody('adoptGeometryOutcome');
+    const refusedAt = fn.indexOf('if (!outcome.ok)');
+    const moveAt = fn.indexOf('selectionAfterRebuild(selectedFaceIdRef.current, outcome)');
+    const noticeAt = fn.indexOf('sat on a roof face that this change removed');
+    expect(refusedAt, 'positive control: the slice is the adoption pipeline').toBeGreaterThan(-1);
+    expect(noticeAt, 'positive control: the orphan notice is in the slice').toBeGreaterThan(-1);
+    expect(moveAt, 'the selection no longer follows the section').toBeGreaterThan(refusedAt);
+    // Selecting clears the refusal line, so the move must come first.
+    expect(moveAt, 'selecting after the notice wipes it').toBeLessThan(noticeAt);
+    expect(fn).toMatch(/if \(stillSelected !== selectedFaceIdRef\.current\) selectRoofFace\(stillSelected\)/);
+  });
+
+  it('selectRoofFace still clears a stale refusal — which is exactly why the order above matters', () => {
+    expect(fnBody('selectRoofFace')).toMatch(/setSectionRefusal\(null\)/);
+  });
+});
+
+describe('🚨 the status line belongs to the action that caused the redraw', () => {
+  it('renderBuildingExtrusion only writes the status line when announcing', () => {
+    // A Block placed read "⚠ 1 of 1 face(s) are FLAT" and "Change roof to
+    // Gable" became "2 faces · 6 walls" — the redraw overwrote the action.
+    const fn = fnBody('renderBuildingExtrusion');
+    expect(fn, 'positive control').toMatch(/buildWalls\(faces, groundElevM\)/);
+    const calls = fn.match(/setStatusMsg\(/g) ?? [];
+    const guarded = fn.match(/if \(announce\) setStatusMsg\(/g) ?? [];
+    expect(calls.length, 'positive control: the empty-state and summary lines').toBeGreaterThanOrEqual(2);
+    expect(guarded.length, 'an unguarded setStatusMsg is back').toBe(calls.length);
+    expect(fn).toMatch(/const announce = opts\.announce === true;/);
+  });
+
+  it('only the 🏚 Building button announces; the effect reads that once', () => {
+    expect(ENGINE).toMatch(
+      /onClick=\{\(\) => \{ announceBuildingRef\.current = true; setShowBuilding3D\(v => !v\); \}\}/);
+    expect((ENGINE.match(/announceBuildingRef\.current = true/g) ?? []).length,
+      'something other than the Building button announces').toBe(1);
+    const at = ENGINE.indexOf('syncBlockPrismVisibility(showBuilding3D);');
+    const effect = ENGINE.slice(at, ENGINE.indexOf('}, [', at));
+    expect(effect).toMatch(/const announce = announceBuildingRef\.current;\s*announceBuildingRef\.current = false;/);
+    expect(effect).toMatch(/renderBuildingExtrusion\(viewer, C, \{ announce \}\)/);
+    // Every other caller redraws in silence.
+    const others = ENGINE.match(/renderBuildingExtrusion\(viewer, C\)/g) ?? [];
+    expect(others.length, 'positive control: adoption, Square Up and Building shape redraw it').toBeGreaterThanOrEqual(3);
+  });
+
+  it('a face level by design is not counted as ⚠ FLAT', () => {
+    const fn = fnBody('renderBuildingExtrusion');
+    expect(fn).toMatch(
+      /if \(orient\.tiltDeg < LEVEL_TILT_DEG && !isLevelByDesign\(planeById\.get\(f\.id\)\)\) flatFaceCount\+\+;/);
+  });
+
+  it('the Block hint and the kind-change message are still what those actions say', () => {
+    expect(fnBody('finalizeBlock')).toMatch(/Roof → Gable makes it a/);
+    expect(fnBody('handleInspectorEdit')).toMatch(/the walls are on so you can see the house/);
   });
 });

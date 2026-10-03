@@ -6140,6 +6140,7 @@ export default function DesignStudio({ project, onSave, onProjectPromoted }: Pro
               onRunShadeAnalysis={runShadeAnalysis}
               onPanelsAboutToBeCulled={site.recordGeometryWithPanels}
               deletion={engineDeletion ?? undefined}
+              geometryRestore={site.geometryRestore ?? undefined}
               onUndoGeometry={site.undoGeometry}
               onRedoGeometry={site.redoGeometry}
               canUndoGeometry={site.canUndoGeometry}

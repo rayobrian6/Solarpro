@@ -25,6 +25,18 @@ import { join, extname, resolve, sep } from 'node:path';
  * halves meet at the ridge — and the same gable after a reload, from the
  * database.
  *
+ * And what a review of that slice found, on the same path:
+ *
+ *   · the orphaned-panel notice was wiped ~57 ms after it appeared, and the
+ *     inspector closed, because Gable removes the ::deck the user had selected
+ *     (p04c) — so the Block is filled with Fill Roof first, and the notice and
+ *     the section have to still be on screen seconds later;
+ *   · the status line the action set was overwritten by the Building redraw
+ *     ("⚠ 1 of 1 face(s) are FLAT" instead of "Block placed … Roof → Gable");
+ *   · Undo/Redo restored the data and left the previous kind's faces and walls
+ *     drawn (p02) — so the gable is undone and redone, and what Cesium draws
+ *     must be what the design holds each time.
+ *
  * Section faces are user-authored geometry (`source: 'user-traced'`). Nothing
  * here treats them as anything more than that.
  *
@@ -196,6 +208,34 @@ async function selectFace(page: Page, faceId: string): Promise<boolean> {
   return false;
 }
 
+/** The face ids Cesium is drawing — roof outlines and Building roofs — whatever the design holds.
+ *  Names are `[PLANE3D-OUTLINE] <faceId>`, `[PLANE3D-GRID-V] <faceId> u=1.7`, `[BUILD3D-ROOF] <faceId>`:
+ *  the face id is always the SECOND token. */
+const drawnFaceIds = (page: Page): Promise<string[]> => page.evaluate(() => {
+  const v = (window as any).__solarViewerE2E; const ids = new Set<string>();
+  for (const e of v.entities.values) {
+    const n: string = e?.name ?? '';
+    if (!(n.startsWith('[PLANE3D-') || n.startsWith('[BUILD3D-ROOF]')) || e.show === false) continue;
+    const id = n.split(' ')[1];
+    if (id) ids.add(id);
+  }
+  return [...ids].sort();
+});
+
+/** What the status line and the inspector's notice said, sampled every 100 ms for `ms`. */
+const sampleMessages = (page: Page, ms: number) => page.evaluate(async (ms: number) => {
+  const seen: Array<{ status: string | null; notice: string | null }> = [];
+  const t0 = performance.now();
+  while (performance.now() - t0 < ms) {
+    seen.push({
+      status: document.querySelector('[data-testid="engine-status"]')?.textContent?.trim() ?? null,
+      notice: document.querySelector('[data-testid="inspector-refusal"]')?.textContent?.trim() ?? null,
+    });
+    await new Promise(r => setTimeout(r, 100));
+  }
+  return seen;
+}, ms);
+
 /** Group rake walls by the plan point of their HIGH end — the ridge apex. */
 function gableEnds(ws: Awaited<ReturnType<typeof walls>>) {
   const near = (a: number, b: number) => Math.abs(a - b) < 0.3;
@@ -276,8 +316,25 @@ test.describe('Design: a Block becomes a visible five-point gable house — real
       { message: 'a flat Block should stand on four walls', timeout: 20_000 }).toBe(4);
     await expect.poll(async () => (await prisms(page)).map(p => p.show),
       { message: 'the prism should hide while its section’s walls are drawn', timeout: 10_000 }).toEqual([false]);
+    // 🚨 THE STATUS LINE IS THE BLOCK'S, AND STAYS. The Building redraw this
+    // placement causes used to overwrite it with "⚠ 1 of 1 face(s) are FLAT".
+    const afterBlock = await sampleMessages(page, 2_500);
+    for (const m of afterBlock) {
+      expect(m.status, 'the Block’s own message, including the pointer to the Roof control')
+        .toMatch(/Block placed.*Roof → Gable/);
+      expect(m.status, 'a deliberately flat deck is not flagged').not.toMatch(/FLAT/);
+    }
     await aim(page, { headingDeg: 30, pitchDeg: -28, rangeM: 45, h: GROUND_M + 2 });
     await shot(page, testInfo, '01-block-4m-walls-on');
+
+    // ── 1b. Fill Roof, so the kind change has modules to strand ─────────────
+    await page.keyboard.press('Escape');
+    await page.getByTestId('toolgroup-auto').click();
+    await page.getByTestId('tool-auto_roof').click();
+    await expect.poll(() => page.evaluate(() => ((window as any).__solarE2E?.panels ?? []).length),
+      { message: 'Fill Roof laid nothing on the Block’s deck', timeout: 30_000 }).toBeGreaterThan(0);
+    const modules = await page.evaluate(() => ((window as any).__solarE2E.panels as any[]).map(p => p.planeId));
+    expect(new Set(modules), 'every module stands on the deck').toEqual(new Set([deck.id]));
 
     // ── 2. Roof: Gable, in the inspector ───────────────────────────────────
     await page.keyboard.press('Escape');
@@ -289,6 +346,22 @@ test.describe('Design: a Block becomes a visible five-point gable house — real
     await expect(page.getByTestId('inspector-kind-flat')).toHaveAttribute('aria-pressed', 'true');
     await shot(page, testInfo, '02-inspector-roof-type');
     await page.getByTestId('inspector-kind-gable').click();
+
+    // 🚨 THE NOTICE AND THE SECTION SURVIVE THE EDIT THAT REMOVED THE SELECTED
+    // FACE. Probe p04c: shown at 53929 ms, GONE at 53986 ms, "Nothing selected".
+    const afterGable = await sampleMessages(page, 3_000);
+    for (const m of afterGable) {
+      expect(m.notice, 'the orphaned-module notice must stay on screen')
+        .toMatch(new RegExp(`${modules.length} panels sat on a roof face that this change removed`));
+      expect(m.status, 'the kind change’s own message, not the Building summary')
+        .toMatch(/Change roof to Gable/);
+    }
+    await expect(page.getByTestId('inspector-section'), 'the inspector stays on the section')
+      .toContainText('Gable section');
+    expect(await page.evaluate(() => (window as any).__solarE2E?.selected3DFaceId),
+      'the selection moved to a surviving face of the same section')
+      .toMatch(new RegExp(`^${deck.sectionId}::slope[AB]$`));
+    await shot(page, testInfo, '02b-orphan-notice-stays');
 
     await expect.poll(async () => (await faces(page)).map(f => f.id).sort(),
       { message: 'Gable should leave exactly two slopes', timeout: 20_000 })
@@ -315,14 +388,35 @@ test.describe('Design: a Block becomes a visible five-point gable house — real
     await aim(page, { headingDeg: 35, pitchDeg: -25, rangeM: 42, h: GROUND_M + 2 });
     await shot(page, testInfo, '04-gable-house-oblique');
 
-    // The inspector now reads it as the gable it is — one section, renamed with its type.
-    await aim(page, { headingDeg: 20, pitchDeg: -65, rangeM: 40, h: GROUND_M + BLOCK_EAVE_M });
-    expect(await selectFace(page, `${deck.sectionId}::slopeA`), 'clicking a slope should select the section').toBe(true);
+    // The inspector, still on the section, reads it as the gable it is — one
+    // section, renamed with its type. (No second click on the roof is needed.)
     await expect(page.getByTestId('inspector-kind-gable')).toHaveAttribute('aria-pressed', 'true');
     await expect(page.getByTestId('inspector-section')).toContainText('Gable section');
     await expect(page.getByTestId('inspector-section')).toContainText('2 faces');
+    expect(await drawnFaceIds(page), 'nothing of the deck is still drawn')
+      .toEqual([`${deck.sectionId}::slopeA`, `${deck.sectionId}::slopeB`]);
     await shot(page, testInfo, '04b-inspector-gable-section');
-    await page.getByTestId('inspector-clear').click();
+
+    // ── 3b. Undo and Redo: the picture follows the design ───────────────────
+    // 🚨 Probe p02: after Undo the design held [deck] and the gable slopes were
+    // still drawn above it; one more Undo drew six gable walls around a hip.
+    await page.getByTestId('geometry-undo').click();
+    await expect.poll(async () => (await faces(page)).map(f => f.id),
+      { message: 'Undo should hold the Block’s deck again', timeout: 15_000 }).toEqual([deck.id]);
+    await expect.poll(() => drawnFaceIds(page),
+      { message: 'after Undo, Cesium must draw the deck and nothing of the gable', timeout: 15_000 })
+      .toEqual([deck.id]);
+    await expect.poll(async () => (await walls(page)).length,
+      { message: 'after Undo the flat Block stands on four walls', timeout: 15_000 }).toBe(4);
+    await page.getByTestId('geometry-redo').click();
+    await expect.poll(() => drawnFaceIds(page),
+      { message: 'after Redo, Cesium must draw the two slopes and no deck', timeout: 15_000 })
+      .toEqual([`${deck.sectionId}::slopeA`, `${deck.sectionId}::slopeB`]);
+    await expect.poll(async () => gableEnds(await walls(page)).pairs.length,
+      { message: 'after Redo the gable closes into two pentagon ends again', timeout: 15_000 }).toBe(2);
+    expect((await walls(page)).length).toBe(6);
+    const inspectorClear = page.getByTestId('inspector-clear');
+    if (await inspectorClear.isVisible().catch(() => false)) await inspectorClear.click();
 
     // ── 4. Saved, and the same house after a reload ────────────────────────
     await expect.poll(async () => {
@@ -345,9 +439,14 @@ test.describe('Design: a Block becomes a visible five-point gable house — real
     await page.waitForTimeout(1000);
     // The view toggle is not saved (a decision left to Ray); pressing it shows
     // the same closed house from the stored faces.
-    if (!/✓/.test(await building.innerText())) await building.click();
+    // Off first if it is somehow on, so the press below is the one that turns it on.
+    if (/✓/.test(await building.innerText())) await building.click();
+    await building.click();
+    await expect(building).toContainText('✓');
     await expect.poll(async () => (await walls(page)).length,
       { message: 'the reloaded gable should close into six walls', timeout: 20_000 }).toBe(6);
+    // Pressing 🏚 Building is what puts the Building summary on the status line.
+    await expect(page.getByTestId('engine-status')).toContainText('Building — 2 faces · 6 walls');
     const reloaded = gableEnds(await walls(page));
     expect(reloaded.pairs, 'the reloaded house still has two pentagon ends').toHaveLength(2);
     await aim(page, { headingDeg: 300, pitchDeg: -18, rangeM: 38, h: GROUND_M + 2 });

@@ -40,7 +40,8 @@ import {
 } from '@/lib/design/nativeGeometryDisposition';
 import {
   emptyHistory, pushSnapshot, undo, redo, canUndo, canRedo, undoLabel, redoLabel,
-  type GeometryHistory,
+  restoreRedrawFor,
+  type GeometryHistory, type RestoreRedraw,
 } from '@/lib/3d/geometryHistory';
 import { repositionPanelsForPlanes } from '@/lib/3d/sectionEditing';
 import {
@@ -113,6 +114,12 @@ function asVersion(v: unknown): string | null {
 export interface SiteScope {
   siteKey: string;
   epoch: number;
+}
+
+/** What the last Undo/Redo removed or reshaped, by face id. The token makes
+ *  two identical steps (undo, redo, undo) each a new instruction. */
+export interface GeometryRestoreRedraw extends RestoreRedraw {
+  token: number;
 }
 
 export interface UseSiteDesign {
@@ -244,6 +251,9 @@ export interface UseSiteDesign {
   canRedoGeometry: boolean;
   undoGeometryLabel: string | null;
   redoGeometryLabel: string | null;
+  /** What the last Undo/Redo removed or reshaped, by face id, with a token.
+   *  A render instruction for the 3D view — see `restoreRedrawFor`. */
+  geometryRestore: GeometryRestoreRedraw | null;
 
   // ── Deletion ──────────────────────────────────────────────────────────────
   /**
@@ -406,6 +416,27 @@ export function useSiteDesign(): UseSiteDesign {
   const [geometryHistory, setGeometryHistory] = useState<GeometryHistory>(() => emptyHistory());
   const geometryHistoryRef = useRef<GeometryHistory>(emptyHistory());
   const writeHistory = (h: GeometryHistory) => { geometryHistoryRef.current = h; setGeometryHistory(h); };
+
+  /**
+   * WHAT THE LAST UNDO OR REDO CHANGED, BY FACE ID — for the renderer.
+   *
+   * 🚨 RESTORING THE ARRAY DID NOT RESTORE THE PICTURE. The renderer may not
+   * infer a removal from a prop (absence is not intent), so after an undo it
+   * kept drawing faces the design no longer held and skipped faces whose
+   * geometry had moved back. This is the explicit list it is allowed to act
+   * on, minted here — by the owner, from the two arrays the user's own action
+   * swapped — and keyed on a token so two identical steps both fire. It is a
+   * RENDER instruction only: no ledger, no tombstone, no authorization.
+   * See `restoreRedrawFor`.
+   */
+  const [geometryRestore, setGeometryRestore] = useState<GeometryRestoreRedraw | null>(null);
+  const geometryRestoreTokenRef = useRef(0);
+  const announceRestore = (before: ReadonlyArray<RoofPlane>, after: ReadonlyArray<RoofPlane>) => {
+    const r = restoreRedrawFor(before, after);
+    if (r.removedFaceIds.length === 0 && r.reshapedFaceIds.length === 0) return;
+    geometryRestoreTokenRef.current += 1;
+    setGeometryRestore({ token: geometryRestoreTokenRef.current, ...r });
+  };
 
   /** Record the state BEFORE a mutation. Call, then mutate. */
   const recordGeometry = useCallback((label: string, coalesceKey?: string) => {
@@ -574,6 +605,7 @@ export function useSiteDesign(): UseSiteDesign {
     );
     if (!step.ok) return null;
     writeHistory(step.history);
+    const planesBefore = roofPlanesRef.current ?? [];
     // 🚨 PANELS FIRST WHEN THE STEP CARRIES THEM. `applyRestoredGeometry`
     // repositions whatever panels are live onto the restored roof; if the
     // deleted ones are not back yet it repositions the survivors and the
@@ -582,6 +614,7 @@ export function useSiteDesign(): UseSiteDesign {
     // Adopt the canonical array; every derived thing rebuilds from it. The
     // orphan count comes back so the label can say a module was left behind.
     const restore = applyRestoredGeometry(step.planes, verbatim);
+    announceRestore(planesBefore, step.planes);
     restoreSiteEntities(step.obstructions, step.measurements);
     restoreDisposition(step.disposition);
     restoreLedger(step.deletions);
@@ -615,6 +648,7 @@ export function useSiteDesign(): UseSiteDesign {
     // Half a fix reads to the user exactly like no fix.
     const beforeLedger = deletionLedgerRef.current;
     const panelsBefore = panelsRef.current;
+    const planesBefore = roofPlanesRef.current ?? [];
     const step = redo(
       geometryHistoryRef.current, roofPlanesRef.current, nativeDispositionRef.current,
       deletionLedgerRef.current, panelsRef.current,
@@ -624,6 +658,7 @@ export function useSiteDesign(): UseSiteDesign {
     writeHistory(step.history);
     const verbatim = restorePanelsVerbatim(step.panels);
     const restore = applyRestoredGeometry(step.planes, verbatim);
+    announceRestore(planesBefore, step.planes);
     restoreSiteEntities(step.obstructions, step.measurements);
     restoreDisposition(step.disposition);
     // 🚨 A REDO RE-PERFORMS A DELETION, SO IT MUST RE-AUTHORISE IT.
@@ -1161,6 +1196,7 @@ export function useSiteDesign(): UseSiteDesign {
     canRedoGeometry: canRedo(geometryHistory),
     undoGeometryLabel: undoLabel(geometryHistory),
     redoGeometryLabel: redoLabel(geometryHistory),
+    geometryRestore,
     deletionLedger, deletionLedgerRef,
     planDelete, applyDelete,
     notePanelRemoval, recordGeometryWithPanels, pendingDestructive, clearPendingDestructive,

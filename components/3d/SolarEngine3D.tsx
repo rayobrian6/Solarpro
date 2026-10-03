@@ -205,6 +205,10 @@ import {
 import { roofPlaneFromFootprint, roofPlaneFromFootprintAndRidge } from '@/lib/3d/footprintToRoofPlane';
 // v66: solid building — walls dropped from exterior roof edges to the ground.
 import { buildWalls, faceOrientation, deriveAzimuthsFromSharedEdges, findSharedRidge } from '@/lib/3d/buildingExtrusion';
+import {
+  blockPrismHidden, editChangedRoofKind, isLevelByDesign, sectionKindOf, selectionAfterRebuild,
+  LEVEL_TILT_DEG,
+} from '@/lib/3d/sectionViewRules';
 import { composeRoofTexture, clearRoofTextureCache } from '@/lib/3d/roofTexture';
 import { regularizeOutline, joinSharedCorners } from '@/lib/3d/regularizeOutline';
 import { snapAbutments } from '@/lib/3d/abutment';
@@ -1000,6 +1004,22 @@ interface Props {
      *  setbacks, in-progress traces) goes with it. */
     resetEditor: boolean;
   };
+  /**
+   * WHAT THE OWNER'S LAST UNDO OR REDO CHANGED, and the token that says it is new.
+   *
+   * The same shape of rule as `deletion`: removal driven by an EXPLICIT list of
+   * ids, minted by the owner from the two canonical arrays the user's own Undo
+   * or Redo swapped (see `restoreRedrawFor`), never inferred here from a prop.
+   * A render instruction only — no ledger, no tombstone, no authorization.
+   *   removedFaceIds   no longer in the design: take their picture down
+   *   reshapedFaceIds  still in the design, drawn at the geometry it had before
+   *                    the step: take it down so the restore pass redraws it
+   */
+  geometryRestore?: {
+    token: number;
+    removedFaceIds: string[];
+    reshapedFaceIds: string[];
+  };
   onUndoGeometry?: () => string | null;
   onRedoGeometry?: () => string | null;
   canUndoGeometry?: boolean;
@@ -1493,7 +1513,7 @@ function SolarEngine3D({
   initialObstructions,
   onRoofPlanesStitched,
   onRoofGeometryReplaced,
-  onRequestDelete, deletion, onRunShadeAnalysis, onPanelsAboutToBeCulled,
+  onRequestDelete, deletion, geometryRestore, onRunShadeAnalysis, onPanelsAboutToBeCulled,
   onUndoGeometry, onRedoGeometry,
   canUndoGeometry = false, canRedoGeometry = false,
   undoGeometryLabel = null, redoGeometryLabel = null,
@@ -3703,12 +3723,54 @@ function SolarEngine3D({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deletion?.token]);
 
+  // ═════════════════════════════════════════════════════════════════════════
+  // AN UNDO OR REDO HAS SWAPPED THE ROOF — redraw exactly what it changed.
+  //
+  // 🚨 THE DATA WAS RIGHT AND THE PICTURE WAS NOT. Undo restored the canonical
+  // array (and the autosave stored it), but nothing here took down a face the
+  // step removed — absence is not intent — and the restore pass below skips a
+  // face that is still drawn, so a face whose geometry the step moved back kept
+  // its old picture. Block → Gable → Hip → Undo held a gable and drew hip
+  // trapezoids, two ghost hip ends and the deck; the Building view drew six
+  // gable walls around a design that held a hip.
+  //
+  // The ids come from the owner (`restoreRedrawFor`), named by the user's own
+  // Undo or Redo — the same footing as `deletion`. Removed faces lose their
+  // entities; reshaped faces lose theirs so the restore pass, which runs next
+  // in this same commit (it is declared after this effect), draws them from
+  // the restored record. The maps are left alone, as everywhere else.
+  // ═════════════════════════════════════════════════════════════════════════
+  const lastRestoreTokenRef = useRef<number>(0);
+  /** Faces this effect took down for the restore pass to redraw — a REDRAW, not a load. */
+  const historyRedrawIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!geometryRestore || !geometryRestore.token) return;
+    if (geometryRestore.token === lastRestoreTokenRef.current) return;
+    lastRestoreTokenRef.current = geometryRestore.token;
+    const viewer = viewerRef.current;
+    if (!viewer) return;
+    const removedIds = geometryRestore.removedFaceIds ?? [];
+    const reshapedIds = geometryRestore.reshapedFaceIds ?? [];
+    // Rails are derived from PANELS and follow them; the forward kind-change
+    // path leaves them too.
+    const n = removeFaceEntities(viewer, [...removedIds, ...reshapedIds], { keepRails: true });
+    for (const id of reshapedIds) historyRedrawIdsRef.current.add(id);
+    addLog('UNDO', `history step: took down ${removedIds.length} removed and ${reshapedIds.length} reshaped `
+      + `face(s), ${n} entit${n === 1 ? 'y' : 'ies'}; the reshaped ones are redrawn from the design`);
+    try { viewer.scene?.requestRender?.(); } catch { /* ignore */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [geometryRestore?.token]);
+
   // session). Does NOT touch panels or fences — those have their own restore paths.
   useEffect(() => {
     const viewer = viewerRef.current;
     const C = (window as any).Cesium;
     if (!viewer || !C || stage !== 'done') return;
     const planes = roofPlanes ?? [];
+    // Faces an Undo/Redo took down to be redrawn (see the effect above). Read
+    // once and forgotten, so a later genuine restore is never mistaken for one.
+    const historyRedraw = historyRedrawIdsRef.current;
+    historyRedrawIdsRef.current = new Set();
 
     // 🚨 v66: A RECONCILE-DELETIONS BLOCK WAS HERE AND IS DELIBERATELY GONE.
     //
@@ -3741,6 +3803,7 @@ function SolarEngine3D({
 
     const groundElev = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
     let restored = 0;
+    let redrawnAfterHistory = 0;
 
     for (const plane of planesToRestore) {
       try {
@@ -3821,6 +3884,7 @@ function SolarEngine3D({
         plane3DEntitiesRef.current = Array.from(plane3DEntityMap.current.values()).flat();
 
         restored++;
+        if (historyRedraw.has(plane.id)) redrawnAfterHistory++;
         addLog('RESTORE', `Rebuilt 3D outline for plane ${plane.id.slice(0,8)} (${isMarkOnly ? 'mark-only' : 'panel plane'})`);
       } catch (e) {
         addLog('RESTORE', `Failed plane ${plane.id.slice(0,8)}: ${(e as Error).message}`);
@@ -3829,7 +3893,8 @@ function SolarEngine3D({
 
     // ── Step 6: Show roof model + wireframe + setbacks ────────────────
     if (restored > 0) {
-      setShowRoofModel(true);
+      // A redraw after Undo is not a load: it must not switch a view on.
+      if (restored > redrawnAfterHistory) setShowRoofModel(true);
       try { renderRoofWireframe(viewer, C); } catch {}
       if (showSetbackZones) { try { renderFireSetbackZones(viewer, C); } catch {} }
       try { viewer.scene.requestRender(); } catch {}
@@ -3863,6 +3928,9 @@ function SolarEngine3D({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showRoofModel, roofPlanes, panels, stage]);
 
+  /** Set by the 🏚 Building button only; read once by the Building effect. See
+   *  `renderBuildingExtrusion`'s `announce`. */
+  const announceBuildingRef = useRef(false);
   // v66: rebuild the solid building whenever the roof changes. Same shape as the
   // wireframe effect above, and deliberately NOT keyed on `panels` — panels sit
   // on top of the building and do not change its geometry, so re-extruding on
@@ -3874,8 +3942,12 @@ function SolarEngine3D({
     // Keyed on `roofPlanes` too, so a Block placed while the view is already on
     // hides its prism the moment its section reaches the design.
     syncBlockPrismVisibility(showBuilding3D);
+    // Only a press of 🏚 Building puts the Building summary on the status line;
+    // every other redraw leaves the line to the action that caused it.
+    const announce = announceBuildingRef.current;
+    announceBuildingRef.current = false;
     if (showBuilding3D) {
-      try { renderBuildingExtrusion(viewer, C); }
+      try { renderBuildingExtrusion(viewer, C, { announce }); }
       catch (e) { addLog('WARN', `renderBuildingExtrusion: ${(e as Error).message}`); }
     } else {
       clearBuildingExtrusion(viewer);
@@ -7306,20 +7378,17 @@ function SolarEngine3D({
    */
   function editSection(sectionId: string, edit: SectionEdit, label: string, coalesceKey: string): boolean {
     if (!sectionId) return false;
-    const kindBefore = sectionKindIn(roofPlanesRef.current ?? [], sectionId);
+    // 🚨 THE KIND BEFORE, BY THE AUTHORITY'S OWN LOOKUP — the one
+    // applySectionEdit is about to use. See `sectionKindOf`.
+    const kindBefore = sectionKindOf(roofPlanesRef.current, sectionId);
     const outcome = applySectionEdit(roofPlanesRef.current ?? [], sectionId, edit);
     const ok = adoptGeometryOutcome(outcome, label, coalesceKey, `edit on ${sectionId}`);
     // A Block turned into a gable is a different-looking house; show it as one.
-    if (ok && outcome.section && outcome.section.kind !== kindBefore) {
-      showBuildingWalls(`${sectionId} is now a ${outcome.section.kind} roof`);
+    // An eave, pitch or move edit is not a new roof and leaves the view alone.
+    if (ok && editChangedRoofKind(kindBefore, outcome)) {
+      showBuildingWalls(`${sectionId} is now a ${outcome.section!.kind} roof`);
     }
     return ok;
-  }
-
-  /** The roof kind a section has in this plane list, read off its faces' records. */
-  function sectionKindIn(planes: ReadonlyArray<RoofPlane>, sectionId: string): string | null {
-    const face = planes.find(p => (p.sectionId ?? p.section?.id) === sectionId);
-    return face?.section?.kind ?? null;
   }
 
   /**
@@ -7350,18 +7419,24 @@ function SolarEngine3D({
    * gable ends (or stands above them), so while the walls are drawn they are
    * the massing and the box steps aside.
    *
-   * Only a prism whose section is in the design is hidden. A Block whose roof
-   * face was refused (no ground elevation yet) has no walls to stand in for
-   * it, and hiding its box would make the tool look as if it did nothing.
+   * A Block whose roof face was refused (no ground elevation yet) has no walls
+   * to stand in for it, and hiding its box would make the tool look as if it
+   * did nothing. A Block whose section has since been DELETED (or its creation
+   * undone) keeps its box hidden: a 4 m box reappearing where the house was
+   * just removed is a ghost. See `blockPrismHidden`.
+   *
+   * Synced from the Building effect, which runs on every roof change as well
+   * as every toggle — so a delete, an undo or a redo re-decides it.
    */
   function syncBlockPrismVisibility(buildingOn: boolean) {
     const planes = roofPlanesRef.current ?? [];
     for (const prism of blockEntitiesRef.current) {
       const sid = (prism as any)?.__sectionId as string | undefined;
-      const walled = buildingOn && !!sid && planes.some(p => (p.sectionId ?? p.section?.id) === sid);
-      try { prism.show = !walled; } catch { /* ignore */ }
+      // The rule, and the "section was deleted" case, live in blockPrismHidden.
+      const hidden = blockPrismHidden(planes, sid, buildingOn);
+      try { prism.show = !hidden; } catch { /* ignore */ }
       const handle = blockHandlesRef.current.find((h: any) => (h as any).__blockId === prism.id);
-      if (handle) { try { handle.show = !walled; } catch { /* ignore */ } }
+      if (handle) { try { handle.show = !hidden; } catch { /* ignore */ } }
     }
   }
 
@@ -7410,6 +7485,19 @@ function SolarEngine3D({
       return false;
     }
     setSectionRefusal(null);
+
+    // 🚨 THE SELECTION FOLLOWS THE SECTION, NOT A FACE THIS EDIT REMOVED.
+    //
+    // On a Block the only face is `::deck`, so it is the face the user clicked
+    // to reach the Roof row — and Gable removes it. Left on the dead id, the
+    // "a selection cannot outlive its face" effect cleared it one render later:
+    // the inspector closed, and `selectRoofFace(null)` wiped the
+    // orphaned-panel notice set below, 57 ms after it appeared (live probe:
+    // 36 modules left inside the attic with nothing on screen). The section
+    // survived the edit, so the selection moves to one of its faces — BEFORE
+    // the notice, because selecting clears the refusal line.
+    const stillSelected = selectionAfterRebuild(selectedFaceIdRef.current, outcome);
+    if (stillSelected !== selectedFaceIdRef.current) selectRoofFace(stillSelected);
 
     // Faces the section no longer owns — only ever non-empty when `kind`
     // changed, e.g. a hip becoming a gable drops its two hip ends. Their Cesium
@@ -7499,7 +7587,21 @@ function SolarEngine3D({
     return true;
   }
 
-  function renderBuildingExtrusion(viewer: any, C: any) {
+  /**
+   * Draw the walls and the solid roof.
+   *
+   * 🚨 `announce`: THE STATUS LINE IS SOMEBODY ELSE'S UNLESS BUILDING WAS
+   * PRESSED. This used to end with an unconditional `setStatusMsg`, and it runs
+   * from the Building effect on every roof change and every selection change —
+   * so it overwrote, a render later, whatever the action that caused the
+   * redraw had just said. A Block placed read "⚠ 1 of 1 face(s) are FLAT"
+   * instead of "Block placed … (Roof → Gable makes it a house)", the only
+   * pointer to the Roof control; "Change roof to Gable" became "2 faces · 6
+   * walls"; the Gable tool's ridge height was lost the same way. The Building
+   * summary is the answer to pressing 🏚 Building, so only that announces it.
+   */
+  function renderBuildingExtrusion(viewer: any, C: any, opts: { announce?: boolean } = {}) {
+    const announce = opts.announce === true;
     clearBuildingExtrusion(viewer);
     const groundSeed = cesiumGroundElevResolvedRef.current ? cesiumGroundElevRef.current : 0;
     const renderables = collectRoofRenderables(C, groundSeed);
@@ -7507,7 +7609,7 @@ function SolarEngine3D({
       // The old text said "trace a roof face first", which sends the reader
       // straight to Mark Plane - the tool that CANNOT produce a building.
       // Name the group that can.
-      setStatusMsg('Nothing to extrude yet \u2014 model the house first with \u{1F3DA} Building \u2192 Gable, Hip or Flat/Block. (\u{1F3DA} Building only draws walls on what already exists.)');
+      if (announce) setStatusMsg('Nothing to extrude yet \u2014 model the house first with \u{1F3DA} Building \u2192 Gable, Hip or Flat/Block. (\u{1F3DA} Building only draws walls on what already exists.)');
       return;
     }
 
@@ -7654,9 +7756,13 @@ function SolarEngine3D({
     const roofEdge = C.Color.fromCssColorString('#ff9500').withAlpha(0.9);
     let flatFaceCount = 0;
     const roofEntities: Array<{ ent: any; ring: Array<{ lat: number; lng: number }>; lit: number }> = [];
+    const planeById = new Map((roofPlanesRef.current ?? []).map(p => [p.id, p] as const));
     for (const f of faces) {
       const orient = faceOrientation(f.polygon3D);
-      if (orient.tiltDeg < 1) flatFaceCount++;
+      // A Block's deck, a flat section or a 0° shed is level ON PURPOSE — its
+      // record says so. The warning is for a face that came out level when
+      // nobody asked for it.
+      if (orient.tiltDeg < LEVEL_TILT_DEG && !isLevelByDesign(planeById.get(f.id))) flatFaceCount++;
       const pts = f.polygon3D.map(p => new C.Cartesian3(p.x, p.y, p.z));
       const lit = litness(f.polygon3D);
       const isSel = selectedFaceIdRef.current === f.id;
@@ -7725,7 +7831,7 @@ function SolarEngine3D({
     // Surface a flat roof instead of quietly shading it like a roof: if the
     // geometry really is horizontal, the user needs to know that, not see a
     // convincing picture of a roof that does not exist.
-    setStatusMsg(
+    if (announce) setStatusMsg(
       flatFaceCount > 0
         ? `🏚 Building — ⚠ ${flatFaceCount} of ${faces.length} face(s) are FLAT (0° tilt measured from the geometry) · ${walls.length} walls`
         : `🏚 Building — ${faces.length} face${faces.length === 1 ? '' : 's'} · ${walls.length} wall${walls.length === 1 ? '' : 's'} down to ground`
@@ -14822,7 +14928,7 @@ function SolarEngine3D({
    *  design is taken from `roofPlanesRef.current` by `liveRenderedFaces()`, so a
    *  leftover cache entry decides nothing — and a deleted id is tombstoned, so
    *  it can never return to be confused with a new face. */
-  function removeFaceEntities(viewer: any, faceIds: string[]) {
+  function removeFaceEntities(viewer: any, faceIds: string[], opts: { keepRails?: boolean } = {}) {
     if (!viewer || !faceIds?.length) return 0;
     let removed = 0;
     for (const id of faceIds) {
@@ -14832,7 +14938,9 @@ function SolarEngine3D({
       }
       // The rails and the setback bands are DERIVED from the face. They are
       // keyed by plane id and would otherwise hang in the air over nothing.
-      try { clearRoofRails(viewer, id); } catch { /* ignore */ }
+      // (An Undo/Redo redraw keeps them: the panels they belong to are still
+      // there, and the panel render owns them.)
+      if (!opts.keepRails) { try { clearRoofRails(viewer, id); } catch { /* ignore */ } }
     }
     // A named sweep as well, because `[PLANE3D-*]` entities carry the face id
     // in their name and a map entry that was never written (a face restored by
@@ -20272,7 +20380,7 @@ function SolarEngine3D({
                 the ground, plus opaque roof surfaces, so a traced roof reads as
                 a building instead of wireframe over satellite imagery. */}
             <button
-              onClick={() => setShowBuilding3D(v => !v)}
+              onClick={() => { announceBuildingRef.current = true; setShowBuilding3D(v => !v); }}
               title="Building: extrude walls from the roof down to the ground and fill the roof surfaces — turns marked planes into a solid 3D model"
               data-no-drag
               style={{
