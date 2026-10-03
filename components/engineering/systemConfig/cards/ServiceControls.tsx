@@ -193,13 +193,19 @@ export function DistributionControl({ t, item, ids, disabled, apply }: {
  * verdict (the engine's, read — never recomputed) lists the remedies as PROPOSED WORK: nothing here
  * writes a remedy as the panel's rating.
  */
-export function PanelRow({ t, panel: p, item, ids, disabled, apply, check = null, chip }: {
+export function PanelRow({ t, panel: p, item, ids, disabled, apply, check = null, chip, askSccr = false }: {
   t: ServiceTopology; panel: PanelBoard; item: InterviewItem | null; ids: ServiceControlIds; disabled: boolean;
   apply: Apply; check?: TopologyCheck | null; chip?: React.ReactNode;
+  /** Asked for the panel's SCCR (the engine's fault-current chain names this panel). */
+  askSccr?: boolean;
 }) {
   const id = IDS[ids].panel;
   const remedies = busbarRemedies(p, check);
   const missing = item?.state === 'needs-answer';
+  // 🚨 THE PANEL'S SCCR, OFF ITS LABEL — once the utility's fault current makes the chain need it (or a
+  // figure is recorded). It was only ever editable in the Service Topology inspector's panel box.
+  const showSccr = askSccr || t.service.availableFaultCurrentA != null || p.sccrA != null;
+  const sccrNeeded = showSccr && p.sccrA == null && t.service.availableFaultCurrentA != null;
   return (
     <div data-testid={`${id}-${p.id}`} data-state={item?.state}>
       {/* Two lines so the card reads in the narrow left column: the panel and its maker, then its ratings. */}
@@ -216,7 +222,7 @@ export function PanelRow({ t, panel: p, item, ids, disabled, apply, check = null
                  }
                }} />
       </div>
-      <div className="mt-1 grid grid-cols-2 items-center gap-1.5 text-[11px] text-slate-400">
+      <div className={`mt-1 grid ${showSccr ? 'grid-cols-3' : 'grid-cols-2'} items-center gap-1.5 text-[11px] text-slate-400`}>
         <label className="flex items-center gap-1">Main
           <select data-testid={`${id}-main-${p.id}`} className={`w-full ${box} ${missing && p.mainBreakerA == null ? NEEDS : ''}`}
                   disabled={disabled} value={p.mainBreakerA ?? ''}
@@ -233,6 +239,25 @@ export function PanelRow({ t, panel: p, item, ids, disabled, apply, check = null
             {withRecorded(BUSBAR_RATINGS, p.busbarRatingA).map(a => <option key={a} value={a}>{a} A</option>)}
           </select>
         </label>
+        {showSccr ? (
+          <label className="flex items-center gap-1" title="Interrupting rating (SCCR) off the panel label, in kA">SCCR
+            <input type="number" min={0} step={0.5} data-testid={`${id}-sccr-${p.id}`} key={p.sccrA ?? 'none'}
+                   aria-label={`${p.label} SCCR (kA)`} placeholder="kA" disabled={disabled}
+                   className={`w-full min-w-0 ${box} ${sccrNeeded ? NEEDS : ''}`}
+                   defaultValue={p.sccrA != null ? p.sccrA / 1000 : ''}
+                   onBlur={e => {
+                     const el = e.currentTarget;
+                     if (el.validity?.badInput) {
+                       el.value = p.sccrA != null ? String(p.sccrA / 1000) : '';
+                       void apply({ ok: false, refused: `${p.label} SCCR: enter the kiloamperes on the panel label, or leave it blank.` });
+                       return;
+                     }
+                     const ka = el.value.trim() === '' ? null : Number(el.value);
+                     const a = ka === null ? null : Math.round(ka * 1000);
+                     if (a !== (p.sccrA ?? null)) void apply(answerPanel(t, p.id, { sccrA: a }));
+                   }} />
+          </label>
+        ) : null}
       </div>
       {remedies && check ? (
         <div data-testid={`${id}-busbar-fail-${p.id}`}

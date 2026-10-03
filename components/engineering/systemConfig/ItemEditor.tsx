@@ -23,7 +23,7 @@
 
 import React, { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { ServiceTopology, SolarCoupling, BackupDomain } from '@/lib/electrical/serviceTopology';
+import type { ServiceTopology, SolarCoupling, BackupDomain, PanelBoard } from '@/lib/electrical/serviceTopology';
 import type { PvArrayDesign } from '@/lib/electrical/pvArrayDesign';
 import type { FactSource, InterviewItem } from '@/lib/electrical/systemConfigInterview';
 import {
@@ -46,6 +46,8 @@ import {
 } from '@/components/engineering/systemConfig/cards/ServiceControls';
 import { EXISTING_SERVICE_NEED_PREFIX, existingNeedField } from '@/lib/electrical/systemConfigServiceCard';
 import { StringAssignmentEditor } from '@/components/engineering/systemConfig/StringAssignmentEditor';
+import { GenerationPanelsEditor } from '@/components/engineering/systemConfig/GenerationPanelsEditor';
+import { GENERATION_PANELS_ITEM_ID } from '@/lib/electrical/systemConfigGenerationPanels';
 
 export type { SystemEquipmentSelection };
 
@@ -135,15 +137,32 @@ export function applyVia(
 /** Items whose editor takes several separate writes (a dialog stays open between them). */
 export function isMultiFieldItem(itemId: string): boolean {
   return itemId.startsWith('service.panel.') || itemId === 'service.existing' || itemId === 'behavior.isolation'
-    || itemId.startsWith(DISCONNECT_ITEM_PREFIX) || itemId === LOAD_ANALYSIS_ITEM_ID;
+    || itemId.startsWith(DISCONNECT_ITEM_PREFIX) || itemId === LOAD_ANALYSIS_ITEM_ID
+    || itemId === GENERATION_PANELS_ITEM_ID || itemId.startsWith(SCCR_NEED_PREFIX);
+}
+
+/** "Interrupting rating (SCCR) for <node>" — what the engine's fault-current chain waits on. */
+export const SCCR_NEED_PREFIX = 'engineering.needs.sccr:';
+/** "How the new solar connects" — the engine's `pv.coupling` need, where no question asks it. */
+export const COUPLING_NEED_ID = 'engineering.needs.interconnection.solarCoupling';
+
+/** The panelboard an `engineering.needs.sccr:<id>` names, when it names one (its SCCR is on its label). */
+export function panelOfSccrNeed(itemId: string, t: ServiceTopology | null): PanelBoard | null {
+  if (!t || !itemId.startsWith(SCCR_NEED_PREFIX)) return null;
+  const id = itemId.slice(SCCR_NEED_PREFIX.length);
+  return t.panels.find(p => p.id === id) ?? null;
 }
 
 /** Does `ItemEditor` render a control for this item? (False ⇒ it is a fact, or answered elsewhere.) */
 export function hasItemEditor(item: InterviewItem, t: ServiceTopology | null): boolean {
   const id = item.id;
   if (id === 'service.rating') return true;
-  if (id === 'behavior.pv-connection') return !!item.options;
+  if (id === 'behavior.pv-connection' || id === COUPLING_NEED_ID) return !!item.options;
   if (!t) return false;
+  // Moved out of the Service Topology inspector (closure slice 1): the generation panels' part, busbar
+  // and SCCR, and a panelboard's own SCCR.
+  if (id === GENERATION_PANELS_ITEM_ID) return (t.aggregationPanels ?? []).length > 0;
+  if (id.startsWith(SCCR_NEED_PREFIX)) return panelOfSccrNeed(id, t) !== null;
   if (id.startsWith(EXISTING_SERVICE_NEED_PREFIX)) return !!t.service.existingEquipment;
   if (id.startsWith(UTILITY_ITEM_PREFIX)) return id === METER_COLLAR_ITEM_ID && !!item.options;
   if (id.startsWith(DISCONNECT_ITEM_PREFIX)) return disconnectRoleOf(id) !== null;
@@ -447,6 +466,22 @@ export function ItemEditor(props: ItemEditorProps) {
     return <SystemEquipmentEditor item={item} topology={t} apply={apply} busy={busy} equipment={props.equipment} />;
   }
   if (id.startsWith(LOAD_ANALYSIS_ITEM_ID)) return <LoadAnalysisEditor item={item} topology={t} apply={apply} busy={busy} />;
+  if (id === GENERATION_PANELS_ITEM_ID) return <GenerationPanelsEditor topology={t} apply={apply} busy={busy} />;
+  // A panelboard's SCCR is read off its label — asked with the same row the Service card uses.
+  const sccrPanel = panelOfSccrNeed(id, t);
+  if (sccrPanel && t) {
+    return <PanelRow t={t} panel={sccrPanel} item={item} ids="answer" disabled={busy} apply={apply} askSccr />;
+  }
+  // 🚨 THE PV COUPLING WHERE NO QUESTION ASKS IT: recorded through the same `onRecordCoupling` as
+  // `behavior.pv-connection`, which the page routes to the writer that can record it.
+  if (id === COUPLING_NEED_ID && item.options) {
+    const record = props.onRecordCoupling;
+    return (
+      <Radio name="pv-coupling-need" testid="answer-pv-coupling" options={item.options} value={null}
+             disabled={busy || !t || !record}
+             onPick={v => { if (record) void record(v as SolarCoupling); }} />
+    );
+  }
 
   // 🚨 THE SERVICE QUESTIONS USE THE SERVICE CARD'S OWN CONTROLS (`cards/ServiceControls.tsx`): the
   // same ladders (175 A is a main breaker rating), the recorded value always offered, a fault-current

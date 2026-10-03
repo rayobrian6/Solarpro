@@ -37,6 +37,7 @@ import { buildServiceOverview, REQUIREMENT_OWNERS } from '@/lib/electrical/topol
 import { buildUtilityDisconnectsItems, supersededByUtilityDisconnects } from '@/lib/electrical/systemConfigUtilityDisconnects';
 import { buildSystemEquipmentItems, placeSystemEquipmentItems } from '@/lib/electrical/systemConfigSystemEquipment';
 import { buildLoadAnalysisItems } from '@/lib/electrical/systemConfigLoadAnalysis';
+import { buildGenerationPanelsItem, supersededByGenerationPanels } from '@/lib/electrical/systemConfigGenerationPanels';
 
 // ── The vocabulary an installer reads ───────────────────────────────────────
 
@@ -708,9 +709,26 @@ export function buildSystemConfigInterview(input: InterviewInput): SystemConfigI
   // computed (deduplicated, installer-labelled, owner-classified) — not re-derived here.
   if (t && input.evaluation) {
     const overview = buildServiceOverview(t, input.evaluation);
+    // 🚨 "HOW DOES THE NEW SOLAR CONNECT?" WHERE NO QUESTION ASKS IT. `behavior.pv-connection` is asked
+    // only beside storage; on any other job the engine's `pv.coupling` check still waits on the graph's
+    // coupling, and the Service Topology inspector was the only place to record it. The need carries the
+    // answers the equipment supports (capability, never brand), and is answered where it stands.
+    const couplingOptions = (): InterviewOption[] | undefined => {
+      const ac: InterviewOption = { value: 'ac-coupled-inverter', label: 'Through an external PV inverter',
+        detail: 'The PV has its own inverter and connects on AC.' };
+      if (hasPv) {
+        if (eq.pvInverter.state === 'CONFLICT') return undefined;   // resolved where the conflict is raised
+        if (eq.pvInverter.state === 'SELECTED') return [ac];
+        return [...(eq.storage?.pvInput ? [{ value: 'dc-coupled-storage', label: `Directly to ${storageLabel} PV inputs`,
+          detail: 'The strings land on the battery’s own DC inputs; no separate PV inverter.' }] : []), ac];
+      }
+      return hasStorage ? [{ value: 'storage-only', label: 'No PV — storage only' }] : undefined;
+    };
     for (const r of overview.requiredInputs.filter(x => x.owner !== 'optional-calculation')) {
       const owner = REQUIREMENT_OWNERS.find(o => o.owner === r.owner);
+      const options = r.key === 'interconnection.solarCoupling' ? couplingOptions() : undefined;
       engineering.push({
+        ...(options ? { options, value: null } : {}),
         id: `engineering.needs.${r.key}`,
         section: 'engineering',
         question: r.label,
@@ -747,6 +765,13 @@ export function buildSystemConfigInterview(input: InterviewInput): SystemConfigI
   placeSystemEquipmentItems({ equipment, behavior }, buildSystemEquipmentItems(input), input);
   // Optional full load analysis — lib/electrical/systemConfigLoadAnalysis.ts (before the overall verdict, which is the card's summary)
   engineering.splice(engineering.findIndex(i => i.id === 'engineering.overall'), 0, ...buildLoadAnalysisItems(input));
+  // The generation / combiner panels' part, busbar and SCCR — lib/electrical/systemConfigGenerationPanels.ts
+  const gpItem = buildGenerationPanelsItem(input);
+  if (gpItem) {
+    const gpDrop = supersededByGenerationPanels(input, [gpItem]);
+    for (let k = engineering.length - 1; k >= 0; k--) if (gpDrop.has(engineering[k].id)) engineering.splice(k, 1);
+    engineering.splice(engineering.findIndex(i => i.id === 'engineering.overall'), 0, gpItem);
+  }
 
   // ── Assemble ─────────────────────────────────────────────────────────────
   const sectionOf = (id: SectionId, title: string, items: InterviewItem[], summary: string): InterviewSection => ({

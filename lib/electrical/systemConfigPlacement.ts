@@ -26,6 +26,7 @@ import {
   UTILITY_ITEM_PREFIX, disconnectItemId, disconnectRoleOf,
 } from '@/lib/electrical/systemConfigUtilityDisconnects';
 import { SYSTEM_EQUIPMENT_PREFIX, parseSystemEquipmentItemId } from '@/lib/electrical/systemConfigSystemEquipment';
+import { GENERATION_PANELS_ITEM_ID } from '@/lib/electrical/systemConfigGenerationPanels';
 
 // ── Homes ───────────────────────────────────────────────────────────────────
 
@@ -73,8 +74,10 @@ export function homeOf(itemId: string): CardHome {
   // A module conflict / stale string assignment is a required action, not a fact to restate.
   if (id.startsWith('design.')) return 'readiness';
   if (id.startsWith('service.') || id.startsWith(EXISTING_EQUIPMENT_NEED)) return 'service';
+  // The generation / combiner panels are what the Battery card's "AC aggregation" answer built — their
+  // part, busbar and SCCR are chosen behind that card's [Select Equipment].
   if (id === 'equipment.storage' || id === 'equipment.gateway' || id.startsWith(SYSTEM_EQUIPMENT_PREFIX)
-    || id === 'behavior.storage-landing') return 'battery';
+    || id === 'behavior.storage-landing' || id === GENERATION_PANELS_ITEM_ID) return 'battery';
   if (id === 'equipment.pv-inverter' || id === 'behavior.pv-connection' || id === 'behavior.pv-landing'
     || id === PV_STRING_ASSIGNMENT_NEED) {
     return 'inverters';
@@ -141,8 +144,13 @@ const NEED_ASKED_BY: ReadonlyArray<[token: string | ((t: string) => boolean), as
 ];
 
 function needAskedBy(token: string, id: string): boolean {
-  // "A device carrying the <role> role" is the disconnect editor for that role.
-  if (token.startsWith('device.role:')) return id === `${DISCONNECT_ITEM_PREFIX}${token.slice('device.role:'.length)}`;
+  // "A device carrying the <role> role" is the disconnect editor for that role — and the utility
+  // isolation switch is built by answering whether the utility requires one (`behavior.isolation`),
+  // which is the question to ask first; nothing else in System Config adds that switch.
+  if (token.startsWith('device.role:')) {
+    const role = token.slice('device.role:'.length);
+    return id === `${DISCONNECT_ITEM_PREFIX}${role}` || (role === 'der-isolation-disconnect' && id === 'behavior.isolation');
+  }
   for (const [match, asks] of NEED_ASKED_BY) {
     if (typeof match === 'string' ? match === token : match(token)) return asks(id);
   }
@@ -274,6 +282,11 @@ export function nextActionLabel(item: InterviewItem): string {
         : 'Record the utility isolation requirement';
   }
   if (ITEM_LABEL[id]) return ITEM_LABEL[id];
+  if (id === GENERATION_PANELS_ITEM_ID) {
+    return item.state === 'fails' ? 'Replace the generation panel — its rating does not fit'
+      : item.state === 'needs-answer' ? 'Choose the generation panel part and its busbar'
+        : 'Confirm the generation panel SCCR';
+  }
   if (id.startsWith('service.panel.')) return `Enter ${subjectOf(item.question)} main breaker and busbar`;
   const sys = parseSystemEquipmentItemId(id);
   if (sys) {

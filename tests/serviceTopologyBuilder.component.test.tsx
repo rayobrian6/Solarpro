@@ -19,7 +19,9 @@
 //
 // WHAT IT DOES NOT COVER, said plainly: the engineering PAGE around it (18k lines, needs a project
 // and a database) is not exercised here. The tab is mounted and typechecked; the flow through the
-// real browser with a live project is Ray's acceptance, not this file's.
+// real browser with a live project is Ray's acceptance, not this file's. (Since closure slice 1 the
+// builder is no longer a tab: it is the Advanced service model editor inside Review Engineering —
+// tests/serviceTopologyLeftTheNavigation*.)
 // ═══════════════════════════════════════════════════════════════════════════
 import React from 'react';
 import { describe, it, expect, afterEach } from 'vitest';

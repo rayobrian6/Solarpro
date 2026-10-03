@@ -139,7 +139,9 @@ describe('QuestionDialog — one question, accessible, closes after a successful
 
   it('a fact with no editor says where it is answered; null closes it', () => {
     const t = house200();
-    const item = findInterviewItem(interviewOf(t), 'engineering.needs.interconnection.solarCoupling')!;
+    // (The engine's PV-coupling need used to be this example. Since closure slice 1 it carries its
+    // answers and has an editor — the Service Topology inspector was its only home.)
+    const item = findInterviewItem(interviewOf(t), 'engineering.overall')!;
     const { rerender } = render(<QuestionDialog {...ctxFor(t, async () => true)} item={item} onClose={() => undefined} />);
     expect(screen.getByTestId('question-no-editor').textContent).toMatch(/^Nothing to enter here/);
     rerender(<QuestionDialog {...ctxFor(t, async () => true)} item={null} onClose={() => undefined} />);

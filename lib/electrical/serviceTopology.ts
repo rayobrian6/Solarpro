@@ -1946,7 +1946,20 @@ export function evaluateServiceTopology(topology: ServiceTopology): TopologyEval
   // and not a document a manufacturer owes us — it is a choice the designer has not made, and the
   // drawing must not pick one to look finished.
   const sources = derSources(topology);
-  if (sources.length > 0) {
+  // 🚨 ONE SYSTEM HAS NOTHING TO COMBINE WITH. With every DER source inside the site's single backup
+  // system (and no site-wide generation panel), how "the systems" reach the service is not a choice:
+  // the system reaches it through its own path, and where its batteries land is its own question
+  // (`behavior.storage-landing`). System Config never asks it of one system — and the only place that
+  // could answer it was the Service Topology wizard, no longer in the navigation. Determined, so PASS;
+  // nothing is written to the graph's slot on the installer's behalf.
+  const oneSystemOnly = !ic.derArrangement && topology.domains.length === 1
+    && sources.every(s => s.domainId === topology.domains[0].id)
+    && !(topology.aggregationPanels ?? []).some(a => !a.domainId);
+  if (sources.length > 0 && oneSystemOnly) {
+    checks.push(pass('interconnection.arrangement', 'site', 'DER interconnection arrangement',
+      `Every DER source on this site is in ${topology.domains[0].label}, so it reaches the service through `
+      + 'its own path — there is no second system to combine it with, and no arrangement to choose.'));
+  } else if (sources.length > 0) {
     checks.push(ic.derArrangement
       ? pass('interconnection.arrangement', 'site', 'DER interconnection arrangement',
           ic.derArrangement === 'common-aggregation'

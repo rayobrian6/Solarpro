@@ -118,7 +118,9 @@ import { deriveStorageDcStrings } from '@/lib/electrical/storageDcStrings';
 import { dcStringLimits } from '@/lib/electrical/dcStringLimits';
 import { buildSystemConfigInterview, type InterviewEquipment } from '@/lib/electrical/systemConfigInterview';
 import { selectionPairOf, controllersByProduct, storageByProduct } from '@/lib/electrical/systemConfigSystemEquipment';
-import { evaluateServiceTopology } from '@/lib/electrical/serviceTopology';
+import { evaluateServiceTopology, type SolarCoupling } from '@/lib/electrical/serviceTopology';
+// Closure slice 1 — the PV coupling's writer, chosen by what is on file (Service Topology left the nav).
+import { answerSolarCoupling, pvCouplingWritePath } from '@/lib/electrical/systemConfigAnswers';
 // System Config V3 — Inverters & Strings: PV inverter / PV connection / the one PV STRINGS block.
 import { InvertersStringsDecisions } from '@/components/engineering/systemConfig/cards/InvertersStringsCard';
 // System Config V3 — no questionnaire above the grid: each question in its home card, one dialog,
@@ -331,7 +333,10 @@ function parseCityFromAddress(address: string): string | null {
 type InverterType = 'string' | 'micro' | 'optimizer' | 'hybrid' | 'ecoflow';
 type RoofType = 'shingle' | 'tile' | 'metal_standing_seam' | 'metal_corrugated' | 'flat_tpo' | 'flat_epdm' | 'flat_gravel';
 type SystemType = 'roof' | 'ground' | 'fence';
-type TabId = 'config' | 'service' | 'compliance' | 'electrical' | 'diagram' | 'schedule' | 'structural' | 'mounting' | 'permit' | 'bom' | 'files';
+// 🚨 NO SERVICE TOPOLOGY TAB ID. It is not a tab (closure slice 1): System Config authors the service
+// model, the SLD draws it, and the graph editor is a diagnostic surface inside Review Engineering. A tab
+// id the type does not hold cannot be set — selecting the old id does not compile.
+type TabId = 'config' | 'compliance' | 'electrical' | 'diagram' | 'schedule' | 'structural' | 'mounting' | 'permit' | 'bom' | 'files';
 
 // Wave 1 (docs/ARCHITECTURE-per-subsystem-equipment.md §1.3): the ProjectConfig
 // family is REUNIFIED — canonical declarations live in lib/engineering-helpers.ts;
@@ -1191,10 +1196,12 @@ function EngineeringPageInner() {
   /**
    * 🚨 THE SERVICE GRAPH, HELD ONCE FOR THE WHOLE PAGE.
    *
-   * Handed up by `ServiceTopologyBuilder` as it loads and as it is edited, so the Engineering
-   * Intelligence sidebar reads the SAME object the Service Topology tab is showing. Before this,
-   * the page had no reference to the graph at all — which is how the badge came to read
-   * MICROINVERTER beside a Tesla topology on the next tab.
+   * Loaded by the page itself (the project-keyed effect below) and re-read after every write through
+   * the one write path, so System Config, the Engineering Intelligence sidebar and every request read
+   * the SAME object. It was once handed up only by the Service Topology tab's builder — which is how
+   * the badge came to read MICROINVERTER beside a Tesla topology on the next tab. That tab is gone
+   * from the navigation (closure slice 1); the builder is now only the Advanced service model editor
+   * inside Review Engineering, and it does not write this state.
    */
   const [svcTopology, setSvcTopology] = useState<ServiceTopologyForPage | null>(null);
   // ══════════════════════════════════════════════════════════════════════════
@@ -1236,7 +1243,7 @@ function EngineeringPageInner() {
   // Topology tab is mounted. `ServiceTopologyBuilder` may edit topology. It must not be the
   // mechanism by which the rest of the Engineering page learns what topology exists."
   //
-  // It was. `ServiceTopologyBuilder` is mounted inside `{activeTab === 'service' ? … : null}` and
+  // It was. `ServiceTopologyBuilder` was mounted only while the Service Topology tab was active, and
   // its `onTopologyChange` was the ONLY writer of `svcTopology` — so on every other tab, and after
   // every reload until somebody visited that tab, the page believed the project had no graph and
   // the Engineering Intelligence badge fell back to `inverters[0].type === 'micro'` and printed
@@ -1244,7 +1251,8 @@ function EngineeringPageInner() {
   //
   // This effect is keyed on the PROJECT, not the tab. Switching tabs, deep-linking into another
   // tab and reloading all produce the same electrical state, because none of them is what loads it.
-  // The builder still edits the graph and still reports changes up; it is no longer the source.
+  // The Service Topology tab no longer exists at all; the builder survives only as the Advanced
+  // service model editor in Review Engineering, saving through the page's one write path.
   // ══════════════════════════════════════════════════════════════════════════
   // 🚨 BUMPED BY A RESOLUTION, so the recorded architecture reaches the page from the STORE rather
   // than being patched into React state. A local patch would make the badge agree with the server by
@@ -10014,7 +10022,20 @@ function EngineeringPageInner() {
     busy: _svcSaving || !!_archResolving || unreadGraphRefusal(svcTopologyRead) !== null,
     graphRead: svcTopologyRead,
     apply: applyInterviewAnswer,
-    onRecordCoupling: (coupling: string) => resolveElectricalArchitecture(coupling),
+    // 🚨 THE PV COUPLING IS RECORDED BY THE WRITER THAT CAN RECORD IT (`pvCouplingWritePath`). The
+    // architecture route takes the FIRST decision (and retires a separate PV inverter on a DC answer);
+    // once a designer's decision is on file it refuses, and a change is a graph write through the one
+    // write path — the Service Topology inspector's own radio, which is no longer in the navigation.
+    onRecordCoupling: (coupling: string) => {
+      const path = pvCouplingWritePath({
+        coupling: coupling as SolarCoupling,
+        decisionOnFile: _archServer?.provenanceSource === 'service-topology',
+        hasGraph: !!svcTopology,
+      });
+      return path === 'graph' && svcTopology
+        ? applyInterviewAnswer(answerSolarCoupling(svcTopology, coupling as SolarCoupling))
+        : resolveElectricalArchitecture(coupling);
+    },
   };
   // 🚨 ASK THE SERVER WHERE THE EQUIPMENT CAME FROM. See `_archDetail`: the browser can see THAT the
   // architecture is unresolved, but only the server can say whether the inverter was ever a decision.
@@ -10229,7 +10250,6 @@ function EngineeringPageInner() {
 
   const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
     { id: 'config',     label: 'System Config',      icon: <Settings size={14} /> },
-    { id: 'service',    label: 'Service Topology',     icon: <Zap size={14} /> },
     { id: 'compliance', label: 'Compliance',          icon: <ClipboardCheck size={14} /> },
     { id: 'electrical', label: 'Electrical Sizing',   icon: <Activity size={14} /> },
     { id: 'diagram',    label: 'Single-Line Diagram', icon: <Zap size={14} /> },
@@ -13626,30 +13646,26 @@ function EngineeringPageInner() {
                     top required answers, [Answer Next] and [Review Engineering]. */}
                 <EngineeringReadinessPanel {...interviewEditorContext} interview={systemConfigInterview}
                                            error={_svcError ?? _archResolveError}
-                                           onGoToCard={itemId => { revealHomeCard(itemId); }} />
+                                           onGoToCard={itemId => { revealHomeCard(itemId); }}
+                                           // 🚨 THE GRAPH EDITOR, AS A DIAGNOSTIC SURFACE ONLY — not a tab.
+                                           // Its saves take the page's ONE write path (guarded on the
+                                           // read state, legacy mirrors kept, the graph re-read).
+                                           advancedEditor={
+                                             <ServiceTopologyBuilder projectId={currentProjectId ?? null}
+                                                                     onSave={next => writeInterviewAnswer(next, 'the service model (Advanced editor)')} />
+                                           } />
 
               </div>
             );
           })()) : null}
 
           {/* ── COMPLIANCE TAB ── */}
-          {/* ══════════════════════════════════════════════════════════════
-               SERVICE TOPOLOGY — the canonical service graph, built and inspected here.
-
-               Ray: "The visible Engineering workflow must expose the canonical topology rather
-               than requiring fixtures or direct JSON... Do not retain a competing editable
-               'Main Panel Amps' scalar as another authority."
-
-               The page mounts ONE component. Every graph operation is a pure function in
-               lib/electrical/topologyAuthoring.ts — a screen that builds graph objects inline is
-               a second model of the graph.
-             ══════════════════════════════════════════════════════════════ */}
-          {activeTab === 'service' ? (
-            <div data-testid="engineering-service-tab">
-              <ServiceTopologyBuilder projectId={currentProjectId ?? null}
-                                      onTopologyChange={setSvcTopology} />
-            </div>
-          ) : null}
+          {/* 🚨 NO SERVICE TOPOLOGY TAB. Ray (closure gauntlet): "Remove Service Topology from normal
+              Engineering navigation… The SLD is the human visualization of the topology. System Config
+              is the human authoring interface." The service model, its writers, evaluators and
+              consumers stay, and the page loads the graph itself (keyed on the project, never on a
+              tab). The graph editor survives only as the Advanced service model editor inside
+              Engineering Readiness → Review Engineering (`advancedEditor` above). */}
 
           {activeTab === 'compliance' ? ((() => {
             const _ov   = compliance.overallStatus;

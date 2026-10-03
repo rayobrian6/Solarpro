@@ -112,7 +112,11 @@ describe('the status never says "complete" while something is still to review', 
 
 describe('the page: no questionnaire above the grid, guided is one line, readiness at the bottom', () => {
   const page = readFileSync(resolve(process.cwd(), 'app/engineering/page.tsx'), 'utf8');
-  const tab = page.slice(page.indexOf("{activeTab === 'config' ? ((() => {"), page.indexOf("{activeTab === 'service' ? ("));
+  // The System Config tab body ends where the next tab's begins (Service Topology is no longer a tab).
+  const tab = page.slice(page.indexOf("{activeTab === 'config' ? ((() => {"), page.indexOf("{activeTab === 'compliance' ? ((() => {"));
+  it('the slice is the System Config tab body, not the rest of the file', () => {
+    expect(page.indexOf("{activeTab === 'compliance' ? ((() => {")).toBeGreaterThan(page.indexOf("{activeTab === 'config' ? ((() => {"));
+  });
 
   it('the five-card interview is gone from the page', () => {
     expect(page).not.toContain('<SystemConfigInterview');

@@ -40,12 +40,12 @@
     "bytes": 88172
   },
   "normal 200 A residence AC-coupled, 1 PW3": {
-    "sha256": "e14093df2e9c08a3d973661e72953aafb47bf4f8a0184a3c7716a38d49dbc80a",
-    "bytes": 76376
+    "sha256": "cb9139a07e8c1d84b2722fb42bc4e5936ba58815cbaf52b000aba2c0cb647ac9",
+    "bytes": 76129
   },
   "normal 200 A residence AC-coupled, 2 PW3 / string": {
-    "sha256": "7581716b57fb692d0baf0a2d104c4f9cf3517fe7d03ac1b93d43b6bd7dd0d1bc",
-    "bytes": 84890
+    "sha256": "bdefdb50f8c9aa1062873a01ef474171278cce38bd634cb8624d5d301fd5e557",
+    "bytes": 84643
   },
   "DC-coupled graph with NO domain": {
     "sha256": "ed8d44cb8fa1df48592acb3615a5468a3eb20ad5090617343d5185f6a034018f",

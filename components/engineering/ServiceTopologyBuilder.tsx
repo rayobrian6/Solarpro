@@ -1,6 +1,13 @@
 'use client';
 
 // ═══════════════════════════════════════════════════════════════════════════
+// 🚨 NO LONGER A TAB (closure slice 1). Ray: "Remove Service Topology from normal Engineering
+// navigation… System Config is the human authoring interface." This screen survives ONLY as the
+// Advanced service model editor inside Engineering Readiness → Review Engineering, for unusual systems
+// and for the edits System Config deliberately refuses; there it saves through the page's one write
+// path (`onSave`). Every installer decision it used to be the only home of now lives in a System Config
+// card (see tests/serviceTopologyLeftTheNavigation.test.ts for the audit).
+//
 // THE SERVICE TOPOLOGY SCREEN — SEEN FIRST, CONFIGURED THROUGH, PROVED UNDERNEATH.
 //
 // Ray tested the first version in Dev and rejected its UX, not its engineering:
@@ -65,10 +72,18 @@ export interface ServiceTopologyBuilderProps {
    * somewhere else that can drift from it.
    */
   onTopologyChange?: (t: ServiceTopology | null) => void;
+  /**
+   * 🚨 SAVE THROUGH THE HOST'S ONE WRITE PATH. Service Topology is no longer a tab (closure slice 1);
+   * this screen survives as the Advanced service model editor inside Review Engineering, and the
+   * Engineering page's `writeInterviewAnswer` is the only way a graph reaches the store from there:
+   * refused while the graph is unread, the legacy mirrors kept in step, the graph re-read after. Given,
+   * Save calls it INSTEAD of this component's own PUT; true ⇔ saved.
+   */
+  onSave?: (t: ServiceTopology) => Promise<boolean>;
 }
 
 export function ServiceTopologyBuilder({
-  projectId, fetchImpl, onTopologyChange,
+  projectId, fetchImpl, onTopologyChange, onSave,
 }: ServiceTopologyBuilderProps) {
   const doFetch = fetchImpl ?? (typeof fetch !== 'undefined' ? fetch : null);
   const [topology, setTopology] = useState<ServiceTopology | null>(null);
@@ -139,7 +154,20 @@ export function ServiceTopologyBuilder({
   useEffect(() => { onTopologyChange?.(topology); }, [topology, onTopologyChange]);
 
   const save = useCallback(async () => {
-    if (!projectId || !topology || !doFetch) return;
+    if (!projectId || !topology) return;
+    if (onSave) {
+      setSaving(true); setMessage(null);
+      try {
+        const ok = await onSave(topology);
+        setMessage(ok ? 'Service model saved.' : 'Not saved — the service record did not accept it.');
+        // Back to view only on a real save — the same rule as the PUT below.
+        if (ok) { setMode('view'); setBeforeEdit(null); setSelectedId(null); }
+      } catch (e) {
+        setMessage(`Save failed: ${(e as Error).message}`);
+      } finally { setSaving(false); }
+      return;
+    }
+    if (!doFetch) return;
     setSaving(true); setMessage(null);
     try {
       const res = await doFetch(`/api/projects/${projectId}/service-topology`, {
@@ -155,7 +183,7 @@ export function ServiceTopologyBuilder({
     } catch (e) {
       setMessage(`Save failed: ${(e as Error).message}`);
     } finally { setSaving(false); }
-  }, [projectId, topology, doFetch]);
+  }, [projectId, topology, doFetch, onSave]);
 
   const discard = useCallback(() => {
     // A snapshot exists when editing something that was already saved. A topology built this

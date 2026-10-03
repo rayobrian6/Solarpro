@@ -606,7 +606,11 @@ describe('🚨 the ONE write path refuses while the graph is unread — whicheve
 
 describe('the page: the card is back where the Main Service Panel card was, on the one write path', () => {
   const page = readFileSync(resolve(process.cwd(), 'app/engineering/page.tsx'), 'utf8');
-  const tab = page.slice(page.indexOf("{activeTab === 'config' ? ((() => {"), page.indexOf("{activeTab === 'service' ? ("));
+  // The System Config tab body ends where the next tab's begins (Service Topology is no longer a tab).
+  const tab = page.slice(page.indexOf("{activeTab === 'config' ? ((() => {"), page.indexOf("{activeTab === 'compliance' ? ((() => {"));
+  it('the slice is the System Config tab body, not the rest of the file', () => {
+    expect(page.indexOf("{activeTab === 'compliance' ? ((() => {")).toBeGreaterThan(page.indexOf("{activeTab === 'config' ? ((() => {"));
+  });
 
   it('left column: after Project Information, before the PV AC Output Circuit, wrapped in #sc-card-service', () => {
     const card = tab.indexOf('id="sc-card-service"');

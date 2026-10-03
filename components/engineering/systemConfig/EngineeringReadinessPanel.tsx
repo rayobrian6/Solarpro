@@ -37,6 +37,12 @@ export interface EngineeringReadinessPanelProps extends ItemEditorContext {
   error?: string | null;
   /** Take the installer to an item's home card (offered in a dialog for an item asked elsewhere). */
   onGoToCard?: (itemId: string) => void;
+  /**
+   * 🚨 THE ADVANCED SERVICE MODEL EDITOR — the old Service Topology screen, as a DIAGNOSTIC surface.
+   * It is not in the Engineering tab bar any more (closure slice 1). It is rendered only inside Review
+   * Engineering, behind a disclosure that says what it is, and only once that disclosure is opened.
+   */
+  advancedEditor?: React.ReactNode;
 }
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
@@ -155,14 +161,15 @@ export function EngineeringReadinessPanel(props: EngineeringReadinessPanelProps)
                       onClose={closeQuestion} onAnswered={() => { answeredRef.current = true; }}
                       onGoToCard={props.onGoToCard} />
       <ReviewEngineering open={reviewOpen} onClose={() => setReviewOpen(false)} interview={interview}
-                         queue={queue} ctx={ctx} error={props.error} onAnswer={openQuestion} />
+                         queue={queue} ctx={ctx} error={props.error} onAnswer={openQuestion}
+                         advancedEditor={props.advancedEditor} />
     </section>
   );
 }
 
 // ── Review Engineering ──────────────────────────────────────────────────────
 
-function ReviewEngineering({ open, onClose, interview, queue, ctx, error, onAnswer }: {
+function ReviewEngineering({ open, onClose, interview, queue, ctx, error, onAnswer, advancedEditor }: {
   open: boolean;
   onClose: () => void;
   interview: SystemConfigInterview;
@@ -170,9 +177,11 @@ function ReviewEngineering({ open, onClose, interview, queue, ctx, error, onAnsw
   ctx: ItemEditorContext;
   error?: string | null;
   onAnswer: (itemId: string) => void;
+  advancedEditor?: React.ReactNode;
 }) {
   const titleId = useId();
   const [refusal, setRefusal] = useState<string | null>(null);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const apply: ApplyAnswer = async r => {
     if (r.ok === false) { setRefusal(r.refused); return false; }
     setRefusal(null);
@@ -298,10 +307,35 @@ function ReviewEngineering({ open, onClose, interview, queue, ctx, error, onAnsw
                   </div>
                   {n.owner ? <div className="text-slate-500">{n.owner}</div> : null}
                   {n.why ? <div className="text-slate-500">{n.why}</div> : null}
+                  {/* A need the installer can answer is answered HERE — never only in a graph editor. */}
+                  {hasItemEditor(n, ctx.topology) ? (
+                    <div className="mt-1"><ItemEditor {...ctx} item={n} apply={apply} /></div>
+                  ) : null}
                 </li>
               ))}
             </ul>
           </div>
+        ) : null}
+
+        {/* ══ THE ADVANCED SERVICE MODEL EDITOR — diagnostic, not a workflow ═══════════════════
+            The old Service Topology screen, kept for unusual systems (arbitrary service paths, panels
+            and systems) and for the edits System Config refuses because they would remove connected
+            equipment. Mounted only when opened; it saves through the page's one write path. */}
+        {advancedEditor ? (
+          <details data-testid="review-advanced-editor" className="rounded-lg border border-slate-700/60 bg-slate-950/40 p-2"
+                   open={advancedOpen}
+                   onToggle={e => setAdvancedOpen((e.currentTarget as HTMLDetailsElement).open)}>
+            <summary data-testid="review-advanced-editor-toggle"
+                     className="cursor-pointer text-[11px] font-black uppercase tracking-wide text-slate-400">
+              Advanced service model editor
+            </summary>
+            <p className="mt-1 text-[11px] text-slate-500">
+              For unusual systems only. It edits the same service model the System Config cards answer, saves
+              through the same write path, and every check above re-runs on it. Every normal decision is made
+              in the cards — this is not the workflow.
+            </p>
+            {advancedOpen ? <div data-testid="review-advanced-editor-body" className="mt-2">{advancedEditor}</div> : null}
+          </details>
         ) : null}
 
         <div className="flex justify-end">

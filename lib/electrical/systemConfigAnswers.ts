@@ -20,14 +20,14 @@
 import {
   createServiceTopology, addBackupDomain, removeBackupDomain, setDomainEquipment, updatePanel,
   updateDomain, setInterconnection, addPointOfInterconnection, updatePointOfInterconnection,
-  setStoragePvInput, setExistingServiceEquipment,
+  setStoragePvInput, setExistingServiceEquipment, setSolarCoupling,
 } from '@/lib/electrical/topologyAuthoring';
 import {
   buildServiceFromPreset, applyDerArrangement, applyIsolationArrangement,
   applyPerSystemGenerationPanels, clearPerSystemGenerationPanels,
 } from '@/lib/electrical/topologyPresets';
 import type {
-  ServiceTopology, ServicePhase, PoiRelationship, DerArrangement, BackupDomain,
+  ServiceTopology, ServicePhase, PoiRelationship, DerArrangement, BackupDomain, SolarCoupling,
 } from '@/lib/electrical/serviceTopology';
 import { isServicePhase, servicePhaseInfo } from '@/lib/electrical/serviceTopology';
 
@@ -37,6 +37,14 @@ export type AnswerResult =
 
 const done = (topology: ServiceTopology, did: string): AnswerResult => ({ ok: true, topology, did });
 const refuse = (refused: string): AnswerResult => ({ ok: false, refused });
+
+/**
+ * 🚨 WHERE "ADVANCED" IS. A refusal that sends an edit to the graph editor has to name a place the
+ * installer can actually reach. Service Topology is no longer a tab (Ray: "Remove Service Topology from
+ * normal Engineering navigation"); the graph editor survives only as a diagnostic surface inside
+ * Engineering Readiness → Review Engineering. Every refusal says that, in these words.
+ */
+export const ADVANCED_EDITOR = 'the Advanced service model editor (Engineering Readiness → Review Engineering)';
 
 /** Services above this are commonly split; at or below it a service IS one main panel. */
 export const SINGLE_PANEL_MAX_A = 225;
@@ -110,7 +118,8 @@ export function answerElectricalSystem(t: ServiceTopology, phase: string): Answe
  *
  * Builds the branches and main panels with `buildServiceFromPreset`. Refuses when the existing
  * distribution already carries gateways, batteries or generation panels — rebuilding it would
- * delete equipment the installer authored. That edit belongs in Advanced, deliberately.
+ * delete equipment the installer authored. That edit belongs in the Advanced service model editor
+ * (Review Engineering), deliberately.
  */
 export function answerDistribution(
   t: ServiceTopology, presetId: 'one-main-panel' | 'two-main-panels' | 'three-main-panels' | 'custom',
@@ -119,8 +128,8 @@ export function answerDistribution(
   if (t.service.ratedAmps === null) return refuse('Enter the service rating first.');
   if (hasAuthoredEquipment(t)) {
     return refuse('This service already has backup systems or generation panels on it. Changing how '
-      + 'the service is distributed would remove them — change it in Advanced, where each piece is edited '
-      + 'deliberately.');
+      + `the service is distributed would remove them — change it in ${ADVANCED_EDITOR}, where each piece `
+      + 'is edited deliberately.');
   }
   const built = buildServiceFromPreset({
     ratedAmps: t.service.ratedAmps, voltage: t.service.voltage, phase: t.service.phase,
@@ -193,17 +202,28 @@ export function answerExistingService(t: ServiceTopology, patch: ExistingService
     + `${patch.verified ? ' — read on site' : ''}`);
 }
 
-/** A panel card: main breaker, busbar, manufacturer. Never the service rating. */
+/**
+ * A panel card: main breaker, busbar, manufacturer — and its interrupting rating (SCCR), read off the
+ * panel's label. Never the service rating.
+ *
+ * 🚨 THE SCCR IS THE PANEL'S OWN NAMEPLATE FIGURE. Once the utility's fault current is known the
+ * engine's chain check names every panel with no rating; this is the one place an installer states
+ * it (it used to be the Service Topology inspector's panel box). Blank is "not read" (null), never zero.
+ */
 export function answerPanel(
   t: ServiceTopology, panelId: string,
-  patch: { mainBreakerA?: number | null; busbarRatingA?: number | null; manufacturer?: string | null },
+  patch: { mainBreakerA?: number | null; busbarRatingA?: number | null; manufacturer?: string | null; sccrA?: number | null },
 ): AnswerResult {
   const p = t.panels.find(x => x.id === panelId);
   if (!p) return refuse(`No panel '${panelId}'.`);
+  if (patch.sccrA !== undefined && patch.sccrA !== null && (!Number.isFinite(patch.sccrA) || patch.sccrA <= 0)) {
+    return refuse(`${p.label}: the interrupting rating (SCCR) is a positive number read off the panel label, or left blank until it is read.`);
+  }
   const clean: Record<string, unknown> = {};
   if (patch.mainBreakerA !== undefined) clean.mainBreakerA = patch.mainBreakerA;
   if (patch.busbarRatingA !== undefined) clean.busbarRatingA = patch.busbarRatingA;
   if (patch.manufacturer !== undefined) clean.manufacturer = patch.manufacturer?.trim() || null;
+  if (patch.sccrA !== undefined) clean.sccrA = patch.sccrA;
   return done(updatePanel(t, panelId, clean as never), `${p.label} updated`);
 }
 
@@ -318,13 +338,44 @@ export function answerStorageLanding(
     const shared = (t.aggregationPanels ?? []).find(a => !a.domainId);
     return refuse(`${combined.map(d => d.label).join(' and ')} ${combined.length === 1 ? 'is' : 'are'} combined `
       + `with the other systems in ${shared ? shared.label : 'one generation panel'}, so where the batteries `
-      + 'land is decided by how the systems connect to the service. Change that, or edit it in Advanced.');
+      + `land is decided by how the systems connect to the service. Change that, or edit it in ${ADVANCED_EDITOR}.`);
   }
   let next = value === 'der-aggregation-panel'
     ? applyPerSystemGenerationPanels(t, ids).topology
     : clearPerSystemGenerationPanels(t, ids);
   for (const id of ids) next = updateDomain(next, id, { storageConnection: value });
   return done(next, `Battery circuits: ${value}`);
+}
+
+const SOLAR_COUPLINGS: readonly SolarCoupling[] = ['dc-coupled-storage', 'ac-coupled-inverter', 'storage-only'];
+
+/**
+ * "How does the new solar connect?" — the project's one PV coupling, recorded on the graph.
+ *
+ * 🚨 THIS WAS ONLY EVER ASKED IN THE SERVICE TOPOLOGY TAB once a designer had recorded it. The
+ * architecture route records the FIRST decision (and retires a separate PV inverter on a DC answer),
+ * then refuses every later one ("Change the coupling through the service topology"); and a job with
+ * no storage is never asked at all, while the engine's `pv.coupling` check waits on it. With the tab
+ * gone, this is that write: the graph's own writer (`setSolarCoupling`) through the page's one write
+ * path, whose PUT records the designer as the one who decided it.
+ */
+export function answerSolarCoupling(t: ServiceTopology, coupling: SolarCoupling): AnswerResult {
+  if (!SOLAR_COUPLINGS.includes(coupling)) return refuse(`'${coupling}' is not a PV coupling.`);
+  return done(setSolarCoupling(t, coupling), `PV coupling: ${coupling}`);
+}
+
+/**
+ * Which writer records a PV-connection answer: the architecture route for the FIRST decision on a
+ * coupling it accepts (it also retires or confirms the separate PV inverter), the graph otherwise —
+ * a coupling already recorded as a decision (the route refuses to overwrite one) and "storage only"
+ * (the route does not accept it). Without a graph neither can record it.
+ */
+export function pvCouplingWritePath(opts: {
+  coupling: SolarCoupling; decisionOnFile: boolean; hasGraph: boolean;
+}): 'architecture-route' | 'graph' | null {
+  if (!opts.hasGraph) return null;
+  if (opts.decisionOnFile || opts.coupling === 'storage-only') return 'graph';
+  return 'architecture-route';
 }
 
 /** "How do the systems connect to the service?" — only asked with more than one system. */

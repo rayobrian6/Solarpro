@@ -152,9 +152,11 @@ describe('the graph has backup systems: the graph is the record (Ray\'s job)', (
       expect(within(row).getByTestId(`bat-system-controller-${d}`)).toBeTruthy();
       expect(within(row).getByTestId(`bat-system-qty-${d}`)).toBeTruthy();
       expect(within(row).getByTestId(`bat-system-expansions-${d}`)).toBeTruthy();
-      // The only selects in a system's row are its controller and where its AC circuits land.
+      // The only selects in a system's row are its controller, the output setting its batteries are
+      // commissioned at (closure slice 1 — moved from the Service Topology inspector; a setting, not
+      // a model) and where its AC circuits land.
       const selects = Array.from(row.querySelectorAll('select')).map(s => s.getAttribute('data-testid'));
-      expect(selects).toEqual([`bat-system-controller-${d}`, `bat-system-landing-${d}`]);
+      expect(selects).toEqual([`bat-system-controller-${d}`, `bat-system-output-${d}`, `bat-system-landing-${d}`]);
       expect(within(row).queryByTestId(`answer-system-equipment-ess-${d}`)).toBeNull();
     }
   });

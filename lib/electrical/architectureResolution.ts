@@ -89,8 +89,11 @@ export function planArchitectureResolution(
   if (m.solarCouplingProvenance.source === 'service-topology') {
     return {
       ok: false, refusal: 'NOTHING_TO_RESOLVE',
-      message: 'A designer already recorded the architecture on this project. Change the coupling '
-        + 'through the service topology, which records who changed it.',
+      // Not "the service topology": that is no longer a tab. The PV connection on Inverters & Strings
+      // writes the graph (`answerSolarCoupling`), whose PUT records who changed it.
+      message: 'A designer already recorded the architecture on this project. Change the PV connection '
+        + 'on the Inverters & Strings card in System Config — it writes the service record, which records '
+        + 'who changed it.',
     };
   }
   // The answers an outstanding conflict offers; and when none is outstanding, the two couplings

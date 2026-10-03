@@ -38,7 +38,9 @@ import type {
 import type {
   InterviewInput, InterviewItem, InterviewOption, ItemState,
 } from '@/lib/electrical/systemConfigInterview';
-import { answerBackup, answerStorageLanding, landsOnSharedPanel, type AnswerResult } from '@/lib/electrical/systemConfigAnswers';
+import {
+  ADVANCED_EDITOR, answerBackup, answerStorageLanding, landsOnSharedPanel, type AnswerResult,
+} from '@/lib/electrical/systemConfigAnswers';
 import {
   setDomainEquipment, setStoragePvInput, addBackupDomain, updatePanel, updateDomain, removeBackupDomain,
 } from '@/lib/electrical/topologyAuthoring';
@@ -181,6 +183,33 @@ export function expansionsFor(hostProductId: string | null | undefined): Catalog
 // ONE SYSTEM, READ FROM THE GRAPH
 // ═══════════════════════════════════════════════════════════════════════════
 
+/**
+ * 🚨 THE OUTPUT SETTING A BATTERY IS COMMISSIONED AT — ONLY WHERE ITS MANUFACTURER PUBLISHES ONE.
+ *
+ * A configurable unit's continuous current AND its required OCPD move with the setting it is
+ * commissioned at (a Powerwall 3 at 10 kW is 41.7 A on a 60 A device; at 7.6 kW, 31.7 A on 40 A), so
+ * the setting changes the 120% busbar arithmetic and the ESS output every surface states. It is the
+ * installer's decision, read from the manufacturer's own table — never a scaled figure, and never
+ * offered for a product whose catalogue row publishes no table (capability, not brand).
+ *
+ * Not recorded ⇒ the engine sizes the unit at its published maximum (the conservative row), and the
+ * control says so rather than presenting that row as a choice somebody made.
+ */
+export function outputConfigurationsFor(productId: string | null | undefined): InterviewOption[] {
+  const row = productId ? getBatteryById(productId) : undefined;
+  return (row?.outputConfigurations ?? []).map(c => ({
+    value: String(c.nominalKw),
+    label: `${c.nominalKw} kW`,
+    detail: `${c.maxContinuousOutputA} A continuous · ${c.ocpdA} A OCPD`,
+  }));
+}
+
+/** The setting a system's batteries are recorded at. Null ⇒ not recorded (sized at the maximum). */
+export function outputConfigOf(t: ServiceTopology, d: BackupDomain): number | null {
+  const u = systemEquipmentFacts(t, d).inverting.find(x => x.outputConfigKw !== undefined && x.outputConfigKw !== null);
+  return u?.outputConfigKw ?? null;
+}
+
 export interface SystemEquipmentFacts {
   domain: BackupDomain;
   inverting: StorageUnit[];
@@ -316,7 +345,8 @@ function systemEquipmentItem(t: ServiceTopology, d: BackupDomain, single: boolea
   if (f.mixed) open.push('More than one battery or expansion model is recorded in this system. Choose the one installed.');
   if (f.storageProductId && ctl.evaluated && !ctl.options.some(o => o.value === d.gateway.productId)) {
     open.push(`The catalogue does not list ${d.gateway.label} as compatible with ${essName}. Choose a listed `
-      + 'controller, or record the manufacturer’s compatibility statement in Advanced.');
+      + 'controller. A manufacturer compatibility statement is not something SolarPro can record yet, so the '
+      + 'pairing stays unlisted until the catalogue lists it.');
   }
   if (f.storageProductId && !ctl.evaluated) unverified.push(`Controller compatibility: ${ctl.note}`);
   if (f.expansions.length > 0 && f.expansionProductId && !exp.options.some(o => o.value === f.expansionProductId)) {
@@ -469,7 +499,8 @@ export function placeSystemEquipmentItems(
  * Fields left out keep what the system has. Re-equipped through `setDomainEquipment`, so the units
  * are rebuilt from the catalogue exactly as the inspector's re-equip does — plus three things that
  * writer would otherwise lose:
- *   · the commissioned output setting, kept while the battery product is unchanged;
+ *   · the commissioned output setting, kept while the battery product is unchanged — and set here
+ *     (`outputConfigKw`) only to a setting the battery's manufacturer publishes;
  *   · the PV recorded on each unit's DC inputs, kept while the batteries themselves are unchanged
  *     (a landing recorded for four units is not a landing for three, so a count change reopens it);
  *   · a system that lands its batteries in its own generation panel gets that panel rebuilt from the
@@ -491,6 +522,8 @@ export function answerSystemEquipment(
     storageUnits?: number;
     expansionProductId?: string | null;
     expansionUnits?: number;
+    /** The output setting the system's batteries are commissioned at. Null ⇒ not recorded. */
+    outputConfigKw?: number | null;
   },
 ): AnswerResult {
   const d = t.domains.find(x => x.id === domainId);
@@ -517,7 +550,12 @@ export function answerSystemEquipment(
   const essChanged = (ess ?? null) !== f.storageProductId;
   const inverterSetChanged = essChanged || nEss !== f.inverting.length;
   const expChanged = inverterSetChanged || (exp ?? null) !== f.expansionProductId || nExp !== f.expansions.length;
-  if (!gwChanged && !expChanged) return refuse(`Nothing to change on ${d.label}.`);
+  // The setting is the battery's: a new battery product starts unrecorded unless this answer names one.
+  const recordedConfig = outputConfigOf(t, d);
+  const config = patch.outputConfigKw !== undefined ? patch.outputConfigKw
+    : essChanged ? null : recordedConfig;
+  const configChanged = !essChanged && (config ?? null) !== recordedConfig;
+  if (!gwChanged && !expChanged && !configChanged) return refuse(`Nothing to change on ${d.label}.`);
 
   const essRow = ess ? getBatteryById(ess) : undefined;
   if (ess && essChanged) {
@@ -552,6 +590,20 @@ export function answerSystemEquipment(
     }
   }
 
+  // 🚨 ONLY A SETTING THE MANUFACTURER PUBLISHES. A number the table does not hold would be rebuilt
+  // as the top row with an "unresolved" note nobody reads — refused here, with the published list.
+  if (config !== null && config !== undefined) {
+    if (!ess) return refuse('Choose which battery is installed first — the output setting is the battery’s.');
+    const settings = outputConfigurationsFor(ess);
+    const bat = getBatteryById(ess);
+    const name = bat ? nameOf(bat) : ess;
+    if (settings.length === 0) return refuse(`${name} publishes no output settings to choose from.`);
+    if (!settings.some(o => Number(o.value) === config)) {
+      return refuse(`${name} has no ${config} kW output setting. The published settings are `
+        + `${settings.map(o => o.label).join(', ')}.`);
+    }
+  }
+
   // Which panel the system's battery circuits are in decides what a new set of batteries changes.
   const ownPanel = (t.aggregationPanels ?? []).some(a => a.domainId === d.id);
   // A site-wide panel holding this system's battery circuits is rebuilt whether or not the system
@@ -559,16 +611,14 @@ export function answerSystemEquipment(
   const shared = sharedBatteryPanel(t, d, f.inverting);
   if (inverterSetChanged && shared?.partial) {
     return refuse(`Only some of ${d.label}’s batteries land in ${shared.panel.label}, which the other systems `
-      + 'share. Which of the new batteries land there is not SolarPro’s to decide — change it in Advanced.');
+      + `share. Which of the new batteries land there is not SolarPro’s to decide — change it in ${ADVANCED_EDITOR}.`);
   }
 
-  const keepConfig = essChanged ? null
-    : (f.inverting.find(u => u.outputConfigKw !== undefined && u.outputConfigKw !== null)?.outputConfigKw ?? null);
   const r = setDomainEquipment(t, d.id, {
     gatewayProductId: gw,
     storageProductIds: ess ? Array.from({ length: nEss }, () => ess) : [],
     expansionProductIds: exp && nExp > 0 ? Array.from({ length: nExp }, () => exp) : [],
-    outputConfigKw: keepConfig,
+    outputConfigKw: config ?? null,
   });
   let next = r.topology;
   const rebuiltInverting = () => systemEquipmentFacts(next, next.domains.find(x => x.id === d.id)!).inverting;
@@ -586,6 +636,22 @@ export function answerSystemEquipment(
   }
 
   const notes: string[] = [];
+  // 🚨 A NEW SETTING MOVES EVERY BREAKER THAT PROTECTS THESE BATTERIES. The same units (same ids) now
+  // carry the configured row's OCPD, and each generation-panel circuit that takes one of them follows
+  // it — the panel and its ratings are kept, and the engine re-checks them against the new current.
+  if (configChanged && !inverterSetChanged) {
+    const ocpdNow = new Map(rebuiltInverting().map(u => [u.id, u.ocpdA]));
+    next = {
+      ...next,
+      aggregationPanels: (next.aggregationPanels ?? []).map(p => (p.inputs.some(i => ocpdNow.has(i.sourceId))
+        ? { ...p, inputs: p.inputs.map(i => (ocpdNow.has(i.sourceId) ? { ...i, ocpdA: ocpdNow.get(i.sourceId) ?? null } : i)) }
+        : p)),
+    };
+    const u0 = rebuiltInverting()[0];
+    notes.push(config === null || config === undefined
+      ? 'output setting not recorded — sized at the published maximum'
+      : `commissioned at ${config} kW — ${u0?.continuousOutputA ?? '—'} A continuous, ${u0?.ocpdA ?? '—'} A OCPD each`);
+  }
   if (!inverterSetChanged) {
     const rebuilt = rebuiltInverting();
     f.inverting.forEach((u, i) => {
@@ -627,7 +693,7 @@ export function answerSystemLanding(
     const shared = (t.aggregationPanels ?? []).find(a => !a.domainId);
     return refuse(`${d.label}’s batteries are combined with the other systems’ in `
       + `${shared ? shared.label : 'one generation panel'}, so where they land is not ${d.label}’s alone. `
-      + 'Change how the systems connect to the service, or edit it in Advanced.');
+      + `Change how the systems connect to the service, or edit it in ${ADVANCED_EDITOR}.`);
   }
   const r = answerStorageLanding(t, value, [domainId]);
   return r.ok === false ? r : done(r.topology, `${d.label} battery circuits: ${value}`);
@@ -649,7 +715,8 @@ export interface BackupEquipment {
  * batteries named for it. A panel leaving is taken out of its system; a system left backing up
  * nothing is removed — unless something else is connected to it (its point of interconnection, its
  * generation panel, an isolation switch in line with its controller), in which case the answer is
- * REFUSED: deleting those is a deliberate edit in Advanced, not a side effect of a checkbox.
+ * REFUSED: deleting those is a deliberate edit in the Advanced service model editor (Review
+ * Engineering), not a side effect of a checkbox.
  */
 export function answerBackedUpPanels(t: ServiceTopology, panelIds: string[], equipment: BackupEquipment): AnswerResult {
   if (t.panels.length < 2) return refuse('This service has one main panel — it is backed up whole or not at all.');
@@ -666,7 +733,7 @@ export function answerBackedUpPanels(t: ServiceTopology, panelIds: string[], equ
       const deps = systemDependents(next, d);
       if (deps.length > 0) {
         return refuse(`Taking ${p.label} out of backup removes ${d.label}, and ${deps.join(', ')} `
-          + `${deps.length === 1 ? 'is' : 'are'} connected to it. Remove ${d.label} in Advanced, where each piece `
+          + `${deps.length === 1 ? 'is' : 'are'} connected to it. Remove ${d.label} in ${ADVANCED_EDITOR}, where each piece `
           + 'is edited deliberately.');
       }
       next = removeBackupDomain(next, d.id);
@@ -721,7 +788,7 @@ export function answerBackupChoice(
     const blocked = t.domains.map(d => ({ d, deps: systemDependents(t, d) })).filter(x => x.deps.length > 0);
     if (blocked.length > 0) {
       return refuse(`"No backup" removes every system, and ${blocked.map(x => `${x.d.label} has ${x.deps.join(', ')}`)
-        .join('; ')} connected to it. Remove those systems in Advanced, where each piece is edited deliberately.`);
+        .join('; ')} connected to it. Remove those systems in ${ADVANCED_EDITOR}, where each piece is edited deliberately.`);
     }
   }
   if (choice === 'whole' && t.panels.length > 1) return answerBackedUpPanels(t, t.panels.map(p => p.id), equipment);

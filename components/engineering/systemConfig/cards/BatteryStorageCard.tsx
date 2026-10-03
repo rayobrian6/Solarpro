@@ -13,6 +13,10 @@
 //     circuits land, NEVER its battery model — only behind [Configure systems differently] (inline
 //     in Manual mode). The battery model is asked once for every system: the project selection can
 //     name one battery, so a job with a different battery per system is flagged, not offered.
+//   · The output setting the batteries are commissioned at — under the count with one system, per
+//     system behind [Configure systems differently] — and the generation panels the AC aggregation
+//     answer built ([Select Equipment]: panelboard, busbar, SCCR). Both moved here from the Service
+//     Topology inspector when it left the normal navigation (closure slice 1).
 //
 // Which store is edited:
 //   · No backup system in the service graph yet ⇒ the project selection (`config.batteryId /
@@ -37,6 +41,7 @@ import type { InterviewItem, SystemConfigInterview } from '@/lib/electrical/syst
 import { answerStorageLanding } from '@/lib/electrical/systemConfigAnswers';
 import {
   answerSystemEquipment, answerSystemLanding, backupBatteries, controllersFor, expansionsFor,
+  outputConfigOf, outputConfigurationsFor,
   storageByProduct, systemEquipmentFacts, systemEquipmentItemId, systemLandingItemId,
 } from '@/lib/electrical/systemConfigSystemEquipment';
 import {
@@ -45,7 +50,10 @@ import {
   type BatteryGrouping, type BatterySelection, type BatterySystemSummary,
 } from '@/lib/electrical/systemConfigBatteryCard';
 import { findInterviewItem } from '@/lib/electrical/systemConfigPlacement';
-import { ProvenanceChip, type ApplyAnswer, type ItemEditorContext } from '@/components/engineering/systemConfig/ItemEditor';
+import {
+  ItemEditor, ProvenanceChip, QuestionDialog, type ApplyAnswer, type ItemEditorContext,
+} from '@/components/engineering/systemConfig/ItemEditor';
+import { GENERATION_PANELS_ITEM_ID } from '@/lib/electrical/systemConfigGenerationPanels';
 
 export interface BatteryStorageCardProps extends ItemEditorContext {
   interview: Pick<SystemConfigInterview, 'sections'>;
@@ -229,9 +237,43 @@ function SelectionControls({ selection, onSelectionChange, gatewayItem, busy }: 
 
 // ── The graph has backup systems: the graph is the record ───────────────────
 
-interface Draft { ess?: string; gw?: string; nEss?: number; exp?: string; nExp?: number }
+interface Draft { ess?: string; gw?: string; nEss?: number; exp?: string; nExp?: number; cfg?: string }
 
 const count = (s: string) => Math.max(0, Math.floor(Number(s) || 0));
+
+/** A system's recorded output setting as the select's value ('' ⇒ not recorded). */
+const cfgOf = (t: ServiceTopology, domainId: string | null | undefined): string => {
+  const d = domainId ? t.domains.find(x => x.id === domainId) : undefined;
+  const kw = d ? outputConfigOf(t, d) : null;
+  return kw === null ? '' : String(kw);
+};
+/** The writer's patch for a changed setting select. */
+const cfgPatch = (v: string, cur: string): { outputConfigKw?: number | null } =>
+  (v !== cur ? { outputConfigKw: v === '' ? null : Number(v) } : {});
+
+/**
+ * 🚨 THE OUTPUT SETTING THE BATTERIES ARE COMMISSIONED AT — the Service Topology tab never asked it
+ * (its re-equip silently reset it to the top row); it moves the batteries' continuous current and
+ * OCPD, so the 120% busbar arithmetic and the ESS output follow it. Offered only for a battery whose
+ * manufacturer publishes settings (`outputConfigurationsFor`), as a small select under the count.
+ */
+function OutputSetting({ testid, ess, value, onChange, disabled }: {
+  testid: string; ess: string | null | undefined; value: string; onChange: (v: string) => void; disabled?: boolean;
+}) {
+  const settings = outputConfigurationsFor(ess);
+  if (settings.length === 0) return null;
+  const top = settings[settings.length - 1];
+  return (
+    <label className="mt-1 block text-[10px] text-slate-500">Commissioned at
+      <select data-testid={testid} className="eng-select mt-0.5 !py-0.5 !text-[11px]" disabled={disabled} value={value}
+              title="The output setting each battery in this system is commissioned at — its current and OCPD follow it"
+              onChange={e => onChange(e.target.value)}>
+        <option value="">Not recorded — sized at {top.label}</option>
+        {settings.map(o => <option key={o.value} value={o.value}>{o.label} · {o.detail}</option>)}
+      </select>
+    </label>
+  );
+}
 
 function GraphControls({ ctx, grouping, apply, gatewayItem }: {
   ctx: BatteryStorageCardProps;
@@ -253,6 +295,8 @@ function GraphControls({ ctx, grouping, apply, gatewayItem }: {
     nEss: grouping.batteries,
     exp: grouping.commonExpansionProductId ?? '',
     nExp: grouping.expansions,
+    // One system: its output setting is edited here. More than one: per system, behind the disclosure.
+    cfg: single ? cfgOf(t, single.domainId) : '',
   };
   const v = { ...cur, ...draft };
   const essForFit = modelIsSelection ? (ctx.selection.batteryId || '') : v.ess;
@@ -276,6 +320,7 @@ function GraphControls({ ctx, grouping, apply, gatewayItem }: {
         ...(v.nEss !== cur.nEss ? { storageUnits: v.nEss } : {}),
         ...(expProduct !== cur.exp && (v.nExp > 0 || cur.nExp > 0) ? { expansionProductId: expProduct || null } : {}),
         ...(v.nExp !== cur.nExp ? { expansionUnits: v.nExp } : {}),
+        ...cfgPatch(v.cfg, cur.cfg),
       })
       : answerEverySystemEquipment(t, {
         ...(v.gw !== cur.gw && v.gw ? { gatewayProductId: v.gw } : {}),
@@ -302,7 +347,8 @@ function GraphControls({ ctx, grouping, apply, gatewayItem }: {
                 <Owed item={ownItem} testid="bat-model-owed" />
               </label>
               <select id="bat-model" data-testid="bat-model" className="eng-select" disabled={ctx.busy} value={v.ess}
-                      onChange={e => setDraft(s => ({ ...s, ess: e.target.value }))}>
+                      // A different battery has its own settings (or none): the setting starts unrecorded.
+                      onChange={e => setDraft(s => ({ ...s, ess: e.target.value, cfg: '' }))}>
                 <option value="" disabled>{n > 1 && grouping.batteries > 0 ? 'Differs per system' : '— choose —'}</option>
                 {v.ess && !essListed ? <option value={v.ess} disabled>{batteryName(v.ess)} — not listed for backup</option> : null}
                 {batteries.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -313,8 +359,12 @@ function GraphControls({ ctx, grouping, apply, gatewayItem }: {
         <div>
           <label className="eng-label" htmlFor="bat-qty">Quantity</label>
           {single ? (
-            <input id="bat-qty" data-testid="bat-qty" type="number" min={0} step={1} className="eng-input" disabled={ctx.busy}
-                   value={v.nEss} onChange={e => setDraft(s => ({ ...s, nEss: count(e.target.value) }))} />
+            <>
+              <input id="bat-qty" data-testid="bat-qty" type="number" min={0} step={1} className="eng-input" disabled={ctx.busy}
+                     value={v.nEss} onChange={e => setDraft(s => ({ ...s, nEss: count(e.target.value) }))} />
+              <OutputSetting testid="bat-output-setting" ess={v.ess || null} value={v.cfg} disabled={ctx.busy}
+                             onChange={x => setDraft(s => ({ ...s, cfg: x }))} />
+            </>
           ) : (
             <output id="bat-qty" data-testid="bat-qty" className="block text-sm font-black tabular-nums text-slate-100"
                     title="The sum of the systems' batteries — change a count per system">
@@ -425,9 +475,54 @@ function Aggregation({ item, systems, onPick, busy }: {
   );
 }
 
+// ── The generation / combiner panels the AC aggregation answer built ────────
+
+/**
+ * "Generation panels · 2 · parts not selected [Select Equipment]" — the panelboard, busbar and SCCR of
+ * each panel the AC aggregation answer built, behind ONE button (inline in Manual), exactly as the
+ * System Configuration card's Utility Isolation does it. Shown only when such a panel exists. These
+ * were answerable only in the Service Topology inspector before it left the normal navigation.
+ */
+function GenerationPanels({ ctx, item, apply }: {
+  ctx: BatteryStorageCardProps; item: InterviewItem; apply: ApplyAnswer;
+}) {
+  const [open, setOpen] = useState(false);
+  const panels = ctx.topology?.aggregationPanels ?? [];
+  const chosen = panels.filter(p => !!p.productId).length;
+  const summary = `${panels.length} · ${chosen === 0 ? 'parts not selected'
+    : chosen === panels.length ? 'parts selected' : `${chosen} of ${panels.length} parts selected`}`
+    + (item.state === 'fails' ? ' · FAILS — review the parts' : item.state === 'needs-verification' ? ' · SCCR to confirm' : '');
+  if (ctx.controlMode === 'manual') {
+    return (
+      <div data-testid="bat-generation-inline" data-state={item.state}
+           className="rounded border border-slate-800 bg-slate-950/40 p-1.5">
+        <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-slate-500">
+          Generation panel{panels.length === 1 ? '' : 's'}<Owed item={item} testid="bat-generation-owed" />
+        </div>
+        <ItemEditor {...ctx} item={item} apply={apply} />
+      </div>
+    );
+  }
+  return (
+    <div data-testid="bat-generation-row" data-state={item.state} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
+      <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">
+        Generation panel{panels.length === 1 ? '' : 's'}
+      </span>
+      <Owed item={item} testid="bat-generation-owed" />
+      <span data-testid="bat-generation-summary" className="text-slate-400">{summary}</span>
+      <button type="button" data-testid="bat-generation-select" disabled={ctx.busy}
+              className="ml-auto rounded bg-slate-700 px-2 py-0.5 text-[11px] font-bold text-slate-100 hover:bg-slate-600 disabled:opacity-40"
+              onClick={() => setOpen(true)}>
+        Select Equipment
+      </button>
+      <QuestionDialog {...ctx} apply={apply} item={open ? item : null} error={ctx.error} onClose={() => setOpen(false)} />
+    </div>
+  );
+}
+
 // ── One system's own controller, battery count and expansion packs ──────────
 
-interface SystemDraft { gw?: string; nEss?: number; exp?: string; nExp?: number }
+interface SystemDraft { gw?: string; nEss?: number; exp?: string; nExp?: number; cfg?: string }
 
 /**
  * What [Configure systems differently] edits for ONE system: its controller, how many batteries and
@@ -451,7 +546,10 @@ function SystemRow({ t, s, battery, apply, busy }: {
     );
   }
   const ess = f.storageProductId ?? battery;
-  const cur = { gw: d.gateway.productId, nEss: f.inverting.length, exp: f.expansionProductId ?? '', nExp: f.expansions.length };
+  const cur = {
+    gw: d.gateway.productId, nEss: f.inverting.length, exp: f.expansionProductId ?? '', nExp: f.expansions.length,
+    cfg: cfgOf(t, d.id),
+  };
   const v = { ...cur, ...draft };
   const ctl = controllersFor(ess);
   const exps = expansionsFor(ess);
@@ -469,6 +567,7 @@ function SystemRow({ t, s, battery, apply, busy }: {
       ...(v.nEss !== cur.nEss ? { storageUnits: v.nEss } : {}),
       ...(expProduct !== cur.exp && (v.nExp > 0 || cur.nExp > 0) ? { expansionProductId: expProduct || null } : {}),
       ...(v.nExp !== cur.nExp ? { expansionUnits: v.nExp } : {}),
+      ...cfgPatch(v.cfg, cur.cfg),
     });
     if (await apply(r)) setDraft({});
   };
@@ -491,6 +590,8 @@ function SystemRow({ t, s, battery, apply, busy }: {
           <input type="number" min={0} step={1} data-testid={`bat-system-qty-${id}`} className="eng-input mt-0.5"
                  disabled={busy || !ess} value={v.nEss} title={ess ? undefined : 'Choose the Battery Model above first'}
                  onChange={e => setDraft(x => ({ ...x, nEss: count(e.target.value) }))} />
+          <OutputSetting testid={`bat-system-output-${id}`} ess={ess} value={v.cfg} disabled={busy}
+                         onChange={x => setDraft(y => ({ ...y, cfg: x }))} />
         </label>
         {showExpansions ? (
           <label className="text-[11px] text-slate-400">Expansion packs
@@ -625,6 +726,7 @@ export function BatteryStorageCard(props: BatteryStorageCardProps) {
   const grouping = batteryGroupingOf(t);
   const landing = findInterviewItem(interview, 'behavior.storage-landing');
   const gatewayItem = findInterviewItem(interview, 'equipment.gateway');
+  const generationItem = findInterviewItem(interview, GENERATION_PANELS_ITEM_ID);
 
   return (
     <div className="space-y-3" data-testid="bat-card" data-record={grouping ? 'service-graph' : 'selection'}>
@@ -638,6 +740,7 @@ export function BatteryStorageCard(props: BatteryStorageCardProps) {
         <Aggregation item={landing} systems={t.domains.length} busy={busy}
                      onPick={v => void apply(answerStorageLanding(t, v))} />
       ) : null}
+      {generationItem && t ? <GenerationPanels ctx={props} item={generationItem} apply={apply} /> : null}
       {grouping && t && grouping.systems.length > 1 ? <Grouping ctx={props} grouping={grouping} apply={apply} /> : null}
       {refusal ? (
         <div data-testid="bat-refusal" className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-200">

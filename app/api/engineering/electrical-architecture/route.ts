@@ -109,8 +109,9 @@ export async function POST(req: NextRequest) {
     if (!stored) {
       return NextResponse.json({
         success: false,
-        error: 'This project has no service topology, so there is no architecture to record. Build '
-          + 'the service topology first.',
+        // Named where the installer can act on it — Service Topology is no longer a tab.
+        error: 'This project has no service recorded yet, so there is no architecture to record. Enter the '
+          + 'service rating on the Existing Electrical Service card in System Config first.',
       }, { status: 409 });
     }
     const wrote = await writeServiceTopology(projectId, user.id, {
