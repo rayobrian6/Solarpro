@@ -131,6 +131,12 @@ export interface SystemConfigInterview {
   /** Every relevant, unanswered question, in the order an installer should answer them. */
   openQuestions: InterviewItem[];
   release: ReleaseState;
+  /**
+   * The engine's verdicts this interview was built from (`evaluateServiceTopology`), passed through
+   * unchanged so the Engineering Readiness panel counts PASS / FAIL / NOT EVALUATED from the same
+   * evaluation the questions were read against — never a second run. Null ⇒ nothing evaluated yet.
+   */
+  evaluation: TopologyEvaluation | null;
 }
 
 // ── What the interviewer is told ────────────────────────────────────────────
@@ -144,6 +150,11 @@ export interface InterviewEquipment {
     label?: string | null;
     kind?: 'micro' | 'string' | 'optimizer' | 'hybrid' | null;
     count?: number;
+    /**
+     * Σ rated AC output of the chosen PV inverters, kW, from their catalogue rows. Null / absent ⇒
+     * not established (never a default). Read only when `state === 'SELECTED'`.
+     */
+    acKw?: number | null;
   };
   /** Null ⇒ no storage on this project (a legitimate answer, not a gap). */
   storage: {
@@ -803,6 +814,27 @@ export function buildSystemConfigInterview(input: InterviewInput): SystemConfigI
   });
   facts.push({ label: 'PV inverter', value: equipment[0].answer ?? 'Not chosen',
     source: equipment[0].source ?? 'Not established' });
+  // 🚨 PV AC OUTPUT EXISTS ONLY WHERE A PV INVERTER DOES. On a DC-coupled job the strings land on the
+  // batteries' own inputs: there is no PV AC rating to state, and the batteries' AC output is the ESS
+  // line below, never this one. An inverter chosen with no catalogue rating is "not evaluated", not 0.
+  {
+    const inv = eq.pvInverter;
+    const decidedSource: FactSource = input.couplingIsDecision ? 'Installer decision' : 'Selected equipment';
+    const pvAc: Pick<SummaryFact, 'value' | 'source'> = inv.state === 'CONFLICT'
+      ? { value: 'Not established — the architecture is in conflict', source: 'Not established' }
+      : input.coupling === 'dc-coupled-storage' && inv.state !== 'SELECTED'
+        ? { value: 'N/A — DC coupled', source: decidedSource }
+        : !hasPv || input.coupling === 'storage-only'
+          ? { value: 'N/A — no PV', source: pvArray.moduleCount === null ? 'Not established' : 'From Design' }
+          : inv.state === 'NONE'
+            ? { value: 'N/A — no PV inverter', source: 'Installer decision' }
+            : inv.state === 'SELECTED'
+              ? (typeof inv.acKw === 'number' && inv.acKw > 0
+                ? { value: `${inv.acKw.toFixed(2)} kW`, source: 'Manufacturer specification' }
+                : { value: 'Not evaluated — no catalogue AC rating', source: 'Not established' })
+              : { value: 'Not established — no PV inverter chosen', source: 'Not established' };
+    facts.push({ label: 'PV AC output', ...pvAc });
+  }
   // 🚨 A STRING IS SIZED AGAINST THE INPUT IT LANDS ON. With no PV inverter chosen and the strings
   // not landed on a battery's own PV inputs, the engine's partition was sized against nothing the
   // project contains — stating it as "SolarPro calculation" would present a fabricated design.
@@ -830,6 +862,12 @@ export function buildSystemConfigInterview(input: InterviewInput): SystemConfigI
   if (eq.gateway && eq.gateway.count > 0) {
     facts.push({ label: 'Backup controllers', value: controllersInWords(eq.gateway),
       source: 'Selected equipment' });
+  } else if (hasStorage) {
+    // Storage with no controller recorded is stated, not left out: required-but-missing is a gap the
+    // Battery card answers; not required is the catalogue's statement about this battery.
+    facts.push(eq.storage!.requiresGateway
+      ? { label: 'Backup controllers', value: 'None selected — the storage requires one', source: 'Not established' }
+      : { label: 'Backup controllers', value: 'None — not required by the storage', source: 'Manufacturer specification' });
   }
   facts.push({ label: 'Service', value: rated !== null ? `${rated} A` : 'Not entered',
     source: rated !== null ? 'Installer entered' : 'Not established' });
@@ -848,5 +886,6 @@ export function buildSystemConfigInterview(input: InterviewInput): SystemConfigI
     sections,
     openQuestions,
     release: { drawable, releaseReady: drawable && blockers.length === 0, blockers },
+    evaluation: input.evaluation ?? null,
   };
 }

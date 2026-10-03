@@ -1829,10 +1829,13 @@ describe('🚨 SERVICE RATING vs PANEL MAIN vs PANEL BUSBAR', () => {
     expect(pnl.topology.panels[1].mainBreakerA).toBe(t.panels[1].mainBreakerA);
     expect(pnl.topology.service.ratedAmps).toBe(t.service.ratedAmps);
 
-    // The page renders the interview, writes through one path, and carries no defaulted 120% strip.
+    // The page asks these through its cards / dialog / readiness panel (System Config V3 — the five-card
+    // interview is gone), writes through one path, and carries no defaulted 120% strip.
     const page = readFileSync(join(ROOT, 'app/engineering/page.tsx'), 'utf8');
-    expect(page).toContain('<SystemConfigInterview');
-    expect(page).toContain('onWrite={writeInterviewAnswer}');
+    expect(page).toContain('<EngineeringReadinessPanel {...interviewEditorContext}');
+    expect(page).toContain('<QuestionDialog {...interviewEditorContext}');
+    expect(page).toContain('const applyInterviewAnswer = applyVia(writeInterviewAnswer, setInterviewRefusal);');
+    expect(page).toContain('apply: applyInterviewAnswer,');
     expect(page, 'the defaulted Max PV strip is back').not.toContain('panelBusRatingForDisplay ?? 200');
     expect(page, 'the defaulted Max PV strip is back').not.toContain('panelMainAmpsForDisplay ?? 200');
     expect(page).not.toMatch(/Math\.floor\(busRating \* 1\.2 - mainAmps\)/);

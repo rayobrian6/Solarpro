@@ -4,27 +4,39 @@
 //
 // Ray (System Config gauntlet): "Auto / Guided / Manual over the same owners." The interview's
 // answers, sources and blockers are identical in every mode (they come from
-// buildSystemConfigInterview, which takes no mode); what changes is how much is put in front of the
-// installer at once:
-//   · MANUAL — every card open.
-//   · GUIDED — one question at a time: only the card with the NEXT open question, marked NEXT.
-//   · AUTO   — every card that still needs something.
-// The Engineering Result card is open in every mode.
+// buildSystemConfigInterview, which takes no mode).
+//
+// REWRITTEN FOR V3, NOT DELETED (2026-10-03). This file used to render the five-card
+// SystemConfigInterview and prove GUIDED opened only the card with the next question and marked it.
+// Ray rejected that questionnaire ("Guided: a one-line strip … No separate layout."), so the same
+// requirements are proved through what replaced it:
+//   · GUIDED marks exactly ONE next question — the guided strip's single [Answer], the first item of
+//     the one required queue, which [Answer] hands over to be revealed and asked.
+//   · The release state does not depend on the mode — the readiness panel takes no mode, and the
+//     strip and the panel count the same queue.
+//   · The status never says COMPLETE while something is still to review.
+//   · The page mounts the strip ONLY in guided mode, no questionnaire above the grid, and the
+//     readiness panel UNDER the grid.
 // ═══════════════════════════════════════════════════════════════════════════
 
 import React from 'react';
-import { describe, it, expect, afterEach } from 'vitest';
-import { render, screen, cleanup, within } from '@testing-library/react';
-import { SystemConfigInterview } from '@/components/engineering/systemConfig/SystemConfigInterview';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { describe, it, expect, afterEach, vi } from 'vitest';
+import { render, screen, cleanup, fireEvent } from '@testing-library/react';
 import { buildSystemConfigInterview } from '@/lib/electrical/systemConfigInterview';
+import { requiredQueue, nextActionLabel } from '@/lib/electrical/systemConfigPlacement';
 import { resolvePvArrayDesign } from '@/lib/electrical/pvArrayDesign';
 import { answerServiceRating } from '@/lib/electrical/systemConfigAnswers';
 import { evaluateServiceTopology, type ServiceTopology } from '@/lib/electrical/serviceTopology';
+import { GuidedStrip } from '@/components/engineering/systemConfig/GuidedStrip';
+import { EngineeringReadinessPanel } from '@/components/engineering/systemConfig/EngineeringReadinessPanel';
+import { applyVia } from '@/components/engineering/systemConfig/ItemEditor';
 
 afterEach(cleanup);
 
 // A 200 A house with micros chosen: the service is recorded; the connection and the utility
-// disconnect are still open questions (both in "System Behavior & Connection").
+// disconnect are still open questions.
 const topology = (answerServiceRating(null, 200) as { topology: ServiceTopology }).topology;
 const pvArray = resolvePvArrayDesign({ placedModuleCount: 20, selectedPanelId: 'panel-std440' });
 const interview = buildSystemConfigInterview({
@@ -33,77 +45,96 @@ const interview = buildSystemConfigInterview({
   evaluation: evaluateServiceTopology(topology),
 });
 
-function renderIn(mode: 'auto' | 'guided' | 'manual') {
+function renderPanel(iv = interview) {
   return render(
-    <SystemConfigInterview
-      interview={interview} topology={topology} pvArray={pvArray} derivedStrings={[]}
+    <EngineeringReadinessPanel interview={iv} topology={topology} pvArray={pvArray} derivedStrings={[]}
       equipment={{ gatewayProductId: null, storageProductId: null, storageLabel: null, totalUnits: 0 }}
-      mode={mode} busy={false} error={null}
-      onWrite={async () => true} onRecordCoupling={async () => true}
-    />,
+      busy={false} apply={applyVia(async () => true)} />,
   );
 }
 
-/** A card is open when its items are rendered. */
-const openCards = () => ['design', 'service', 'equipment', 'behavior', 'engineering'].filter(id =>
-  within(screen.getByTestId(`interview-section-${id}`)).queryAllByTestId(/^interview-item-/).length > 0);
-
-describe('the same interview, three ways through it', () => {
-  it('fixture: the first open question is in System Behavior & Connection', () => {
-    expect(interview.openQuestions[0]?.section).toBe('behavior');
-    expect(interview.openQuestions.length).toBeGreaterThan(1);
+describe('the same engineering state, three ways through it', () => {
+  it('fixture: the open questions are still asked, and the queue holds every one of them', () => {
+    expect(interview.openQuestions.map(q => q.id)).toEqual(['behavior.interconnection', 'behavior.isolation']);
+    const q = requiredQueue(interview).map(i => i.id);
+    for (const open of interview.openQuestions) expect(q).toContain(open.id);
   });
 
-  it('MANUAL opens every card', () => {
-    renderIn('manual');
-    expect(openCards()).toEqual(['design', 'service', 'equipment', 'behavior', 'engineering']);
-    expect(screen.queryByTestId('interview-next')).toBeNull();
+  it('GUIDED marks exactly one next question — the first required one — and [Answer] hands that item over', () => {
+    const onAnswer = vi.fn();
+    render(<GuidedStrip interview={interview} onAnswer={onAnswer} />);
+    const next = requiredQueue(interview)[0];
+    expect(screen.getByTestId('guided-strip').getAttribute('data-next')).toBe(next.id);
+    expect(screen.getAllByTestId('guided-answer')).toHaveLength(1);
+    expect(screen.getByTestId('guided-next').textContent).toBe(nextActionLabel(next));
+    fireEvent.click(screen.getByTestId('guided-answer'));
+    expect(onAnswer).toHaveBeenCalledTimes(1);
+    expect(onAnswer.mock.calls[0][0].id).toBe(next.id);
   });
 
-  it('GUIDED opens only the card with the next question (plus the result), and marks exactly that question', () => {
-    renderIn('guided');
-    expect(openCards()).toEqual(['behavior', 'engineering']);
-    const marks = screen.getAllByTestId('interview-next');
-    expect(marks).toHaveLength(1);
-    const nextId = interview.openQuestions[0].id;
-    expect(screen.getByTestId(`interview-item-${nextId}`).getAttribute('data-next')).toBe('true');
+  it('answering the marked question moves GUIDED on to the next one', () => {
+    const [first, second] = requiredQueue(interview);
+    const answered = {
+      ...interview,
+      sections: interview.sections.map(s => ({ ...s, items: s.items.map(i => (i.id === first.id ? { ...i, state: 'answered' as const } : i)) })),
+      openQuestions: interview.openQuestions.filter(q => q.id !== first.id),
+    };
+    render(<GuidedStrip interview={answered} onAnswer={() => undefined} />);
+    expect(screen.getByTestId('guided-strip').getAttribute('data-next')).toBe(second.id);
   });
 
-  it('AUTO opens every card that still needs something; complete cards stay collapsed', () => {
-    renderIn('auto');
-    const incomplete = interview.sections.filter(s => s.status !== 'complete').map(s => s.id);
-    expect(openCards()).toEqual(['design', 'service', 'equipment', 'behavior', 'engineering']
-      .filter(id => incomplete.includes(id as never) || id === 'engineering'));
-    expect(openCards()).not.toContain('design');   // 20 modules from Design: complete
-  });
-
-  it('the answers do not depend on the mode — the same release state is shown in all three', () => {
-    for (const mode of ['auto', 'guided', 'manual'] as const) {
-      renderIn(mode);
-      expect(screen.getByTestId('interview-release').getAttribute('data-release-ready'))
-        .toBe(interview.release.releaseReady ? 'yes' : 'no');
-      cleanup();
-    }
+  it('the release state does not depend on the mode: one status, read from the interview alone', () => {
+    renderPanel();
+    expect(screen.getByTestId('engineering-readiness').getAttribute('data-release'))
+      .toBe(interview.release.releaseReady ? 'ELIGIBLE' : 'BLOCKED');
+    render(<GuidedStrip interview={interview} onAnswer={() => undefined} />);
+    const n = requiredQueue(interview).length;
+    expect(screen.getByTestId('guided-count').textContent).toBe(`${n} required answers`);
+    expect(screen.getByTestId('readiness-status').textContent).toBe(`BLOCKED — ${n} required answers`);
   });
 });
 
-describe('the banner never says "complete" while a card still has something to review', () => {
-  it('release-eligible with a card needing verification reads "Eligible for release — N card to review", not "Engineering complete"', () => {
+describe('the status never says "complete" while something is still to review', () => {
+  it('release-eligible with an item needing verification reads "ELIGIBLE — 1 item to review", not COMPLETE', () => {
     const reviewing = {
       ...interview,
       release: { drawable: true, releaseReady: true, blockers: [] },
-      sections: interview.sections.map(s => (s.id === 'engineering' ? { ...s, status: 'needs-verification' as const } : { ...s, status: 'complete' as const })),
+      sections: interview.sections.map(s => ({ ...s, items: s.items.map(i => (i.id === 'behavior.utility.meter-collar' ? i
+        : { ...i, state: 'answered' as const })) })),
       openQuestions: [],
     };
-    render(
-      <SystemConfigInterview
-        interview={reviewing} topology={topology} pvArray={pvArray} derivedStrings={[]}
-        equipment={{ gatewayProductId: null, storageProductId: null, storageLabel: null, totalUnits: 0 }}
-        mode="auto" busy={false} error={null} onWrite={async () => true} onRecordCoupling={async () => true}
-      />,
-    );
-    const banner = screen.getByTestId('interview-release');
-    expect(banner.textContent).toMatch(/Eligible for release — 1 card to review \(Engineering Result\)/);
-    expect(banner.textContent).not.toMatch(/Engineering complete/);
+    renderPanel(reviewing);
+    const status = screen.getByTestId('readiness-status');
+    expect(status.textContent).toBe('ELIGIBLE — 1 item to review');
+    expect(status.textContent).not.toMatch(/COMPLETE/);
+  });
+});
+
+describe('the page: no questionnaire above the grid, guided is one line, readiness at the bottom', () => {
+  const page = readFileSync(resolve(process.cwd(), 'app/engineering/page.tsx'), 'utf8');
+  const tab = page.slice(page.indexOf("{activeTab === 'config' ? ((() => {"), page.indexOf("{activeTab === 'service' ? ("));
+
+  it('the five-card interview is gone from the page', () => {
+    expect(page).not.toContain('<SystemConfigInterview');
+    expect(page).not.toContain('systemConfig/SystemConfigInterview');
+  });
+
+  it('the guided strip renders only in guided mode, before the grid, and reveals + asks the item', () => {
+    expect(tab).toMatch(/\{controlMode === 'guided' \? \(\s*<GuidedStrip interview=\{systemConfigInterview\}\s*onAnswer=\{item => openQuestion\(item\.id, \{ reveal: true \}\)\} \/>/);
+    expect(tab.indexOf('<GuidedStrip')).toBeLessThan(tab.indexOf('3-COLUMN RESPONSIVE GRID'));
+  });
+
+  it('the readiness panel is mounted under the 3-column grid, full width, on the one write path', () => {
+    const grid = tab.indexOf('end 3-col grid');
+    expect(grid).toBeGreaterThan(0);
+    expect(tab.indexOf('<EngineeringReadinessPanel')).toBeGreaterThan(grid);
+    expect(page).toContain('const applyInterviewAnswer = applyVia(writeInterviewAnswer, setInterviewRefusal);');
+    expect(page).toContain('apply: applyInterviewAnswer,');
+  });
+
+  it('the existing cards carry the anchors the guided strip scrolls to', () => {
+    for (const id of ['sc-card-summary', 'sc-card-inverters', 'sc-card-battery', 'sc-card-system-config']) {
+      expect(tab, id).toContain(`id="${id}"`);
+    }
   });
 });

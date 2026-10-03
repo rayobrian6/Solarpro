@@ -119,7 +119,13 @@ import { dcStringLimits } from '@/lib/electrical/dcStringLimits';
 import { buildSystemConfigInterview, type InterviewEquipment } from '@/lib/electrical/systemConfigInterview';
 import { selectionPairOf, controllersByProduct, storageByProduct } from '@/lib/electrical/systemConfigSystemEquipment';
 import { evaluateServiceTopology } from '@/lib/electrical/serviceTopology';
-import SystemConfigInterview from '@/components/engineering/systemConfig/SystemConfigInterview';
+// System Config V3 — no questionnaire above the grid: each question in its home card, one dialog,
+// one readiness panel at the bottom (lib/electrical/systemConfigPlacement.ts decides where).
+import { findInterviewItem } from '@/lib/electrical/systemConfigPlacement';
+import { QuestionDialog, applyVia } from '@/components/engineering/systemConfig/ItemEditor';
+import { EngineeringReadinessPanel } from '@/components/engineering/systemConfig/EngineeringReadinessPanel';
+import { GuidedStrip, revealHomeCard } from '@/components/engineering/systemConfig/GuidedStrip';
+import { EngineeringSummaryFacts } from '@/components/engineering/systemConfig/EngineeringSummaryFacts';
 // Phase 12 — System-wide validation layer.
 import { validateSystem, type ValidationResult } from '@/lib/system/validationEngine';
 import { ValidationPanel } from '@/components/engineering/ValidationPanel';
@@ -3365,8 +3371,9 @@ function EngineeringPageInner() {
     } | null } | null;
   } | null>(null);
 
-  const resolveElectricalArchitecture = async (coupling: string) => {
-    if (!currentProjectId) return;
+  /** Records the PV coupling as a decision. True only when the server recorded it (a dialog closes on true). */
+  const resolveElectricalArchitecture = async (coupling: string): Promise<boolean> => {
+    if (!currentProjectId) return false;
     setArchResolving(coupling);
     setArchResolveError(null);
     try {
@@ -3378,7 +3385,7 @@ function EngineeringPageInner() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data?.success) {
         setArchResolveError(String(data?.error || 'Could not record the architecture.'));
-        return;
+        return false;
       }
       logDecision('Electrical Architecture', String(data.summary ?? coupling), 'manual');
 
@@ -3411,8 +3418,10 @@ function EngineeringPageInner() {
       setSldSvg(null);
       setArchDetail(null);
       setSvcTopologyReloadKey(k => k + 1);
+      return true;
     } catch (e: unknown) {
       setArchResolveError((e as Error).message);
+      return false;
     } finally {
       setArchResolving(null);
     }
@@ -9866,6 +9875,8 @@ function EngineeringPageInner() {
         label: invData ? `${invData.manufacturer} ${invData.model}` : null,
         kind: (firstFleet?.type as InterviewEquipment['pvInverter']['kind']) ?? null,
         count: firstFleet?.type === 'micro' ? undefined : fleet.length,
+        // The committed fleet's catalogue AC rating (no fallback figure): the summary's PV AC tile.
+        acKw: hasInverterAcKw ? Number(totalInverterKw) : null,
       },
       storage: unitCount > 0 ? {
         label: pair.unit?.label ?? (bat ? `${bat.manufacturer} ${bat.model}` : null),
@@ -9886,7 +9897,7 @@ function EngineeringPageInner() {
       storageProductId,
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [svcTopology, config.batteryId, config.batteryCount, config.backupInterfaceId, config.inverters, electrical?.solarCoupling, _archUnresolved]);
+  }, [svcTopology, config.batteryId, config.batteryCount, config.backupInterfaceId, config.inverters, electrical?.solarCoupling, _archUnresolved, hasInverterAcKw, totalInverterKw]);
 
   const systemConfigInterview = useMemo(() => buildSystemConfigInterview({
     pvArray,
@@ -9918,6 +9929,38 @@ function EngineeringPageInner() {
       if (Object.keys(patch).length > 0) updateConfig(patch);
     }
     return ok;
+  };
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // SYSTEM CONFIG V3 — ONE WAY TO ASK ANY QUESTION, FROM ANY CARD.
+  //
+  // `applyInterviewAnswer` is the `apply` every card editor, dialog and the readiness panel takes:
+  // a writer's refusal is shown (`interviewRefusal`), an accepted answer goes through
+  // `writeInterviewAnswer` — the one write path. `openQuestion(itemId)` opens THE question dialog
+  // for any interview item (a card's [Review] / [Verify] / [Select Equipment], the guided strip);
+  // with `{ reveal: true }` it also scrolls to and rings the item's home card first.
+  // ══════════════════════════════════════════════════════════════════════════
+  const [interviewRefusal, setInterviewRefusal] = useState<string | null>(null);
+  const applyInterviewAnswer = applyVia(writeInterviewAnswer, setInterviewRefusal);
+  const [openQuestionId, setOpenQuestionId] = useState<string | null>(null);
+  const openQuestion = (itemId: string, opts?: { reveal?: boolean }) => {
+    if (opts?.reveal) revealHomeCard(itemId);
+    setOpenQuestionId(itemId);
+  };
+  /** What every System Config editor needs besides its item (ItemEditor / QuestionDialog context). */
+  const interviewEditorContext = {
+    topology: svcTopology,
+    pvArray,
+    derivedStrings: computedSystem.isMicro ? [] : computedSystem.strings.map(st => st.panelCount),
+    equipment: {
+      gatewayProductId: interviewEquipment.gatewayProductId,
+      storageProductId: interviewEquipment.storageProductId,
+      storageLabel: interviewEquipment.storage?.label ?? null,
+      totalUnits: interviewEquipment.storage?.count ?? 0,
+    },
+    busy: _svcSaving || !!_archResolving,
+    apply: applyInterviewAnswer,
+    onRecordCoupling: (coupling: string) => resolveElectricalArchitecture(coupling),
   };
   // 🚨 ASK THE SERVER WHERE THE EQUIPMENT CAME FROM. See `_archDetail`: the browser can see THAT the
   // architecture is unresolved, but only the server can say whether the inverter was ever a decision.
@@ -11183,35 +11226,25 @@ function EngineeringPageInner() {
                   </div>
                 </div>
 
-                {/* ══ THE INSTALLER'S INTERVIEW ══════════════════════════════
-                    Design facts → existing service → equipment → behavior & connection →
-                    engineering result. The answers are written to the project's service model; the
-                    detailed controls below stay for the equipment selection and manual work. */}
-                <div className="mb-5">
-                  <SystemConfigInterview
-                    interview={systemConfigInterview}
-                    topology={svcTopology}
-                    pvArray={pvArray}
-                    derivedStrings={computedSystem.isMicro ? [] : computedSystem.strings.map(st => st.panelCount)}
-                    equipment={{
-                      gatewayProductId: interviewEquipment.gatewayProductId,
-                      storageProductId: interviewEquipment.storageProductId,
-                      storageLabel: interviewEquipment.storage?.label ?? null,
-                      totalUnits: interviewEquipment.storage?.count ?? 0,
-                    }}
-                    mode={controlMode}
-                    busy={_svcSaving || !!_archResolving}
-                    error={_svcError ?? _archResolveError}
-                    onWrite={writeInterviewAnswer}
-                    onRecordCoupling={async (coupling) => { await resolveElectricalArchitecture(coupling); return true; }}
-                    equipmentSlot={(
-                      <a href="#system-config-equipment" data-testid="interview-goto-equipment"
-                         className="inline-block text-[11px] font-bold text-sky-300 hover:text-sky-200">
-                        Choose or change equipment ↓
-                      </a>
-                    )}
-                  />
-                </div>
+                {/* ══ NO QUESTIONNAIRE ABOVE THE GRID (System Config V3) ═════════
+                    Ray: "We do not want a second questionnaire layered on top of System Config." Each
+                    interview question is asked in its home card (lib/electrical/systemConfigPlacement
+                    .ts), in THE question dialog below, or in the Engineering Readiness panel at the
+                    bottom. Guided mode is this one line — never a separate layout. */}
+                {controlMode === 'guided' ? (
+                  <GuidedStrip interview={systemConfigInterview}
+                               onAnswer={item => openQuestion(item.id, { reveal: true })} />
+                ) : null}
+                {interviewRefusal ? (
+                  <div data-testid="interview-refusal" className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-200">
+                    {interviewRefusal}
+                  </div>
+                ) : null}
+                <QuestionDialog {...interviewEditorContext}
+                                item={findInterviewItem(systemConfigInterview, openQuestionId)}
+                                error={_svcError ?? _archResolveError}
+                                onClose={() => setOpenQuestionId(null)}
+                                onGoToCard={itemId => { revealHomeCard(itemId); }} />
 
                 {/* ══ 3-COLUMN RESPONSIVE GRID ═══════════════════════════════ */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-5">
@@ -12080,7 +12113,7 @@ function EngineeringPageInner() {
                     ) : null}
 
                     {/* Inverters & Strings Card */}
-                    <div className="eng-panel">
+                    <div className="eng-panel scroll-mt-4" id="sc-card-inverters">
                       {/* ══════════════════════════════════════════════════════
                           🚨 THIS CARD MUST NOT PRESENT A SUGGESTION AS A DECISION.
 
@@ -12975,50 +13008,24 @@ function EngineeringPageInner() {
                   <div className="space-y-4 lg:col-span-2 xl:col-span-1">
 
                     {/* ── Engineering Summary Panel ── */}
-                    <div className="eng-panel">
+                    <div className="eng-panel scroll-mt-4" id="sc-card-summary">
                       <h3 className="text-sm font-extrabold text-slate-100 mb-3 flex items-center gap-2 tracking-tight">
                         <Cpu size={14} className="text-amber-400" /> Engineering Summary
                       </h3>
-                      <div className="grid grid-cols-3 gap-2 mb-3">
-                        {[
-                          { label: 'Panels', value: totalPanels, color: 'text-amber-400', icon: <Sun size={11} /> },
-                          { label: 'kW DC', value: totalKw, color: 'text-amber-400', icon: <Zap size={11} /> },
-                          { label: 'kW AC', value: _noPvInverter ? 'N/A' : (_acKwNum > 0 ? _acKwNum.toFixed(2) : '—'), color: 'text-blue-400', icon: <Cpu size={11} /> },
-                          { label: 'DC/AC', value: _noPvInverter ? 'N/A' : _dcAcRatio, color: parseFloat(_dcAcRatio) < 1.0 ? 'text-red-400' : parseFloat(_dcAcRatio) > DC_AC_TARGET.hardMax ? 'text-red-400' : parseFloat(_dcAcRatio) > DC_AC_TARGET.max ? 'text-amber-400' : parseFloat(_dcAcRatio) < DC_AC_TARGET.min ? 'text-amber-400' : 'text-emerald-400', icon: <Activity size={11} /> },
-                          { label: cs.isMicro ? 'Branches' : 'Strings', value: _branchCount, color: 'text-purple-400', icon: <GitBranch size={11} /> },
-                          { label: 'BOM Cost', value: bomPricing?.pricingApplied ? `$${(bomPricing.totalBomCost / 1000).toFixed(1)}k` : '—', color: 'text-emerald-400', icon: <Package size={11} /> },
-                        ].map(item => (
-                          <div key={item.label} className="rounded-lg bg-slate-900/70 border border-slate-700/50 px-2.5 py-2">
-                            <div className="flex items-center gap-1 mb-0.5">
-                              <span className={item.color}>{item.icon}</span>
-                              <span className="text-[9px] text-slate-500 uppercase tracking-wide font-semibold">{item.label}</span>
-                            </div>
-                            <div className={`text-base font-black tabular-nums ${item.color}`}>{item.value}</div>
-                          </div>
-                        ))}
+                      {/* ── THE ENGINEERED PROJECT, IN COMPACT TILES (System Config V3) ─────────
+                          PANELS · PV DC · PV AC · STRINGS · STORAGE · ESS OUTPUT · GATEWAYS · SERVICE,
+                          each read from the interview's summary facts (each from its owner) with a
+                          provenance chip, details behind [?]. On a DC-coupled job PV AC reads
+                          "N/A — DC coupled" and the batteries' AC output is its own tile: PV production
+                          capacity is never shown as ESS discharge capacity. */}
+                      <EngineeringSummaryFacts facts={systemConfigInterview.summaryFacts} />
+                      {/* What is not a project fact — the ratio and the price — stays one quiet line. */}
+                      <div className="mb-3 flex flex-wrap gap-x-3 text-[10px] text-slate-500">
+                        {!_noPvInverter && _acKwNum > 0 ? (
+                          <span data-testid="summary-dc-ac">DC/AC <span className={`font-bold ${parseFloat(_dcAcRatio) < 1.0 ? 'text-red-400' : parseFloat(_dcAcRatio) > DC_AC_TARGET.hardMax ? 'text-red-400' : parseFloat(_dcAcRatio) > DC_AC_TARGET.max ? 'text-amber-400' : parseFloat(_dcAcRatio) < DC_AC_TARGET.min ? 'text-amber-400' : 'text-emerald-400'}`}>{_dcAcRatio}</span></span>
+                        ) : null}
+                        <span data-testid="summary-bom">BOM <span className="font-bold text-slate-300">{bomPricing?.pricingApplied ? `$${(bomPricing.totalBomCost / 1000).toFixed(1)}k` : '—'}</span></span>
                       </div>
-
-                      {/* ── THE ENGINEERED PROJECT, STATED PRECISELY ───────────────────────
-                          Read from the interview's summary facts — each from its owner. On a DC-coupled
-                          job the PV inverter reads NONE and the batteries' AC output is its own line;
-                          PV production capacity is never shown as ESS discharge capacity. */}
-                      <dl data-testid="engineering-summary-facts"
-                          className="mb-3 rounded-xl bg-slate-900/40 border border-slate-700/30 divide-y divide-slate-700/30">
-                        {systemConfigInterview.summaryFacts.map(f => (
-                          <div key={f.label} className="flex items-baseline justify-between gap-2 px-3 py-1.5">
-                            <dt className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{f.label}</dt>
-                            <dd className="text-right">
-                              <span className="text-[11px] font-bold text-slate-100" data-testid={`summary-fact-${f.label.toLowerCase().replace(/[^a-z]+/g, '-')}`}>{f.value}</span>
-                              <span className="ml-1.5 text-[9px] text-slate-500">{f.source}</span>
-                            </dd>
-                          </div>
-                        ))}
-                      </dl>
-                      {_noPvInverter ? (
-                        <div className="mb-3 text-[10px] text-slate-500">
-                          kW AC and DC/AC are not applicable: no standalone PV inverter exists on this design.
-                        </div>
-                      ) : null}
 
                       {/* System health rows */}
                       <div className="rounded-xl bg-slate-900/40 border border-slate-700/30 divide-y divide-slate-700/30">
@@ -13056,7 +13063,7 @@ function EngineeringPageInner() {
                     </div>
 
                     {/* Battery Card — Toggleable Module */}
-                    <div className="eng-panel">
+                    <div className="eng-panel scroll-mt-4" id="sc-card-battery">
                       {/* Battery header with ON/OFF toggle */}
                       <div className="flex items-center justify-between mb-3">
                         <h3 className="text-sm font-extrabold text-slate-100 flex items-center gap-2 tracking-tight">
@@ -13267,7 +13274,7 @@ function EngineeringPageInner() {
                     </div>
 
                     {/* ── System Configuration ── */}
-                    <div className="eng-panel">
+                    <div className="eng-panel scroll-mt-4" id="sc-card-system-config">
                       <h3 className="text-sm font-extrabold text-slate-100 mb-3 flex items-center gap-2 tracking-tight">
                         <Settings size={14} className="text-amber-400" /> System Configuration
                       </h3>
@@ -13557,6 +13564,13 @@ function EngineeringPageInner() {
 
 
                 </div>{/* end 3-col grid */}
+
+                {/* ══ ENGINEERING READINESS — full width, under the grid (System Config V3) ═══
+                    The one place for leftovers: PASS / FAIL / NOT EVALUATED, the release status, the
+                    top required answers, [Answer Next] and [Review Engineering]. */}
+                <EngineeringReadinessPanel {...interviewEditorContext} interview={systemConfigInterview}
+                                           error={_svcError ?? _archResolveError}
+                                           onGoToCard={itemId => { revealHomeCard(itemId); }} />
 
               </div>
             );

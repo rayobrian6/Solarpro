@@ -4,18 +4,22 @@
 //   · a controller or battery that does not fit is shown by its NAME, and "not evaluated" where the
 //     catalogue carries no fact — never a raw catalogue key;
 //   · a failed save keeps what the installer typed (the draft is cleared only when the PUT succeeded).
+//
+// REWRITTEN FOR V3, NOT DELETED (2026-10-03): rendered through `ItemEditor` — the one editor switch
+// the cards and dialogs share — instead of the removed five-card SystemConfigInterview.
 // ═══════════════════════════════════════════════════════════════════════════
 import React from 'react';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
-import { SystemConfigInterview } from '@/components/engineering/systemConfig/SystemConfigInterview';
 import { buildSystemConfigInterview } from '@/lib/electrical/systemConfigInterview';
 import { answerServiceRating, type AnswerResult } from '@/lib/electrical/systemConfigAnswers';
 import { addBackupDomain } from '@/lib/electrical/topologyAuthoring';
 import { resolvePvArrayDesign } from '@/lib/electrical/pvArrayDesign';
 import { buildRaysIntendedJob } from '@/lib/electrical/fixtures/tesla400aTwoGateway';
+import { allInterviewItems } from '@/lib/electrical/systemConfigPlacement';
+import { ItemEditor, applyVia } from '@/components/engineering/systemConfig/ItemEditor';
 import type { ServiceTopology } from '@/lib/electrical/serviceTopology';
 
 afterEach(cleanup);
@@ -34,12 +38,15 @@ function mount(t: ServiceTopology, onWriteResult = true) {
     },
     evaluation: null,
   });
+  const items = allInterviewItems(interview).filter(i => i.id.startsWith('equipment.system.'));
   render(
-    <SystemConfigInterview
-      interview={interview} topology={t} pvArray={pvArray} derivedStrings={[]}
-      equipment={{ gatewayProductId: null, storageProductId: null, storageLabel: null, totalUnits: 2 }}
-      mode="manual" busy={false} error={null} onWrite={onWrite} onRecordCoupling={async () => true}
-    />,
+    <div>
+      {items.map(item => (
+        <ItemEditor key={item.id} item={item} topology={t} pvArray={pvArray} derivedStrings={[]} busy={false}
+                    equipment={{ gatewayProductId: null, storageProductId: null, storageLabel: null, totalUnits: 2 }}
+                    apply={applyVia(onWrite)} />
+      ))}
+    </div>,
   );
   return onWrite;
 }
@@ -91,9 +98,12 @@ describe('[nit] a failed save keeps what the installer typed', () => {
     await waitFor(() => expect(count()).toBe('2'));
   });
 
-  it('the interview no longer imports the writers the per-system editor replaced', () => {
-    const src = readFileSync(resolve(process.cwd(), 'components/engineering/systemConfig/SystemConfigInterview.tsx'), 'utf8');
-    const imports = src.slice(src.indexOf('import {\n  answerServiceRating'), src.indexOf("from '@/lib/electrical/systemConfigAnswers'"));
+  it('the shared editor switch does not import the writers the per-system editor replaced', () => {
+    const src = readFileSync(resolve(process.cwd(), 'components/engineering/systemConfig/ItemEditor.tsx'), 'utf8');
+    const end = src.indexOf("from '@/lib/electrical/systemConfigAnswers'");
+    expect(end, 'ItemEditor no longer imports the answer writers at all').toBeGreaterThan(0);
+    const imports = src.slice(src.lastIndexOf('import {', end), end);
+    expect(imports).toMatch(/\banswerServiceRating\b/);   // the slice really is that import
     expect(imports).not.toMatch(/\banswerBackup\b/);
     expect(imports).not.toMatch(/\banswerSystemBatteries\b/);
   });

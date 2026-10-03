@@ -1,13 +1,19 @@
 /** @vitest-environment jsdom */
 // ═══════════════════════════════════════════════════════════════════════════
-// The System Config card renders the optional load analysis in its Engineering section, and each
-// control writes the service graph through the page's `onWrite` — the same path the PUT route sits
-// behind. (The PUT → GET → engineering round trip is proven in the .postgres test beside this one.)
+// The optional load analysis, clicked: each control writes the service graph through `apply` — the
+// page's one write path, the same one the PUT route sits behind. (The PUT → GET → engineering round
+// trip is proven in the .postgres test beside this one.)
+//
+// REWRITTEN FOR V3, NOT DELETED (2026-10-03). The analysis used to be edited in the five-card
+// interview's Engineering Result card. Its home is now the Engineering Readiness panel's REVIEW
+// ENGINEERING modal ("the optional load analysis editor. Detail lives here, not on the page."), so
+// every case below opens that modal and proves the same behaviour there: the method is never
+// assumed, a typo never deletes a stored figure, a FAIL is never quiet, and an optional analysis
+// never turns the engineering amber by itself.
 // ═══════════════════════════════════════════════════════════════════════════
 import React, { useState } from 'react';
 import { describe, it, expect, afterEach } from 'vitest';
-import { render, screen, cleanup, fireEvent, waitFor, act } from '@testing-library/react';
-import { SystemConfigInterview } from '@/components/engineering/systemConfig/SystemConfigInterview';
+import { render, screen as page, cleanup, fireEvent, waitFor, act, within } from '@testing-library/react';
 import { buildSystemConfigInterview } from '@/lib/electrical/systemConfigInterview';
 import {
   answerServiceRating, answerElectricalSystem, answerDistribution, answerInterconnection,
@@ -18,6 +24,8 @@ import { resolvePvArrayDesign } from '@/lib/electrical/pvArrayDesign';
 import { buildRaysIntendedJob } from '@/lib/electrical/fixtures/tesla400aTwoGateway';
 import { evaluateServiceTopology, type ServiceTopology } from '@/lib/electrical/serviceTopology';
 import { addProtectiveDevice, setSolarCoupling, updatePanel } from '@/lib/electrical/topologyAuthoring';
+import { EngineeringReadinessPanel } from '@/components/engineering/systemConfig/EngineeringReadinessPanel';
+import { applyVia } from '@/components/engineering/systemConfig/ItemEditor';
 
 afterEach(cleanup);
 
@@ -33,23 +41,29 @@ const interviewOf = (t: ServiceTopology) => buildSystemConfigInterview({
   evaluation: evaluateServiceTopology(t),
 });
 
+const NO_EQUIPMENT = { gatewayProductId: null, storageProductId: null, storageLabel: null, totalUnits: 0 };
+
+/** Everything below is asked inside Review Engineering: queries are scoped to that modal. */
+const screen = {
+  getByTestId: (id: string) => within(page.getByTestId('review-engineering')).getByTestId(id),
+  queryByTestId: (id: string) => within(page.getByTestId('review-engineering')).queryByTestId(id),
+  queryAllByTestId: (id: string | RegExp) => within(page.getByTestId('review-engineering')).queryAllByTestId(id),
+};
+const openReview = () => fireEvent.click(page.getByTestId('readiness-review'));
+
 function mount(t: ServiceTopology) {
   const writes: ServiceTopology[] = [];
   render(
-    <SystemConfigInterview
-      interview={interviewOf(t)} topology={t} pvArray={pv20} derivedStrings={[]}
-      equipment={{ gatewayProductId: null, storageProductId: null, storageLabel: null, totalUnits: 0 }}
-      mode="manual" busy={false} error={null}
-      onWrite={async next => { writes.push(next); return true; }}
-      onRecordCoupling={async () => true}
-      // The page always passes its pickers; the load analysis lives outside the Equipment card.
-      equipmentSlot={<div data-testid="equipment-pickers" />} />,
+    <EngineeringReadinessPanel
+      interview={interviewOf(t)} topology={t} pvArray={pv20} derivedStrings={[]} equipment={NO_EQUIPMENT}
+      busy={false} apply={applyVia(async next => { writes.push(next); return true; })} />,
   );
+  openReview();
   return writes;
 }
 
 /**
- * The page's loop, live: every write becomes the topology the card is rebuilt from, as the page does
+ * The page's loop, live: every write becomes the topology the panel is rebuilt from, as the page does
  * after its PUT. `setTopology` stands in for a change made elsewhere (another card, a reload).
  */
 function mountLive(initial: ServiceTopology) {
@@ -59,16 +73,13 @@ function mountLive(initial: ServiceTopology) {
     const [t, setT] = useState(initial);
     setTopology = setT;
     return (
-      <SystemConfigInterview
-        interview={interviewOf(t)} topology={t} pvArray={pv20} derivedStrings={[]}
-        equipment={{ gatewayProductId: null, storageProductId: null, storageLabel: null, totalUnits: 0 }}
-        mode="manual" busy={false} error={null}
-        onWrite={async next => { writes.push(next); setT(next); return true; }}
-        onRecordCoupling={async () => true}
-        equipmentSlot={<div data-testid="equipment-pickers" />} />
+      <EngineeringReadinessPanel
+        interview={interviewOf(t)} topology={t} pvArray={pv20} derivedStrings={[]} equipment={NO_EQUIPMENT}
+        busy={false} apply={applyVia(async next => { writes.push(next); setT(next); return true; })} />
     );
   }
   render(<Page />);
+  openReview();
   return { writes, setTopology: (t: ServiceTopology) => act(() => setTopology(t)) };
 }
 
@@ -91,7 +102,7 @@ const resolved400 = (): ServiceTopology => {
   return setSolarCoupling(t, 'ac-coupled-inverter');
 };
 
-describe('the System Config card edits the optional load analysis', () => {
+describe('Review Engineering edits the optional load analysis', () => {
   it('Add stays disabled until a method is chosen; choosing one writes exactly that method', async () => {
     const writes = mount(house200());
     expect(screen.getByTestId('interview-item-engineering.loads').getAttribute('data-state')).toBe('answered');
@@ -162,7 +173,7 @@ describe('a figure is deleted only by a deliberate blank', () => {
     fireEvent.blur(input);
     await settle();
     expect(writes, 'the stored figure was deleted').toEqual([]);
-    expect(screen.getByTestId('interview-refusal').textContent).toMatch(/^MSP #1: enter a number of amperes\./);
+    expect(screen.getByTestId('answer-refusal').textContent).toMatch(/^MSP #1: enter a number of amperes\./);
     expect(input.value, 'the screen shows a figure the project does not hold').toBe('92');
   });
 
@@ -182,7 +193,7 @@ describe('a figure is deleted only by a deliberate blank', () => {
     fireEvent.change(msp2, { target: { value: '0' } });
     fireEvent.blur(msp2);
     await settle();
-    expect(screen.getByTestId('interview-refusal').textContent).toMatch(/positive number of amperes/);
+    expect(screen.getByTestId('answer-refusal').textContent).toMatch(/positive number of amperes/);
     expect(msp2.value).toBe('');
     const msp1 = screen.getByTestId('answer-loads-panel-msp-1') as HTMLInputElement;
     fireEvent.change(msp1, { target: { value: '-5' } });
@@ -216,7 +227,7 @@ describe('the method picked before Add is never a stale choice', () => {
   });
 });
 
-describe('🚨 the card never lets a FAIL go quietly', () => {
+describe('🚨 Review Engineering never lets a FAIL go quietly', () => {
   it('a failing analysis row says why (a red verdict with no reason is not a next step)', () => {
     mount(ok(answerPanelDemand(ok(answerLoadAnalysisMethod(buildRaysIntendedJob().topology, 'standard-220-part-iii')), 'msp-1', 250)));
     const row = screen.getByTestId('interview-item-engineering.loads');
@@ -240,14 +251,17 @@ describe('🚨 the card never lets a FAIL go quietly', () => {
     expect(row.getAttribute('data-state')).toBe('needs-verification');
     expect(row.textContent).toMatch(/no longer read\. It failed, and nothing evaluates that now — 450\.0 A calculated demand exceeds the 400 A service\./);
     expect(row.textContent).toMatch(/Nothing evaluates this demand now/);
-    expect(screen.getByTestId('interview-section-engineering').getAttribute('data-status')).toBe('needs-verification');
+    expect(screen.getByTestId('review-engineering-items').getAttribute('data-status')).toBe('needs-verification');
     expect(screen.queryByTestId('answer-loads-supersedes')).toBeNull();
   });
 
-  it('an empty or partial analysis on a fully resolved job leaves the Engineering card Complete', () => {
+  it('an empty or partial analysis on a fully resolved job leaves the engineering Complete — and the job COMPLETE', () => {
     mount(ok(answerPanelDemand(ok(answerLoadAnalysisMethod(resolved400(), 'standard-220-part-iii')), 'msp-1', 92)));
     expect(screen.getByTestId('interview-item-engineering.loads').getAttribute('data-state')).toBe('answered');
-    expect(screen.getByTestId('interview-section-engineering').getAttribute('data-status')).toBe('complete');
+    expect(screen.getByTestId('review-engineering-items').getAttribute('data-status')).toBe('complete');
     expect(screen.getByTestId('answer-loads-missing').textContent).toBe('MSP #2');
+    // The optional analysis holds nothing up: no required answer, and the panel says so.
+    expect(page.getByTestId('readiness-status').textContent).toMatch(/^(ELIGIBLE|COMPLETE)/);
+    expect(page.queryByTestId('readiness-next-0')).toBeNull();
   });
 });
