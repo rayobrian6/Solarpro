@@ -24,7 +24,7 @@ const box = 'rounded bg-slate-800 px-2 py-1 text-xs text-slate-100 border border
 export interface UtilityDisconnectsEditorProps {
   item: InterviewItem;
   topology: ServiceTopology | null;
-  apply: (r: AnswerResult) => Promise<void>;
+  apply: (r: AnswerResult) => Promise<unknown>;
   busy: boolean;
 }
 
