@@ -27,7 +27,7 @@ import {
   applyPerSystemGenerationPanels, clearPerSystemGenerationPanels,
 } from '@/lib/electrical/topologyPresets';
 import type {
-  ServiceTopology, ServicePhase, PoiRelationship, DerArrangement, BackupDomain, SolarCoupling,
+  ServiceTopology, ServicePhase, PoiRelationship, DerArrangement, BackupDomain, SolarCoupling, PanelBoard,
 } from '@/lib/electrical/serviceTopology';
 import { isServicePhase, servicePhaseInfo } from '@/lib/electrical/serviceTopology';
 
@@ -189,13 +189,37 @@ const EXISTING_FIELD_WORDS: ReadonlyArray<[keyof ExistingServiceAnswer, string]>
  * A blank text field is "not read" (null), never an empty string the check would count as read; an
  * AIC that is not a positive number of amperes is refused rather than stored.
  */
+/**
+ * 🚨 ON A ONE-PANEL SERVICE THE SERVICE ASSEMBLY *IS* MSP #1 — ONE NAMEPLATE, ONE SCCR.
+ *
+ * The Verify dialog's "AIC / SCCR — from its nameplate" (`service.existingEquipment.sccrA`) and the
+ * panel row's "SCCR off the panel label" (`panels[0].sccrA`, which the engine's fault-current chain
+ * reads) are the same figure off the same label when the service is one main panel with no separate
+ * service disconnect recorded. Each writer therefore writes both, so it is asked once: answering the
+ * Verify dialog satisfies the chain, and the panel row reads it back answered. Null ⇒ more than one
+ * panel, or a separate service disconnect (then they are different assemblies with their own labels).
+ */
+export function soleServicePanel(t: ServiceTopology): PanelBoard | null {
+  if (t.panels.length !== 1) return null;
+  if (t.devices.some(d => d.roles.includes('service-disconnect') && !d.inlineOnNodeId)) return null;
+  return t.panels[0];
+}
+
 export function answerExistingService(t: ServiceTopology, patch: ExistingServiceAnswer): AnswerResult {
-  if (!patch.existing) return done(setExistingServiceEquipment(t, null), 'Service equipment: new');
+  if (!patch.existing) {
+    // A NEW assembly brings its own numbers: the sole panel's SCCR that was the OLD assembly's label is
+    // not the new one's (the rule `answerGenerationPanelPart` applies to a new part).
+    const sole = soleServicePanel(t);
+    const oldSccr = t.service.existingEquipment?.sccrA ?? null;
+    let next = setExistingServiceEquipment(t, null);
+    if (sole && oldSccr !== null && sole.sccrA === oldSccr) next = updatePanel(next, sole.id, { sccrA: null });
+    return done(next, 'Service equipment: new');
+  }
   if (patch.sccrA !== undefined && patch.sccrA !== null && (!Number.isFinite(patch.sccrA) || patch.sccrA <= 0)) {
     return refuse('The AIC / SCCR must be a positive number read off the nameplate, or left blank until it is read.');
   }
   const text = (v: string | null | undefined) => (typeof v === 'string' ? v.trim() || null : null);
-  const next = setExistingServiceEquipment(t, {
+  let next = setExistingServiceEquipment(t, {
     ...(patch.manufacturer !== undefined ? { manufacturer: text(patch.manufacturer) } : {}),
     ...(patch.catalogNumber !== undefined ? { catalogNumber: text(patch.catalogNumber) } : {}),
     ...(patch.mainArrangement !== undefined ? { mainArrangement: text(patch.mainArrangement) } : {}),
@@ -203,6 +227,8 @@ export function answerExistingService(t: ServiceTopology, patch: ExistingService
     ...(patch.sccrA !== undefined ? { sccrA: patch.sccrA } : {}),
     ...(patch.verified !== undefined ? { verified: patch.verified } : {}),
   });
+  const sole = soleServicePanel(next);
+  if (sole && patch.sccrA !== undefined) next = updatePanel(next, sole.id, { sccrA: patch.sccrA });
   const ex = next.service.existingEquipment;
   const recorded = EXISTING_FIELD_WORDS
     .filter(([k]) => patch[k] !== undefined && ex?.[k as keyof typeof ex] != null)
@@ -233,7 +259,12 @@ export function answerPanel(
   if (patch.busbarRatingA !== undefined) clean.busbarRatingA = patch.busbarRatingA;
   if (patch.manufacturer !== undefined) clean.manufacturer = patch.manufacturer?.trim() || null;
   if (patch.sccrA !== undefined) clean.sccrA = patch.sccrA;
-  return done(updatePanel(t, panelId, clean as never), `${p.label} updated`);
+  let next = updatePanel(t, panelId, clean as never);
+  // The same nameplate as the existing service assembly's on a one-panel service (`soleServicePanel`).
+  if (patch.sccrA !== undefined && soleServicePanel(t)?.id === panelId && t.service.existingEquipment) {
+    next = setExistingServiceEquipment(next, { sccrA: patch.sccrA });
+  }
+  return done(next, `${p.label} updated`);
 }
 
 // ── 4 · SYSTEM BEHAVIOR / CONNECTION ────────────────────────────────────────
@@ -418,10 +449,24 @@ export function answerInterconnection(
   const relationship: PoiRelationship = value === 'meter-collar' ? 'meter-collar' : value;
   let next = setInterconnection(t, { meterCollarSelected: value === 'meter-collar' });
 
+  // 🚨 A METER COLLAR AND A SUPPLY-SIDE TAP LAND AT THE SERVICE ENTRANCE — that is what the two
+  // relationships ARE (the meter socket; the service conductors ahead of the service disconnect), so
+  // the landing is determined by the answer, not a second question. It used to be left null, and the
+  // engine's "where on the premises wiring it lands" need then had no System Config editor at all —
+  // only the Service Topology tab's "Lands on" select could answer it. The entrance is the one
+  // service disconnect where one is recorded, else the one main panel, else the service distribution
+  // ahead of every main (the node the drawing and the connection graph already have for it).
+  const serviceEntrance = (): string => {
+    const disconnects = next.devices.filter(x => x.roles.includes('service-disconnect') && !x.inlineOnNodeId);
+    if (disconnects.length === 1) return disconnects[0].id;
+    if (next.panels.length === 1) return next.panels[0].id;
+    return 'service-distribution';
+  };
   const where = (d: BackupDomain | null): string | null => {
     if (relationship === 'load-side-busbar') return d?.backedUpPanelIds[0] ?? next.panels[0]?.id ?? null;
     if (relationship === 'manufacturer-integrated') return d?.gateway.id ?? null;
     if (relationship === 'load-side-feeder-tap') return d?.branchId ?? next.branches[0]?.id ?? null;
+    if (relationship === 'supply-side' || relationship === 'meter-collar') return serviceEntrance();
     return null;
   };
 

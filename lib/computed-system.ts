@@ -1678,8 +1678,8 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
       'NEC 705.12(B) NOT EVALUATED — this project has not recorded how the PV connects to the '
       + 'service (supply-side tap, load-side breaker, or manufacturer-integrated). The 120% busbar '
       + 'rule applies to a load-side connection and NEC 705.11 governs a supply-side tap, so the '
-      + 'governing article is not yet known. Record the point of interconnection in the service '
-      + 'topology.';
+      + 'governing article is not yet known. Answer "Where does the system connect to the service?" '
+      + 'on the System Configuration card in System Config.';
     console.warn('[COMPUTED-SYSTEM]', _interconnectionRefusal);
     issues.push({
       severity: 'error',
@@ -1687,8 +1687,9 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
       message: _interconnectionRefusal,
       necReference: 'NEC 705.11 / 705.12(B)',
       autoFixed: false,
-      suggestion: 'Record the point of interconnection in the service topology — it decides which '
-        + 'article governs.',
+      // Named where the installer can answer it — Service Topology is no longer in the navigation.
+      suggestion: 'Answer "Where does the system connect to the service?" on the System Configuration '
+        + 'card in System Config — it decides which article governs.',
     });
   }
   const interconnectionPass = _interconUnresolved

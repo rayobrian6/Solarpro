@@ -674,6 +674,16 @@ export function answerSystemEquipment(
     notes.push(config === null || config === undefined
       ? 'output setting not recorded — sized at the published maximum'
       : `commissioned at ${config} kW — ${u0?.continuousOutputA ?? '—'} A continuous, ${u0?.ocpdA ?? '—'} A OCPD each`);
+    // 🚨 AND A PANEL SOLARPRO SIZED ITSELF IS RE-SIZED. Before a part is chosen, this system's own
+    // generation panel carries the sizing's output OCPD and busbar copy; keeping them after RAISING the
+    // setting left SolarPro's own stale figures FAILING against the new current ("80 A is below the
+    // 125 A required"), with no System Config control that could clear it. It is rebuilt exactly as a
+    // count change rebuilds it. Once a part is chosen its numbers are the part's: kept, and re-checked.
+    const own = (next.aggregationPanels ?? []).find(a => a.domainId === d.id);
+    if (d.storageConnection === 'der-aggregation-panel' && own && !own.productId) {
+      next = applyPerSystemGenerationPanels(next, [d.id]).topology;
+      notes.push('its generation panel was re-sized for the new setting');
+    }
   }
   if (!inverterSetChanged) {
     const rebuilt = rebuiltInverting();

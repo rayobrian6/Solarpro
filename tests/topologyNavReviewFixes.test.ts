@@ -25,7 +25,10 @@ import { answerGenerationPanelPart } from '@/lib/electrical/systemConfigGenerati
 import { equipmentInstancesFromTopology, reconcileQuantities } from '@/lib/electrical/topologyEquipment';
 import { bomFromServiceTopology } from '@/lib/bom/topologyBom';
 import { serviceTopologyScheduleRows, serviceTopologyProcurement } from '@/lib/permit/utils/serviceTopologySchedule';
-import { sccrAmpsFromKa, sccrKaFromAmps } from '@/lib/electrical/systemConfigAnswers';
+import {
+  sccrAmpsFromKa, sccrKaFromAmps, answerAvailableFaultCurrent, answerExistingService, answerIsolationRequired,
+  answerPanel, soleServicePanel,
+} from '@/lib/electrical/systemConfigAnswers';
 
 const PW3 = 'tesla-powerwall-3';
 const GW3 = 'tesla-backup-gateway-3';
@@ -160,5 +163,97 @@ describe('🚨 the generation panel part reaches the consumers its editor promis
     expect(sccrKaFromAmps(10_000)).toBe(10);
     const r = answerGenerationPanelPart(t, 'agg-1', { sccrA: 10_000 });
     expect(r.ok && r.did).toMatch(/SCCR 10 kA/);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+describe('🚨 raising the commissioned setting re-sizes the generation panel SolarPro sized itself', () => {
+  /** The reviewer's job: 400 A / two MSPs, 4 PW3 at 7.6 kW, independent paths, each system its own panel. */
+  function at76WithPanels(): ServiceTopology {
+    let t = ok(answerServiceRating(null, 400));
+    t = ok(answerDistribution(t, 'two-main-panels'));
+    t = ok(answerBackup(t, 'whole', { gatewayProductId: GW3, storageProductId: PW3, totalUnits: 4,
+      unitsPerPanel: { [t.panels[0].id]: 2, [t.panels[1].id]: 2 } }));
+    t = ok(answerSystemsArrangement(t, 'independent-branch'));
+    for (const d of t.domains) t = ok(answerSystemEquipment(t, d.id, { outputConfigKw: 7.6 }));
+    return ok(answerStorageLanding(t, 'der-aggregation-panel'));
+  }
+  const aggOf = (t: ServiceTopology, domainId: string) => t.aggregationPanels.find(a => a.domainId === domainId)!;
+  const panelFails = (t: ServiceTopology, aggId: string) => evaluateServiceTopology(t).checks
+    .filter(c => c.scope === `aggregation:${aggId}` && c.conclusion === 'FAIL').map(c => c.id);
+
+  it('no part chosen: 7.6 → 11.5 kW rebuilds it to the new current (was 80 A / 80 A, FAILING, with no control to clear it)', () => {
+    const t = at76WithPanels();
+    const d1 = t.domains[0].id;
+    expect([aggOf(t, d1).outputOcpdA, aggOf(t, d1).busbarRatingA]).toEqual([80, 80]);
+    const raised = ok(answerSystemEquipment(t, d1, { outputConfigKw: 11.5 }));
+    expect([aggOf(raised, d1).outputOcpdA, aggOf(raised, d1).busbarRatingA]).toEqual([125, 125]);
+    expect(aggOf(raised, d1).inputs.map(i => i.ocpdA)).toEqual([60, 60]);
+    expect(panelFails(raised, aggOf(raised, d1).id)).toEqual([]);
+    // The other system's panel is untouched.
+    expect(aggOf(raised, t.domains[1].id)).toEqual(aggOf(t, t.domains[1].id));
+  });
+
+  it('a part already chosen keeps its own numbers — and the engine re-checks them against the new current', () => {
+    let t = at76WithPanels();
+    const d1 = t.domains[0].id;
+    t = ok(answerGenerationPanelPart(t, aggOf(t, d1).id, { productId: 'small-100', busbarRatingA: 100, sccrA: 10_000 }));
+    const raised = ok(answerSystemEquipment(t, d1, { outputConfigKw: 11.5 }));
+    expect(aggOf(raised, d1)).toMatchObject({ productId: 'small-100', busbarRatingA: 100, sccrA: 10_000 });
+    expect(aggOf(raised, d1).inputs.map(i => i.ocpdA)).toEqual([60, 60]);
+    expect(panelFails(raised, aggOf(raised, d1).id)).toContain('aggregation.busbar');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+describe('🚨 one nameplate, one answer: a one-panel service\'s Verify AIC IS MSP #1\'s SCCR', () => {
+  const house = () => {
+    let t = ok(answerServiceRating(null, 200));
+    t = ok(answerInterconnection(t, 'load-side-busbar'));
+    t = ok(answerIsolationRequired(t, false));
+    return ok(answerAvailableFaultCurrent(t, 10_000));
+  };
+  const interview = (t: ServiceTopology) => buildSystemConfigInterview({
+    pvArray: resolvePvArrayDesign({ placedModuleCount: 20, selectedPanelId: 'panel-fence-ps1' }),
+    topology: t, coupling: null, couplingIsDecision: false, architectureConflict: false,
+    equipment: { pvInverter: { state: 'SELECTED', label: 'Enphase IQ8M', kind: 'micro' }, storage: null, gateway: null },
+    evaluation: evaluateServiceTopology(t),
+  });
+  const verify = (t: ServiceTopology, sccrA: number) => ok(answerExistingService(t, {
+    existing: true, manufacturer: 'Square D', catalogNumber: 'QO', mainArrangement: 'one main',
+    feederArrangement: 'none', sccrA, verified: true,
+  }));
+
+  it('answered in the Verify dialog: the chain stops waiting on MSP #1, and the panel row reads it back', () => {
+    const before = house();
+    expect(requiredQueue(interview(before)).map(i => i.id)).toContain('engineering.needs.sccr:msp-1');
+    const t = verify(before, 22_000);
+    expect(t.panels[0].sccrA).toBe(22_000);
+    expect(requiredQueue(interview(t)).map(i => i.id)).not.toContain('engineering.needs.sccr:msp-1');
+    expect(evaluateServiceTopology(t).checks.find(c => c.id === 'sccr.chain')?.conclusion).toBe('PASS');
+  });
+
+  it('answered on the panel row instead: the Verify AIC reads the same figure', () => {
+    const t = ok(answerPanel(verify(house(), 22_000), 'msp-1', { sccrA: 25_000 }));
+    expect([t.panels[0].sccrA, t.service.existingEquipment?.sccrA]).toEqual([25_000, 25_000]);
+  });
+
+  it('a NEW service assembly does not inherit the old one\'s label; two panels are two assemblies', () => {
+    const t = ok(answerExistingService(verify(house(), 22_000), { existing: false }));
+    expect(t.panels[0].sccrA).toBeNull();
+    const two = ok(answerDistribution(ok(answerServiceRating(null, 400)), 'two-main-panels'));
+    const v = verify(two, 42_000);
+    expect(v.panels.map(p => p.sccrA ?? null)).toEqual([null, null]);
+    expect(soleServicePanel(two)).toBeNull();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+describe('compliance help text names a place that is in the navigation', () => {
+  it('an unrecorded interconnection method sends the installer to System Config, not the service topology', () => {
+    const cs = computeSystem({ ...csStringInput(), interconnectionMethod: 'UNRESOLVED' } as ComputedSystemInput);
+    const issue = cs.issues.find(i => i.code === 'INTERCONNECTION_METHOD_UNRESOLVED')!;
+    expect(issue.suggestion).toMatch(/System Configuration card in System Config/);
+    expect(`${issue.message} ${issue.suggestion}`).not.toMatch(/service topology/i);
   });
 });

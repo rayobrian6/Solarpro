@@ -30,7 +30,7 @@ import {
 import {
   answerSystemEquipment, answerBackedUpPanels, outputConfigOf, outputConfigurationsFor, systemEquipmentFacts,
 } from '@/lib/electrical/systemConfigSystemEquipment';
-import { answerDisconnectPart } from '@/lib/electrical/systemConfigUtilityDisconnects';
+import { answerDisconnectPart, answerMeterCollarPermitted } from '@/lib/electrical/systemConfigUtilityDisconnects';
 import {
   GENERATION_PANELS_ITEM_ID, answerGenerationPanelPart,
 } from '@/lib/electrical/systemConfigGenerationPanels';
@@ -294,12 +294,15 @@ describe('the PV coupling is answerable in System Config on every job', () => {
  * depends on the main breaker fitted in it; the tab never had a control for it either). Named, so
  * the list can only shrink.
  */
+// 🚨 `poi.connectedToNodeId` IS NOT ON THIS LIST. It was — unconditionally — which hid two real dead
+// ends (a meter-collar or supply-side answer left the landing null, and only the old tab's "Lands on"
+// could set it) AND would have hidden a landing regression on every load-side job. The landing is now
+// derived from the answer for every relationship System Config offers, so a missing one is a defect.
 const NO_INSTALLER_CONTROL_ANYWHERE = (id: string) =>
   /^engineering\.needs\.manufacturer-(document|limit):/.test(id)
   || id === 'engineering.disconnect.multi-gateway-doc'
   || /^engineering\.needs\.sccr:.*-gateway$/.test(id)
-  || id === 'engineering.needs.poi.supplySideTapConductors'
-  || id === 'engineering.needs.poi.connectedToNodeId';
+  || id === 'engineering.needs.poi.supplySideTapConductors';
 
 describe('🚨 every required answer on a job built through System Config alone has a System Config editor', () => {
   const jobs: Array<[string, () => { t: ServiceTopology; eq: InterviewEquipment; dc: boolean }]> = [
@@ -324,6 +327,24 @@ describe('🚨 every required answer on a job built through System Config alone 
       t = ok(answerStorageLanding(t, 'gateway-panelboard'));
       return { t: { ...t, solarCoupling: 'dc-coupled-storage' as const }, eq: { ...PW3_EQ, storage: { ...PW3_EQ.storage!, count: 1 } }, dc: true };
     }],
+    ['a 200 A house on a METER COLLAR, fault current known', () => {
+      let t = ok(answerServiceRating(null, 200));
+      t = ok(answerMeterCollarPermitted(t, true));
+      t = ok(answerInterconnection(t, 'meter-collar'));
+      t = ok(answerIsolationRequired(t, false));
+      return { t: ok(answerAvailableFaultCurrent(t, 10_000)), eq: MICROS, dc: false };
+    }],
+    ['a 200 A house on a SUPPLY-SIDE tap, fault current known', () => {
+      let t = ok(answerServiceRating(null, 200));
+      t = ok(answerInterconnection(t, 'supply-side'));
+      t = ok(answerIsolationRequired(t, false));
+      return { t: ok(answerAvailableFaultCurrent(t, 10_000)), eq: MICROS, dc: false };
+    }],
+    ['a 400 A / two-main-panel house on a supply-side tap', () => {
+      let t = ok(answerDistribution(ok(answerServiceRating(null, 400)), 'two-main-panels'));
+      t = ok(answerInterconnection(t, 'supply-side'));
+      return { t: ok(answerIsolationRequired(t, false)), eq: MICROS, dc: false };
+    }],
     ['partial backup — only MSP #1', () => {
       let t = ok(answerDistribution(ok(answerServiceRating(null, 400)), 'two-main-panels'));
       t = ok(answerBackedUpPanels(t, [t.panels[0].id], { gatewayProductId: GW3, storageProductId: PW3, unitsPerPanel: { [t.panels[0].id]: 2 } }));
@@ -335,6 +356,27 @@ describe('🚨 every required answer on a job built through System Config alone 
     const queue = requiredQueue(interviewOf(t, eq, dc));
     const deadEnds = queue.filter(i => !hasItemEditor(i, t) && !NO_INSTALLER_CONTROL_ANYWHERE(i.id)).map(i => i.id);
     expect(deadEnds, 'a required answer only a graph editor can give').toEqual([]);
+  });
+
+  it('🚨 the guard is not masked: a load-side job whose landing regressed to null IS a dead end it reports', () => {
+    let t = ok(answerServiceRating(null, 200));
+    t = ok(answerInterconnection(t, 'load-side-busbar'));
+    t = ok(answerAvailableFaultCurrent(ok(answerIsolationRequired(t, false)), 10_000));
+    const regressed = { ...t, pointsOfInterconnection: t.pointsOfInterconnection.map(p => ({ ...p, connectedToNodeId: null })) };
+    const queue = requiredQueue(interviewOf(regressed, MICROS, false));
+    const deadEnds = queue.filter(i => !hasItemEditor(i, regressed) && !NO_INSTALLER_CONTROL_ANYWHERE(i.id)).map(i => i.id);
+    expect(deadEnds).toContain('engineering.needs.poi.connectedToNodeId');
+  });
+
+  it('a meter collar and a supply-side tap land at the service entrance — derived from the answer, nothing asked twice', () => {
+    const one = ok(answerInterconnection(ok(answerMeterCollarPermitted(ok(answerServiceRating(null, 200)), true)), 'meter-collar'));
+    expect(one.pointsOfInterconnection.map(p => p.connectedToNodeId)).toEqual([one.panels[0].id]);
+    const two = ok(answerInterconnection(ok(answerDistribution(ok(answerServiceRating(null, 400)), 'two-main-panels')), 'supply-side'));
+    expect(two.pointsOfInterconnection.map(p => p.connectedToNodeId)).toEqual(['service-distribution']);
+    expect(evaluateServiceTopology(two).checks.filter(c => c.id === 'poi.relationship').map(c => c.conclusion)).toEqual(['PASS']);
+    // Back to load side: the landing follows the answer again.
+    const back = ok(answerInterconnection(one, 'load-side-busbar'));
+    expect(back.pointsOfInterconnection.map(p => p.connectedToNodeId)).toEqual([one.panels[0].id]);
   });
 });
 
