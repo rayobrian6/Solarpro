@@ -100,18 +100,24 @@ const DOT: Partial<Record<InterviewItem['state'], string>> = {
   'fails': 'bg-rose-500',
 };
 
-/** One compact row: a label, the control, and a dot when the item still owes something. */
+/**
+ * One compact field: the label (with a dot when the item still owes something) over its control.
+ * Stacked, so the control gets the card's full width in the narrow right column — a select never
+ * truncates to "Every" / "Indep".
+ */
 function Field({ label, htmlFor, item, testid, children }: {
   label: string; htmlFor?: string; item?: InterviewItem | null; testid: string; children: React.ReactNode;
 }) {
   const dot = item ? DOT[item.state] : undefined;
   return (
-    <div data-testid={testid} data-state={item?.state} className="flex flex-wrap items-center gap-x-2 gap-y-1">
-      <label htmlFor={htmlFor} className="w-32 shrink-0 text-[10px] font-bold uppercase tracking-wide text-slate-500">
-        {label}
-      </label>
-      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">{children}</div>
-      {dot ? <span aria-hidden title={item?.state} className={`h-1.5 w-1.5 shrink-0 rounded-full ${dot}`} /> : null}
+    <div data-testid={testid} data-state={item?.state} className="flex flex-col gap-1">
+      <div className="flex items-center gap-1.5">
+        <label htmlFor={htmlFor} className="text-[10px] font-bold uppercase tracking-wide text-slate-500">
+          {label}
+        </label>
+        {dot ? <span aria-hidden title={item?.state} className={`h-1.5 w-1.5 shrink-0 rounded-full ${dot}`} /> : null}
+      </div>
+      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">{children}</div>
     </div>
   );
 }
