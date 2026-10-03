@@ -9,6 +9,7 @@
 // sheet, so the mirror must never hand those a code article.
 // ═══════════════════════════════════════════════════════════════════════════
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { answerServiceRating, answerInterconnection, type AnswerResult } from '@/lib/electrical/systemConfigAnswers';
 import { answerMeterCollarPermitted } from '@/lib/electrical/systemConfigUtilityDisconnects';
 import { updatePointOfInterconnection, setInterconnection } from '@/lib/electrical/topologyAuthoring';
@@ -112,5 +113,26 @@ describe('the mirror — what to write after a graph write', () => {
       // …but a connection that is no longer load-side does replace it
       expect(legacyInterconnectionMirror(answered('supply-side'), remedy)).toBe('SUPPLY_SIDE_TAP');
     }
+  });
+});
+
+describe('the page — the scalar follows the graph on the ONE write path', () => {
+  const page = readFileSync(`${process.cwd()}/app/engineering/page.tsx`, 'utf8');
+  const at = page.indexOf('const writeInterviewAnswer = guardGraphRead(async');
+  const body = page.slice(at, page.indexOf('\n  }, () => svcTopologyReadRef.current', at));
+
+  it('writeInterviewAnswer mirrors the interconnection after the graph write, before updateConfig', () => {
+    expect(at).toBeGreaterThan(0);
+    const write = body.indexOf('const ok = await writeTopology(next, what);');
+    const mirror = body.indexOf('legacyInterconnectionMirror(next, config.interconnectionMethod)');
+    const commit = body.indexOf('if (Object.keys(patch).length > 0) updateConfig(patch);');
+    expect(write).toBeGreaterThan(0);
+    expect(mirror, 'Guided [Answer], Answer Next and every dialog write skip the scalar mirror').toBeGreaterThan(write);
+    expect(commit).toBeGreaterThan(mirror);
+  });
+
+  it('nothing else on the page writes the interconnection scalar beside the graph', () => {
+    expect(page).not.toMatch(/updateConfig\(\{\s*interconnectionMethod:\s*'SUPPLY_SIDE_TAP'/);
+    expect(page).not.toContain('onLegacyInterconnection={m => updateConfig({ interconnectionMethod: m })}');
   });
 });

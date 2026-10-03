@@ -128,6 +128,7 @@ import {
   QuestionDialog, applyVia, guardGraphRead, unreadGraphRefusal,
 } from '@/components/engineering/systemConfig/ItemEditor';
 import { MeterCollarControl, SystemArchitectureControls } from '@/components/engineering/systemConfig/cards/SystemConfigurationControls';
+import { legacyInterconnectionMirror } from '@/lib/electrical/systemConfigLegacyInterconnection';
 import { EngineeringReadinessPanel } from '@/components/engineering/systemConfig/EngineeringReadinessPanel';
 import { GuidedStrip, revealHomeCard } from '@/components/engineering/systemConfig/GuidedStrip';
 import { ExistingElectricalServiceCard } from '@/components/engineering/systemConfig/cards/ExistingElectricalServiceCard';
@@ -9971,6 +9972,11 @@ function EngineeringPageInner() {
       // can never read two different battery counts — while Battery Storage is ON. OFF cleared the
       // selection; mirroring the graph's units back into it is the v63 phantom battery.
       Object.assign(patch, batteryConfigMirror(next, config, { batteryEnabled }));
+      // 🚨 The graph is the interconnection record: the legacy scalar follows it after EVERY graph
+      // write — a card select, the question dialog, Guided [Answer], Readiness [Answer Next] —
+      // so the SLD / BOM / permit consumers of `config.interconnectionMethod` never disagree with it.
+      const interconnection = legacyInterconnectionMirror(next, config.interconnectionMethod);
+      if (interconnection !== null) patch.interconnectionMethod = interconnection;
       if (Object.keys(patch).length > 0) updateConfig(patch);
     }
     return ok;
@@ -13420,8 +13426,7 @@ function EngineeringPageInner() {
                             beside the utility meter and only while it matters. */}
                         <MeterCollarControl {...interviewEditorContext} interview={systemConfigInterview}
                                             className="col-span-2"
-                                            legacyInterconnectionMethod={config.interconnectionMethod}
-                                            onLegacyInterconnection={m => updateConfig({ interconnectionMethod: m })} />
+                                            legacyInterconnectionMethod={config.interconnectionMethod} />
                         <div className="col-span-2">
                           <label className="eng-label">
                             Mounting System{subSystemCounts.isHybrid ? ' — project default (set per sub-system below)' : ''}
@@ -13442,7 +13447,6 @@ function EngineeringPageInner() {
                                                         error={_svcError ?? _archResolveError}
                                                         expanded={controlMode === 'manual'}
                                                         legacyInterconnectionMethod={config.interconnectionMethod}
-                                                        onLegacyInterconnection={m => updateConfig({ interconnectionMethod: m })}
                                                         legacyBusbarFails={(compliance as any)?.electrical?.errors?.some((e: any) => e.code === 'E-BUSBAR-120')
                                                           && pvConnectionSide(config.interconnectionMethod) === 'load-side'}
                                                         onGoToCard={itemId => { revealHomeCard(itemId); }} />
@@ -14410,11 +14414,17 @@ function EngineeringPageInner() {
                                     <div className={`font-bold ${alt.passes ? 'text-emerald-400' : 'text-slate-400'}`}>{alt.label}</div>
                                     <div className="text-slate-500 mt-0.5">{alt.description}</div>
                                     {alt.method === 'SUPPLY_SIDE_TAP' && alt.passes ? (
+                                      // The interconnection is answered once, on System Configuration (the graph):
+                                      // this opens that question rather than writing the legacy scalar beside it.
                                       <button
-                                        onClick={() => updateConfig({ interconnectionMethod: 'SUPPLY_SIDE_TAP' })}
+                                        data-testid="electrical-change-interconnection"
+                                        onClick={() => {
+                                          setActiveTab('config');
+                                          window.setTimeout(() => openQuestion('behavior.interconnection', { reveal: true }), 50);
+                                        }}
                                         className="mt-1.5 text-[10px] px-2 py-0.5 rounded bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/30 transition-colors font-semibold"
                                       >
-                                        Apply Supply-Side Tap →
+                                        Change the interconnection in System Config →
                                       </button>
                                     ) : null}
                                   </div>

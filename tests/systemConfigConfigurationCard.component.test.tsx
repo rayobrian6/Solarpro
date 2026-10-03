@@ -362,7 +362,9 @@ describe('the page mounts the card controls where the old grid was', () => {
   it('one interconnection control over the graph, mirrored onto config.interconnectionMethod; the meter collar beside the meter', () => {
     expect(card).toMatch(/<SystemArchitectureControls \{\.\.\.interviewEditorContext\} interview=\{systemConfigInterview\}/);
     expect(card).toMatch(/expanded=\{controlMode === 'manual'\}/);
-    expect((card.match(/onLegacyInterconnection=\{m => updateConfig\(\{ interconnectionMethod: m \}\)\}/g) ?? [])).toHaveLength(2);
+    // The scalar mirror is the page's write path (writeInterviewAnswer), not a card callback — so the
+    // dialog, Guided [Answer] and Answer Next mirror it too (tests/systemConfigLegacyInterconnection.test.ts).
+    expect(card).not.toContain('onLegacyInterconnection=');
     expect((card.match(/legacyInterconnectionMethod=\{config\.interconnectionMethod\}/g) ?? [])).toHaveLength(2);
     const meter = card.indexOf('>Utility Meter</label>');
     const collar = card.indexOf('<MeterCollarControl');
