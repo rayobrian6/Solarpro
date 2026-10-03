@@ -68,7 +68,7 @@ export async function POST(req: NextRequest) {
     const user = getUserFromRequest(req);
     if (!user) return NextResponse.json({ success: false, error: 'Authentication required.' }, { status: 401 });
 
-    const body = await req.json().catch(() => ({})) as { projectId?: string; coupling?: string };
+    const body = await req.json().catch(() => ({})) as { projectId?: string; coupling?: string; change?: boolean };
     const projectId = String(body.projectId ?? '');
     if (!isValidUUID(projectId)) {
       return NextResponse.json({ success: false, error: 'Invalid project ID.' }, { status: 400 });
@@ -87,7 +87,11 @@ export async function POST(req: NextRequest) {
     const loaded = await loadElectricalProject(projectId, user.id);
     if (!loaded) return NextResponse.json({ success: false, error: 'Project not found.' }, { status: 404 });
 
-    const planned = planArchitectureResolution(loaded.model, coupling, new Date());
+    // 🚨 `change: true` is the installer deliberately changing a recorded decision (System Config's
+    // PV connection, or a conflict banner on a recorded decision). Only then is a designer's recorded
+    // coupling re-planned — a DC answer retires the separate inverter here, exactly as a first answer
+    // does, instead of leaving it on file to contradict the graph.
+    const planned = planArchitectureResolution(loaded.model, coupling, new Date(), { change: body.change === true });
     if (planned.ok === false) {
       return NextResponse.json({
         success: false, error: planned.message, refusal: planned.refusal,

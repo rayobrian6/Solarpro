@@ -719,6 +719,11 @@ export function buildSystemConfigInterview(input: InterviewInput): SystemConfigI
       if (hasPv) {
         if (eq.pvInverter.state === 'CONFLICT') return undefined;   // resolved where the conflict is raised
         if (eq.pvInverter.state === 'SELECTED') return [ac];
+        // 🚨 NO INVERTER YET AND NOTHING ELSE TO LAND ON: CHOOSING THE INVERTER IS THE ANSWER. Without
+        // PV-input storage the coupling follows from the inverter once one is chosen; a one-option
+        // "Through an external PV inverter" before then records a decision about an inverter that does
+        // not exist (the phantom-inverter class). `equipment.pv-inverter` asks it (NEED_ASKED_BY).
+        if (eq.pvInverter.state === 'UNDECIDED' && !eq.storage?.pvInput) return undefined;
         return [...(eq.storage?.pvInput ? [{ value: 'dc-coupled-storage', label: `Directly to ${storageLabel} PV inputs`,
           detail: 'The strings land on the battery’s own DC inputs; no separate PV inverter.' }] : []), ac];
       }

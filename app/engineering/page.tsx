@@ -3406,7 +3406,10 @@ function EngineeringPageInner() {
   } | null>(null);
 
   /** Records the PV coupling as a decision. True only when the server recorded it (a dialog closes on true). */
-  const resolveElectricalArchitecture = async (coupling: string): Promise<boolean> => {
+  // `change`: the installer is deliberately changing a coupling a designer already recorded — the
+  // route refuses to overwrite one without it (a stale tab must not), and with it retires / confirms
+  // the separate inverter exactly as it does for a first answer.
+  const resolveElectricalArchitecture = async (coupling: string, opts: { change?: boolean } = {}): Promise<boolean> => {
     if (!currentProjectId) return false;
     setArchResolving(coupling);
     setArchResolveError(null);
@@ -3414,7 +3417,7 @@ function EngineeringPageInner() {
       const res = await fetch('/api/engineering/electrical-architecture', {
         method: 'POST', cache: 'no-store',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId: currentProjectId, coupling }),
+        body: JSON.stringify({ projectId: currentProjectId, coupling, ...(opts.change ? { change: true } : {}) }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data?.success) {
@@ -10029,19 +10032,24 @@ function EngineeringPageInner() {
     busy: _svcSaving || !!_archResolving || unreadGraphRefusal(svcTopologyRead) !== null,
     graphRead: svcTopologyRead,
     apply: applyInterviewAnswer,
-    // 🚨 THE PV COUPLING IS RECORDED BY THE WRITER THAT CAN RECORD IT (`pvCouplingWritePath`). The
-    // architecture route takes the FIRST decision (and retires a separate PV inverter on a DC answer);
-    // once a designer's decision is on file it refuses, and a change is a graph write through the one
-    // write path — the Service Topology inspector's own radio, which is no longer in the navigation.
+    // 🚨 THE PV COUPLING IS RECORDED BY THE WRITER THAT CAN RECORD IT (`pvCouplingWritePath`). With a
+    // separate PV inverter on file, the architecture route — it retires that inverter on a DC answer
+    // and confirms it on an AC one, a deliberate CHANGE of a recorded decision included. With none on
+    // file (or "storage only"), the graph's own coupling through the one write path: nothing to retire
+    // or confirm, and no inverter provenance written for an inverter that does not exist.
     onRecordCoupling: (coupling: string) => {
       const path = pvCouplingWritePath({
         coupling: coupling as SolarCoupling,
         decisionOnFile: _archServer?.provenanceSource === 'service-topology',
         hasGraph: !!svcTopology,
+        // Either authority seeing an inverter sends it to the route — which writes no inverter
+        // provenance when the server holds none.
+        hasExternalInverter: !!_archDetail?.externalInverter || !!electrical?.hasExternalInverter,
       });
-      return path === 'graph' && svcTopology
+      if (!path) return Promise.resolve(false);
+      return path.writer === 'graph' && svcTopology
         ? applyInterviewAnswer(answerSolarCoupling(svcTopology, coupling as SolarCoupling))
-        : resolveElectricalArchitecture(coupling);
+        : resolveElectricalArchitecture(coupling, { change: path.writer === 'architecture-route' && path.change });
     },
   };
   // 🚨 ASK THE SERVER WHERE THE EQUIPMENT CAME FROM. See `_archDetail`: the browser can see THAT the
@@ -12303,7 +12311,8 @@ function EngineeringPageInner() {
                                   key={choice.coupling}
                                   data-testid={`config-resolve-${choice.coupling}`}
                                   disabled={_archResolving !== null}
-                                  onClick={() => resolveElectricalArchitecture(choice.coupling)}
+                                  // A conflict on a RECORDED decision is answered as a deliberate change.
+                                  onClick={() => resolveElectricalArchitecture(choice.coupling, { change: _archServer?.provenanceSource === 'service-topology' })}
                                   className="rounded border border-amber-500/60 bg-amber-500/15 hover:bg-amber-500/25 disabled:opacity-50 px-2 py-1 text-[11px] font-bold text-amber-200 transition-colors"
                                 >
                                   {_archResolving === choice.coupling ? 'Recording…' : choice.label}
@@ -19504,7 +19513,7 @@ function EngineeringPageInner() {
                           key={choice.coupling}
                           data-testid={`resolve-${choice.coupling}`}
                           disabled={_archResolving !== null}
-                          onClick={() => resolveElectricalArchitecture(choice.coupling)}
+                          onClick={() => resolveElectricalArchitecture(choice.coupling, { change: _archServer?.provenanceSource === 'service-topology' })}
                           className="w-full text-left rounded border border-slate-600 bg-slate-800/80 hover:bg-slate-700/80 disabled:opacity-50 px-2 py-1.5 transition-colors"
                         >
                           <div className="text-[10px] font-bold text-white">

@@ -67,6 +67,13 @@ export function planArchitectureResolution(
   m: ElectricalProjectModel,
   coupling: SolarCoupling,
   now: Date,
+  /**
+   * `change`: the installer is deliberately CHANGING a coupling a designer already recorded (System
+   * Config's PV connection answer, or a conflict banner on a recorded decision). Without it a
+   * recorded decision is refused — the stale-tab guard below. With it the new answer is planned
+   * exactly like a first one: a DC answer retires the separate inverter, an AC answer confirms it.
+   */
+  opts: { change?: boolean } = {},
 ): ArchitectureResolutionResult {
   // ══════════════════════════════════════════════════════════════════════════
   // 🚨 REFUSE WHEN A HUMAN ALREADY DECIDED — NOT MERELY WHEN NOTHING IS OUTSTANDING.
@@ -86,7 +93,7 @@ export function planArchitectureResolution(
   // improvement — it is the write that makes the value permanent, attributable, and immune to every
   // future change in the derivation. So the refusal names the state it is actually protecting.
   // ══════════════════════════════════════════════════════════════════════════
-  if (m.solarCouplingProvenance.source === 'service-topology') {
+  if (m.solarCouplingProvenance.source === 'service-topology' && !opts.change) {
     return {
       ok: false, refusal: 'NOTHING_TO_RESOLVE',
       // Not "the service topology": that is no longer a tab. The PV connection on Inverters & Strings
@@ -146,7 +153,7 @@ export function planArchitectureResolution(
         now,
       ),
     };
-  } else {
+  } else if (coupling === 'ac-coupled-inverter' && m.hasExternalInverter) {
     // ── The AC answer: the inverter STAYS, and stops being a suggestion. ─────
     //
     // 🚨 THIS IS THE HALF THAT MUST NOT BE SKIPPED. Recording only the coupling would leave the
@@ -165,6 +172,25 @@ export function planArchitectureResolution(
         now,
       ),
     };
+  } else {
+    // ── NO SEPARATE INVERTER ON FILE: only the decision is recorded. ─────────
+    //
+    // 🚨 NEVER AN INVERTER PROVENANCE FOR AN INVERTER THAT DOES NOT EXIST. This branch used to be the
+    // AC branch's `else`, so ANY answer here — an AC answer on a job with no inverter yet, even a DC
+    // answer with nothing to retire — wrote `provenance.inverter = USER_SELECTED "The installer
+    // confirmed this separate PV inverter"`. This route is the only writer of that slot, and its mere
+    // presence classifies whatever inverter is written LATER (an ecosystem auto-pick included) as the
+    // installer's decision, never AUTO_SUGGESTED_LEGACY — the phantom-inverter class. An inverter
+    // chosen later records its own provenance when it is chosen.
+    equipmentPatch.provenance = {
+      architecture: provenanceRecord(
+        'USER_SELECTED', 'architecture-resolution',
+        coupling === 'dc-coupled-storage'
+          ? 'The installer resolved the electrical architecture to PV DC coupled to storage.'
+          : 'The installer recorded that the PV connects through a separate AC PV inverter (none is selected yet).',
+        now,
+      ),
+    };
   }
 
   return {
@@ -176,7 +202,9 @@ export function planArchitectureResolution(
         + (choice.retiresExternalInverter && m.hasExternalInverter
           ? `; the separate inverter (${m.externalInverterId ?? 'unknown'}) was retired from design `
             + 'authority and kept as history'
-          : '; the separate inverter is now recorded as the installer’s decision'),
+          : coupling === 'ac-coupled-inverter' && m.hasExternalInverter
+            ? '; the separate inverter is now recorded as the installer’s decision'
+            : ''),
       retiredExternalInverter: choice.retiresExternalInverter && m.hasExternalInverter,
     },
   };

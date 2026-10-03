@@ -15,6 +15,12 @@ import {
 import { answerSystemEquipment, batteryCircuitOf } from '@/lib/electrical/systemConfigSystemEquipment';
 import { computeSystem, type ComputedSystemInput } from '@/lib/computed-system';
 import { csStringInput } from './goldens/wave0-fixtures';
+import { planArchitectureResolution } from '@/lib/electrical/architectureResolution';
+import type { ElectricalProjectModel } from '@/lib/electrical/projectModel';
+import { buildSystemConfigInterview } from '@/lib/electrical/systemConfigInterview';
+import { findInterviewItem, requiredQueue } from '@/lib/electrical/systemConfigPlacement';
+import { resolvePvArrayDesign } from '@/lib/electrical/pvArrayDesign';
+import { evaluateServiceTopology } from '@/lib/electrical/serviceTopology';
 
 const PW3 = 'tesla-powerwall-3';
 const GW3 = 'tesla-backup-gateway-3';
@@ -68,5 +74,62 @@ describe('🚨 one battery circuit, as the graph records it — the owner comput
     const calcAt = live.indexOf('batteryCount: config.batteryCount || 0,');
     const calc = live.slice(calcAt, live.indexOf('batteryModel: config.batteryModel', calcAt));
     expect(calc).toContain('batteryCircuitOf(svcTopology)?.continuousOutputA');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+describe('🚨 the PV coupling: no phantom inverter decision, and a recorded decision can be changed', () => {
+  const model = (over: Record<string, unknown>) => ({
+    solarCouplingProvenance: { source: 'none', basis: '' }, architectureChoices: [],
+    hasExternalInverter: false, externalInverterId: null, externalInverterOrigin: null, ...over,
+  }) as unknown as ElectricalProjectModel;
+  const NOW = new Date('2026-10-03T00:00:00Z');
+  const plan = (r: ReturnType<typeof planArchitectureResolution>) => { if (r.ok === false) throw new Error(r.message); return r.plan; };
+
+  it('a first AC answer with NO inverter on file records the decision only — never an inverter provenance', () => {
+    const p = plan(planArchitectureResolution(model({}), 'ac-coupled-inverter', NOW));
+    const prov = p.equipmentPatch.provenance as Record<string, { basis: string }>;
+    expect(Object.keys(prov)).toEqual(['architecture']);
+    expect(prov.architecture.basis).toMatch(/separate AC PV inverter \(none is selected yet\)/);
+    expect(p.summary).toBe('Electrical architecture resolved to ac-coupled-inverter');
+  });
+
+  it('a DC answer with nothing to retire records a DC decision (it used to write the AC branch\'s text and an inverter)', () => {
+    const p = plan(planArchitectureResolution(model({}), 'dc-coupled-storage', NOW));
+    const prov = p.equipmentPatch.provenance as Record<string, { basis: string }>;
+    expect(Object.keys(prov)).toEqual(['architecture']);
+    expect(prov.architecture.basis).toMatch(/PV DC coupled to storage/);
+    expect(p.retiredExternalInverter).toBe(false);
+  });
+
+  it('control: an AC answer with an inverter on file still confirms it', () => {
+    const p = plan(planArchitectureResolution(model({ hasExternalInverter: true, externalInverterId: 'x' }), 'ac-coupled-inverter', NOW));
+    expect(Object.keys(p.equipmentPatch.provenance as object).sort()).toEqual(['architecture', 'inverter']);
+  });
+
+  it('a recorded decision is refused without change intent, and re-planned with it (DC retires the inverter on file)', () => {
+    const decided = model({
+      solarCouplingProvenance: { source: 'service-topology', basis: '' }, hasExternalInverter: true,
+      externalInverterId: 'tesla-solar-inverter-5p7k',
+    });
+    expect(planArchitectureResolution(decided, 'dc-coupled-storage', NOW).ok).toBe(false);
+    const p = plan(planArchitectureResolution(decided, 'dc-coupled-storage', NOW, { change: true }));
+    expect(p.retiredExternalInverter).toBe(true);
+    expect(p.equipmentPatch.inverter).toBeNull();
+  });
+
+  it('a fresh PV job with no inverter and no storage: the inverter question asks it — no one-option coupling radio', () => {
+    const t = ok(answerServiceRating(null, 200));
+    const iv = buildSystemConfigInterview({
+      pvArray: resolvePvArrayDesign({ placedModuleCount: 37, selectedPanelId: 'panel-fence-ps1' }),
+      topology: t, coupling: null, couplingIsDecision: false, architectureConflict: false,
+      equipment: { pvInverter: { state: 'UNDECIDED' }, storage: null, gateway: null },
+      evaluation: evaluateServiceTopology(t),
+    });
+    const need = findInterviewItem(iv, 'engineering.needs.interconnection.solarCoupling');
+    expect(need?.options).toBeUndefined();
+    const queue = requiredQueue(iv).map(i => i.id);
+    expect(queue).toContain('equipment.pv-inverter');
+    expect(queue).not.toContain('engineering.needs.interconnection.solarCoupling');
   });
 });

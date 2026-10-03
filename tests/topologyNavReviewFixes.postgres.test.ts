@@ -177,3 +177,92 @@ describe('🚨 the commissioned output setting reaches the conductor schedule (c
     expect(batteryRunRow(s.svg)).toEqual(expect.arrayContaining(['48A', '60A']));
   }, 120_000);
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+describe('🚨 the PV coupling through the writer System Config chooses — production path', () => {
+  async function arch() {
+    const { GET } = await import('@/app/api/engineering/electrical-architecture/route');
+    const { NextRequest } = await import('next/server');
+    const res = await GET(new NextRequest(`http://localhost/api/engineering/electrical-architecture?projectId=${HOUSE}`));
+    return await res.json() as Record<string, any>;
+  }
+  async function resolveRoute(coupling: string, change?: boolean) {
+    const { POST } = await import('@/app/api/engineering/electrical-architecture/route');
+    const { NextRequest } = await import('next/server');
+    const res = await POST(new NextRequest('http://localhost/api/engineering/electrical-architecture', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ projectId: HOUSE, coupling, ...(change ? { change: true } : {}) }),
+    }));
+    return { status: res.status, json: await res.json() as Record<string, any> };
+  }
+  async function selectedEquipment(): Promise<Record<string, any>> {
+    const r = await db.query(`SELECT selected_equipment FROM projects WHERE id = $1`, [HOUSE]);
+    const v = (r.rows[0] as { selected_equipment: unknown }).selected_equipment;
+    return (typeof v === 'string' ? JSON.parse(v) : v) as Record<string, any>;
+  }
+  /** What the page does on a PV-connection answer: `pvCouplingWritePath`, then that writer. */
+  async function answerPvConnection(coupling: 'dc-coupled-storage' | 'ac-coupled-inverter') {
+    const A = await import('@/lib/electrical/systemConfigAnswers');
+    const a = await arch();
+    const path = A.pvCouplingWritePath({
+      coupling, decisionOnFile: a.couplingProvenance?.source === 'service-topology', hasGraph: true,
+      hasExternalInverter: !!a.externalInverter,
+    })!;
+    if (path.writer === 'graph') { await persist(A.answerSolarCoupling(await reload(), coupling)); return { path, status: 200 }; }
+    const r = await resolveRoute(coupling, path.change);
+    return { path, status: r.status, json: r.json };
+  }
+
+  it('a recorded AC decision CHANGED to "PV onto the batteries": the inverter on file is retired, the architecture resolves, the SLD draws', async () => {
+    await db.query(`UPDATE projects SET selected_equipment=$2 WHERE id=$1`, [HOUSE, JSON.stringify({
+      panelId: MODULE, batteryId: PW3, batteryCount: 4,
+      inverter: { id: 'tesla-solar-inverter-5p7k', type: 'string', manufacturer: 'Tesla', model: 'Solar Inverter 5.7kW' },
+      inverterId: 'tesla-solar-inverter-5p7k' })]);
+    const t0 = await raysJob();
+    await persist({ ...t0, solarCoupling: undefined } as unknown as ServiceTopology);
+    // The first decision, AC, with the inverter on file — through the route, which confirms it.
+    const first = await answerPvConnection('ac-coupled-inverter');
+    expect(first.path).toEqual({ writer: 'architecture-route', change: false });
+    expect(first.status).toBe(200);
+    expect((await arch()).couplingProvenance.source).toBe('service-topology');
+
+    // The installer changes it in System Config: the route, as a deliberate change.
+    const change = await answerPvConnection('dc-coupled-storage');
+    expect(change.path).toEqual({ writer: 'architecture-route', change: true });
+    expect(change.status, JSON.stringify(change.json)).toBe(200);
+    expect(change.json!.retiredExternalInverter).toBe(true);
+    const after = await arch();
+    expect(after.coupling).toBe('dc-coupled-storage');
+    expect(after.resolutionRequired).toBe(false);
+    expect(after.externalInverter).toBeNull();
+    expect((await selectedEquipment()).retiredInverter?.id).toBe('tesla-solar-inverter-5p7k');
+    const s = await sld();
+    expect(s.status, JSON.stringify(s.json).slice(0, 300)).toBe(200);
+  }, 120_000);
+
+  it('control: the route still refuses to overwrite a recorded decision WITHOUT change intent (a stale tab)', async () => {
+    await persist({ ...(await raysJob()), solarCoupling: undefined } as unknown as ServiceTopology);
+    expect((await resolveRoute('dc-coupled-storage')).status).toBe(200);
+    const again = await resolveRoute('ac-coupled-inverter');
+    expect(again.status).toBe(409);
+    expect(again.json.refusal).toBe('NOTHING_TO_RESOLVE');
+  }, 120_000);
+
+  it('🚨 a first AC answer with NO inverter on file writes no inverter provenance — on either writer', async () => {
+    await db.query(`UPDATE projects SET selected_equipment=$2 WHERE id=$1`, [HOUSE, JSON.stringify({ panelId: MODULE })]);
+    const A = await import('@/lib/electrical/systemConfigAnswers');
+    await persist(A.answerServiceRating(null, 200));
+    const r = await answerPvConnection('ac-coupled-inverter');
+    expect(r.path).toEqual({ writer: 'graph' });
+    let prov = (await selectedEquipment()).provenance ?? {};
+    expect(prov.architecture?.kind).toBe('USER_SELECTED');
+    expect(prov.inverter, 'an inverter provenance for an inverter that does not exist').toBeUndefined();
+    // The route itself, called directly (a banner, an old tab): the same — the planner is guarded.
+    await db.query(`UPDATE projects SET selected_equipment=$2 WHERE id=$1`, [HOUSE, JSON.stringify({ panelId: MODULE })]);
+    await persist({ ...(await reload()), solarCoupling: undefined } as unknown as ServiceTopology);
+    expect((await resolveRoute('ac-coupled-inverter')).status).toBe(200);
+    prov = (await selectedEquipment()).provenance ?? {};
+    expect(prov.architecture?.kind).toBe('USER_SELECTED');
+    expect(prov.inverter).toBeUndefined();
+  }, 120_000);
+});

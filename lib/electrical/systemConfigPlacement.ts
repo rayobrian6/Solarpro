@@ -130,7 +130,9 @@ const NEED_ASKED_BY: ReadonlyArray<[token: string | ((t: string) => boolean), as
   ['panel.busbarRatingA', id => id.startsWith('service.panel.')],
   ['panel.mainBreakerA', id => id.startsWith('service.panel.')],
   ['pv.stringAssignment', id => id === 'behavior.pv-landing'],
-  ['interconnection.solarCoupling', id => id === 'behavior.pv-connection'],
+  // Before a PV inverter is chosen (and with nothing else for the PV to land on), choosing it IS the
+  // coupling answer — the need is not a second, one-option question beside it.
+  ['interconnection.solarCoupling', id => id === 'behavior.pv-connection' || id === 'equipment.pv-inverter'],
   ['interconnection.derArrangement', id => id === 'behavior.systems'],
   ['interconnection.externalDerIsolationRequired', id => id === 'behavior.isolation'],
   ['interconnection.isolationArrangement', id => id === 'behavior.isolation' || id === DER_ISOLATION_ITEM],

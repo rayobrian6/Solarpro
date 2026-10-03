@@ -365,17 +365,26 @@ export function answerSolarCoupling(t: ServiceTopology, coupling: SolarCoupling)
 }
 
 /**
- * Which writer records a PV-connection answer: the architecture route for the FIRST decision on a
- * coupling it accepts (it also retires or confirms the separate PV inverter), the graph otherwise —
- * a coupling already recorded as a decision (the route refuses to overwrite one) and "storage only"
- * (the route does not accept it). Without a graph neither can record it.
+ * Which writer records a PV-connection answer.
+ *
+ *  · 'graph' — the graph's own coupling through the page's one write path (its PUT records the
+ *    designer's decision in `provenance.architecture`): "storage only" (the route does not accept
+ *    it), and EVERY answer when no separate PV inverter is on file — there is nothing to retire or
+ *    confirm, and the route is the only writer of `provenance.inverter`, which it must never write for
+ *    an inverter that does not exist (a later auto-pick would read as the installer's decision).
+ *  · 'architecture-route' — a separate PV inverter IS on file: the route records the coupling AND
+ *    retires that inverter (DC) or confirms it (AC), clearing the page's fleet with it. `change` when
+ *    a designer's decision is already recorded: the route refuses to overwrite one unless the request
+ *    says it is a deliberate change. Changing DC on the graph alone left the inverter on file, the
+ *    architecture unresolved and the SLD refused — with every resolve button refused too.
+ *  · null — no graph: nothing can record it.
  */
 export function pvCouplingWritePath(opts: {
-  coupling: SolarCoupling; decisionOnFile: boolean; hasGraph: boolean;
-}): 'architecture-route' | 'graph' | null {
+  coupling: SolarCoupling; decisionOnFile: boolean; hasGraph: boolean; hasExternalInverter: boolean;
+}): { writer: 'graph' } | { writer: 'architecture-route'; change: boolean } | null {
   if (!opts.hasGraph) return null;
-  if (opts.decisionOnFile || opts.coupling === 'storage-only') return 'graph';
-  return 'architecture-route';
+  if (opts.coupling === 'storage-only' || !opts.hasExternalInverter) return { writer: 'graph' };
+  return { writer: 'architecture-route', change: opts.decisionOnFile };
 }
 
 /** "How do the systems connect to the service?" — only asked with more than one system. */

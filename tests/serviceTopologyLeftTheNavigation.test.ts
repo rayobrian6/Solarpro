@@ -248,6 +248,9 @@ describe('the PV coupling is answerable in System Config on every job', () => {
     // No inverter chosen, storage with PV inputs: either.
     expect(need({ ...PW3_EQ, pvInverter: { state: 'UNDECIDED' } })!.options!.map(o => o.value))
       .toEqual(['dc-coupled-storage', 'ac-coupled-inverter']);
+    // No inverter chosen and nothing else to land on: choosing the inverter IS the answer — no
+    // one-option question about an inverter that does not exist.
+    expect(need({ ...MICROS, pvInverter: { state: 'UNDECIDED' } })!.options).toBeUndefined();
     // No PV, storage: storage only.
     expect(need(PW3_EQ, 0)!.options!.map(o => o.value)).toEqual(['storage-only']);
     // In conflict it is resolved where the conflict is raised — no second control.
@@ -263,15 +266,21 @@ describe('the PV coupling is answerable in System Config on every job', () => {
     expect(refused(answerSolarCoupling(t, 'nonsense' as never))).toMatch(/is not a PV coupling/);
   });
 
-  it('🚨 the writer is chosen by what is on file — a recorded decision is changed on the graph, never refused into a dead end', () => {
-    // The route records the FIRST decision (it retires a separate inverter on a DC answer)…
-    expect(pvCouplingWritePath({ coupling: 'dc-coupled-storage', decisionOnFile: false, hasGraph: true })).toBe('architecture-route');
-    expect(pvCouplingWritePath({ coupling: 'ac-coupled-inverter', decisionOnFile: false, hasGraph: true })).toBe('architecture-route');
-    // …and refuses every later one (NOTHING_TO_RESOLVE) — so a change is a graph write.
-    expect(pvCouplingWritePath({ coupling: 'ac-coupled-inverter', decisionOnFile: true, hasGraph: true })).toBe('graph');
+  it('🚨 the writer is chosen by what is on file — a recorded decision is CHANGED, never refused into a dead end', () => {
+    const w = (coupling: 'dc-coupled-storage' | 'ac-coupled-inverter' | 'storage-only', decisionOnFile: boolean, hasExternalInverter: boolean, hasGraph = true) =>
+      pvCouplingWritePath({ coupling, decisionOnFile, hasGraph, hasExternalInverter });
+    // A separate inverter on file: the route records the coupling AND retires (DC) / confirms (AC) it…
+    expect(w('dc-coupled-storage', false, true)).toEqual({ writer: 'architecture-route', change: false });
+    expect(w('ac-coupled-inverter', false, true)).toEqual({ writer: 'architecture-route', change: false });
+    // …and a decision already recorded is changed through it deliberately, never on the graph alone
+    // (that left the inverter on file and the architecture unresolved).
+    expect(w('dc-coupled-storage', true, true)).toEqual({ writer: 'architecture-route', change: true });
+    // No inverter on file: nothing to retire or confirm — the graph's coupling is the whole answer.
+    expect(w('ac-coupled-inverter', false, false)).toEqual({ writer: 'graph' });
+    expect(w('dc-coupled-storage', true, false)).toEqual({ writer: 'graph' });
     // The route does not accept "storage only" at all.
-    expect(pvCouplingWritePath({ coupling: 'storage-only', decisionOnFile: false, hasGraph: true })).toBe('graph');
-    expect(pvCouplingWritePath({ coupling: 'dc-coupled-storage', decisionOnFile: false, hasGraph: false })).toBeNull();
+    expect(w('storage-only', false, true)).toEqual({ writer: 'graph' });
+    expect(w('dc-coupled-storage', false, true, false)).toBeNull();
   });
 });
 
@@ -430,11 +439,12 @@ describe('🚨 the Engineering page: Service Topology is not in the navigation',
     expect(effect).not.toContain('activeTab');
   });
 
-  it('the PV connection is recorded by the writer that can record it (route first, graph after a decision)', () => {
+  it('the PV connection is recorded by the writer that can record it (the route when an inverter is on file, a change included)', () => {
     const ctx = LIVE.slice(LIVE.indexOf('const interviewEditorContext = {'), LIVE.indexOf('};', LIVE.indexOf('onRecordCoupling:')));
     expect(ctx).toContain('pvCouplingWritePath({');
     expect(ctx).toContain("decisionOnFile: _archServer?.provenanceSource === 'service-topology'");
+    expect(ctx).toContain('hasExternalInverter: !!_archDetail?.externalInverter || !!electrical?.hasExternalInverter');
     expect(ctx).toContain('applyInterviewAnswer(answerSolarCoupling(svcTopology');
-    expect(ctx).toContain(': resolveElectricalArchitecture(coupling)');
+    expect(ctx).toContain(": resolveElectricalArchitecture(coupling, { change: path.writer === 'architecture-route' && path.change })");
   });
 });
