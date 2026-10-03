@@ -2883,7 +2883,11 @@ export interface ServiceSectionResult {
     cx: number; bottom: number;
     label: string; mppts: number | null;
   }>;
-  /** A clear vertical corridor just left of this section, for the DC trunk to drop in. */
+  /**
+   * A clear vertical corridor just left of this section, for the DC trunk to drop in. On the compact
+   * DC layout it is the x the trunk actually drops at — that layout draws the trunk itself, into the
+   * TOP of each landed cabinet, and the caller draws none.
+   */
   dcBusX: number;
   /**
    * 🚨 DC coupled, and nobody has said which unit receives which strings. The trunk is then drawn to
@@ -2893,6 +2897,12 @@ export interface ServiceSectionResult {
   dcLandingUnassigned: boolean;
   /** The storage the strings land on, named from the graph (never a hard-coded product). */
   dcStorageLabel: string;
+  /**
+   * COMPACT DC LAYOUT ONLY: where the top-left of the PV array + junction box group must be moved
+   * to. That group is drawn by the main renderer before the service graph is laid out; the compact
+   * arrangement puts it above the systems it feeds, and the caller translates it there.
+   */
+  pvBlockAt?: { x: number; y: number };
 }
 
 /**
@@ -3078,6 +3088,971 @@ function overlayServiceTopologyRows(
   return out;
 }
 
+// ── WHAT EACH SERVICE-SECTION BOX SAYS ──────────────────────────────────────
+//
+// 🚨 ONE WORDING PER ENCLOSURE, WHICHEVER LAYOUT DRAWS IT. The compact DC-coupled arrangement moves
+// these boxes; it must not restate them. Lifted out of `renderTopologyServiceSection` verbatim so
+// the column layout and the compact one print the same facts from the same lines of code.
+
+const ampsSld = (v: number | null | undefined) => (typeof v === 'number' ? `${v} A` : 'NOT EVALUATED');
+
+function servicePanelLinesSld(panel: ServiceTopologyForSld['panels'][number]): SectionLine[] {
+  const amps = ampsSld;
+  return [
+    { t: panel.label, sz: F.hdr, bold: true },
+    { t: `${amps(panel.busbarRatingA)} BUS`, sz: F.sub },
+    { t: `${amps(panel.mainBreakerA)} MAIN`, sz: F.sub },
+    ...(panel.backedUp ? [{ t: 'BACKED UP', sz: F.tiny, fill: SEC_BLUE } as SectionLine] : []),
+  ];
+}
+
+function gatewayLinesSld(gw: ServiceTopologyForSld['domains'][number]['gateway']): SectionLine[] {
+  const amps = ampsSld;
+  const gwLines: SectionLine[] = [
+    { t: gw.label, sz: F.hdr, bold: true },
+    { t: `${amps(gw.continuousRatingA)} CONTINUOUS`, sz: F.sub },
+    { t: `${amps(gw.mainBreakerA)} MAIN`, sz: F.sub },
+  ];
+  if (gw.serviceEntranceRated) gwLines.push({ t: 'SERVICE ENTRANCE RATED', sz: F.tiny });
+  if (gw.sccrA === null) {
+    gwLines.push({ t: 'NOT EVALUATED — INTERRUPTING RATING REQUIRED', sz: F.tiny, fill: SEC_AMBER, bold: true });
+  } else {
+    gwLines.push({ t: `${gw.sccrA} A SCCR`, sz: F.tiny });
+  }
+  return gwLines;
+}
+
+/** A system's OWN generation / combiner panel (one with a `domainId`). */
+function generationPanelLinesSld(t: ServiceTopologyForSld, agg: DerAggregationPanelForSld): SectionLine[] {
+  const amps = ampsSld;
+  type Line = SectionLine;
+  const sizing = sizeAggregationPanel(t, agg);
+  return [
+    { t: agg.label.toUpperCase(), sz: F.sub, bold: true },
+    { t: agg.busbarRatingA === null
+        ? 'NOT EVALUATED — BUSBAR RATING REQUIRED' : `${agg.busbarRatingA} A BUS`,
+      sz: F.tiny, ...(agg.busbarRatingA === null ? { fill: SEC_AMBER, bold: true } : {}) },
+    { t: agg.mainLugOnly ? 'MLO — NO MAIN OCPD' : `${amps(agg.mainBreakerA)} MAIN`, sz: F.tiny },
+    { t: `${agg.inputs.length} BRANCH OCPD`
+        + `${agg.inputs.every(x => x.ocpdA === agg.inputs[0]?.ocpdA) && agg.inputs[0]?.ocpdA
+          ? ` @ ${agg.inputs[0].ocpdA} A` : ''}`,
+      sz: F.tiny },
+    { t: agg.outputOcpdA === null
+        ? 'NOT EVALUATED — OUTPUT OCPD REQUIRED' : `${agg.outputOcpdA} A OUTPUT OCPD`,
+      sz: F.tiny, ...(agg.outputOcpdA === null ? { fill: SEC_AMBER, bold: true } : {}) },
+    // 🚨 WHY IT IS THIS SIZE AND NOT 400 A. Printed because it is the first thing a plan
+    // reviewer asks about a 125 A panel on a 400 A service.
+    ...(sizing.aggregateContinuousA !== null
+      ? [{ t: `${sizing.aggregateContinuousA} A AGGREGATED · ${sizing.standardOcpdA} A AT 125%`,
+           sz: F.tiny } as Line] : []),
+    { t: agg.carriesPremisesLoad === false ? 'DER ONLY — NO PREMISES LOAD'
+        : agg.carriesPremisesLoad ? 'CARRIES PREMISES LOAD'
+          : 'NOT EVALUATED — DER-ONLY OR LOAD-CARRYING REQUIRED',
+      sz: F.tiny,
+      ...(agg.carriesPremisesLoad === null ? { fill: SEC_AMBER, bold: true } : {}) },
+    ...(agg.sccrA === null
+      ? [{ t: 'NOT EVALUATED — INTERRUPTING RATING REQUIRED',
+           sz: F.tiny, fill: SEC_AMBER, bold: true } as Line] : []),
+    ...(agg.productId ? [] : [{ t: 'NOT EVALUATED — EQUIPMENT SELECTION REQUIRED',
+                                sz: F.tiny, fill: SEC_AMBER, bold: true } as Line]),
+  ];
+}
+
+function storageUnitLinesSld(
+  t: ServiceTopologyForSld, u: ServiceTopologyForSld['storage'][number], dcCoupled: boolean,
+): SectionLine[] {
+  const amps = ampsSld;
+  type Line = SectionLine;
+  return [
+    { t: storageUnitLabelSld(t, u), sz: F.sub, bold: true },
+    { t: `${amps(u.continuousOutputA)} AC · ${u.usableKwh ?? '—'} kWh`, sz: F.tiny },
+    { t: `${amps(u.ocpdA)} OCPD`, sz: F.tiny },
+    ...(u.outputConfigKw ? [{ t: `${u.outputConfigKw} kW CONFIGURED`, sz: F.tiny } as Line] : []),
+    // The DC side of a DC-coupled unit, named on the box the strings land in.
+    // 🚨 EACH CABINET STATES ITS OWN LANDING. "PV DC INPUT — 6 MPPT" on all four was a statement
+    // of capability that read as a statement of design; the landing is per unit and may be none.
+    ...(dcCoupled
+      ? [{ t: !u.pvInputLimits ? 'PV DC INPUT — LIMITS NOT EVALUATED'
+             : u.pvDcStcKw == null ? `PV DC INPUT (${u.pvInputLimits.mppts} MPPT) — LANDING TO BE ASSIGNED`
+               : u.pvDcStcKw === 0 ? 'NO PV ON THIS UNIT'
+                 : `PV DC IN — ${u.pvDcStcKw.toFixed(2)} kW STC`,
+           sz: F.tiny, fill: SEC_DC,
+           ...(u.pvInputLimits && u.pvDcStcKw != null ? {} : { bold: true }) } as Line]
+      : []),
+  ];
+}
+
+function expansionLinesSld(u: ServiceTopologyForSld['storage'][number]): SectionLine[] {
+  return [
+    { t: u.label ?? u.productId, sz: F.sub, bold: true, fill: SEC_DC },
+    { t: `${u.usableKwh ?? '—'} kWh — DC EXPANSION`, sz: F.tiny, fill: SEC_DC },
+    { t: 'NO AC OUTPUT · NO OCPD', sz: F.tiny, fill: SEC_DC, bold: true },
+  ];
+}
+
+function serviceDistributionLinesSld(t: ServiceTopologyForSld): SectionLine[] {
+  const ex = t.service.existingEquipment ?? null;
+  const distLines: SectionLine[] = [
+    { t: `${ex ? 'EXISTING ' : ''}${serviceRatingLabelSld(t)} SERVICE `
+        + `${ex ? 'EQUIPMENT' : 'DISTRIBUTION'}`, sz: F.hdr, bold: true },
+    { t: `${t.service.voltage} V ${t.service.phase === 'split-240' ? '1Ø 3W' : t.service.phase}`, sz: F.sub },
+    { t: `${t.branches.length} SERVICE BRANCH${t.branches.length === 1 ? '' : 'ES'}`, sz: F.tiny },
+  ];
+  if (ex) {
+    const name = [ex.manufacturer, ex.catalogNumber].filter(Boolean).join(' ');
+    if (name) distLines.push({ t: name.toUpperCase(), sz: F.tiny });
+    if (ex.mainArrangement) distLines.push({ t: ex.mainArrangement.toUpperCase(), sz: F.tiny });
+    if (!ex.verified || !ex.catalogNumber || !ex.mainArrangement || ex.sccrA === null) {
+      distLines.push({ t: 'CONFIGURATION TO VERIFY', sz: F.tiny, fill: SEC_AMBER, bold: true });
+    }
+    distLines.push({ t: 'EXISTING — NOT IN SCOPE OF SUPPLY', sz: F.tiny });
+  }
+  return distLines;
+}
+
+/** A device on the shared service chain (service disconnect, utility DER isolation). */
+function chainDeviceLinesSld(d: ServiceTopologyForSld['devices'][number]): SectionLine[] {
+  const amps = ampsSld;
+  const lines: SectionLine[] = [
+    { t: d.label.toUpperCase(), sz: F.sub, bold: true },
+    { t: amps(d.ratedAmps), sz: F.tiny },
+  ];
+  if (d.sccrA === null) {
+    lines.push({ t: 'NOT EVALUATED — INTERRUPTING RATING REQUIRED', sz: F.tiny, fill: SEC_AMBER, bold: true });
+  } else lines.push({ t: `${d.sccrA} A SCCR`, sz: F.tiny });
+  if (d.visibleOpen) lines.push({ t: 'LOCKABLE · VISIBLE OPEN', sz: F.tiny });
+  return lines;
+}
+
+/** The short tag lettered beside a knife switch drawn IN a branch feeder. */
+function inlineDeviceTagsSld(dev: ServiceTopologyForSld['devices'][number]): string[] {
+  const amps = ampsSld;
+  return [
+    'UTILITY', 'ISOLATION',
+    amps(dev.ratedAmps),
+    ...(dev.visibleOpen ? ['LOCK/VIS OPEN'] : []),
+    ...(dev.sccrA === null ? ['SCCR NOT EVAL'] : []),
+  ];
+}
+
+/** The sheet notes a service section contributes for what the graph does not establish. */
+function serviceCheckNotesSld(ev: TopologyEvaluationForSld, hasGenerator: boolean): string[] {
+  const notes: string[] = [];
+  if (hasGenerator) {
+    notes.push('GENERATOR / TRANSFER EQUIPMENT IS NOT REPRESENTED IN THE SERVICE TOPOLOGY. It is '
+      + 'declared on this project but the service graph has no node for it, so it is not drawn '
+      + 'rather than drawn in a position nothing established.');
+  }
+  for (const c of ev.checks.filter(c => c.conclusion === 'NOT_EVALUATED')) {
+    notes.push(`NOT EVALUATED — ${c.title}: ${c.detail}`);
+  }
+  for (const c of ev.checks.filter(c => c.conclusion === 'FAIL')) {
+    notes.push(`FAIL — ${c.title}: ${c.detail}`);
+  }
+  return notes;
+}
+
+/** The "SERVICE ENGINEERING — INPUT REQUIRED" lines: the requirement, never a verdict. */
+function serviceRequirementLinesSld(
+  t: ServiceTopologyForSld, ev: TopologyEvaluationForSld, hasGenerator: boolean,
+): string[] {
+  const lines: string[] = [];
+  // 🚨 THE NAME OF THE THING, NOT ITS KEY IN THE CODE. This block printed
+  // "REQUIRES service.existingEquipment.catalogNumber, service.existingEquipment.mainArrangement"
+  // — a list of TypeScript field paths, on a permit-grade sheet, to be read by an inspector. It is
+  // the same defect as `TO DEVICE-1` and "backs msp-1", in the one place nobody had looked.
+  // `requirementLabel` is the canonical token→words function the needs-input screen already uses,
+  // so the sheet and the screen ask for the same thing in the same words.
+  const words = (tokens: readonly string[]) =>
+    tokens.map(tk => labelForToken(tk, t as ServiceTopologyForSld)).join('; ') || 'input';
+  // 🚨 AND THE OPTIONAL CALCULATION IS ONE LINE, NOT SIX. Six checks depend on the dwelling load
+  // (the service demand, each branch, each domain, and the calculation itself), so the sheet
+  // printed "REQUIRES loads.model" six times — the very "five requests for one house" shape Ray
+  // rejected on the screen, leaking onto the drawing.
+  const optionalChecks = ev.checks.filter(c => c.conclusion === 'NOT_EVALUATED' && isOptionalCheck(c));
+  for (const c of ev.checks) {
+    if (c.conclusion === 'FAIL') lines.push(`FAIL — ${c.title}`);
+    else if (c.conclusion === 'NOT_EVALUATED' && !isOptionalCheck(c)) {
+      lines.push(`${c.title} — REQUIRES ${words(c.requires ?? [])}`);
+    }
+  }
+  if (optionalChecks.length > 0) {
+    const tokens = [...new Set(optionalChecks.flatMap(c => c.requires ?? []))];
+    lines.push(`OPTIONAL, NOT PROVIDED — ${words(tokens)}. `
+      + `${optionalChecks.length} check${optionalChecks.length === 1 ? '' : 's'} `
+      + 'not evaluated for want of it; the rest of this design does not depend on it.');
+  }
+  if (hasGenerator) lines.push('GENERATOR / TRANSFER EQUIPMENT NOT REPRESENTED IN THE SERVICE GRAPH');
+  return lines;
+}
+
+/**
+ * Draw the INPUT REQUIRED block into `area`; returns the y it reached, or null when there is
+ * nothing to ask for. What does not fit is counted on the sheet, never dropped silently.
+ */
+function drawServiceRequirementBlock(
+  p: string[], boxes: ServiceSectionBox[], lines: string[],
+  area: { x: number; y: number; w: number; maxY: number },
+): number | null {
+  if (!lines.length) return null;
+  const blockX = area.x;
+  const blockW = Math.max(200, area.w);
+  let y = area.y;
+  const head = 'SERVICE ENGINEERING — INPUT REQUIRED';
+  p.push(txt(blockX, +y.toFixed(2), head, { sz: F.sub, bold: true, fill: SEC_AMBER }));
+  boxes.push({ id: 'service-notes-head', x: blockX, y: y - capUu(F.sub),
+               w: textWidthUu(head, F.sub, true), h: LBL_PITCH, kind: 'label' });
+  y += LBL_PITCH + 2;
+  let drawn = 0;
+  for (const l of lines) {
+    // Prose, wrapped at spaces to the block's real width — see `wrapWords`.
+    const wrapped = wrapWords(`· ${l}`, blockW, F.tiny);
+    if (y + wrapped.length * LBL_PITCH > area.maxY - LBL_PITCH) break;
+    for (const piece of wrapped) {
+      p.push(txt(blockX, +y.toFixed(2), piece, { sz: F.tiny, fill: SEC_AMBER }));
+      boxes.push({ id: `service-note-${drawn}-${piece.slice(0, 8)}`, x: blockX,
+                   y: y - capUu(F.tiny), w: textWidthUu(piece, F.tiny), h: LBL_PITCH,
+                   kind: 'label' });
+      y += LBL_PITCH;
+    }
+    drawn++;
+  }
+  // 🚨 NO SILENT TRUNCATION. What did not fit is counted and named as being elsewhere.
+  if (drawn < lines.length) {
+    const more = `· + ${lines.length - drawn} further requirement(s) — see the SERVICE EQUIPMENT SCHEDULE`;
+    p.push(txt(blockX, +y.toFixed(2), more, { sz: F.tiny, bold: true, fill: SEC_AMBER }));
+    boxes.push({ id: 'service-notes-more', x: blockX, y: y - capUu(F.tiny),
+                 w: textWidthUu(more, F.tiny, true), h: LBL_PITCH, kind: 'label' });
+    y += LBL_PITCH;
+  }
+  return y;
+}
+
+/**
+ * 🚨 DC coupled, and nobody has said which unit receives which strings — the trunk then ends at a
+ * "landing to be assigned" tag rather than fanning out to every cabinet. `landedUnits` is how many
+ * units the drawing feeds (those with `pvDcStcKw > 0`).
+ */
+function dcLandingUnassignedSld(t: ServiceTopologyForSld, landedUnits: number): boolean {
+  return t.solarCoupling === 'dc-coupled-storage'
+    && t.storage.some(u => u.role === 'inverter-unit')
+    && landedUnits === 0
+    && !t.storage.some(u => u.role === 'inverter-unit' && u.pvDcStcKw === 0
+      && t.storage.filter(x => x.role === 'inverter-unit').every(x => typeof x.pvDcStcKw === 'number'));
+}
+
+/** The storage the strings land on, named from the graph (never a hard-coded product). */
+function dcStorageLabelSld(t: ServiceTopologyForSld): string {
+  const names = [...new Set(t.storage.filter(u => u.role === 'inverter-unit')
+    .map(u => (u.label ?? u.productId).toUpperCase()))];
+  return names.length === 1 ? names[0] : 'BATTERY';
+}
+
+// ── SERVICE-SECTION DRAWING PRIMITIVES ─────────────────────────────────────
+//
+// Shared by the column layout and the compact DC-coupled layout, so a box, its glyph, its wrapped
+// text and its audit footprint are drawn by ONE piece of code whichever arrangement the sheet uses.
+// Moved out of `renderTopologyServiceSection` verbatim; it closes over the section's own ink list
+// and box list, exactly as it did when it was declared inside it.
+
+/** One line of text in a service-section box. */
+type SectionLine = { t: string; sz: number; bold?: boolean; fill?: string; italic?: boolean };
+type SectionGlyph = 'controller' | 'battery-inverter' | 'panelboard';
+
+/**
+ * 🚨 A SCHEMATIC GLYPH, NOT ARTWORK — and not a rectangle that could be anything.
+ *
+ * Ray: "The current generic rectangles are not sufficient for a professional permit SLD... The
+ * Powerwall, Gateway and combiner must be visually distinguishable at a glance. Do not invent
+ * fake manufacturer artwork. A labeled electrical schematic symbol is acceptable and preferable
+ * to incorrect artwork."
+ *
+ * So each is the IEEE-style symbol for WHAT IT IS, drawn in the box's top-left corner: a transfer
+ * contact for a backup controller, a battery stack feeding an inverter for a Powerwall-class
+ * unit, a bus with branch breakers for a panelboard. No manufacturer marks, no logos, nothing
+ * that claims to be a picture of the product.
+ */
+function sectionDeviceGlyph(kind: SectionGlyph, gx: number, gy: number, stroke: string): string {
+  const s: string[] = [];
+  if (kind === 'controller') {
+    // A transfer contact: two fixed terminals and a blade between them.
+    s.push(`<circle cx="${gx + 2}" cy="${gy + 9}" r="1.4" fill="${stroke}"/>`);
+    s.push(`<circle cx="${gx + 16}" cy="${gy + 9}" r="1.4" fill="${stroke}"/>`);
+    s.push(ln(gx + 2, gy + 9, gx + 14, gy + 2, { sw: SW_MED, stroke }));
+    s.push(ln(gx - 4, gy + 9, gx + 2, gy + 9, { sw: SW_THIN, stroke }));
+    s.push(ln(gx + 16, gy + 9, gx + 22, gy + 9, { sw: SW_THIN, stroke }));
+  } else if (kind === 'battery-inverter') {
+    // A battery stack (long/short plates) into an inverter square with the DC/AC diagonal.
+    s.push(ln(gx, gy + 1, gx, gy + 13, { sw: SW_MED, stroke }));
+    s.push(ln(gx + 4, gy + 4, gx + 4, gy + 10, { sw: SW_THIN, stroke }));
+    s.push(ln(gx + 8, gy + 1, gx + 8, gy + 13, { sw: SW_MED, stroke }));
+    s.push(ln(gx + 12, gy + 4, gx + 12, gy + 10, { sw: SW_THIN, stroke }));
+    s.push(rect(gx + 16, gy + 1, 12, 12, { fill: 'none', stroke, sw: SW_THIN }));
+    s.push(ln(gx + 16, gy + 13, gx + 28, gy + 1, { sw: SW_THIN, stroke }));
+  } else {
+    // A panelboard: a vertical bus with branch breaker stubs off it.
+    s.push(ln(gx + 4, gy, gx + 4, gy + 14, { sw: SW_MED, stroke }));
+    for (const dy of [2, 7, 12]) {
+      s.push(ln(gx + 4, gy + dy, gx + 12, gy + dy, { sw: SW_THIN, stroke }));
+      s.push(ln(gx + 12, gy + dy, gx + 15, gy + dy - 2.5, { sw: SW_THIN, stroke }));
+    }
+  }
+  return s.join('');
+}
+
+/** BOX PRIMITIVE: text wraps and the box GROWS. Truncating would hide a requirement. */
+function sectionCanvas(p: string[], boxes: ServiceSectionBox[]) {
+  const drawBox = (
+    id: string, cx: number, cyOrTop: number, w: number, lines: SectionLine[],
+    o: {
+      stroke?: string; fill?: string; dash?: string; anchor?: 'center' | 'top';
+      glyph?: SectionGlyph;
+    } = {},
+  ) => {
+    const wrapped: SectionLine[] = [];
+    for (const l of lines) {
+      for (const piece of wrapToWidth(l.t, w - 14, l.sz)) wrapped.push({ ...l, t: piece });
+    }
+    const pitch = Math.max(LBL_PITCH, MIN_TYPE_UU + 2);
+    const h = Math.max(38, wrapped.length * pitch + 12);
+    // 🚨 THE BOX GROWS WITH ITS TEXT, so an anchor has to say WHICH edge is fixed. A stacked chain
+    // anchors its top (or the next box starts inside this one); a row anchors its centre line.
+    const cy = o.anchor === 'top' ? cyOrTop + h / 2 : cyOrTop;
+    const x = cx - w / 2, y = cy - h / 2;
+    p.push(rect(x, y, w, h, { fill: o.fill ?? WHT, stroke: o.stroke ?? BLK, sw: SW_MED, dash: o.dash }));
+    // In the top-left corner, inside the border: the text is centred, so the corner is clear.
+    if (o.glyph) p.push(sectionDeviceGlyph(o.glyph, x + 7, y + 5, o.stroke ?? BLK));
+    let by = y + 8 + capUu(wrapped[0]?.sz ?? F.sub);
+    for (const l of wrapped) {
+      p.push(txt(cx, +by.toFixed(2), l.t,
+        { sz: l.sz, bold: l.bold, anc: 'middle', fill: l.fill, italic: l.italic }));
+      by += pitch;
+    }
+    boxes.push({ id, x, y, w, h, kind: 'device' });
+    return { x, y, w, h, cx, cy, top: y, bottom: y + h, left: x, right: x + w };
+  };
+
+  /** A conductor callout placed on a span, reserved so nothing else is drawn through it. */
+  const spanLabel = (id: string, x1: number, x2: number, y: number, lines: string[],
+                     fill = BLK) => {
+    if (!lines.length) return;
+    const cx = (x1 + x2) / 2;
+    const w = Math.max(...lines.map(l => textWidthUu(l, F.seg)));
+    const h = lines.length * LBL_PITCH;
+    p.push(tspan(cx, +(y - h - 2).toFixed(2), lines, { sz: F.seg, anc: 'middle', fill, lh: LBL_PITCH }));
+    boxes.push({ id, x: cx - w / 2, y: y - h - 2 - capUu(F.seg), w, h: h + 2, kind: 'label' });
+  };
+  return { drawBox, spanLabel };
+}
+type SectionBoxGeom = ReturnType<ReturnType<typeof sectionCanvas>['drawBox']>;
+
+/** The height `drawBox` will give these lines at this width — the same wrap, the same pitch. */
+function sectionBoxHeight(lines: SectionLine[], w: number): number {
+  let n = 0;
+  for (const l of lines) n += wrapToWidth(l.t, w - 14, l.sz).length;
+  return Math.max(38, n * Math.max(LBL_PITCH, MIN_TYPE_UU + 2) + 12);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 🚨 THE COMPACT DC-COUPLED SERVICE LAYOUT.
+//
+// Ray, on the live 400 A sheet: "much better architecturally but too spread out and visually
+// primitive on the storage side... Do not leave huge whitespace because an inverter block was
+// removed." The column layout was built for an AC-coupled sheet, where a combiner, an inverter and a
+// PV AC disconnect fill the left half and the service graph hangs off the right. A DC-coupled design
+// has none of them — the strings land on the batteries' own inputs — so the same arrangement left the
+// PV array alone at the far left, an empty band where the inverter used to be, and every cabinet
+// squeezed into the right-hand corner.
+//
+// This draws what the design IS, top down, in the order the energy flows:
+//
+//          PV ARRAY → J-BOX ┐                 SERVICE ENGINEERING — INPUT REQUIRED
+//                           │  (strings → the batteries' PV inputs)
+//          PW3 #1  PW3 #2   ┴   PW3 #3  PW3 #4
+//            GEN PANEL 1          GEN PANEL 2
+//            GATEWAY #1 ─╫─ SERVICE EQUIPMENT ─╫─ GATEWAY #2
+//               │                 │                 │
+//             MSP #1      SERVICE DISCONNECT      MSP #2
+//                               METER
+//                              UTILITY
+//
+// 🚨 THE WORDS ARE THE COLUMN LAYOUT'S. Every box states its facts through the same builders
+// (`storageUnitLinesSld`, `gatewayLinesSld`, …); only positions differ. And the connectivity is the
+// graph's: the MSP hangs off the gateway's BACKUP side, and the service branch — with its utility
+// isolation switch in line — leaves the gateway's GRID side for the service equipment. Drawing
+// MSP → service instead would put the gateway beside the path rather than in it, which is the
+// contradiction the "BACKUP FEEDER" label was written to remove.
+//
+// 🚨 AND A DC CONDUCTOR GOES ONLY WHERE THE DESIGN LANDS PV. The trunk drops from the junction box
+// and either feeds the units with `pvDcStcKw > 0`, or — nothing recorded — ends at "STRING LANDING TO
+// BE ASSIGNED". A fan-out to every cabinet would be a claim the design has not made.
+//
+// 🚨 GATED (`compactDcServiceLayoutApplies`). Every other sheet keeps the column layout byte for
+// byte — tests/sldNonDcSheetsUnchanged.test.ts holds them to the commit before this existed.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** What the main renderer tells the compact layout about the part of the sheet it already drew. */
+export interface CompactDcLayoutInput {
+  /** The region the whole compact drawing must fit in, in sheet units (pre-fit). */
+  region: { x0: number; x1: number; y0: number; y1: number };
+  /**
+   * The PV array + junction box group, measured in the coordinates it was DRAWN in: its size, and
+   * where the junction box's DC output sits relative to its top-left corner.
+   */
+  pvBlock: { w: number; h: number; outDx: number; outDy: number };
+  /** The string count the trunk callout states (0 ⇒ not recorded). */
+  totalStrings: number;
+  dcWireGauge: string;
+  dcConduitType: string;
+}
+
+/**
+ * Is this service graph drawn with the compact DC-coupled arrangement?
+ *
+ * DC coupled AND at least one backup domain — and, inside that, only the shapes this arrangement can
+ * draw without inventing a connection: one or two service branches, no SITE-WIDE DER aggregation
+ * group, no device placed on a DER path (both belong to the shared DER chain the column layout draws
+ * under its rows), and no Expansions on a system with more than two inverting units (their harness
+ * would have to cross a cabinet). Anything else keeps the column layout.
+ */
+export function compactDcServiceLayoutApplies(t: ServiceTopologyForSld | null | undefined): boolean {
+  if (!t || t.solarCoupling !== 'dc-coupled-storage') return false;
+  if (t.domains.length === 0) return false;
+  if (t.branches.length < 1 || t.branches.length > 2) return false;
+  if ((t.aggregationPanels ?? []).some(a => !a.domainId)) return false;
+  if (t.devices.some(d => !!d.feedsNodeId && !d.inlineOnNodeId)) return false;
+  const roleOf = (id: string) => t.storage.find(u => u.id === id)?.role;
+  for (const d of t.domains) {
+    const inverting = d.storageUnitIds.filter(id => roleOf(id) === 'inverter-unit').length;
+    const expansions = d.storageUnitIds.filter(id => roleOf(id) === 'energy-expansion').length;
+    if (inverting > 2 && expansions > 0) return false;
+  }
+  return true;
+}
+
+type SldStorageUnit = ServiceTopologyForSld['storage'][number];
+
+function renderCompactDcServiceSection(
+  opts: Parameters<typeof renderTopologyServiceSection>[0] & { compactDc: CompactDcLayoutInput },
+  t: ServiceTopologyForSld,
+  ev: TopologyEvaluationForSld,
+): ServiceSectionResult {
+  const c = opts.compactDc;
+  const p: string[] = [];
+  const boxes: ServiceSectionBox[] = [];
+  const groundX: number[] = [];
+  const notes: string[] = serviceCheckNotesSld(ev, opts.hasGenerator);
+  const { drawBox } = sectionCanvas(p, boxes);
+  const amps = ampsSld;
+  let calloutN = opts.calloutStart;
+
+  const GREEN = '#1B5E20';
+  // Sized so the lines these boxes actually carry wrap once at most: at the column layout's 178 uu
+  // a gateway's "NOT EVALUATED — INTERRUPTING RATING REQUIRED" took two lines and a generation panel
+  // ran to eleven. Wider boxes are SHORTER boxes, and height is what this sheet is short of.
+  const W_ESS = 168, ESS_GAP = 18, EXP_GAP = 30;
+  const W_GEN = 262, W_GW = 250, W_PNL = 158, W_DIST = 220, W_DEV = 186;
+  /** From the junction box's DC output to where the trunk turns down. */
+  const TRUNK_LEG = 36;
+  /** Gateway bottom → MSP top: the backup feeder, its label, the CT note and the feeder callout. */
+  const BACKUP_DROP = 50;
+  const mR = 26;
+  const n = t.branches.length;
+  const storageLabel = dcStorageLabelSld(t);
+  const panelById = new Map(t.panels.map(x => [x.id, x]));
+  const storageById = new Map(t.storage.map(x => [x.id, x]));
+
+  // Which sources leave their domain for an aggregation panel, and which panel takes them — the
+  // column layout's rule, so a unit is drawn in exactly the system it is drawn in there.
+  const aggregated = new Map<string, DerAggregationPanelForSld>();
+  for (const agg of t.aggregationPanels ?? []) {
+    for (const input of agg.inputs) {
+      if (input.tap !== 'der-output') continue;
+      for (const s of sourcesForAggregationInputSld(t, input)) aggregated.set(s.id, agg);
+    }
+  }
+  const ctDocMissing = t.domains.length > 1 && !t.interconnection.multiGatewayMeteringDoc?.present;
+  const CT_NOTE = 'CTs — MANUFACTURER DOCUMENT REQUIRED';
+  const HARNESS = 'DC EXPANSION HARNESS — MFR ASSEMBLY';
+
+  // ── 1. WHAT EACH SYSTEM COLUMN HOLDS, AND HOW BIG IT IS ──────────────────
+  type RowItem = { kind: 'ess' | 'exp'; u: SldStorageUnit; lines: SectionLine[]; h: number };
+  const cols = t.branches.map((branch, i) => {
+    const domain = t.domains.find(d => d.branchId === branch.id) ?? null;
+    const panel = (domain?.backedUpPanelIds ?? branch.panelIds ?? [])
+      .map(id => panelById.get(id)).find(Boolean) ?? t.panels[i] ?? null;
+    // Outboard is AWAY from the service equipment: the left of a one-system sheet, each side of two.
+    const outboard: 'L' | 'R' = n === 2 && i === 1 ? 'R' : 'L';
+    const ownAgg = domain ? (t.aggregationPanels ?? []).filter(a => a.domainId === domain.id) : [];
+    const ownAggIds = new Set(ownAgg.map(a => a.id));
+    const takenByOwnPanel = (id: string) => {
+      const a = aggregated.get(id);
+      return !!a && ownAggIds.has(a.id);
+    };
+    const units = (domain?.storageUnitIds ?? [])
+      .map(id => storageById.get(id)).filter((u): u is SldStorageUnit => !!u);
+    const inverting = units.filter(u => u.role === 'inverter-unit'
+      && (!aggregated.has(u.id) || takenByOwnPanel(u.id)));
+    const expansions = units.filter(u => u.role === 'energy-expansion'
+      && !(u.attachedToUnitId && aggregated.has(u.attachedToUnitId)
+        && !takenByOwnPanel(u.attachedToUnitId)));
+    // An Expansion hangs off its own host; one whose host is not drawn here hangs off the first
+    // unit, as the column layout does; one with no unit at all is said in the notes.
+    const hostOf = (u: SldStorageUnit) =>
+      (inverting.some(h => h.id === u.attachedToUnitId) ? u.attachedToUnitId! : inverting[0]?.id ?? null);
+    const ess = (u: SldStorageUnit): RowItem => {
+      const lines = storageUnitLinesSld(t, u, true);
+      return { kind: 'ess', u, lines, h: sectionBoxHeight(lines, W_ESS) };
+    };
+    const exp = (u: SldStorageUnit): RowItem => {
+      const lines = expansionLinesSld(u);
+      return { kind: 'exp', u, lines, h: sectionBoxHeight(lines, W_ESS) };
+    };
+    const expsOf = (hostId: string) => expansions.filter(e => hostOf(e) === hostId).map(exp);
+    // Expansions sit on the OUTBOARD side of their host, chained cabinet to cabinet, so a harness
+    // never crosses another unit and the AC collector between two inverting units never crosses an
+    // Expansion.
+    const row: RowItem[] = [];
+    if (inverting.length === 1) {
+      const h = inverting[0];
+      if (outboard === 'L') row.push(...expsOf(h.id).reverse(), ess(h));
+      else row.push(ess(h), ...expsOf(h.id));
+    } else if (inverting.length === 2) {
+      row.push(...expsOf(inverting[0].id).reverse(), ess(inverting[0]), ess(inverting[1]),
+        ...expsOf(inverting[1].id));
+    } else {
+      row.push(...inverting.map(ess));
+    }
+    const orphans = expansions.filter(e => hostOf(e) === null);
+    for (const o of orphans) {
+      notes.push(`${o.productId} is drawn as a DC expansion with no host unit to connect to.`);
+      row.push(exp(o));
+    }
+    // Item centres relative to the inverting group's centre (or the row's, with none).
+    const gapAfter = (k: number) =>
+      (row[k].kind === 'exp' || row[k + 1]?.kind === 'exp' ? EXP_GAP : ESS_GAP);
+    const rel: number[] = [];
+    let run = 0;
+    row.forEach((_, k) => { rel.push(run); run += W_ESS + (k + 1 < row.length ? gapAfter(k) : 0); });
+    const invIdx = row.map((r, k) => (r.kind === 'ess' ? k : -1)).filter(k => k >= 0);
+    const centre = invIdx.length
+      ? (rel[invIdx[0]] + rel[invIdx[invIdx.length - 1]]) / 2
+      : (rel[0] + rel[rel.length - 1]) / 2;
+    const itemDx = rel.map(x => x - centre);
+    const rowH = row.length ? Math.max(...row.map(r => r.h)) : 0;
+    const hasExp = row.some(r => r.kind === 'exp');
+    const harnessLines = wrapToWidth(HARNESS, W_ESS, F.tiny);
+
+    const gen = [...ownAgg].reverse().map(agg => {
+      const lines = generationPanelLinesSld(t, agg);
+      const label = agg.outputOcpdA === null
+        ? 'GENERATION FEEDER — OUTPUT OCPD NOT EVALUATED' : `${agg.outputOcpdA} A GENERATION FEEDER`;
+      return { agg, lines, h: sectionBoxHeight(lines, W_GEN), label };
+    });
+    const gwLines = domain ? gatewayLinesSld(domain.gateway) : null;
+    const panelLines = panel ? servicePanelLinesSld(panel) : null;
+    const coreW = domain ? W_GW : W_PNL;
+    const coreH = domain ? sectionBoxHeight(gwLines!, W_GW)
+      : panelLines ? sectionBoxHeight(panelLines, W_PNL) : 38;
+    const mspH = domain && panelLines ? sectionBoxHeight(panelLines, W_PNL) : 0;
+    const feederLabel = `BACKUP FEEDER — ${amps(panel?.mainBreakerA ?? branch.ratedAmps)}`;
+
+    // The devices IN this branch's feeder, and how much run they need: each knife switch gets a slot
+    // as wide as its tag, and the OCPD label sits at the service end.
+    const inline = t.devices.filter(d => d.inlineOnNodeId
+      && (d.inlineOnNodeId === branch.id
+          || (domain && (d.inlineOnNodeId === domain.gateway.id
+              || domain.backedUpPanelIds.includes(d.inlineOnNodeId)))));
+    const inlineSlots = inline.map(dev => {
+      const tag = inlineDeviceTagsSld(dev).flatMap(l => wrapToWidth(l, 96, F.tiny));
+      const tagW = Math.max(...tag.map(l => textWidthUu(l, F.tiny)));
+      return { dev, tag, tagW, slotW: Math.max(44, tagW + 14) };
+    });
+    const ocpdLbl = `${amps(branch.ocpdAmps ?? branch.ratedAmps)} OCPD`;
+    const ocpdW = textWidthUu(ocpdLbl, F.tiny);
+    const noDomainFeeder = `${branch.label} — ${amps(branch.ocpdAmps ?? branch.ratedAmps)} FEEDER`;
+    let runLen = Math.max(96, 16 + inlineSlots.reduce((a, s) => a + s.slotW, 0) + ocpdW + 16);
+    if (!domain) runLen = Math.max(runLen, textWidthUu(noDomainFeeder, F.seg) + 28);
+
+    // Horizontal reach either side of the column's centre line.
+    const leftOf = (k: number) => itemDx[k] - W_ESS / 2;
+    const rightOf = (k: number) => itemDx[k] + W_ESS / 2;
+    const rowL = row.length ? -Math.min(...row.map((_, k) => leftOf(k))) : 0;
+    const rowR = row.length ? Math.max(...row.map((_, k) => rightOf(k))) : 0;
+    const genL = gen.length ? Math.max(W_GEN / 2, ...gen.map(g => 6 + textWidthUu(g.label, F.tiny))) : 0;
+    const ctW = domain && ctDocMissing ? 8 + textWidthUu(CT_NOTE, F.tiny, true) : 0;
+    const fbW = domain && panel ? 8 + textWidthUu(feederLabel, F.seg) : 0;
+    const coreHalf = Math.max(coreW / 2, mspH ? W_PNL / 2 : 0);
+    const extL = Math.max(rowL, genL, coreHalf, outboard === 'L' ? ctW : fbW, 28);
+    const extR = Math.max(rowR, gen.length ? W_GEN / 2 : 0, coreHalf, outboard === 'R' ? ctW : fbW, 28);
+    // Above the gateway row only — where the trunk callout has to find its room.
+    const upperL = Math.max(rowL, genL);
+    const upperR = Math.max(rowR, gen.length ? W_GEN / 2 : 0);
+    return {
+      branch, domain, panel, outboard, row, itemDx, rowH, hasExp, harnessLines, gen,
+      gwLines, panelLines, coreW, coreH, mspH, feederLabel, inlineSlots, ocpdLbl, noDomainFeeder,
+      runLen, extL, extR, upperL, upperR, cx: 0,
+    };
+  });
+
+  // ── 2. ACROSS: COLUMN │ FEEDER │ SERVICE EQUIPMENT │ FEEDER │ COLUMN ───────
+  const landedUnits = cols.flatMap(col => col.row.filter(r => r.kind === 'ess'
+    && typeof r.u.pvDcStcKw === 'number' && r.u.pvDcStcKw > 0));
+  const unassigned = landedUnits.length === 0 && dcLandingUnassignedSld(t, 0);
+  // The count when it is recorded; otherwise the run is named without one ("PV PV STRING HOME
+  // RUNS" was the column layout's way of saying it did not know).
+  const strings = c.totalStrings || (unassigned ? 0 : landedUnits.length);
+  const trunkLines = [
+    `${strings ? `${strings} ` : ''}PV STRING HOME RUNS`,
+    `${c.dcWireGauge} PV WIRE + EGC IN ${c.dcConduitType}`,
+    `TO ${storageLabel} PV INPUTS — DC COUPLED`,
+  ];
+  const tagLines = ['STRING LANDING TO BE ASSIGNED —', 'WHICH UNIT RECEIVES EACH STRING'];
+  const trunkW = Math.max(...trunkLines.map(l => textWidthUu(l, F.seg)),
+    ...(unassigned ? tagLines.map(l => textWidthUu(l, F.tiny, true)) : [0]));
+  const hasTrunkText = landedUnits.length > 0 || unassigned;
+
+  const c0 = cols[0];
+  c0.cx = 0;
+  let cxD = c0.coreW / 2 + c0.runLen + W_DIST / 2;
+  // The trunk callout lives between the systems' upper rows (or right of the only one): widen the
+  // feeders until it has room, rather than printing it over a cabinet.
+  const halfNeed = hasTrunkText ? trunkW / 2 + 14 : 0;
+  if (cxD - c0.upperR < halfNeed) {
+    const grow = halfNeed - (cxD - c0.upperR);
+    c0.runLen += grow; cxD += grow;
+  }
+  if (n === 2) {
+    const c1 = cols[1];
+    c1.cx = cxD + W_DIST / 2 + c1.runLen + c1.coreW / 2;
+    if (c1.cx - c1.upperL - cxD < halfNeed) {
+      const grow = halfNeed - (c1.cx - c1.upperL - cxD);
+      c1.runLen += grow; c1.cx += grow;
+    }
+  }
+  const trunkX0 = cxD;
+  const pvX0 = trunkX0 - TRUNK_LEG - c.pvBlock.outDx;
+  const notesX0 = trunkX0 + 26;
+  const colsRight0 = Math.max(cxD + W_DIST / 2 + 40, ...cols.map(col => col.cx + col.extR));
+  const notesW = Math.max(400, colsRight0 - notesX0);
+  const minLeft = Math.min(pvX0, cxD - W_DEV / 2 - 36, ...cols.map(col => col.cx - col.extL));
+  const shift = Math.round(c.region.x0 + 6 - minLeft);
+  for (const col of cols) col.cx += shift;
+  const cx = { dist: cxD + shift, notes: notesX0 + shift };
+  const pvAt = { x: Math.round(pvX0 + shift), y: Math.round(c.region.y0) };
+
+  // ── 3. DOWN: HOW TALL EVERYTHING BELOW THE TOP BAND IS ───────────────────
+  const distLines = serviceDistributionLinesSld(t);
+  const distH = sectionBoxHeight(distLines, W_DIST);
+  const bondedAt = new Set(ev.bonding.bondedAtNodeIds);
+  const inlineIds = new Set(t.devices.filter(d => !!d.inlineOnNodeId).map(d => d.id));
+  const chainDevices = [
+    ...t.devices.filter(d => d.roles.includes('service-disconnect') && !inlineIds.has(d.id)),
+    ...t.devices.filter(d => d.roles.includes('der-isolation-disconnect') && !inlineIds.has(d.id)),
+  ].map(d => ({ d, lines: chainDeviceLinesSld(d) }));
+
+  /** Layout below the band, relative to the band's bottom; `gap` is the service chain's spacing. */
+  const plan = (gap: number) => {
+    const hdr = 20;
+    const rowTop = hdr + 20;
+    const colPlan = cols.map(col => {
+      let cur = rowTop;
+      let rowBottom = rowTop;
+      if (col.row.length) {
+        rowBottom = rowTop + col.rowH;
+        cur = rowBottom + (col.hasExp ? 44 : 32);
+      }
+      const genTops: number[] = [];
+      for (const g of col.gen) { genTops.push(cur); cur += g.h + 40; }
+      return { rowBottom, genTops, coreTopMin: cur };
+    });
+    const coreTop = Math.max(...colPlan.map(x => x.coreTopMin));
+    const coreCy = cols.reduce((a, col) => a + coreTop + col.coreH / 2, 0) / cols.length;
+    const distTop = coreCy - distH / 2;
+    let chainTop = distTop + distH + gap;
+    const devTops: number[] = [];
+    for (const cd of chainDevices) {
+      devTops.push(chainTop);
+      chainTop += sectionBoxHeight(cd.lines, W_DEV) + gap;
+    }
+    const meterCy = chainTop + mR;
+    const gridCy = meterCy + mR + gap;
+    const mspBottom = Math.max(0, ...cols.map(col => (col.mspH
+      ? coreTop + col.coreH + BACKUP_DROP + col.mspH : coreTop + col.coreH)));
+    const bottom = Math.max(gridCy + 44, mspBottom);
+    return { hdr, rowTop, colPlan, coreTop, coreCy, distTop, devTops, meterCy, gridCy, bottom };
+  };
+  const regionH = c.region.y1 - c.region.y0;
+  let below = plan(46);
+  if (c.pvBlock.h + below.bottom > regionH) below = plan(30);
+
+  // ── 4. THE TOP BAND: PV ARRAY + JUNCTION BOX, AND WHAT THE DESIGN STILL NEEDS ──
+  const reqLines = serviceRequirementLinesSld(t, ev, opts.hasGenerator);
+  const notesMaxY = c.region.y0 + Math.max(c.pvBlock.h, regionH - below.bottom);
+  const notesArea = { x: cx.notes, y: c.region.y0 + capUu(F.sub), w: notesW, maxY: notesMaxY };
+  const notesEnd = drawServiceRequirementBlock([], [], reqLines, notesArea);
+  const bandH = Math.max(c.pvBlock.h, notesEnd === null ? 0 : notesEnd - c.region.y0);
+  const notesBottom = drawServiceRequirementBlock(p, boxes, reqLines, notesArea);
+  // The PV group is drawn by the caller; its footprint is reserved here so the audit sees it.
+  boxes.push({ id: 'pv-array-and-junction-box', x: pvAt.x, y: pvAt.y,
+               w: c.pvBlock.w, h: c.pvBlock.h, kind: 'device' });
+  const Y = (rel: number) => c.region.y0 + bandH + rel;
+  const hdrY = Y(below.hdr);
+  const rowTop = Y(below.rowTop);
+
+  // ── 5. EACH SYSTEM, TOP DOWN ─────────────────────────────────────────────
+  const coreBoxes: SectionBoxGeom[] = [];
+  const essBoxById = new Map<string, SectionBoxGeom>();
+  cols.forEach((col, i) => {
+    const cp = below.colPlan[i];
+    const x = col.cx;
+    // The storage row. Every cabinet's top is the row's top: the DC enters there.
+    const itemBoxes = col.row.map((r, k) => drawBox(`${r.kind}-${r.u.id}`, x + col.itemDx[k], rowTop,
+      W_ESS, r.lines, r.kind === 'ess'
+        ? { stroke: GREEN, glyph: 'battery-inverter', anchor: 'top' }
+        : { stroke: SEC_DC, dash: '6 4', anchor: 'top' }));
+    col.row.forEach((r, k) => { if (r.kind === 'ess') essBoxById.set(r.u.id, itemBoxes[k]); });
+    // Each Expansion is chained to its neighbour toward its host: dashed, orange, no OCPD.
+    col.row.forEach((r, k) => {
+      if (r.kind !== 'exp') return;
+      const b = itemBoxes[k];
+      const hostIdx = col.row.findIndex(x2 => x2.kind === 'ess');
+      const towardHost = hostIdx < 0 ? null : hostIdx > k ? k + 1 : k - 1;
+      if (towardHost !== null && col.row[towardHost]) {
+        const nb = itemBoxes[towardHost];
+        const ly = rowTop + 18;
+        const [x1, x2] = nb.cx > b.cx ? [b.right, nb.left] : [nb.right, b.left];
+        p.push(ln(x1, ly, x2, ly, { sw: SW_MED, stroke: SEC_DC, dash: '6 4' }));
+      }
+      const lw = Math.max(...col.harnessLines.map(l => textWidthUu(l, F.tiny)));
+      p.push(tspan(b.cx, +(b.bottom + 6 + capUu(F.tiny)).toFixed(2), col.harnessLines,
+        { sz: F.tiny, anc: 'middle', fill: SEC_DC, lh: LBL_PITCH }));
+      boxes.push({ id: `exp-harness-label-${r.u.id}`, x: b.cx - lw / 2, y: b.bottom + 6,
+                   w: lw, h: col.harnessLines.length * LBL_PITCH + 2, kind: 'label' });
+    });
+
+    // AC out of the bottom of each inverting unit, onto one collector, down the column.
+    const invBoxes = col.row.map((r, k) => (r.kind === 'ess' ? itemBoxes[k] : null))
+      .filter((b): b is SectionBoxGeom => !!b);
+    const firstBelow = cp.genTops.length ? Y(cp.genTops[0]) : Y(below.coreTop);
+    if (invBoxes.length) {
+      const collectY = Math.max(...invBoxes.map(b => b.bottom)) + 14;
+      for (const b of invBoxes) p.push(ln(b.cx, b.bottom, b.cx, collectY, { sw: SW_MED, stroke: GREEN }));
+      const xs = invBoxes.map(b => b.cx);
+      if (xs.length > 1) p.push(ln(Math.min(...xs), collectY, Math.max(...xs), collectY, { sw: SW_MED, stroke: GREEN }));
+      p.push(ln(x, collectY, x, firstBelow, { sw: SW_MED, stroke: GREEN }));
+    }
+
+    // The system's own generation panel(s), between its Powerwalls and its Gateway — the order the
+    // current travels: PW3 → branch OCPD → generation panel → feeder → Gateway.
+    col.gen.forEach((g, k) => {
+      const gb = drawBox(`aggregation-${g.agg.id}`, x, Y(cp.genTops[k]), W_GEN, g.lines,
+        { stroke: GREEN, anchor: 'top', glyph: 'panelboard' });
+      const nextTop = k + 1 < col.gen.length ? Y(cp.genTops[k + 1]) : Y(below.coreTop);
+      p.push(ln(x, gb.bottom, x, nextTop, { sw: SW_MED, stroke: GREEN }));
+      // Beside its conductor, on the side away from the service equipment's feeders.
+      const fw = textWidthUu(g.label, F.tiny);
+      const fy = (gb.bottom + nextTop) / 2 + capUu(F.tiny) / 2;
+      p.push(txt(x - 6, +fy.toFixed(2), g.label, { sz: F.tiny, anc: 'end' }));
+      boxes.push({ id: `aggregation-feeder-label-${g.agg.id}`, x: x - 6 - fw, y: fy - capUu(F.tiny),
+                   w: fw, h: LBL_PITCH, kind: 'label' });
+    });
+
+    // The gateway — or, on a branch nobody backs up, the panel it feeds directly.
+    const coreTop = Y(below.coreTop);
+    const core = col.domain
+      ? drawBox(`gateway-${col.domain.gateway.id}`, x, coreTop, W_GW, col.gwLines!,
+          { stroke: SEC_BLUE, glyph: 'controller', anchor: 'top' })
+      : drawBox(`panel-${col.panel?.id ?? col.branch.id}`, x, coreTop, W_PNL,
+          col.panelLines ?? [{ t: col.branch.label, sz: F.hdr, bold: true }], { anchor: 'top' });
+    coreBoxes.push(core);
+
+    // The MSP on the gateway's BACKUP side, by its backup feeder.
+    if (col.domain && col.panel && col.panelLines) {
+      const mspTop = core.bottom + BACKUP_DROP;
+      p.push(ln(x, core.bottom, x, mspTop, { sw: SW_MED }));
+      drawBox(`panel-${col.panel.id}`, x, mspTop, W_PNL, col.panelLines, { anchor: 'top' });
+      const inboardRight = col.outboard === 'L';
+      const fbW = textWidthUu(col.feederLabel, F.seg);
+      const fbY = core.bottom + BACKUP_DROP / 2 + capUu(F.seg) / 2;
+      const fbX = inboardRight ? x + 8 : x - 8;
+      p.push(txt(fbX, +fbY.toFixed(2), col.feederLabel,
+        { sz: F.seg, anc: inboardRight ? 'start' : 'end' }));
+      boxes.push({ id: `feeder-${col.branch.id}`, x: inboardRight ? fbX : fbX - fbW,
+                   y: fbY - capUu(F.seg), w: fbW, h: LBL_PITCH, kind: 'label' });
+      // The CT note and the feeder's callout go on the OUTBOARD side, clear of the label above.
+      const out = inboardRight ? -1 : 1;
+      if (ctDocMissing) {
+        const lw = textWidthUu(CT_NOTE, F.tiny, true);
+        const ctX = x + out * 8;
+        p.push(txt(ctX, +(core.bottom + 8 + capUu(F.tiny)).toFixed(2), CT_NOTE,
+          { sz: F.tiny, anc: out < 0 ? 'end' : 'start', fill: SEC_AMBER, bold: true }));
+        boxes.push({ id: `ct-${col.domain.id}`, x: out < 0 ? ctX - lw : ctX, y: core.bottom + 8,
+                     w: lw, h: LBL_PITCH + 2, kind: 'label' });
+      }
+      const coX = x + out * 18, coY = core.bottom + 36;
+      p.push(callout(coX, coY, calloutN++));
+      boxes.push({ id: `feeder-callout-${col.branch.id}`, x: coX - 10, y: coY - 10, w: 20, h: 20,
+                   kind: 'device' });
+    }
+  });
+
+  // ── 6. THE SERVICE EQUIPMENT, AND EACH BRANCH FEEDER INTO IT ──────────────
+  const dist = drawBox('service-distribution', cx.dist, Y(below.distTop), W_DIST, distLines,
+    { anchor: 'top' });
+  cols.forEach((col, i) => {
+    const core = coreBoxes[i];
+    const dir = col.outboard === 'L' ? 1 : -1;          // toward the service equipment
+    const xs = dir > 0 ? core.right : core.left;
+    const xe = dir > 0 ? dist.left : dist.right;
+    const y = core.cy;
+    const ye = Math.min(Math.max(y, dist.top + 10), dist.bottom - 10);
+    // Knife switch centres along the run, from the gateway end.
+    let along = 16;
+    const knives = col.inlineSlots.map(s => {
+      const sx = xs + dir * (along + s.slotW / 2);
+      along += s.slotW;
+      return { ...s, sx };
+    });
+    // The conductor, broken at each switch so the open blade reads as open.
+    const stops = [xs, ...knives.flatMap(k => [k.sx - dir * 20, k.sx + dir * 20])];
+    const jogX = xe - dir * 10;
+    for (let k = 0; k < stops.length; k += 2) {
+      const a = stops[k];
+      const b = k + 1 < stops.length ? stops[k + 1] : (Math.abs(ye - y) > 0.5 ? jogX : xe);
+      p.push(ln(a, y, b, y, { sw: SW_MED }));
+    }
+    if (Math.abs(ye - y) > 0.5) {
+      p.push(ln(jogX, y, jogX, ye, { sw: SW_MED }));
+      p.push(ln(jogX, ye, xe, ye, { sw: SW_MED }));
+    }
+    for (const k of knives) {
+      p.push(knifeSwitch(k.sx, y, 40));
+      p.push(callout(k.sx, y - 38, calloutN++));
+      boxes.push({ id: `inline-callout-${k.dev.id}`, x: k.sx - 10, y: y - 48, w: 20, h: 20,
+                   kind: 'device' });
+      p.push(tspan(k.sx, +(y + 18 + capUu(F.tiny)).toFixed(2), k.tag,
+        { sz: F.tiny, anc: 'middle', fill: k.dev.sccrA === null ? SEC_AMBER : BLK, lh: LBL_PITCH }));
+      boxes.push({ id: `inline-device-${k.dev.id}`, x: k.sx - k.tagW / 2, y: y + 18,
+                   w: k.tagW, h: k.tag.length * LBL_PITCH + 2, kind: 'label' });
+    }
+    // The branch's own OCPD in the service equipment, at the service end of its feeder.
+    const ow = textWidthUu(col.ocpdLbl, F.tiny);
+    const ox = xe - dir * 6;
+    const oy = col.domain ? ye - 6 : ye + 6 + capUu(F.tiny);
+    p.push(txt(ox, +oy.toFixed(2), col.ocpdLbl, { sz: F.tiny, anc: dir > 0 ? 'end' : 'start' }));
+    boxes.push({ id: `branch-ocpd-${col.branch.id}`, x: dir > 0 ? ox - ow : ox, y: oy - capUu(F.tiny),
+                 w: ow, h: LBL_PITCH, kind: 'label' });
+    if (!col.domain) {
+      const fw = textWidthUu(col.noDomainFeeder, F.seg);
+      const fx = (xs + xe) / 2;
+      p.push(txt(fx, +(y - 6).toFixed(2), col.noDomainFeeder, { sz: F.seg, anc: 'middle' }));
+      boxes.push({ id: `feeder-${col.branch.id}`, x: fx - fw / 2, y: y - 6 - capUu(F.seg),
+                   w: fw, h: LBL_PITCH, kind: 'label' });
+    }
+  });
+
+  // ── 7. THE SHARED SERVICE CHAIN, DROPPING TOWARD THE UTILITY ─────────────
+  let lastY = dist.bottom;
+  chainDevices.forEach((cd, k) => {
+    const b = drawBox(`device-${cd.d.id}`, cx.dist, Y(below.devTops[k]), W_DEV, cd.lines, { anchor: 'top' });
+    p.push(ln(cx.dist, lastY, cx.dist, b.top, { sw: SW_MED }));
+    // 🚨 THE CANONICAL N-G BOND, WHERE THE TOPOLOGY PUTS IT — once.
+    if (bondedAt.has(cd.d.id)) {
+      const bx = b.left - 22;
+      p.push(ln(b.left, b.cy, bx, b.cy, { stroke: GRN, sw: SW_MED }));
+      p.push(gnd(bx, b.cy));
+      boxes.push({ id: `bond-symbol-${cd.d.id}`, x: bx - 10, y: b.cy - 2, w: 20, h: 18, kind: 'device' });
+      groundX.push(bx);
+      // Beside the conductor that continues down the chain, not centred across it: centred, the
+      // feeder to the next device ran through the middle of the words.
+      const lbl = 'N-G BOND — NEC 250.24';
+      const lw = textWidthUu(lbl, F.tiny, true);
+      p.push(txt(b.cx + 6, +(b.bottom + 8 + capUu(F.tiny)).toFixed(2), lbl,
+        { sz: F.tiny, anc: 'start', fill: GRN, bold: true }));
+      boxes.push({ id: `bond-label-${cd.d.id}`, x: b.cx + 6, y: b.bottom + 8,
+                   w: lw, h: LBL_PITCH, kind: 'label' });
+    }
+    lastY = b.bottom;
+  });
+  const meterCY = Y(below.meterCy);
+  p.push(ln(cx.dist, lastY, cx.dist, meterCY - mR, { sw: SW_MED }));
+  p.push(meterSymbol(cx.dist, meterCY, mR));
+  p.push(txt(cx.dist + mR + 8, +(meterCY - 4).toFixed(2), 'REVENUE METER', { sz: F.sub, bold: true, anc: 'start' }));
+  p.push(txt(cx.dist + mR + 8, +(meterCY + LBL_PITCH - 4).toFixed(2), opts.utilityName, { sz: F.tiny, anc: 'start' }));
+  p.push(callout(cx.dist - mR - 14, meterCY, calloutN++));
+  boxes.push({ id: 'revenue-meter', x: cx.dist - mR, y: meterCY - mR, w: mR * 2, h: mR * 2, kind: 'device' });
+  boxes.push({ id: 'revenue-meter-label', x: cx.dist + mR + 8, y: meterCY - 4 - capUu(F.sub),
+               w: Math.max(textWidthUu('REVENUE METER', F.sub, true),
+                           textWidthUu(opts.utilityName, F.tiny)), h: LBL_PITCH * 2, kind: 'label' });
+  const gridCY = Y(below.gridCy);
+  p.push(ln(cx.dist, meterCY + mR, cx.dist, gridCY - 16, { sw: SW_MED }));
+  p.push(circ(cx.dist, gridCY, 16, { fill: WHT, sw: SW_MED }));
+  p.push(txt(cx.dist, +(gridCY - 1).toFixed(2), 'UTIL', { sz: 5.5, bold: true, anc: 'middle' }));
+  p.push(txt(cx.dist, +(gridCY + 7).toFixed(2), 'GRID', { sz: 5, anc: 'middle' }));
+  p.push(ln(cx.dist, gridCY + 16, cx.dist, gridCY + 26, { sw: SW_MED }));
+  p.push(gnd(cx.dist, gridCY + 26));
+  groundX.push(cx.dist);
+  boxes.push({ id: 'utility-grid', x: cx.dist - 16, y: gridCY - 16, w: 32, h: 32, kind: 'device' });
+
+  // ── 8. THE PV, ON DC, INTO THE BATTERIES' OWN INPUTS ─────────────────────
+  //
+  // 🚨 ONLY TO THE UNITS THE DESIGN LANDS PV ON. Down from the junction box to the header over the
+  // storage rows, and from the header into the TOP of each landed cabinet — never to a unit whose
+  // landing is unrecorded or zero.
+  const dcEntries: ServiceSectionResult['dcEntries'] = [];
+  const jb = { x: pvAt.x + c.pvBlock.outDx, y: pvAt.y + c.pvBlock.outDy };
+  const trunkX = jb.x + TRUNK_LEG;
+  const trunkText = (lines: string[], top: number, fill: string, bold: boolean, sz: number, id: string) => {
+    const w = Math.max(...lines.map(l => textWidthUu(l, sz, bold)));
+    p.push(tspan(trunkX, +(top + capUu(sz)).toFixed(2), lines,
+      { sz, anc: 'middle', lh: LBL_PITCH, fill, bold }));
+    boxes.push({ id, x: trunkX - w / 2, y: top, w, h: lines.length * LBL_PITCH + 2, kind: 'label' });
+    return top + lines.length * LBL_PITCH + 2;
+  };
+  if (landedUnits.length > 0) {
+    p.push(ln(jb.x, jb.y, trunkX, jb.y, { sw: SW_MED, stroke: SEC_DC }));
+    p.push(ln(trunkX, jb.y, trunkX, hdrY, { sw: SW_MED, stroke: SEC_DC }));
+    const landed = landedUnits.map(r => essBoxById.get(r.u.id)!).filter(Boolean);
+    const xs = [trunkX, ...landed.map(b => b.cx)];
+    p.push(ln(Math.min(...xs), hdrY, Math.max(...xs), hdrY, { sw: SW_MED, stroke: SEC_DC }));
+    if (Math.min(...xs) < trunkX && Math.max(...xs) > trunkX) {
+      p.push(circ(trunkX, hdrY, 2.2, { fill: SEC_DC, stroke: SEC_DC, sw: 0 }));
+    }
+    for (const b of landed) p.push(ln(b.cx, hdrY, b.cx, b.top, { sw: SW_MED, stroke: SEC_DC }));
+    landedUnits.forEach((r, k) => dcEntries.push({
+      cx: landed[k].cx, bottom: landed[k].bottom, label: storageUnitLabelSld(t, r.u),
+      mppts: r.u.pvInputLimits?.mppts ?? null,
+    }));
+    trunkText(trunkLines, hdrY + 8, SEC_DC, false, F.seg, 'dc-trunk-callout');
+  } else if (unassigned) {
+    // 🚨 THE LANDING IS NOT DECIDED, SO IT IS NOT DRAWN: the trunk stops at a tag that says what is
+    // owed, and each unit says "LANDING TO BE ASSIGNED" in its own box.
+    p.push(ln(jb.x, jb.y, trunkX, jb.y, { sw: SW_MED, stroke: SEC_DC }));
+    p.push(ln(trunkX, jb.y, trunkX, hdrY, { sw: SW_MED, stroke: SEC_DC }));
+    p.push(ln(trunkX - 7, hdrY, trunkX + 7, hdrY, { sw: SW_HEAVY, stroke: SEC_DC }));
+    const afterTag = trunkText(tagLines, hdrY + 8, SEC_DC, true, F.tiny, 'dc-landing-unassigned');
+    trunkText(trunkLines, afterTag + 4, SEC_DC, false, F.seg, 'dc-trunk-callout');
+  }
+
+  // ── THE RESULT ────────────────────────────────────────────────────────────
+  const lowest = Math.max(gridCY + 44, notesBottom ?? 0, ...boxes.map(b => b.y + b.h));
+  const panelLabel = cols.find(col => col.panel)?.panel?.label;
+  return {
+    svg: p.join(''),
+    entryX: dist.left, entryY: dist.cy,
+    entryLabel: panelLabel ?? 'the service distribution',
+    boxes, notes, groundX,
+    topY: Math.min(...boxes.map(b => b.y)), bottomY: lowest,
+    rightX: Math.max(...boxes.map(b => b.x + b.w)),
+    dcEntries,
+    dcBusX: trunkX,
+    dcLandingUnassigned: unassigned,
+    dcStorageLabel: storageLabel,
+    pvBlockAt: pvAt,
+  };
+}
+
 export function renderTopologyServiceSection(opts: {
   topology: ServiceTopologyForSld;
   evaluation?: TopologyEvaluationForSld;
@@ -3102,9 +4077,18 @@ export function renderTopologyServiceSection(opts: {
    * therefore owns the clearance.
    */
   notes: { x: number; y: number; w: number; maxY: number };
+  /**
+   * The compact DC-coupled arrangement's inputs. Honoured only where
+   * `compactDcServiceLayoutApplies` says the graph has that shape; every other graph is drawn by
+   * the column layout below, unchanged.
+   */
+  compactDc?: CompactDcLayoutInput;
 }): ServiceSectionResult {
   const t = opts.topology;
   const ev = opts.evaluation ?? evaluateServiceTopology(t);
+  if (opts.compactDc && compactDcServiceLayoutApplies(t)) {
+    return renderCompactDcServiceSection({ ...opts, compactDc: opts.compactDc }, t, ev);
+  }
   const p: string[] = [];
   const boxes: ServiceSectionBox[] = [];
   const notes: string[] = [];
@@ -3114,90 +4098,8 @@ export function renderTopologyServiceSection(opts: {
   const amps = (v: number | null | undefined) => (typeof v === 'number' ? `${v} A` : 'NOT EVALUATED');
 
   // ── BOX PRIMITIVE: text wraps and the box GROWS. Truncating would hide a requirement. ──
-  type Line = { t: string; sz: number; bold?: boolean; fill?: string; italic?: boolean };
-
-  /**
-   * 🚨 A SCHEMATIC GLYPH, NOT ARTWORK — and not a rectangle that could be anything.
-   *
-   * Ray: "The current generic rectangles are not sufficient for a professional permit SLD... The
-   * Powerwall, Gateway and combiner must be visually distinguishable at a glance. Do not invent
-   * fake manufacturer artwork. A labeled electrical schematic symbol is acceptable and preferable
-   * to incorrect artwork."
-   *
-   * So each is the IEEE-style symbol for WHAT IT IS, drawn in the box's top-left corner: a transfer
-   * contact for a backup controller, a battery stack feeding an inverter for a Powerwall-class
-   * unit, a bus with branch breakers for a panelboard. No manufacturer marks, no logos, nothing
-   * that claims to be a picture of the product.
-   */
-  const deviceGlyph = (kind: 'controller' | 'battery-inverter' | 'panelboard',
-                       gx: number, gy: number, stroke: string): string => {
-    const s: string[] = [];
-    if (kind === 'controller') {
-      // A transfer contact: two fixed terminals and a blade between them.
-      s.push(`<circle cx="${gx + 2}" cy="${gy + 9}" r="1.4" fill="${stroke}"/>`);
-      s.push(`<circle cx="${gx + 16}" cy="${gy + 9}" r="1.4" fill="${stroke}"/>`);
-      s.push(ln(gx + 2, gy + 9, gx + 14, gy + 2, { sw: SW_MED, stroke }));
-      s.push(ln(gx - 4, gy + 9, gx + 2, gy + 9, { sw: SW_THIN, stroke }));
-      s.push(ln(gx + 16, gy + 9, gx + 22, gy + 9, { sw: SW_THIN, stroke }));
-    } else if (kind === 'battery-inverter') {
-      // A battery stack (long/short plates) into an inverter square with the DC/AC diagonal.
-      s.push(ln(gx, gy + 1, gx, gy + 13, { sw: SW_MED, stroke }));
-      s.push(ln(gx + 4, gy + 4, gx + 4, gy + 10, { sw: SW_THIN, stroke }));
-      s.push(ln(gx + 8, gy + 1, gx + 8, gy + 13, { sw: SW_MED, stroke }));
-      s.push(ln(gx + 12, gy + 4, gx + 12, gy + 10, { sw: SW_THIN, stroke }));
-      s.push(rect(gx + 16, gy + 1, 12, 12, { fill: 'none', stroke, sw: SW_THIN }));
-      s.push(ln(gx + 16, gy + 13, gx + 28, gy + 1, { sw: SW_THIN, stroke }));
-    } else {
-      // A panelboard: a vertical bus with branch breaker stubs off it.
-      s.push(ln(gx + 4, gy, gx + 4, gy + 14, { sw: SW_MED, stroke }));
-      for (const dy of [2, 7, 12]) {
-        s.push(ln(gx + 4, gy + dy, gx + 12, gy + dy, { sw: SW_THIN, stroke }));
-        s.push(ln(gx + 12, gy + dy, gx + 15, gy + dy - 2.5, { sw: SW_THIN, stroke }));
-      }
-    }
-    return s.join('');
-  };
-
-  const drawBox = (
-    id: string, cx: number, cyOrTop: number, w: number, lines: Line[],
-    o: {
-      stroke?: string; fill?: string; dash?: string; anchor?: 'center' | 'top';
-      glyph?: 'controller' | 'battery-inverter' | 'panelboard';
-    } = {},
-  ) => {
-    const wrapped: Line[] = [];
-    for (const l of lines) {
-      for (const piece of wrapToWidth(l.t, w - 14, l.sz)) wrapped.push({ ...l, t: piece });
-    }
-    const pitch = Math.max(LBL_PITCH, MIN_TYPE_UU + 2);
-    const h = Math.max(38, wrapped.length * pitch + 12);
-    // 🚨 THE BOX GROWS WITH ITS TEXT, so an anchor has to say WHICH edge is fixed. A stacked chain
-    // anchors its top (or the next box starts inside this one); a row anchors its centre line.
-    const cy = o.anchor === 'top' ? cyOrTop + h / 2 : cyOrTop;
-    const x = cx - w / 2, y = cy - h / 2;
-    p.push(rect(x, y, w, h, { fill: o.fill ?? WHT, stroke: o.stroke ?? BLK, sw: SW_MED, dash: o.dash }));
-    // In the top-left corner, inside the border: the text is centred, so the corner is clear.
-    if (o.glyph) p.push(deviceGlyph(o.glyph, x + 7, y + 5, o.stroke ?? BLK));
-    let by = y + 8 + capUu(wrapped[0]?.sz ?? F.sub);
-    for (const l of wrapped) {
-      p.push(txt(cx, +by.toFixed(2), l.t,
-        { sz: l.sz, bold: l.bold, anc: 'middle', fill: l.fill, italic: l.italic }));
-      by += pitch;
-    }
-    boxes.push({ id, x, y, w, h, kind: 'device' });
-    return { x, y, w, h, cx, cy, top: y, bottom: y + h, left: x, right: x + w };
-  };
-
-  /** A conductor callout placed on a span, reserved so nothing else is drawn through it. */
-  const spanLabel = (id: string, x1: number, x2: number, y: number, lines: string[],
-                     fill = BLK) => {
-    if (!lines.length) return;
-    const cx = (x1 + x2) / 2;
-    const w = Math.max(...lines.map(l => textWidthUu(l, F.seg)));
-    const h = lines.length * LBL_PITCH;
-    p.push(tspan(cx, +(y - h - 2).toFixed(2), lines, { sz: F.seg, anc: 'middle', fill, lh: LBL_PITCH }));
-    boxes.push({ id, x: cx - w / 2, y: y - h - 2 - capUu(F.seg), w, h: h + 2, kind: 'label' });
-  };
+  type Line = SectionLine;
+  const { drawBox, spanLabel } = sectionCanvas(p, boxes);
 
   // ── COLUMN GEOMETRY ───────────────────────────────────────────────────────
   //
@@ -3287,12 +4189,7 @@ export function renderTopologyServiceSection(opts: {
     const y = sequentialRows ? rowCursor + 40 : rowY(i);
     rowCenterY[i] = y;
 
-    const panelLines: Line[] = panel ? [
-      { t: panel.label, sz: F.hdr, bold: true },
-      { t: `${amps(panel.busbarRatingA)} BUS`, sz: F.sub },
-      { t: `${amps(panel.mainBreakerA)} MAIN`, sz: F.sub },
-      ...(panel.backedUp ? [{ t: 'BACKED UP', sz: F.tiny, fill: SEC_BLUE } as Line] : []),
-    ] : [];
+    const panelLines: Line[] = panel ? servicePanelLinesSld(panel) : [];
 
     // PANEL — beside its gateway where the sheet is wide enough, stacked under it where it is not.
     let panelBox: ReturnType<typeof drawBox> | null = null;
@@ -3307,17 +4204,7 @@ export function renderTopologyServiceSection(opts: {
     let gwBox: ReturnType<typeof drawBox> | null = null;
     if (domain) {
       const gw = domain.gateway;
-      const gwLines: Line[] = [
-        { t: gw.label, sz: F.hdr, bold: true },
-        { t: `${amps(gw.continuousRatingA)} CONTINUOUS`, sz: F.sub },
-        { t: `${amps(gw.mainBreakerA)} MAIN`, sz: F.sub },
-      ];
-      if (gw.serviceEntranceRated) gwLines.push({ t: 'SERVICE ENTRANCE RATED', sz: F.tiny });
-      if (gw.sccrA === null) {
-        gwLines.push({ t: 'NOT EVALUATED — INTERRUPTING RATING REQUIRED', sz: F.tiny, fill: SEC_AMBER, bold: true });
-      } else {
-        gwLines.push({ t: `${gw.sccrA} A SCCR`, sz: F.tiny });
-      }
+      const gwLines: Line[] = gatewayLinesSld(gw);
       gwBox = drawBox(`gateway-${gw.id}`, cxGw, y, W_GW, gwLines,
         { stroke: SEC_BLUE, glyph: 'controller' });
       highest = Math.min(highest, gwBox.top);
@@ -3428,36 +4315,7 @@ export function renderTopologyServiceSection(opts: {
       // Between the gateway above it and the Powerwalls below it, which is the order the current
       // actually travels: PW3 → branch OCPD → generation panel → feeder → Gateway.
       for (const agg of ownAgg) {
-        const sizing = sizeAggregationPanel(t, agg);
-        const genLines: Line[] = [
-          { t: agg.label.toUpperCase(), sz: F.sub, bold: true },
-          { t: agg.busbarRatingA === null
-              ? 'NOT EVALUATED — BUSBAR RATING REQUIRED' : `${agg.busbarRatingA} A BUS`,
-            sz: F.tiny, ...(agg.busbarRatingA === null ? { fill: SEC_AMBER, bold: true } : {}) },
-          { t: agg.mainLugOnly ? 'MLO — NO MAIN OCPD' : `${amps(agg.mainBreakerA)} MAIN`, sz: F.tiny },
-          { t: `${agg.inputs.length} BRANCH OCPD`
-              + `${agg.inputs.every(x => x.ocpdA === agg.inputs[0]?.ocpdA) && agg.inputs[0]?.ocpdA
-                ? ` @ ${agg.inputs[0].ocpdA} A` : ''}`,
-            sz: F.tiny },
-          { t: agg.outputOcpdA === null
-              ? 'NOT EVALUATED — OUTPUT OCPD REQUIRED' : `${agg.outputOcpdA} A OUTPUT OCPD`,
-            sz: F.tiny, ...(agg.outputOcpdA === null ? { fill: SEC_AMBER, bold: true } : {}) },
-          // 🚨 WHY IT IS THIS SIZE AND NOT 400 A. Printed because it is the first thing a plan
-          // reviewer asks about a 125 A panel on a 400 A service.
-          ...(sizing.aggregateContinuousA !== null
-            ? [{ t: `${sizing.aggregateContinuousA} A AGGREGATED · ${sizing.standardOcpdA} A AT 125%`,
-                 sz: F.tiny } as Line] : []),
-          { t: agg.carriesPremisesLoad === false ? 'DER ONLY — NO PREMISES LOAD'
-              : agg.carriesPremisesLoad ? 'CARRIES PREMISES LOAD'
-                : 'NOT EVALUATED — DER-ONLY OR LOAD-CARRYING REQUIRED',
-            sz: F.tiny,
-            ...(agg.carriesPremisesLoad === null ? { fill: SEC_AMBER, bold: true } : {}) },
-          ...(agg.sccrA === null
-            ? [{ t: 'NOT EVALUATED — INTERRUPTING RATING REQUIRED',
-                 sz: F.tiny, fill: SEC_AMBER, bold: true } as Line] : []),
-          ...(agg.productId ? [] : [{ t: 'NOT EVALUATED — EQUIPMENT SELECTION REQUIRED',
-                                      sz: F.tiny, fill: SEC_AMBER, bold: true } as Line]),
-        ];
+        const genLines: Line[] = generationPanelLinesSld(t, agg);
         const gb = drawBox(`aggregation-${agg.id}`, cxGw, stackTop + 54, W_GW + 26, genLines,
           { stroke: '#1B5E20', anchor: 'top', glyph: 'panelboard' });
         aggBoxesInRow.set(agg.id, gb);
@@ -3502,23 +4360,8 @@ export function renderTopologyServiceSection(opts: {
       const essBoxes = new Map<string, ReturnType<typeof drawBox>>();
       inverting.forEach((u, k) => {
         const b = drawBox(`ess-${u.id}`, essRow ? essLeft + k * essStep : cxGw,
-          essRow ? stackTop + 58 : essY, W_ESS, [
-          { t: storageUnitLabelSld(t, u), sz: F.sub, bold: true },
-          { t: `${amps(u.continuousOutputA)} AC · ${u.usableKwh ?? '—'} kWh`, sz: F.tiny },
-          { t: `${amps(u.ocpdA)} OCPD`, sz: F.tiny },
-          ...(u.outputConfigKw ? [{ t: `${u.outputConfigKw} kW CONFIGURED`, sz: F.tiny } as Line] : []),
-          // The DC side of a DC-coupled unit, named on the box the strings land in.
-          // 🚨 EACH CABINET STATES ITS OWN LANDING. "PV DC INPUT — 6 MPPT" on all four was a statement
-          // of capability that read as a statement of design; the landing is per unit and may be none.
-          ...(dcCoupled
-            ? [{ t: !u.pvInputLimits ? 'PV DC INPUT — LIMITS NOT EVALUATED'
-                   : u.pvDcStcKw == null ? `PV DC INPUT (${u.pvInputLimits.mppts} MPPT) — LANDING TO BE ASSIGNED`
-                     : u.pvDcStcKw === 0 ? 'NO PV ON THIS UNIT'
-                       : `PV DC IN — ${u.pvDcStcKw.toFixed(2)} kW STC`,
-                 sz: F.tiny, fill: SEC_DC,
-                 ...(u.pvInputLimits && u.pvDcStcKw != null ? {} : { bold: true }) } as Line]
-            : []),
-        ], { stroke: '#1B5E20', glyph: 'battery-inverter' });
+          essRow ? stackTop + 58 : essY, W_ESS, storageUnitLinesSld(t, u, dcCoupled),
+          { stroke: '#1B5E20', glyph: 'battery-inverter' });
         essBoxes.set(u.id, b);
         // Only a unit the design lands PV on gets a DC conductor drawn to it.
         if (dcCoupled && typeof u.pvDcStcKw === 'number' && u.pvDcStcKw > 0) {
@@ -3560,11 +4403,8 @@ export function renderTopologyServiceSection(opts: {
         const host = u.attachedToUnitId ? essBoxes.get(u.attachedToUnitId) : undefined;
         const anchor = host ?? essBoxes.values().next().value;
         const ey = (anchor ? anchor.bottom : stackTop) + 56 + k * 62;
-        const b = drawBox(`exp-${u.id}`, cxGw, ey, W_EXP, [
-          { t: u.label ?? u.productId, sz: F.sub, bold: true, fill: SEC_DC },
-          { t: `${u.usableKwh ?? '—'} kWh — DC EXPANSION`, sz: F.tiny, fill: SEC_DC },
-          { t: 'NO AC OUTPUT · NO OCPD', sz: F.tiny, fill: SEC_DC, bold: true },
-        ], { stroke: SEC_DC, dash: '6 4' });
+        const b = drawBox(`exp-${u.id}`, cxGw, ey, W_EXP, expansionLinesSld(u),
+          { stroke: SEC_DC, dash: '6 4' });
         if (anchor) {
           p.push(ln(cxGw, anchor.bottom, cxGw, b.top, { sw: SW_MED, stroke: SEC_DC, dash: '6 4' }));
           // The label goes LEFT, away from the service chain's column — the same class of defect
@@ -3602,22 +4442,7 @@ export function renderTopologyServiceSection(opts: {
   // EXISTING 400 A SERVICE EQUIPMENT — CONFIGURATION TO VERIFY until exact equipment data is
   // supplied. Do not automatically add replacement 400 A service distribution equipment." A drawing
   // that shows it as new service distribution tells an inspector SolarPro is replacing it.
-  const ex = t.service.existingEquipment ?? null;
-  const distLines: Line[] = [
-    { t: `${ex ? 'EXISTING ' : ''}${serviceRatingLabelSld(t)} SERVICE `
-        + `${ex ? 'EQUIPMENT' : 'DISTRIBUTION'}`, sz: F.hdr, bold: true },
-    { t: `${t.service.voltage} V ${t.service.phase === 'split-240' ? '1Ø 3W' : t.service.phase}`, sz: F.sub },
-    { t: `${t.branches.length} SERVICE BRANCH${t.branches.length === 1 ? '' : 'ES'}`, sz: F.tiny },
-  ];
-  if (ex) {
-    const name = [ex.manufacturer, ex.catalogNumber].filter(Boolean).join(' ');
-    if (name) distLines.push({ t: name.toUpperCase(), sz: F.tiny });
-    if (ex.mainArrangement) distLines.push({ t: ex.mainArrangement.toUpperCase(), sz: F.tiny });
-    if (!ex.verified || !ex.catalogNumber || !ex.mainArrangement || ex.sccrA === null) {
-      distLines.push({ t: 'CONFIGURATION TO VERIFY', sz: F.tiny, fill: SEC_AMBER, bold: true });
-    }
-    distLines.push({ t: 'EXISTING — NOT IN SCOPE OF SUPPLY', sz: F.tiny });
-  }
+  const distLines: Line[] = serviceDistributionLinesSld(t);
   const dist = drawBox('service-distribution', cxDist, opts.busY, W_DIST, distLines);
   highest = Math.min(highest, dist.top);
 
@@ -3729,12 +4554,7 @@ export function renderTopologyServiceSection(opts: {
       // MEASURED: "UTILITY ISOLATION" is 80.9 uu and `wrapToWidth` returned it whole even at 69.9,
       // so the tag was dropped on the lower branch — one of two identical switches lettered and the
       // other bare. Pre-split into words that each fit the narrowest corridor this layout produces.
-      const tags = [
-        'UTILITY', 'ISOLATION',
-        amps(dev.ratedAmps),
-        ...(dev.visibleOpen ? ['LOCK/VIS OPEN'] : []),
-        ...(dev.sccrA === null ? ['SCCR NOT EVAL'] : []),
-      ];
+      const tags = inlineDeviceTagsSld(dev);
       // 🚨 WRAPPED AND MEASURED IN THE SAME WEIGHT AS IT IS DRAWN. `wrapToWidth` measures regular
       // type; drawn BOLD the same words are wider, so lines that "fitted" overflowed and the tag was
       // dropped — one of Ray's two identical switches ended up lettered and the other bare. The tag
@@ -3804,11 +4624,8 @@ export function renderTopologyServiceSection(opts: {
       const exps = t.storage.filter(u => u.role === 'energy-expansion' && u.attachedToUnitId === s.id);
       let top = sourceBoxes[k].bottom + 34;
       for (const u of exps) {
-        const b = drawBox(`exp-${u.id}`, sourceBoxes[k].cx, top, W_EXP, [
-          { t: u.label ?? u.productId, sz: F.sub, bold: true, fill: SEC_DC },
-          { t: `${u.usableKwh ?? '—'} kWh — DC EXPANSION`, sz: F.tiny, fill: SEC_DC },
-          { t: 'NO AC OUTPUT · NO OCPD', sz: F.tiny, fill: SEC_DC, bold: true },
-        ], { stroke: SEC_DC, dash: '6 4', anchor: 'top' });
+        const b = drawBox(`exp-${u.id}`, sourceBoxes[k].cx, top, W_EXP, expansionLinesSld(u),
+          { stroke: SEC_DC, dash: '6 4', anchor: 'top' });
         p.push(ln(b.cx, sourceBoxes[k].bottom, b.cx, b.top,
           { sw: SW_MED, stroke: SEC_DC, dash: '6 4' }));
         top = b.bottom + 34;
@@ -3976,14 +4793,7 @@ export function renderTopologyServiceSection(opts: {
     ...t.devices.filter(d => d.roles.includes('der-isolation-disconnect') && !onDerPath.has(d.id)),
   ];
   for (const d of chainDevices) {
-    const lines: Line[] = [
-      { t: d.label.toUpperCase(), sz: F.sub, bold: true },
-      { t: amps(d.ratedAmps), sz: F.tiny },
-    ];
-    if (d.sccrA === null) {
-      lines.push({ t: 'NOT EVALUATED — INTERRUPTING RATING REQUIRED', sz: F.tiny, fill: SEC_AMBER, bold: true });
-    } else lines.push({ t: `${d.sccrA} A SCCR`, sz: F.tiny });
-    if (d.visibleOpen) lines.push({ t: 'LOCKABLE · VISIBLE OPEN', sz: F.tiny });
+    const lines: Line[] = chainDeviceLinesSld(d);
     const b = drawBox(`device-${d.id}`, cxDist, chainY, W_DEV, lines, { anchor: 'top' });
     p.push(ln(lastX, lastY, cxDist, b.top, { sw: SW_MED }));
     // 🚨 THE CANONICAL N-G BOND, WHERE THE TOPOLOGY PUTS IT — once.
@@ -4047,17 +4857,7 @@ export function renderTopologyServiceSection(opts: {
   }
 
   // ── WHAT THIS SHEET DOES NOT REPRESENT, SAID OUT LOUD ─────────────────────
-  if (opts.hasGenerator) {
-    notes.push('GENERATOR / TRANSFER EQUIPMENT IS NOT REPRESENTED IN THE SERVICE TOPOLOGY. It is '
-      + 'declared on this project but the service graph has no node for it, so it is not drawn '
-      + 'rather than drawn in a position nothing established.');
-  }
-  for (const c of ev.checks.filter(c => c.conclusion === 'NOT_EVALUATED')) {
-    notes.push(`NOT EVALUATED — ${c.title}: ${c.detail}`);
-  }
-  for (const c of ev.checks.filter(c => c.conclusion === 'FAIL')) {
-    notes.push(`FAIL — ${c.title}: ${c.detail}`);
-  }
+  notes.push(...serviceCheckNotesSld(ev, opts.hasGenerator));
 
   // ── THE UNRESOLVED AUTHORITIES, ON THE DRAWING ────────────────────────────
   //
@@ -4066,66 +4866,9 @@ export function renderTopologyServiceSection(opts: {
   // would have been, because that is what a stamping engineer needs. So this lists what is
   // required, in one line each, and says nothing about whether the design may be released.
   {
-    const lines: string[] = [];
-    // 🚨 THE NAME OF THE THING, NOT ITS KEY IN THE CODE. This block printed
-    // "REQUIRES service.existingEquipment.catalogNumber, service.existingEquipment.mainArrangement"
-    // — a list of TypeScript field paths, on a permit-grade sheet, to be read by an inspector. It is
-    // the same defect as `TO DEVICE-1` and "backs msp-1", in the one place nobody had looked.
-    // `requirementLabel` is the canonical token→words function the needs-input screen already uses,
-    // so the sheet and the screen ask for the same thing in the same words.
-    const words = (tokens: readonly string[]) =>
-      tokens.map(tk => labelForToken(tk, t as ServiceTopologyForSld)).join('; ') || 'input';
-    // 🚨 AND THE OPTIONAL CALCULATION IS ONE LINE, NOT SIX. Six checks depend on the dwelling load
-    // (the service demand, each branch, each domain, and the calculation itself), so the sheet
-    // printed "REQUIRES loads.model" six times — the very "five requests for one house" shape Ray
-    // rejected on the screen, leaking onto the drawing.
-    const optionalChecks = ev.checks.filter(c => c.conclusion === 'NOT_EVALUATED' && isOptionalCheck(c));
-    for (const c of ev.checks) {
-      if (c.conclusion === 'FAIL') lines.push(`FAIL — ${c.title}`);
-      else if (c.conclusion === 'NOT_EVALUATED' && !isOptionalCheck(c)) {
-        lines.push(`${c.title} — REQUIRES ${words(c.requires ?? [])}`);
-      }
-    }
-    if (optionalChecks.length > 0) {
-      const tokens = [...new Set(optionalChecks.flatMap(c => c.requires ?? []))];
-      lines.push(`OPTIONAL, NOT PROVIDED — ${words(tokens)}. `
-        + `${optionalChecks.length} check${optionalChecks.length === 1 ? '' : 's'} `
-        + 'not evaluated for want of it; the rest of this design does not depend on it.');
-    }
-    if (opts.hasGenerator) lines.push('GENERATOR / TRANSFER EQUIPMENT NOT REPRESENTED IN THE SERVICE GRAPH');
-    if (lines.length) {
-      const blockX = opts.notes.x;
-      const blockW = Math.max(200, opts.notes.w);
-      let y = opts.notes.y;
-      const head = 'SERVICE ENGINEERING — INPUT REQUIRED';
-      p.push(txt(blockX, +y.toFixed(2), head, { sz: F.sub, bold: true, fill: SEC_AMBER }));
-      boxes.push({ id: 'service-notes-head', x: blockX, y: y - capUu(F.sub),
-                   w: textWidthUu(head, F.sub, true), h: LBL_PITCH, kind: 'label' });
-      y += LBL_PITCH + 2;
-      let drawn = 0;
-      for (const l of lines) {
-        // Prose, wrapped at spaces to the block's real width — see `wrapWords`.
-        const wrapped = wrapWords(`· ${l}`, blockW, F.tiny);
-        if (y + wrapped.length * LBL_PITCH > opts.notes.maxY - LBL_PITCH) break;
-        for (const piece of wrapped) {
-          p.push(txt(blockX, +y.toFixed(2), piece, { sz: F.tiny, fill: SEC_AMBER }));
-          boxes.push({ id: `service-note-${drawn}-${piece.slice(0, 8)}`, x: blockX,
-                       y: y - capUu(F.tiny), w: textWidthUu(piece, F.tiny), h: LBL_PITCH,
-                       kind: 'label' });
-          y += LBL_PITCH;
-        }
-        drawn++;
-      }
-      // 🚨 NO SILENT TRUNCATION. What did not fit is counted and named as being elsewhere.
-      if (drawn < lines.length) {
-        const more = `· + ${lines.length - drawn} further requirement(s) — see the SERVICE EQUIPMENT SCHEDULE`;
-        p.push(txt(blockX, +y.toFixed(2), more, { sz: F.tiny, bold: true, fill: SEC_AMBER }));
-        boxes.push({ id: 'service-notes-more', x: blockX, y: y - capUu(F.tiny),
-                     w: textWidthUu(more, F.tiny, true), h: LBL_PITCH, kind: 'label' });
-        y += LBL_PITCH;
-      }
-      lowest = Math.max(lowest, y);
-    }
+    const lines = serviceRequirementLinesSld(t, ev, opts.hasGenerator);
+    const y = drawServiceRequirementBlock(p, boxes, lines, opts.notes);
+    if (y !== null) lowest = Math.max(lowest, y);
   }
 
   return {
@@ -4137,16 +4880,8 @@ export function renderTopologyServiceSection(opts: {
     // Left of everything this section draws: the panelboard column starts at `startX`, so a trunk
     // dropped here crosses no box and no feeder callout on its way down the sheet.
     dcBusX: opts.startX - 22,
-    dcLandingUnassigned: t.solarCoupling === 'dc-coupled-storage'
-      && t.storage.some(u => u.role === 'inverter-unit')
-      && dcEntries.length === 0
-      && !t.storage.some(u => u.role === 'inverter-unit' && u.pvDcStcKw === 0
-        && t.storage.filter(x => x.role === 'inverter-unit').every(x => typeof x.pvDcStcKw === 'number')),
-    dcStorageLabel: (() => {
-      const names = [...new Set(t.storage.filter(u => u.role === 'inverter-unit')
-        .map(u => (u.label ?? u.productId).toUpperCase()))];
-      return names.length === 1 ? names[0] : 'BATTERY';
-    })(),
+    dcLandingUnassigned: dcLandingUnassignedSld(t, dcEntries.length),
+    dcStorageLabel: dcStorageLabelSld(t),
   };
 }
 
@@ -4455,6 +5190,10 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   // The lowest ink of the equipment drawn under the main chain (a backup
   // sub-panel, a generator) — the schematic's fit box must reach it.
   let _auxBottom = -Infinity;
+
+  // Where the PV array + junction box group starts on the sheet: the compact DC-coupled layout moves
+  // that group, as one, above the systems it feeds (see the service section below).
+  const _pvBlockFrom = parts.length;
 
   // ── NODE 1: PV ARRAY (or SOLAR FENCE for a SolFence vertical array) ─────────
   const isFence = input.systemType === 'fence';
@@ -5376,6 +6115,12 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   // ═══════════════════════════════════════════════════════════════════════
   let _svcSection: ServiceSectionResult | null = null;
   const _dcCoupled = _svcTopology?.solarCoupling === 'dc-coupled-storage';
+  // 🚨 THE COMPACT DC-COUPLED ARRANGEMENT — PV on top, the systems side by side, converging on the
+  // service — for the graph shapes `compactDcServiceLayoutApplies` admits. Everything it changes on
+  // this sheet is behind this flag; with it false every line below does what it did before.
+  const _compactDc = !!_svcTopology && compactDcServiceLayoutApplies(_svcTopology);
+  /** Where the J-box's ground rail goes once the PV group has moved (compact layout only). */
+  let _compactGnd: { floor: number; labelRight: number } | null = null;
   if (_svcTopology) {
     parts.length = _svcSpanFrom;          // the single-service tail comes off the sheet
     _gndNodes.length = _svcGndFrom;       // and so do the ground drops it registered
@@ -5390,6 +6135,35 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     // NARROW layout, two systems stacked, and the second one 200 uu off the bottom. It starts where
     // the drawing actually ends: just past the junction box.
     const _svcStartX = _dcCoupled ? Math.min(xMSP - 79, _jbOutPt.x + 190) : xMSP - 79;
+    // ── THE PV GROUP, MEASURED WHERE IT WAS DRAWN (compact layout only) ─────────
+    //
+    // The array, its labels, the junction box, its callouts, the open-air run between them — and the
+    // J-box's ground drop, its ground symbol and the rail's name, which move with it. Measured from
+    // the same constants that placed them, so the reservation the compact layout makes for the group
+    // is the group.
+    let _pvGroup: { left: number; top: number; gndFloor: number } | null = null;
+    let _compactInput: CompactDcLayoutInput | undefined;
+    if (_compactDc) {
+      const left = Math.floor(xPV - W_PV / 2 - 4);
+      const top = Math.floor(BUS_Y - pvH / 2 - 18 - capUu(F.hdr) - 2);
+      const right = jbCX + jbW / 2 + 12 + 10 + 3;           // the J-box's callout ring
+      const labelBottom = pvL0 + ((input.optimizerQty ?? 0) > 0 ? 4 : 2) * LBL_PITCH + descUu(F.tiny);
+      // The rail sits under the J-box's string count and its name under the array's nameplate.
+      const gndFloor = Math.max(jbCY + jbH / 2 + 22, labelBottom + 3 - (29 - capUu(F.tiny)));
+      const meterLines = input.meteringDrawing?.consumption
+        ? 1 + (input.meteringDrawing.lead && !_drawnLeads ? 1 : 0) : 0;
+      const bottom = Math.max(labelBottom,
+        gndFloor + 29 + descUu(F.tiny) + (meterLines ? 12.5 + 11 * (meterLines - 1) : 0)) + 3;
+      _pvGroup = { left, top, gndFloor };
+      _compactInput = {
+        region: { x0: SCH_X + 16, x1: Math.min(TB_X - 30, SCH_X + schW - 16),
+                  y0: SCH_Y + 22, y1: CALC_Y - 20 },
+        pvBlock: { w: right - left, h: bottom - top, outDx: _jbOutPt.x - left, outDy: _jbOutPt.y - top },
+        totalStrings: input.totalStrings || 0,
+        dcWireGauge: input.dcWireGauge ?? '#10',
+        dcConduitType: input.dcConduitType ?? 'EMT',
+      };
+    }
     _svcSection = renderTopologyServiceSection({
       topology: _svcTopology,
       evaluation: _svcEval ?? undefined,
@@ -5412,14 +6186,29 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
                  ? Math.max(320, _svcStartX - 22 - (SCH_X + 30) - 40)
                  : Math.max(320, xDisco - SCH_X - 60),
                maxY: CALC_Y - 40 },
+      compactDc: _compactInput,
     });
+    // ── …AND MOVED, AS ONE, TO WHERE THE COMPACT LAYOUT PUT IT ──────────────
+    if (_compactDc && _pvGroup && _svcSection.pvBlockAt) {
+      const dx = _svcSection.pvBlockAt.x - _pvGroup.left;
+      const dy = _svcSection.pvBlockAt.y - _pvGroup.top;
+      // Only the PV group is on the sheet past `_pvBlockFrom` at this point: the AC chain and the
+      // single-service tail both came off above.
+      parts.splice(_pvBlockFrom, 0, `<g transform="translate(${dx},${dy})">`);
+      parts.push('</g>');
+      for (const nd of _gndNodes) {
+        nd.x += dx; nd.top += dy;
+        if (nd.skip) nd.skip = { top: nd.skip.top + dy, bot: nd.skip.bot + dy };
+      }
+      _compactGnd = { floor: _pvGroup.gndFloor + dy, labelRight: _svcSection.dcBusX - 8 };
+    }
     // ── THE PV, ON DC, INTO THE BATTERIES' OWN INPUTS ─────────────────────
     //
     // 🚨 THE STRINGS GO TO THE POWERWALLS. One trunk leaves the roof junction box, drops in the
     // clear corridor left of the service section, and lands on each unit's PV input. No combiner,
     // no inverter, no PV AC disconnect and no AC feeder onto the service — because on this design
     // none of them exist.
-    if (_dcCoupled && _svcSection.dcEntries.length > 0) {
+    if (!_compactDc && _dcCoupled && _svcSection.dcEntries.length > 0) {
       const busX = _svcSection.dcBusX;
       // 🚨 IN AT THE BOTTOM OF EACH CABINET, AND ONE COLLECTOR PER ROW.
       //
@@ -5454,7 +6243,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       parts.push(tspan((_jbOutPt.x + busX) / 2,
         +(_jbOutPt.y - 10 - 2 * LBL_PITCH).toFixed(2), _dcLines,
         { sz: F.seg, anc: 'middle', lh: LBL_PITCH, fill: SEC_DC }));
-    } else if (_dcCoupled && _svcSection.dcLandingUnassigned) {
+    } else if (!_compactDc && _dcCoupled && _svcSection.dcLandingUnassigned) {
       // 🚨 THE LANDING IS NOT DECIDED, SO IT IS NOT DRAWN. The trunk leaves the junction box and ends
       // at a tag that says what is owed — never a fan-out to every cabinet, which would assert that
       // every unit takes PV. The units themselves each say "LANDING TO BE ASSIGNED".
@@ -5504,8 +6293,12 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     // chain in front of it is, and it is 250 uu narrower on a string sheet with an external DC
     // disconnect than on a micro one. A test that hand-feeds a roomy span proves nothing about the
     // sheet that is actually drawn.
-    console.log(`[SLD SERVICE SECTION BUDGET] startX=${_svcStartX.toFixed(0)} `
-      + `endX=${(TB_X - 30).toFixed(0)} available=${(TB_X - 30 - _svcStartX).toFixed(0)} `
+    // The compact DC layout is given a region, not a span after the PV chain: that is what it logs.
+    const _budgetX0 = _compactInput ? _compactInput.region.x0 : _svcStartX;
+    const _budgetX1 = _compactInput ? _compactInput.region.x1 : TB_X - 30;
+    console.log(`[SLD SERVICE SECTION BUDGET] ${_compactInput ? 'layout=compact-dc ' : ''}`
+      + `startX=${_budgetX0.toFixed(0)} `
+      + `endX=${_budgetX1.toFixed(0)} available=${(_budgetX1 - _budgetX0).toFixed(0)} `
       + `defects=${_svcDefects.length}`);
     for (const d of _svcDefects) console.log(`[SLD SERVICE SECTION LAYOUT DEFECT] ${d}`);
 
@@ -5531,7 +6324,8 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   const GND_SW   = 1.0;        // thin stroke — subordinate
   const gndPts = _gndNodes.map(n => n.x);
   // The rail runs under the deepest nameplate block, never through one.
-  const gndY = Math.max(GND_Y, ..._gndNodes.map(n => (n.skip ? n.skip.bot + 9 : -Infinity)));
+  const gndY = Math.max(_compactGnd ? _compactGnd.floor : GND_Y,
+    ..._gndNodes.map(n => (n.skip ? n.skip.bot + 9 : -Infinity)));
   const gx1 = gndPts[0], gx2 = gndPts[gndPts.length-1];
   parts.push(ln(gx1, gndY, gx2, gndY, {stroke:GND_CLR, sw:GND_SW}));
   for (const n of _gndNodes) {
@@ -5546,9 +6340,13 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   // The rail's name, under the rail and its ground symbols — on the rail, it
   // was crossed by two of its own drops.
   const gndNoteY = gndY + 29;
-  parts.push(txt((gx1+gx2)/2, gndNoteY,
-    'EQUIPMENT GROUNDING CONDUCTORS — NEC 250.122 / NEC 690.43',
-    {sz:F.tiny, anc:'middle', fill:GRN}));
+  // On the compact DC sheet the DC trunk drops just right of the junction box, so the name stops
+  // short of it instead of being centred across it.
+  const _railName = 'EQUIPMENT GROUNDING CONDUCTORS — NEC 250.122 / NEC 690.43';
+  const _railCx = _compactGnd
+    ? Math.min((gx1+gx2)/2, _compactGnd.labelRight - textWidthUu(_railName, F.tiny)/2)
+    : (gx1+gx2)/2;
+  parts.push(txt(_railCx, gndNoteY, _railName, {sz:F.tiny, anc:'middle', fill:GRN}));
 
   // ── THE GATEWAY AND ITS CT LEADS ──────────────────────────────────────────
   // Ray, 2026-09-26: "I would like to see CTs drawn from the Envoy to the MSP or
@@ -5656,7 +6454,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   // prints (at GND_Y+24 the first sat 1.2 uu under the ground symbols' bars).
   let _notesBottom = gndNoteY + descUu(F.tiny);
   {
-    const _mx = (gx1 + gx2) / 2;
+    const _mx = _railCx;
     let _ny = gndNoteY + 12.5;
     if (input.meteringDrawing?.consumption) {
       parts.push(txt(_mx, _ny, consumptionCtNoteText(input.meteringDrawing.consumption),
@@ -5683,6 +6481,8 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   // Wrap everything drawn since the schematic border in a scale group computed
   // to FIT the real content bounds (chain right edge = xUtil; bottom = ground
   // rail) into the box. Strokes/fonts scale with it — that is the point.
+  /** The fit actually applied, as printed in the transform — read back by the compact layout's audit. */
+  const _fit = { k: 1, tx: 0, ty: 0 };
   {
     const _sx0 = SCH_X + 16;                 // content left (a hair before PV)
     // content right (utility + label margin, or the grid's name beside it)
@@ -5699,14 +6499,19 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       (SCH_H - 36) / Math.max(1, _sy1 - _sy0),
       1.55,                                  // sanity cap — beyond this it reads cartoonish
     ));
-    if (_k > 1.02) {
+    // The compact DC drawing is CENTRED even when it is too tall to enlarge: left-anchored at 1:1 it
+    // printed the whole spare width as one empty band down the right of the sheet.
+    const _centreOnly = _compactDc && _k <= 1.02 && _sx1 - _sx0 < schW - 32;
+    if (_k > 1.02 || _centreOnly) {
       const _tx = SCH_X + (schW - _k * (_sx1 - _sx0)) / 2 - _k * _sx0;
       // Center VERTICALLY too — top-anchoring left the whole spare height as a
       // dead band under the ground rail.
-      const _ty = SCH_Y + (SCH_H - _k * (_sy1 - _sy0)) / 2 - _k * _sy0;
+      const _ty = _centreOnly && _sy1 - _sy0 > SCH_H - 36 ? 0
+        : SCH_Y + (SCH_H - _k * (_sy1 - _sy0)) / 2 - _k * _sy0;
       parts.splice(_schScaleStart, 0,
         `<g transform="translate(${_tx.toFixed(1)},${_ty.toFixed(1)}) scale(${_k.toFixed(3)})">`);
       parts.push('</g>');
+      _fit.k = +_k.toFixed(3); _fit.tx = +_tx.toFixed(1); _fit.ty = +_ty.toFixed(1);
     }
   }
 
@@ -5764,6 +6569,32 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     if (!item.cont) parts.push(ln(legX+4, ly, legX+38, ly, {stroke:item.stroke, sw:SW_MED, dash:item.dash||undefined}));
     parts.push(txt(legX+LEG_TEXT_X, ly+3, item.text, {sz:F.tiny}));
   });
+
+  // 🚨 THE COMPACT LAYOUT IS AUDITED WHERE IT PRINTS, NOT ONLY WHERE IT WAS LAID OUT. The legend and
+  // the rapid-shutdown note are the main renderer's, drawn OUTSIDE the fit, and the fit scales and
+  // centres the section — so a box that cleared them in layout units can land on them on paper. The
+  // service-notes block already ran through this legend once. Each section box is carried through the
+  // fit and checked against both, and against the schematic border; a hit is reported the way every
+  // other layout defect on this sheet is.
+  if (_compactDc && _svcSection) {
+    const keepOut = [
+      { id: 'LEGEND', x: legX, y: legY, w: LEG_W, h: legH },
+      ...(input.rapidShutdownIntegrated
+        ? [{ id: 'RAPID SHUTDOWN NOTE', x: SCH_X + 5, y: SCH_Y + SCH_H - 32, w: 240, h: 16 }] : []),
+    ];
+    for (const b of _svcSection.boxes) {
+      const bx = _fit.tx + _fit.k * b.x, by = _fit.ty + _fit.k * b.y;
+      const bw = _fit.k * b.w, bh = _fit.k * b.h;
+      for (const o of keepOut) {
+        if (bx < o.x + o.w && o.x < bx + bw && by < o.y + o.h && o.y < by + bh) {
+          console.log(`[SLD SERVICE SECTION LAYOUT DEFECT] ${b.id} overlaps the ${o.id} once the schematic is fitted`);
+        }
+      }
+      if (bx < SCH_X || bx + bw > SCH_X + schW || by < SCH_Y || by + bh > SCH_Y + SCH_H) {
+        console.log(`[SLD SERVICE SECTION LAYOUT DEFECT] ${b.id} leaves the schematic border once fitted`);
+      }
+    }
+  }
 
   // ── CALCULATION PANELS ────────────────────────────────────────────────────
   // E-1 / E-1.1 split: E-1 is the one-line TOPOLOGY; the panels render on E-1.1.
