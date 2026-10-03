@@ -10908,13 +10908,34 @@ function EngineeringPageInner() {
             // NEVER mix recommendation strings in one place and current config in another.
             // 🚨 A RETIRED FLEET HAS NO STRINGS, BUT THE ARRAY DOES. On a DC-coupled job the engineered
             // strings are the engine's (sized against the storage's PV inputs), not the empty fleet's.
-            const _branchCount = cs.isMicro
-              ? cs.acBranchCount
-              : displayConfig.totalStrings > 0
-                ? displayConfig.totalStrings
-                : (cs.strings?.length ?? config.inverters.reduce((s, i) => s + i.strings.length, 0));
             // No standalone PV inverter ⇒ there is no PV AC rating and no DC/AC ratio to state.
             const _noPvInverter = electrical?.solarCoupling === 'dc-coupled-storage';
+            const _branchCount = cs.isMicro
+              ? cs.acBranchCount
+              // On a DC-coupled job the fleet's stored layout is not the design: the strings are the
+              // engine's, derived against the storage's own PV inputs (the same ones the sheet draws).
+              : _noPvInverter
+                ? (cs.strings?.length ?? 0)
+                : displayConfig.totalStrings > 0
+                  ? displayConfig.totalStrings
+                  : (cs.strings?.length ?? config.inverters.reduce((s, i) => s + i.strings.length, 0));
+            // 🚨 THE FLOW BAR STATES THE ENGINEERED PROJECT. Ray (V3): "The top of System Config should
+            // immediately make this project understandable." It used to read only the page's legacy
+            // config — the first fleet entry (a retired placeholder on a DC-coupled job), a 200 A /
+            // Square D default service, config.batteryCount — and drew "Inverter · String · 2 strings →
+            // AC Run → Disconnect → Main Panel 200A Square D" over four Powerwalls on a 400 A service.
+            const _fbStorage = interviewEquipment.storage;
+            const _fbGateway = interviewEquipment.gateway;
+            const _fbSvc = svcTopology && svcTopology.service.ratedAmps ? svcTopology : null;
+            const _fbBuses = _fbSvc ? [...new Set(_fbSvc.panels.map(pl => pl.busbarRatingA).filter((x): x is number => typeof x === 'number'))] : [];
+            const _fbServiceLine = _fbSvc
+              ? `${_fbSvc.service.ratedAmps} A` + (_fbSvc.panels.length > 1
+                  ? ` · ${_fbSvc.panels.length} × ${_fbBuses.length === 1 ? `${_fbBuses[0]} A` : ''} MSP`
+                  : _fbBuses.length === 1 ? ` · ${_fbBuses[0]} A bus` : '')
+              : null;
+            const _fbServiceMfr = _fbSvc
+              ? (_fbSvc.panels.find(pl => pl.manufacturer)?.manufacturer ?? _fbSvc.service.existingEquipment?.manufacturer ?? null)
+              : null;
             const _genData    = config.generatorId ? getGeneratorById(config.generatorId) : null;
             const _atsData    = config.atsId ? getATSById(config.atsId) : null;
             const _batData    = config.batteryId ? getBatteryById(config.batteryId) : null;
@@ -10993,8 +11014,8 @@ function EngineeringPageInner() {
                       <div className="text-xs text-slate-500 mt-0.5">kW DC</div>
                     </div>
                     <div className="rounded-xl bg-slate-900/60 border border-slate-700/50 px-4 py-3 text-center">
-                      <div className="text-2xl font-black text-blue-400 tabular-nums">{hasInverterAcKw ? totalInverterKw : '—'}</div>
-                      <div className="text-xs text-slate-500 mt-0.5">kW AC</div>
+                      <div className="text-2xl font-black text-blue-400 tabular-nums">{_noPvInverter ? 'N/A' : hasInverterAcKw ? totalInverterKw : '—'}</div>
+                      <div className="text-xs text-slate-500 mt-0.5">{_noPvInverter ? 'PV AC · DC coupled' : 'kW AC'}</div>
                     </div>
                     <div className="rounded-xl bg-slate-900/60 border border-slate-700/50 px-4 py-3 text-center">
                       <div className="text-2xl font-black text-emerald-400 tabular-nums">{totalPanels}</div>
@@ -11050,7 +11071,19 @@ function EngineeringPageInner() {
                         <div className="text-[9px] text-slate-600 mt-0.5">DC</div>
                       </div>
 
-                      {/* Node: Inverter */}
+                      {/* Node: Inverter — or, with no PV inverter, the storage the strings land on */}
+                      {_noPvInverter ? (
+                        <div data-testid="flow-node-storage"
+                          className="flex flex-col items-center gap-1.5 px-3 py-2.5 rounded-xl border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 min-w-[90px]"
+                          title="No PV inverter — the strings land on the batteries' own PV DC inputs">
+                          <Battery size={18} className="text-emerald-400" />
+                          <div className="text-xs font-bold text-white truncate max-w-[120px] text-center">
+                            {_fbStorage ? `${_fbStorage.count} × ${_fbStorage.label ?? 'battery'}` : 'Storage'}
+                          </div>
+                          <div className="text-[10px] text-slate-400">PV DC inputs · no PV inverter</div>
+                          <div className="text-[9px] font-bold uppercase tracking-wide text-emerald-400">{_branchCount} strings</div>
+                        </div>
+                      ) : (
                       <div className={`flex flex-col items-center gap-1.5 px-3 py-2.5 rounded-xl border cursor-pointer hover:brightness-110 transition-all min-w-[90px] ${
                         subSystemCounts.isHybrid ? 'border-amber-500/40 bg-amber-500/10 text-amber-300' :
                         _inv0?.type === 'micro' ? 'border-purple-500/40 bg-purple-500/10 text-purple-300' :
@@ -11075,6 +11108,7 @@ function EngineeringPageInner() {
                           {subSystemCounts.isHybrid ? (_acKwNum > 0 ? `${_acKwNum} kW AC` : 'multi-inverter') : `${_branchCount} ${cs.isMicro ? 'branches' : 'strings'}`}
                         </div>
                       </div>
+                      )}
 
                       {/* Arrow */}
                       <div className="flex flex-col items-center px-1">
@@ -11085,6 +11119,20 @@ function EngineeringPageInner() {
                         <div className="text-[9px] text-slate-600 mt-0.5">AC</div>
                       </div>
 
+                      {_noPvInverter ? (
+                        <div data-testid="flow-node-gateways"
+                          className="flex flex-col items-center gap-1.5 px-3 py-2.5 rounded-xl border border-sky-500/40 bg-sky-500/10 min-w-[90px]"
+                          title="Backup controllers">
+                          <Power size={18} className="text-sky-400" />
+                          <div className="text-xs font-bold text-white truncate max-w-[120px] text-center">
+                            {_fbGateway && _fbGateway.count > 0 ? `${_fbGateway.count} × ${_fbGateway.label ?? 'gateway'}` : 'Backup controller'}
+                          </div>
+                          <div className="text-[10px] text-slate-400">backup &amp; isolation</div>
+                          <div className="text-[9px] font-bold uppercase tracking-wide text-sky-400">
+                            {_fbGateway && _fbGateway.count > 0 ? 'Selected' : 'Not chosen'}
+                          </div>
+                        </div>
+                      ) : (<>
                       {/* Node: AC Run */}
                       <div className={`flex flex-col items-center gap-1.5 px-3 py-2.5 rounded-xl border cursor-pointer hover:brightness-110 transition-all min-w-[90px] ${statusGlow(_elecStatus)}`}
                         title="AC Wiring Run — click to expand Electrical Service">
@@ -11133,14 +11181,19 @@ function EngineeringPageInner() {
                         <div className="text-[9px] text-slate-600 mt-0.5">AC</div>
                       </div>
 
-                      {/* Node: Main Panel */}
+                      </>)}
+
+                      {/* Node: Main Panel — the recorded service when there is one */}
                       <div className="flex flex-col items-center gap-1.5 px-3 py-2.5 rounded-xl border border-blue-500/40 bg-blue-500/10 cursor-pointer hover:brightness-110 transition-all min-w-[90px]"
                         title="Main Service Panel — click to expand Electrical Service">
                         <Home size={18} className="text-blue-400" />
-                        <div className="text-xs font-bold text-white">Main Panel</div>
-                        <div className="text-[10px] text-slate-400">{config.mainPanelAmps}A · {config.mainPanelBrand || '—'}</div>
+                        <div className="text-xs font-bold text-white">{_fbSvc ? 'Service' : 'Main Panel'}</div>
+                        <div className="text-[10px] text-slate-400" data-testid="flow-node-service">
+                          {_fbServiceLine ?? `${config.mainPanelAmps}A · ${config.mainPanelBrand || '—'}`}
+                        </div>
                         <div className="text-[9px] font-bold uppercase tracking-wide text-blue-400">
                           {(() => {
+                            if (_fbSvc) return _fbServiceMfr ?? 'Service';
                             const backfeed = cs.backfeedBreakerAmps || 0;
                             const busRating = config.mainPanelAmps * 1.2;
                             const load = backfeed;
@@ -11152,7 +11205,7 @@ function EngineeringPageInner() {
                       </div>
 
                       {/* Battery (if enabled) */}
-                      {config.batteryCount > 0 && _batTotalKwh > 0 ? (
+                      {!_noPvInverter && config.batteryCount > 0 && _batTotalKwh > 0 ? (
                         <>
                           <div className="flex flex-col items-center px-1">
                             <div className="flex items-center gap-0.5">
@@ -11207,10 +11260,12 @@ function EngineeringPageInner() {
                         {subSystemCounts.isHybrid ? 'hybrid' : config.systemType}
                       </div>
                     ) : null}
+                    {_noPvInverter ? null : (
                     <div className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border border-slate-700/50 bg-slate-800/60 text-slate-400">
                       <Activity size={11} />
                       DC/AC: {_dcAcRatio}
                     </div>
+                    )}
                     <div className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border border-slate-700/50 bg-slate-800/60 text-slate-400">
                       <GitBranch size={11} />
                       {_branchCount} {cs.isMicro ? 'AC Branches' : 'Strings'}
@@ -12249,8 +12304,10 @@ function EngineeringPageInner() {
                                                  pvInverterState={interviewEquipment.pvInverter.state}
                                                  connectionError={_archResolveError} />
 
-                      {/* Branch Visualization */}
-                      {config.inverters.length > 0 ? (
+                      {/* Branch Visualization — only for strings that land on a chosen inverter. On a
+                          DC-coupled job the strings are the PV STRINGS line above (the engine's, against the
+                          storage's inputs); with no inverter chosen there is nothing for strings to land on. */}
+                      {config.inverters.length > 0 && !pvOnStorageDc && config.inverters.some(i => !!i.inverterId) ? (
                         <div className="mb-4 p-3 rounded-xl bg-slate-900/60 border border-slate-700/40">
                           <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-2">
                             {subSystemCounts.isHybrid ? 'Array Layout — by Sub-System' : cs.isMicro ? 'AC Branch Layout' : 'String Layout'}
@@ -12432,7 +12489,9 @@ function EngineeringPageInner() {
                         </div>
                       ) : null}
 
-                      <div className="space-y-3">
+                      {/* The inverter fleet. On a DC-coupled job its only entry is the retired placeholder —
+                          switching back to an external inverter is the PV connection control above. */}
+                      <div className={`space-y-3 ${pvOnStorageDc ? 'hidden' : ''}`} data-testid="inv-fleet-list">
                         {/* Wave 4B.C — hybrid: cards grouped per sub-system in fixed
                             roof > ground > fence order under a per-sub header (fleet
                             from partitionFleet, equipment from subSystems[key] — never
