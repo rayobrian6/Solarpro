@@ -436,6 +436,10 @@ describe('🚨 MUTATION 13 — the real 400 A job, through every production surf
       moduleCount: 72, totalPanels: 72, systemType: 'roof',
       mainPanelAmps: 200,                       // the stale scalar
       acOCPD: 200, backfeedAmps: 200,
+      // The installer's load-side answer, as the page posts it. Since 1c2fb44 an UNANSWERED
+      // interconnection is UNRESOLVED and sizes no backfeed breaker at all (never a default) — so
+      // without an answer there is no breaker line for this test to read the busbar off.
+      interconnectionMethod: 'LOAD_SIDE',
     });
     const bom = json.bom as { items: Array<{ partNumber: string; description?: string }> };
     // The breaker line states the busbar it was sized against ("bus: 400A"); the warning-LABEL line

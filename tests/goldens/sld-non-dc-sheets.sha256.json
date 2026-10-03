@@ -36,24 +36,24 @@
     "bytes": 55191
   },
   "Tesla 400 A two gateway, coupling unrecorded, expansions": {
-    "sha256": "71d860429b09541f6cbe7d001d1696d35d5e5117d8388d7f4ee44c46f5441bca",
-    "bytes": 88172
+    "sha256": "5437ca79bffff57a47753582be8d91d81d5fefedc1b6b031a37ca97476cf9917",
+    "bytes": 89031
   },
   "normal 200 A residence AC-coupled, 1 PW3": {
-    "sha256": "cb9139a07e8c1d84b2722fb42bc4e5936ba58815cbaf52b000aba2c0cb647ac9",
-    "bytes": 76129
+    "sha256": "83b45f83e56c8d41f3b47c9af44cf7a6993167b37b9787a422b9c98e7f4efead",
+    "bytes": 76961
   },
   "normal 200 A residence AC-coupled, 2 PW3 / string": {
-    "sha256": "bdefdb50f8c9aa1062873a01ef474171278cce38bd634cb8624d5d301fd5e557",
-    "bytes": 84643
+    "sha256": "f08e15ca3bda3f1fa50c42d4a3b9f8db08933d69b3226f6e9a1d2d04f99bddc0",
+    "bytes": 85475
   },
   "DC-coupled graph with NO domain": {
-    "sha256": "ed8d44cb8fa1df48592acb3615a5468a3eb20ad5090617343d5185f6a034018f",
-    "bytes": 59691
+    "sha256": "3968bd37940129b612891aff1ed209f8a8e9d1c717fdd2c28f5759166e609b76",
+    "bytes": 60523
   },
   "Tesla 400 A DC-coupled, ONE common DER aggregation panel (site-wide group)": {
-    "sha256": "cec5716bf680d6f63ca3d46c826af7c56d6ea08fc723ca520eeb8d5b33f9789d",
-    "bytes": 82832
+    "sha256": "0c18d5946af553301b612415b045a1673b8e46cf572204dde3b8eb1469f33578",
+    "bytes": 83664
   },
   "Ray 400 A DC-coupled, generation panels detached from their systems (site-wide group)": {
     "sha256": "5da1430aab9cb482a79b19f62acbdb107bd35a295f76dee64692b43bde83409d",

@@ -268,7 +268,8 @@ describe('an absent interconnection topology is not a supply-side tap', () => {
 
   it('every remaining default is LOAD_SIDE (engine boundary) or null (UNRESOLVED)', () => {
     for (const f of fallbacks) {
-      expect(["'LOAD_SIDE'", 'null'], `unexpected interconnection fallback: ${f}`).toContain(f);
+      // 'UNRESOLVED' is the null of the token vocabulary (1c2fb44): not evaluated, never a tap.
+      expect(["'LOAD_SIDE'", 'null', "'UNRESOLVED'"], `unexpected interconnection fallback: ${f}`).toContain(f);
     }
   });
 
