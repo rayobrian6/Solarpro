@@ -41,7 +41,7 @@ import {
 } from '@/lib/electrical/systemConfigUtilityDisconnects';
 import { allInterviewItems, anchorOf, findInterviewItem } from '@/lib/electrical/systemConfigPlacement';
 import {
-  LOAD_SIDE_REMEDIES, legacyInterconnectionMirror, type LegacyInterconnectionToken,
+  appliedPanelRemedies, legacyInterconnectionMirror, legacyRemedyNote, type LegacyInterconnectionToken,
 } from '@/lib/electrical/systemConfigLegacyInterconnection';
 import {
   ItemEditor, ProvenanceChip, QuestionDialog, type ApplyAnswer, type ItemEditorContext,
@@ -218,7 +218,11 @@ export function SystemArchitectureControls(props: SystemConfigurationControlsPro
   const isoEquipment = findInterviewItem(interview, DER_ISOLATION_ITEM_ID);
 
   const legacy = String(props.legacyInterconnectionMethod ?? '').trim().toUpperCase();
-  const remedy = LOAD_SIDE_REMEDIES[legacy] ?? null;
+  // 🚨 THE GRAPH IS THE REMEDY RECORD; THE SCALAR'S TOKEN IS A NOTE. "Recorded" is said only of a
+  // remedy applied on a panel (`PanelBoard.remedy`); a MAIN_BREAKER_DERATE / PANEL_UPGRADE token with
+  // nothing applied is an earlier note that names no panel and no rating — shown as not applied.
+  const appliedRemedies = appliedPanelRemedies(t);
+  const remedyNote = legacyRemedyNote(props.legacyInterconnectionMethod, t);
   // The graph's own 120% verdicts (per panel, per generation panel), or the legacy engine's.
   const graphBusbarFails = allInterviewItems(interview).some(i => i.state === 'fails'
     && (i.id.startsWith('engineering.domain.busbar-705-12') || i.id.startsWith('engineering.aggregation.busbar')));
@@ -319,9 +323,21 @@ export function SystemArchitectureControls(props: SystemConfigurationControlsPro
             </CardLink>
           </span>
         ) : null}
-        {remedy ? (
+        {appliedRemedies.length > 0 ? (
           <span data-testid="sys-interconnection-remedy" className="basis-full text-[10px] text-slate-400">
-            120% remedy recorded: {remedy}
+            120% remedy applied (proposed work): {appliedRemedies.map(r => `${r.panel.label} — ${r.label}`).join('; ')}
+            {' '}
+            <CardLink itemId="service.rating" testid="sys-interconnection-remedy-link" onGoToCard={props.onGoToCard}>
+              Existing Electrical Service →
+            </CardLink>
+          </span>
+        ) : remedyNote ? (
+          <span data-testid="sys-interconnection-remedy-note" className="basis-full text-[10px] text-amber-300/90">
+            Earlier remedy note: {remedyNote.label} — not applied. Nothing is derated or upgraded until a remedy is
+            applied on a panel.{' '}
+            <CardLink itemId="service.rating" testid="sys-interconnection-remedy-note-link" onGoToCard={props.onGoToCard}>
+              Apply it on Existing Electrical Service →
+            </CardLink>
           </span>
         ) : ic && !ic.value && LEGACY_WORDS[legacy] ? (
           <span data-testid="sys-interconnection-legacy" className="basis-full text-[10px] text-slate-500">

@@ -272,6 +272,21 @@ export async function POST(req: NextRequest) {
             console.warn('[bom/POST] 🚨 INTERCONNECTION ARRANGEMENT NOT RESOLVED on this project —'
               + ' the graph declines to name one, so the legacy scalar is deciding the code article.');
           }
+          // 🚨 A 120% REMEDY TOKEN ON THE SCALAR IS A NOTE, NOT A RECORD. The graph's
+          // `PanelBoard.remedy` is the one record of a derate / panel upgrade (and `bomFromServiceTopology`
+          // lists it); a posted MAIN_BREAKER_DERATE / PANEL_UPGRADE names no panel and no rating, so the
+          // engine reads it as the load-side connection it refines — never as "main OCPD derated".
+          {
+            const { consumerInterconnectionToken } =
+              await import('@/lib/electrical/systemConfigLegacyInterconnection');
+            const _posted = body.interconnectionMethod ?? body.interconnection ?? null;
+            const _read = consumerInterconnectionToken(_posted);
+            if (_posted != null && _read !== _posted) {
+              console.warn('[bom/POST] a 120% remedy token was posted as the interconnection method'
+                + ` (${_posted}) — read as ${_read}; the service graph holds the remedy record.`);
+              body.interconnectionMethod = _read;
+            }
+          }
           // 🚨 A DC-COUPLED OR STORAGE-ONLY PROJECT HAS NO STANDALONE PV INVERTER TO ORDER.
           //
           // The SLD routes assert this as Rule Eleven (`projectCanonicalArchitecture`); the parts

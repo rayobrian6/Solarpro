@@ -440,33 +440,79 @@ describe('existing service equipment — "Field verification N items required [V
 describe('the 120% rule — remedies on a FAIL, as PROPOSED WORK, never as the panel\'s reading', () => {
   const failing = () => buildNormalResidence200A({ storageConnection: 'backed-up-panel-busbar' }).topology;
 
+  /** A remedy option's text without its [Apply] buttons — what the installer reads. */
+  const optionText = (testid: string) => {
+    const el = screen.getByTestId(testid).cloneNode(true) as HTMLElement;
+    el.querySelectorAll('button').forEach(b => b.remove());
+    return el.textContent!.replace(/\s+/g, ' ');
+  };
+
   it('a failing panel says why and lists derate-main / upgrade-bus with their allowances and what each entails', () => {
     mountLiveCard(failing());
     const fail = screen.getByTestId('svc-panel-busbar-fail-msp-1');
     expect(fail.textContent).toContain('48.0 A of backfeed exceeds the 40.0 A allowed');
     expect(fail.textContent).toContain('NEC 705.12(B)');
     expect(fail.textContent).toContain('proposed work, not recorded as this panel\'s rating');
-    const derate = screen.getByTestId('svc-remedy-derate-msp-1').textContent!;
+    expect(fail.textContent).toContain('nothing is applied until you do');
+    const derate = optionText('svc-remedy-derate-msp-1');
     expect(derate).toMatch(/^Derate the main breaker — 175 A allows 65 A · 150 A allows 90 A/);
     expect(derate).toContain('replacement main breaker');
     expect(derate).toContain('load calculation');
-    const bus = screen.getByTestId('svc-remedy-bus-msp-1').textContent!;
+    const bus = optionText('svc-remedy-bus-msp-1');
     expect(bus).toMatch(/^Upgrade the busbar — 225 A allows 70 A · 320 A allows 184 A/);
     expect(bus).toContain('replacement panelboard');
+    // One [Apply] per option, and nothing else in the block that can write.
+    expect([...fail.querySelectorAll('button')].map(b => b.getAttribute('data-testid'))).toEqual([
+      ...[175, 150, 125, 110, 100].map(a => `svc-remedy-apply-derate-msp-1-${a}`),
+      ...[225, 320, 400].map(a => `svc-remedy-apply-bus-msp-1-${a}`),
+    ]);
+    expect(fail.querySelectorAll('select, input')).toHaveLength(0);
   });
 
-  it('🚨 nothing in the FAIL writes: a derate is not a reading — the installed 200 A main stays recorded and the FAIL stays', async () => {
+  it('🚨 nothing is written without the click: reading the remedies writes nothing, and the FAIL stays', async () => {
     const writes = mountLiveCard(failing());
-    const fail = screen.getByTestId('svc-panel-busbar-fail-msp-1');
     // Before: a "Derate main to [175 ▼]" select wrote mainBreakerA = 175 as if it were read off the
     // panel, the FAIL became a PASS and nothing recorded that a breaker had to be bought.
-    expect(fail.querySelectorAll('select, input, button')).toHaveLength(0);
     fireEvent.click(screen.getByTestId('svc-remedy-derate-msp-1'));
     fireEvent.click(screen.getByTestId('svc-remedy-bus-msp-1'));
+    fireEvent.click(screen.getByTestId('svc-panel-busbar-fail-msp-1'));
     await flush();
     expect(writes).toEqual([]);
     expect((screen.getByTestId('svc-panel-main-msp-1') as HTMLSelectElement).value).toBe('200');
     expect(screen.getByTestId('svc-panel-busbar-fail-msp-1')).toBeTruthy();
+    expect(screen.queryByTestId('svc-panel-remedy-applied-msp-1')).toBeNull();
+  });
+
+  it('🚨 [Apply] writes the remedy RECORD through apply — the installed main stays 200 A, and the engine re-checks the panel after the work', async () => {
+    const writes = mountLiveCard(failing());
+    fireEvent.click(screen.getByTestId('svc-remedy-apply-derate-msp-1-150'));
+    await waitFor(() => expect(writes).toHaveLength(1));
+    const p = writes[0].next.panels[0];
+    expect(p.remedy).toEqual({ kind: 'replace-main-breaker', mainBreakerA: 150 });
+    expect([p.mainBreakerA, p.busbarRatingA]).toEqual([200, 200]);
+    expect(writes[0].what).toMatch(/proposed work applied — Replacement main breaker 150 A \(replaces the installed 200 A main\)/);
+    // The reading did not move; the FAIL is gone because the engine checks the panel AFTER the work.
+    await waitFor(() => expect(screen.queryByTestId('svc-panel-busbar-fail-msp-1')).toBeNull());
+    expect((screen.getByTestId('svc-panel-main-msp-1') as HTMLSelectElement).value).toBe('200');
+    const applied = screen.getByTestId('svc-panel-remedy-applied-msp-1');
+    expect(applied.getAttribute('data-kind')).toBe('replace-main-breaker');
+    expect(applied.textContent).toContain('Replacement main breaker 150 A — replaces the installed 200 A main');
+    expect(applied.textContent).toContain('load calculation must still show');
+  });
+
+  it('[Apply] on a busbar upgrade records a replacement panelboard; [Remove] takes it back off and the FAIL returns', async () => {
+    const writes = mountLiveCard(failing());
+    fireEvent.click(screen.getByTestId('svc-remedy-apply-bus-msp-1-225'));
+    await waitFor(() => expect(writes).toHaveLength(1));
+    expect(writes[0].next.panels[0].remedy).toEqual({ kind: 'replace-panelboard', busbarRatingA: 225, mainBreakerA: 200 });
+    expect((await screen.findByTestId('svc-panel-remedy-applied-msp-1')).getAttribute('data-kind')).toBe('replace-panelboard');
+
+    fireEvent.click(screen.getByTestId('svc-remedy-remove-msp-1'));
+    await waitFor(() => expect(writes).toHaveLength(2));
+    expect('remedy' in writes[1].next.panels[0]).toBe(false);
+    expect(writes[1].next).toEqual(failing());
+    await waitFor(() => expect(screen.getByTestId('svc-panel-busbar-fail-msp-1')).toBeTruthy());
+    expect(screen.queryByTestId('svc-panel-remedy-applied-msp-1')).toBeNull();
   });
 
   it('once the work is done, recording the installed main in the row is what the engine re-checks', async () => {

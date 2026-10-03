@@ -64,7 +64,7 @@ import type {
   ProtectiveDevice, GatewayInstance, DeviceRole,
   GenerationUnit, DerAggregationPanel, DerAggregationInput, PointOfInterconnection,
   PoiRelationship, ExistingServiceEquipment, ExistingOrNew, LoadModel, LoadCalculationMethod, PanelLoad,
-  ServicePhase,
+  ServicePhase, PanelRemedy,
 } from '@/lib/electrical/serviceTopology';
 import {
   isServicePhase, servicePhaseInfo, isExistingOrNew, BLANK_EXISTING_SERVICE_EQUIPMENT,
@@ -272,8 +272,29 @@ function parseBranch(v: unknown): ServiceBranch | null {
   };
 }
 
+/**
+ * An applied 120% remedy — proposed work the installer chose with [Apply].
+ *
+ * 🚨 ALL ITS NUMBERS OR NOTHING. A remedy that reloads without its rating would be a "replacement
+ * main breaker" of no size; one that reloads as a different kind would order the wrong equipment.
+ * An unrecognised or partial record reads back as ABSENT — the 120% check then runs on the installed
+ * panel, which is the conservative direction — never as a guessed remedy.
+ */
+function parsePanelRemedy(v: unknown): PanelRemedy | null {
+  if (!isObj(v)) return null;
+  const pos = (x: unknown): number | null => { const n = numOrNull(x); return n !== null && n > 0 ? n : null; };
+  const main = pos(v.mainBreakerA);
+  if (v.kind === 'replace-main-breaker' && main !== null) return { kind: 'replace-main-breaker', mainBreakerA: main };
+  const bus = pos(v.busbarRatingA);
+  if (v.kind === 'replace-panelboard' && main !== null && bus !== null) {
+    return { kind: 'replace-panelboard', busbarRatingA: bus, mainBreakerA: main };
+  }
+  return null;
+}
+
 function parsePanel(v: unknown): PanelBoard | null {
   if (!isObj(v) || !str(v.id)) return null;
+  const remedy = parsePanelRemedy(v.remedy);
   return {
     id: str(v.id),
     label: str(v.label) || str(v.id),
@@ -283,6 +304,10 @@ function parsePanel(v: unknown): PanelBoard | null {
     backedUp: v.backedUp === true,
     ...(typeof v.manufacturer === 'string' && v.manufacturer.trim()
       ? { manufacturer: v.manufacturer.trim() } : {}),
+    // 🚨 THE APPLIED REMEDY SURVIVES THE SAVE. Dropped, an [Apply] reloads as "nothing applied": the
+    // 120% check returns to FAIL, the SLD stops drawing the new breaker and the BOM stops ordering it.
+    // Absent stays absent, so a graph that never applied one serialises exactly as before.
+    ...(remedy ? { remedy } : {}),
   };
 }
 

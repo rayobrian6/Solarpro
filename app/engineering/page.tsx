@@ -130,7 +130,9 @@ import {
   QuestionDialog, applyVia, guardGraphRead, unreadGraphRefusal,
 } from '@/components/engineering/systemConfig/ItemEditor';
 import { MeterCollarControl, SystemArchitectureControls } from '@/components/engineering/systemConfig/cards/SystemConfigurationControls';
-import { legacyInterconnectionMirror } from '@/lib/electrical/systemConfigLegacyInterconnection';
+import {
+  legacyInterconnectionMirror, complianceInterconnection, consumerInterconnectionToken, appliedPanelRemedies,
+} from '@/lib/electrical/systemConfigLegacyInterconnection';
 import { EngineeringReadinessPanel } from '@/components/engineering/systemConfig/EngineeringReadinessPanel';
 import { GuidedStrip, revealHomeCard } from '@/components/engineering/systemConfig/GuidedStrip';
 import { ExistingElectricalServiceCard } from '@/components/engineering/systemConfig/cards/ExistingElectricalServiceCard';
@@ -7010,11 +7012,15 @@ function EngineeringPageInner() {
         acDisconnect: config.acDisconnect,
         dcDisconnect: config.dcDisconnect,
         engineeringMode,
-        interconnection: {
+        // 🚨 THE GRAPH'S REMEDY, NOT THE SCALAR'S. An applied 120% remedy on the primary panel
+        // (`PanelBoard.remedy`) re-runs this check on the panel AFTER the work and says so; a
+        // MAIN_BREAKER_DERATE / PANEL_UPGRADE token on the scalar is read as the load-side connection it
+        // is — it records no remedy, so it must not make the engine pass one.
+        interconnection: complianceInterconnection({
           method: config.interconnectionMethod ?? 'UNRESOLVED',
           busRating: config.panelBusRating ?? 200,
           mainBreaker: config.mainPanelAmps ?? 200,
-        },
+        }, svcTopology),
         // Battery NEC 705.12(B) — bus loading impact
         batteryBackfeedA: calcBatteryBackfeedAmps(config.batteryId, config.batteryCount),
         batteryCount: config.batteryCount || 0,
@@ -7632,6 +7638,11 @@ function EngineeringPageInner() {
   }, [buildCalcPayload, engineeringMode, overrides, config, totalPanels, updateConfig]);
 
 
+  // An applied 120% remedy moves the compliance check without moving any config field, so its key is a
+  // dependency of the re-run too: [Apply] / [Remove] re-checks the panel they changed.
+  const appliedRemedyKey = appliedPanelRemedies(svcTopology)
+    .map(r => `${r.panel.id}:${r.remedy.kind}:${r.remedy.mainBreakerA}`
+      + (r.remedy.kind === 'replace-panelboard' ? `:${r.remedy.busbarRatingA}` : '')).join('|');
   useEffect(() => {
     setConfigDirty(true);
     const timer = setTimeout(() => {
@@ -7641,7 +7652,7 @@ function EngineeringPageInner() {
     }, 800);
     return () => clearTimeout(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config, engineeringMode]);
+  }, [config, engineeringMode, appliedRemedyKey]);
 
   // Override management
   const addOverride = (ruleId: string, field: string, value: string, justification: string) => {
@@ -8417,8 +8428,10 @@ function EngineeringPageInner() {
             return new Set(panels.map(p => String(p.arrayId ?? p.planeId ?? '0'))).size;
           })(),
           spliceAtRows:     config.spliceAtRows === true,
-          // Interconnection method — controls whether backfed breaker appears in BOM
-          interconnectionMethod: config.interconnectionMethod ?? 'UNRESOLVED',
+          // Interconnection method — controls whether backfed breaker appears in BOM. A 120% remedy
+          // token is read as the load-side connection it refines: the remedy itself, when applied, is
+          // on the service graph and the route lists it from there (lib/bom/topologyBom.ts).
+          interconnectionMethod: consumerInterconnectionToken(config.interconnectionMethod) ?? 'UNRESOLVED',
           consumptionCtLocation: ctLocationForRequests || undefined,
           panelBusRating:   config.panelBusRating ?? config.mainPanelAmps ?? 200,
           // Pass ComputedSystem.runs as single source of truth for wire/conduit quantities
@@ -14149,10 +14162,9 @@ function EngineeringPageInner() {
                           {(() => {
                             const elec = compliance.electrical as any;
                             const ic = elec?.interconnection;
-                            const icMethod = String(ic?.method ?? config.interconnectionMethod ?? 'UNRESOLVED').toUpperCase();
+                            // A remedy token on the scalar is read as load side: the remedy record is the graph's.
+                            const icMethod = String(ic?.method ?? consumerInterconnectionToken(config.interconnectionMethod) ?? 'UNRESOLVED').toUpperCase();
                             const isSupplySide = icMethod === 'SUPPLY_SIDE_TAP' || icMethod.includes('SUPPLY') || icMethod.includes('LINE_SIDE');
-                            const isMainDerate = icMethod === 'MAIN_BREAKER_DERATE';
-                            const isPanelUpgrade = icMethod === 'PANEL_UPGRADE';
                             // 🚨 AND THE THIRD STATE, WHICH THIS PANEL USED TO RENDER AS LOAD-SIDE.
                             //
                             // `?? 'LOAD_SIDE'` made every unestablished interconnection fall into
@@ -14171,7 +14183,7 @@ function EngineeringPageInner() {
                             const maxAllowed = (ic?.maxAllowedSolarBreaker != null && ic.maxAllowedSolarBreaker < 9999) ? ic.maxAllowedSolarBreaker : solarRequired;
                             const backfedBreakerAmps = Math.min(solarRequired, maxAllowed);
                             const isCapped = backfedBreakerAmps < solarRequired;
-                            const showBackfedBreaker = !icNotEvaluated && !isSupplySide && !isMainDerate && !isPanelUpgrade && backfedBreakerAmps > 0;
+                            const showBackfedBreaker = !icNotEvaluated && !isSupplySide && backfedBreakerAmps > 0;
                             return (
                               <>
                                 {icNotEvaluated ? (
@@ -14208,6 +14220,14 @@ function EngineeringPageInner() {
                                   <div className="flex justify-between">
                                     <span className="text-slate-500">Interconnection</span>
                                     <span className="font-bold text-emerald-400">Supply-Side Tap (NEC 705.11)</span>
+                                  </div>
+                                ) : null}
+                                {ic?.proposedWork ? (
+                                  <div data-testid="compliance-proposed-work" className="flex justify-between gap-2">
+                                    <span className="text-slate-500">Proposed work (120% remedy)</span>
+                                    <span className="text-right font-bold text-amber-300">
+                                      {ic.proposedWork.panelLabel}: {ic.proposedWork.label} — {ic.proposedWork.replaces}
+                                    </span>
                                   </div>
                                 ) : null}
                                 {elec?.acSizing?.ocpdAmps != null ? (
@@ -14450,7 +14470,7 @@ function EngineeringPageInner() {
                       </div>
                       <div className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-slate-800/60 border border-slate-700/50 text-slate-300">
                         <Zap size={10} className="text-amber-400" />
-                        Interconnection: {config.interconnectionMethod || '—'}
+                        Interconnection: {consumerInterconnectionToken(config.interconnectionMethod) || '—'}
                       </div>
                       {(elec?.errors?.length > 0 || elec?.warnings?.length > 0) ? (
                         <div className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 font-semibold">
@@ -14634,6 +14654,19 @@ function EngineeringPageInner() {
                                         className="mt-1.5 text-[10px] px-2 py-0.5 rounded bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/30 transition-colors font-semibold"
                                       >
                                         Change the interconnection in System Config →
+                                      </button>
+                                    ) : null}
+                                    {alt.method === 'MAIN_BREAKER_DERATE' || alt.method === 'PANEL_UPGRADE' ? (
+                                      // A suggestion here; applied only by its own [Apply] on the panel it changes.
+                                      <button
+                                        data-testid="electrical-apply-remedy"
+                                        onClick={() => {
+                                          setActiveTab('config');
+                                          window.setTimeout(() => revealHomeCard('service.rating'), 50);
+                                        }}
+                                        className="mt-1.5 text-[10px] px-2 py-0.5 rounded bg-amber-500/15 border border-amber-500/40 text-amber-300 hover:bg-amber-500/25 transition-colors font-semibold"
+                                      >
+                                        Apply a remedy on Existing Electrical Service →
                                       </button>
                                     ) : null}
                                   </div>
@@ -16462,9 +16495,11 @@ function EngineeringPageInner() {
                   const interconnectLabels: Record<string, string> = {
                     LOAD_SIDE: 'Load-Side Breaker (NEC 705.12(B) — 120% Rule)',
                     SUPPLY_SIDE_TAP: 'Supply-Side Tap (NEC 705.11 — Line-Side)',
-                    MAIN_BREAKER_DERATE: 'Main Breaker Derate',
-                    PANEL_UPGRADE: 'Panel Upgrade',
                   };
+                  // 🚨 A remedy token on the scalar is NOT scheduled as a derate / panel upgrade: it records
+                  // no panel and no rating. The schedule's remedy rows come from the graph, where [Apply] wrote them.
+                  const icToken = consumerInterconnectionToken(config.interconnectionMethod) ?? '';
+                  const scheduledRemedies = appliedPanelRemedies(svcTopology);
                   return (
                     <div className="mb-6">
                       <div className="text-sm font-black text-slate-700 mb-2 uppercase tracking-wide">Electrical Equipment</div>
@@ -16517,10 +16552,20 @@ function EngineeringPageInner() {
                           </tr>
                           <tr className="bg-slate-50">
                             <td className="border border-slate-200 px-3 py-2 font-semibold">Interconnection Method</td>
-                            <td className="border border-slate-200 px-3 py-2">{interconnectLabels[config.interconnectionMethod] || config.interconnectionMethod}</td>
+                            <td className="border border-slate-200 px-3 py-2">{interconnectLabels[icToken] || icToken}</td>
                             <td className="border border-slate-200 px-3 py-2 font-bold text-amber-700">{config.mainPanelAmps}A Panel</td>
-                            <td className="border border-slate-200 px-3 py-2 text-slate-500">{config.interconnectionMethod === 'SUPPLY_SIDE_TAP' ? 'NEC 705.11' : 'NEC 705.12(B)'}</td>
+                            <td className="border border-slate-200 px-3 py-2 text-slate-500">{icToken === 'SUPPLY_SIDE_TAP' ? 'NEC 705.11' : 'NEC 705.12(B)'}</td>
                           </tr>
+                          {scheduledRemedies.map(r => (
+                            <tr key={`remedy-${r.panel.id}`} data-testid={`schedule-remedy-${r.panel.id}`} className="bg-amber-50">
+                              <td className="border border-slate-200 px-3 py-2 font-semibold">(N) {r.panel.label} — proposed work</td>
+                              <td className="border border-slate-200 px-3 py-2">{r.label} — {r.replaces}</td>
+                              <td className="border border-slate-200 px-3 py-2 font-bold text-amber-700">
+                                {r.remedy.kind === 'replace-panelboard' ? `${r.remedy.busbarRatingA}A bus / ` : ''}{r.remedy.mainBreakerA}A main
+                              </td>
+                              <td className="border border-slate-200 px-3 py-2 text-slate-500">NEC 705.12(B)</td>
+                            </tr>
+                          ))}
                           {config.utilityId ? (
                             <tr className="bg-white">
                               <td className="border border-slate-200 px-3 py-2 font-semibold">Utility Provider</td>

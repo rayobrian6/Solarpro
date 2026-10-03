@@ -22,6 +22,7 @@
 import {
   evaluateServiceTopology, OPTIONAL_REQUIREMENT_TOKENS, solarCouplingLabel, serviceRatingLabel,
   servicePhaseInfo, isServicePhase, isSiteLevelCheck, serviceExistingOrNew, EXISTING_OR_NEW_TOKEN,
+  REMEDY_LOAD_CALCULATION_TOKEN as REMEDY_LOAD_TOKEN,
   type ServiceTopology, type TopologyEvaluation, type TopologyCheck, type ExistingOrNew,
 } from '@/lib/electrical/serviceTopology';
 import { foldConclusions, type EngineeringConclusion } from '@/lib/engineering/engineeringStatus';
@@ -319,6 +320,13 @@ export function labelForToken(token: string, t: ServiceTopology): string {
     return `Calculation method for ${phase === 'custom' || !isServicePhase(phase)
       ? 'this electrical system' : servicePhaseInfo(phase).label} (not yet supported)`;
   }
+  if (token.startsWith(REMEDY_LOAD_TOKEN)) {
+    // The derate an installer applied, named by its panel and its new main — not a database id.
+    const panel = t.panels.find(p => p.id === token.slice(REMEDY_LOAD_TOKEN.length));
+    const main = panel?.remedy?.mainBreakerA;
+    return `Load calculation for ${panel?.label ?? 'the panel'} — its load must fit the derated `
+      + `${main != null ? `${main} A ` : ''}main breaker`;
+  }
   if (token.startsWith('aggregation.input-source:')) {
     return `A DER source for the aggregation input '${token.slice('aggregation.input-source:'.length)}'`;
   }
@@ -399,6 +407,8 @@ function ownerForToken(token: string): RequirementOwner {
   // would be a second answer to "is this holding the job up".
   if (OPTIONAL_REQUIREMENT_TOKENS.has(token)) return 'optional-calculation';
   if (token.startsWith('calculation-method:')) return 'not-yet-supported';
+  // Enter the panel's load in the load analysis and SolarPro checks the derated main against it.
+  if (token.startsWith(REMEDY_LOAD_TOKEN)) return 'solarpro-can-calculate';
   if (token.startsWith('manufacturer-document:') || token.startsWith('manufacturer-limit:')
       || token.startsWith('sccr:') || token === 'gateway.continuousRatingA') {
     return 'manufacturer-authority';
@@ -466,7 +476,7 @@ function focusFor(check: TopologyCheck, token: string, t: ServiceTopology): Over
   // to that branch, but the answer is not typed into the branch — it is the one load calculation on
   // the service. Routed by scope it would send the operator to Branch B to answer a question about
   // the whole house.
-  if (token === 'loads.model') {
+  if (token === 'loads.model' || token.startsWith(REMEDY_LOAD_TOKEN)) {
     return { kind: 'service', nodeId: 'service', field: 'loads' };
   }
   if (token === EXISTING_OR_NEW_TOKEN) {

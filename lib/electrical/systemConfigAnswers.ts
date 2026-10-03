@@ -27,9 +27,12 @@ import {
   applyPerSystemGenerationPanels, clearPerSystemGenerationPanels,
 } from '@/lib/electrical/topologyPresets';
 import type {
-  ServiceTopology, ServicePhase, PoiRelationship, DerArrangement, BackupDomain, SolarCoupling, PanelBoard,
+  ServiceTopology, ServicePhase, PoiRelationship, DerArrangement, BackupDomain, SolarCoupling, PanelBoard, PanelRemedy,
 } from '@/lib/electrical/serviceTopology';
-import { isServicePhase, servicePhaseInfo, serviceExistingOrNew, existingServiceReading } from '@/lib/electrical/serviceTopology';
+import {
+  isServicePhase, servicePhaseInfo, serviceExistingOrNew, existingServiceReading, panelRemedyWork,
+} from '@/lib/electrical/serviceTopology';
+import { NEC_STANDARD_OCPD } from '@/lib/electrical/stdSizes';
 
 export type AnswerResult =
   | { ok: true; topology: ServiceTopology; did: string }
@@ -275,6 +278,64 @@ export function answerPanel(
     next = setExistingServiceEquipment(next, { sccrA: patch.sccrA });
   }
   return done(next, `${p.label} updated`);
+}
+
+/**
+ * [Apply] on a 120% remedy — "derate the main breaker to 175 A" / "upgrade the busbar to 225 A".
+ *
+ * 🚨 PROPOSED WORK, NEVER A READING. This writes `PanelBoard.remedy` and nothing else: the installed
+ * `mainBreakerA` / `busbarRatingA` stay exactly as read off the label, so the graph still says a
+ * 200 A main is installed AND that a 175 A replacement is to be fitted. The 120% check re-runs on the
+ * panel after the work, the SLD draws the new breaker / panelboard as new work, the BOM lists it and
+ * the permit schedule carries it. Applying another remedy replaces this one (one per panel);
+ * `answerRemoveBusbarRemedy` takes it back off.
+ *
+ * Refused — never guessed — when the installed ratings are not recorded (a remedy for a figure nobody
+ * entered is a guess), when a derate is not a smaller NEC 240.6(A) standard breaker, or when a busbar
+ * upgrade is not larger than the installed bus. A replacement panelboard keeps the installed main's
+ * rating: the busbar is the change, and the allowance the card offered was computed on that main.
+ */
+export function answerBusbarRemedy(
+  t: ServiceTopology, panelId: string,
+  remedy: { kind: 'replace-main-breaker'; mainBreakerA: number } | { kind: 'replace-panelboard'; busbarRatingA: number },
+): AnswerResult {
+  const p = t.panels.find(x => x.id === panelId);
+  if (!p) return refuse(`No panel '${panelId}'.`);
+  const main = p.mainBreakerA, bus = p.busbarRatingA;
+  if (main == null || bus == null) {
+    return refuse(`Record ${p.label}'s installed main breaker and busbar first — a 120% remedy is worked out `
+      + 'from what is installed.');
+  }
+  let next: PanelRemedy;
+  if (remedy.kind === 'replace-main-breaker') {
+    const a = remedy.mainBreakerA;
+    if (!(Number.isFinite(a) && (NEC_STANDARD_OCPD as readonly number[]).includes(a))) {
+      return refuse(`${a} A is not a standard main breaker rating (NEC 240.6(A)).`);
+    }
+    if (a >= main) return refuse(`A derate replaces the ${main} A main with a SMALLER breaker — ${a} A is not smaller.`);
+    next = { kind: 'replace-main-breaker', mainBreakerA: a };
+  } else {
+    const b = remedy.busbarRatingA;
+    if (!(Number.isFinite(b) && b > 0)) return refuse('Choose the replacement panelboard\'s busbar rating.');
+    if (b <= bus) return refuse(`A busbar upgrade needs a bus LARGER than the installed ${bus} A — ${b} A is not.`);
+    next = { kind: 'replace-panelboard', busbarRatingA: b, mainBreakerA: main };
+  }
+  const work = panelRemedyWork({ ...p, remedy: next })!;
+  return done(updatePanel(t, panelId, { remedy: next }),
+    `${p.label}: proposed work applied — ${work.label} (${work.replaces}); the installed ratings stay recorded`);
+}
+
+/** [Remove] on an applied remedy: the panel goes back to its installed ratings, and nothing else moves. */
+export function answerRemoveBusbarRemedy(t: ServiceTopology, panelId: string): AnswerResult {
+  const p = t.panels.find(x => x.id === panelId);
+  if (!p) return refuse(`No panel '${panelId}'.`);
+  const work = panelRemedyWork(p);
+  if (!work) return refuse(`${p.label} has no proposed work to remove.`);
+  // The key goes, not `remedy: null`: a panel with nothing applied serialises exactly as it always did.
+  const { remedy: _removed, ...rest } = p;
+  void _removed;
+  return done({ ...t, panels: t.panels.map(x => (x.id === panelId ? rest : x)) },
+    `${p.label}: proposed work removed — ${work.label}`);
 }
 
 // ── 4 · SYSTEM BEHAVIOR / CONNECTION ────────────────────────────────────────

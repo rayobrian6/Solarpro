@@ -16,6 +16,7 @@ import type { InterviewItem, SystemConfigInterview } from '@/lib/electrical/syst
 import type {
   ExistingServiceEquipment, PanelBoard, ServiceTopology, TopologyCheck,
 } from '@/lib/electrical/serviceTopology';
+import { panelRemedyWork } from '@/lib/electrical/serviceTopology';
 import type { AnswerResult } from '@/lib/electrical/systemConfigAnswers';
 import { NEC_STANDARD_OCPD } from '@/lib/electrical/stdSizes';
 import { maxLoadSideBackfeedA } from '@/lib/nec/rule705_12';
@@ -166,6 +167,8 @@ export function panelRecordedFacts(t: ServiceTopology | null): string[] {
       p.busbarRatingA != null ? `Bus ${p.busbarRatingA} A` : null,
       p.manufacturer ? p.manufacturer : null,
       p.sccrA != null ? `${p.sccrA / 1000} kA` : null,
+      // An applied remedy is recorded work too — a rebuild discards it with the panel.
+      panelRemedyWork(p) ? `proposed: ${panelRemedyWork(p)!.label}` : null,
     ].filter((f): f is string => f !== null);
     return facts.length > 0 ? [`${p.label}: ${facts.join(' · ')}`] : [];
   });
@@ -239,21 +242,22 @@ export interface BusbarRemedies {
  * PANEL_UPGRADE "interconnection methods". They are not ways to connect, and they are PROPOSED WORK,
  * not readings: a derate means buying and swapping a breaker (and a load calculation showing the
  * panel's load still fits it); a busbar upgrade means a different panelboard. Each option states the
- * allowance it would give by the one 705.12(B) formula.
+ * allowance it would give by the one 705.12(B) formula, worked out from what is INSTALLED.
  *
- * 🚨 NEVER WRITTEN AS THE PANEL'S RATING. Writing "175 A" into `mainBreakerA` would erase the fact
- * that a 200 A main is installed, turn the FAIL into a PASS and record nothing that says a breaker
- * must be bought — the graph has no place for proposed work yet. The card lists these as proposals;
- * the installer records the panel's rating once the work is actually done. Offered only on a FAIL,
- * and only when both of the panel's ratings are recorded (a remedy for a figure nobody entered is a
- * guess).
+ * 🚨 A SUGGESTION UNTIL THE INSTALLER CLICKS [Apply], AND NEVER WRITTEN AS THE PANEL'S RATING.
+ * Nothing applies one by default, in Auto mode or as a fix. [Apply] writes `PanelBoard.remedy`
+ * (`answerBusbarRemedy`) — proposed work beside the installed readings, never in place of them:
+ * writing "175 A" into `mainBreakerA` would erase the fact that a 200 A main is installed and record
+ * nothing that says a breaker must be bought. Offered only on a FAIL, and only when both of the
+ * panel's ratings are recorded (a remedy for a figure nobody entered is a guess). A derate is a
+ * smaller NEC 240.6(A) standard breaker — a size somebody can buy.
  */
 export function busbarRemedies(panel: PanelBoard, check: TopologyCheck | null): BusbarRemedies | null {
   if (!check || check.conclusion !== 'FAIL') return null;
   const bus = panel.busbarRatingA, main = panel.mainBreakerA;
   if (bus == null || main == null) return null;
   return {
-    derateMain: MAIN_BREAKER_RATINGS.filter(a => a < main && a >= main / 2)
+    derateMain: (NEC_STANDARD_OCPD as readonly number[]).filter(a => a < main && a >= main / 2)
       .sort((a, b) => b - a)
       .map(amps => ({ amps, allowsA: maxLoadSideBackfeedA(bus, amps) })),
     upgradeBus: BUSBAR_RATINGS.filter(a => a > bus)

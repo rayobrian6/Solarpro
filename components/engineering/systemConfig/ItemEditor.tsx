@@ -24,7 +24,7 @@
 import React, { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { ServiceTopology, SolarCoupling, BackupDomain, PanelBoard } from '@/lib/electrical/serviceTopology';
-import { existingServiceReading } from '@/lib/electrical/serviceTopology';
+import { existingServiceReading, REMEDY_LOAD_CALCULATION_TOKEN } from '@/lib/electrical/serviceTopology';
 import type { PvArrayDesign } from '@/lib/electrical/pvArrayDesign';
 import type { FactSource, InterviewItem } from '@/lib/electrical/systemConfigInterview';
 import {
@@ -487,6 +487,11 @@ export function ItemEditor(props: ItemEditorProps) {
              disabled={busy || !t || !record}
              onPick={v => { if (record) void record(v as SolarCoupling); }} />
     );
+  }
+  // A derated main's load calculation is answered in the one load analysis — the same editor, asked
+  // from [Answer Next] where the derate made it required.
+  if (id.startsWith(`engineering.needs.${REMEDY_LOAD_CALCULATION_TOKEN}`)) {
+    return <LoadAnalysisEditor item={{ ...item, id: LOAD_ANALYSIS_ITEM_ID }} topology={t} apply={apply} busy={busy} />;
   }
 
   // 🚨 THE SERVICE QUESTIONS USE THE SERVICE CARD'S OWN CONTROLS (`cards/ServiceControls.tsx`): the

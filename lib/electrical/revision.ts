@@ -105,6 +105,13 @@ export function revisionInputs(m: ElectricalProjectModel): string[] {
     put('pnl[' + p.id + '].mainA', p.mainBreakerA);
     put('pnl[' + p.id + '].sccrA', p.sccrA);
     put('pnl[' + p.id + '].backedUp', p.backedUp);
+    // 🚨 AN APPLIED REMEDY MOVES THE SHEET (a new breaker drawn, a line ordered) — and only a panel
+    // that has one contributes, so every revision taken before remedies existed is unchanged.
+    if (p.remedy) {
+      put('pnl[' + p.id + '].remedy', p.remedy.kind);
+      put('pnl[' + p.id + '].remedy.mainA', p.remedy.mainBreakerA);
+      if (p.remedy.kind === 'replace-panelboard') put('pnl[' + p.id + '].remedy.busbarA', p.remedy.busbarRatingA);
+    }
   }
   for (const s of [...t.storage].sort((x, y) => x.id.localeCompare(y.id))) {
     put('sto[' + s.id + '].productId', s.productId);

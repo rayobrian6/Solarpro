@@ -17,11 +17,12 @@ import React, { useState } from 'react';
 import type { InterviewItem } from '@/lib/electrical/systemConfigInterview';
 import type { ExistingOrNew, PanelBoard, ServiceTopology, TopologyCheck } from '@/lib/electrical/serviceTopology';
 import {
-  SERVICE_PHASES, servicePhaseInfo, serviceExistingOrNew, existingServiceReading,
+  SERVICE_PHASES, servicePhaseInfo, serviceExistingOrNew, existingServiceReading, panelRemedyWork,
 } from '@/lib/electrical/serviceTopology';
 import {
   answerServiceRating, answerElectricalSystem, answerDistribution, answerPanel,
-  answerAvailableFaultCurrent, answerExistingService, sccrAmpsFromKa, sccrKaFromAmps, type AnswerResult,
+  answerAvailableFaultCurrent, answerExistingService, sccrAmpsFromKa, sccrKaFromAmps,
+  answerBusbarRemedy, answerRemoveBusbarRemedy, type AnswerResult,
 } from '@/lib/electrical/systemConfigAnswers';
 import {
   BUSBAR_RATINGS, MAIN_BREAKER_RATINGS, SERVICE_RATINGS, busbarRemedies, existingRecordedFacts,
@@ -192,8 +193,12 @@ export function DistributionControl({ t, item, ids, disabled, apply }: {
 /**
  * One panelboard: Main / Bus / Manufacturer, with where its figures came from (`chip`). The ladders
  * always include the recorded rating, so a 175 A main never reads as blank. A failing NEC 705.12(B)
- * verdict (the engine's, read — never recomputed) lists the remedies as PROPOSED WORK: nothing here
- * writes a remedy as the panel's rating.
+ * verdict (the engine's, read — never recomputed) lists the remedies as PROPOSED WORK.
+ *
+ * 🚨 A REMEDY IS A SUGGESTION UNTIL ITS [Apply] IS CLICKED. Each option carries its own [Apply];
+ * nothing else in the failure block writes, and nothing applies one by default. [Apply] writes the
+ * remedy RECORD (`answerBusbarRemedy` → `PanelBoard.remedy`) through `apply` — never the panel's Main /
+ * Bus, which stay what is installed. An applied remedy is stated under the row with [Remove].
  */
 export function PanelRow({ t, panel: p, item, ids, disabled, apply, check = null, chip, askSccr = false }: {
   t: ServiceTopology; panel: PanelBoard; item: InterviewItem | null; ids: ServiceControlIds; disabled: boolean;
@@ -203,11 +208,18 @@ export function PanelRow({ t, panel: p, item, ids, disabled, apply, check = null
 }) {
   const id = IDS[ids].panel;
   const remedies = busbarRemedies(p, check);
+  const applied = panelRemedyWork(p);
   const missing = item?.state === 'needs-answer';
   // 🚨 THE PANEL'S SCCR, OFF ITS LABEL — once the utility's fault current makes the chain need it (or a
   // figure is recorded). It was only ever editable in the Service Topology inspector's panel box.
   const showSccr = askSccr || t.service.availableFaultCurrentA != null || p.sccrA != null;
   const sccrNeeded = showSccr && p.sccrA == null && t.service.availableFaultCurrentA != null;
+  const applyBtn = (testid: string, onClick: () => void, label = 'Apply') => (
+    <button type="button" data-testid={testid} disabled={disabled} onClick={onClick}
+            className="ml-1 rounded border border-amber-500/50 bg-amber-500/15 px-1.5 py-px text-[10px] font-bold text-amber-100 hover:bg-amber-500/25 disabled:opacity-40">
+      {label}
+    </button>
+  );
   return (
     <div data-testid={`${id}-${p.id}`} data-state={item?.state}>
       {/* Two lines so the card reads in the narrow left column: the panel and its maker, then its ratings. */}
@@ -268,27 +280,56 @@ export function PanelRow({ t, panel: p, item, ids, disabled, apply, check = null
             {check.citation ? <span className="text-rose-300/70"> ({check.citation})</span> : null}</div>
           <div className="mt-1 text-slate-300">
             <span className="font-semibold text-slate-200">Possible remedies</span>
-            <span className="text-slate-400"> — proposed work, not recorded as this panel&apos;s rating:</span>
+            <span className="text-slate-400"> — proposed work, not recorded as this panel&apos;s rating. [Apply] records one
+              as work to be done; nothing is applied until you do.</span>
           </div>
           <ul className="mt-0.5 list-disc space-y-0.5 pl-4 text-slate-300">
             {remedies.derateMain.length > 0 ? (
               <li data-testid={`${ids}-remedy-derate-${p.id}`}>
-                Derate the main breaker — {remedies.derateMain.map(r => `${r.amps} A allows ${r.allowsA} A`).join(' · ')}.
+                Derate the main breaker —{' '}
+                {remedies.derateMain.map((r, i) => (
+                  <span key={r.amps} className="whitespace-nowrap">
+                    {i > 0 ? ' · ' : ''}{r.amps} A allows {r.allowsA} A
+                    {applyBtn(`${ids}-remedy-apply-derate-${p.id}-${r.amps}`,
+                      () => void apply(answerBusbarRemedy(t, p.id, { kind: 'replace-main-breaker', mainBreakerA: r.amps })))}
+                  </span>
+                ))}.
                 {' '}Needs a replacement main breaker, and a load calculation showing the panel&apos;s calculated
                 load fits the derated main.
               </li>
             ) : null}
             {remedies.upgradeBus.length > 0 ? (
               <li data-testid={`${ids}-remedy-bus-${p.id}`}>
-                Upgrade the busbar — {remedies.upgradeBus.map(r => `${r.amps} A allows ${r.allowsA} A`).join(' · ')}.
+                Upgrade the busbar —{' '}
+                {remedies.upgradeBus.map((r, i) => (
+                  <span key={r.amps} className="whitespace-nowrap">
+                    {i > 0 ? ' · ' : ''}{r.amps} A allows {r.allowsA} A
+                    {applyBtn(`${ids}-remedy-apply-bus-${p.id}-${r.amps}`,
+                      () => void apply(answerBusbarRemedy(t, p.id, { kind: 'replace-panelboard', busbarRatingA: r.amps })))}
+                  </span>
+                ))}.
                 {' '}That is a replacement panelboard: its manufacturer, SCCR and field verification are the new
                 panel&apos;s, not this one&apos;s.
               </li>
             ) : null}
           </ul>
           <div className="mt-0.5 text-[10px] text-slate-500">
-            Once the work is done, record what is installed in Main / Bus above — the check re-runs on it.
+            Once the work is done, record what is installed in Main / Bus above and remove the proposed work — the
+            check re-runs on it.
           </div>
+        </div>
+      ) : null}
+      {applied ? (
+        <div data-testid={`${id}-remedy-applied-${p.id}`} data-kind={applied.kind}
+             className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 rounded border border-amber-500/40 bg-amber-500/10 p-1.5 text-[11px] text-amber-100">
+          <span className="font-bold">Proposed work:</span>
+          <span>{applied.label} — {applied.replaces}.</span>
+          <span className="text-amber-200/80">
+            The 120% rule is checked on the panel after this work; the SLD, BOM and permit show it as new work.
+            {applied.kind === 'replace-main-breaker'
+              ? ' A load calculation must still show the panel’s load fits the smaller main.' : ''}
+          </span>
+          {applyBtn(`${ids}-remedy-remove-${p.id}`, () => void apply(answerRemoveBusbarRemedy(t, p.id)), 'Remove')}
         </div>
       ) : null}
     </div>

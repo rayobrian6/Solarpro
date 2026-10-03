@@ -445,6 +445,66 @@ export interface PanelBoard {
    * the sheet and in the field.
    */
   manufacturer?: string | null;
+  /**
+   * 🚨 PROPOSED WORK ON THIS PANEL — a 120% remedy the installer explicitly applied ([Apply] on the
+   * Existing Electrical Service card). It is NOT a reading: `mainBreakerA` / `busbarRatingA` above
+   * stay what is installed, and this records what will be bought and fitted. The busbar check runs
+   * on the panel AFTER the work (`effectivePanelRatings`); the SLD, BOM and permit schedule draw and
+   * list it as new work. Absent on every graph that never applied one — never defaulted.
+   */
+  remedy?: PanelRemedy | null;
+}
+
+/**
+ * The two NEC 705.12(B) remedies, as work to be done.
+ *
+ *   'replace-main-breaker' — a smaller main breaker in the SAME panelboard (a derate). The busbar is
+ *       the installed one; a load calculation must show the panel's load fits the smaller main.
+ *   'replace-panelboard'   — a new panelboard with a larger bus (and its own main). Both ratings are
+ *       the new panelboard's, not the installed one's.
+ */
+export type PanelRemedy =
+  | { kind: 'replace-main-breaker'; mainBreakerA: number }
+  | { kind: 'replace-panelboard'; busbarRatingA: number; mainBreakerA: number };
+
+/**
+ * What a derate still owes: `remedy.loadCalculation:<panelId>`. NOT in `OPTIONAL_REQUIREMENT_TOKENS`
+ * — a load calculation is optional for a design, never for a derated main breaker.
+ */
+export const REMEDY_LOAD_CALCULATION_TOKEN = 'remedy.loadCalculation:';
+
+/** The ratings the 120% rule is evaluated on: the panel after any applied remedy, else as installed. */
+export function effectivePanelRatings(p: Pick<PanelBoard, 'busbarRatingA' | 'mainBreakerA' | 'remedy'>): {
+  busbarRatingA: number | null; mainBreakerA: number | null;
+} {
+  const r = p.remedy ?? null;
+  if (r?.kind === 'replace-main-breaker') return { busbarRatingA: p.busbarRatingA, mainBreakerA: r.mainBreakerA };
+  if (r?.kind === 'replace-panelboard') return { busbarRatingA: r.busbarRatingA, mainBreakerA: r.mainBreakerA };
+  return { busbarRatingA: p.busbarRatingA, mainBreakerA: p.mainBreakerA };
+}
+
+/**
+ * The applied remedy, in the words every consumer prints — the card, the SLD, the BOM, the permit
+ * schedule. Null when nothing is applied. `installed` names what the work replaces.
+ */
+export function panelRemedyWork(p: Pick<PanelBoard, 'label' | 'busbarRatingA' | 'mainBreakerA' | 'remedy'>): {
+  kind: PanelRemedy['kind'];
+  /** "Replacement main breaker 175 A" / "Replacement panelboard 225 A bus, 200 A main". */
+  label: string;
+  /** "replaces the installed 200 A main" / "replaces the installed 200 A bus panelboard". */
+  replaces: string;
+} | null {
+  const r = p.remedy ?? null;
+  const A = (v: number | null | undefined) => (typeof v === 'number' ? `${v} A` : 'unrecorded');
+  if (r?.kind === 'replace-main-breaker') {
+    return { kind: r.kind, label: `Replacement main breaker ${r.mainBreakerA} A`,
+      replaces: `replaces the installed ${A(p.mainBreakerA)} main` };
+  }
+  if (r?.kind === 'replace-panelboard') {
+    return { kind: r.kind, label: `Replacement panelboard ${r.busbarRatingA} A bus, ${r.mainBreakerA} A main`,
+      replaces: `replaces the installed ${A(p.busbarRatingA)} bus panelboard` };
+  }
+  return null;
 }
 
 /**
@@ -1691,12 +1751,18 @@ export function evaluateServiceTopology(topology: ServiceTopology): TopologyEval
 
     // Panel rating vs the branch feeding it.
     for (const pid of d.backedUpPanelIds) {
-      const p = panelById.get(pid);
-      if (!p) {
+      const installed = panelById.get(pid);
+      if (!installed) {
         checks.push(fail('domain.panel-link', scope, `${d.label} panels exist`,
           `This domain names panel '${pid}', which is not in the topology.`));
         continue;
       }
+      // 🚨 THE PANEL AFTER THE WORK. An applied remedy (`PanelBoard.remedy`) is proposed new work the
+      // installer chose with [Apply]; every rating check below runs on the panel as it will be, and
+      // says so. The installed readings are untouched — `remedyNote` names what replaces what.
+      const p = { ...installed, ...effectivePanelRatings(installed) };
+      const work = panelRemedyWork(installed);
+      const remedyNote = work ? ` — with the proposed ${work.label.charAt(0).toLowerCase()}${work.label.slice(1)} (${work.replaces})` : '';
       if (branch && num(p.busbarRatingA)) {
         checks.push(branch.ratedAmps <= p.busbarRatingA
           ? pass('domain.panel-rating', scope, `${p.label} rating vs its feeder`,
@@ -1765,10 +1831,10 @@ export function evaluateServiceTopology(topology: ServiceTopology): TopologyEval
           checks.push(otherGenerationA <= allowed
             ? pass('domain.busbar-705-12', scope, `${p.label} 120% busbar allowance`,
                 `${otherGenerationA.toFixed(1)} A of generation against ${allowed.toFixed(1)} A `
-                + 'allowed; the storage is aggregated elsewhere.', 'NEC 705.12(B)')
+                + `allowed; the storage is aggregated elsewhere${remedyNote}.`, 'NEC 705.12(B)')
             : fail('domain.busbar-705-12', scope, `${p.label} 120% busbar allowance`,
                 `${otherGenerationA.toFixed(1)} A of generation exceeds the ${allowed.toFixed(1)} A `
-                + 'allowed on this busbar.', 'NEC 705.12(B)'));
+                + `allowed on this busbar${remedyNote}.`, 'NEC 705.12(B)'));
         } else {
           const missing: string[] = [];
           if (!num(p.busbarRatingA)) missing.push('panel.busbarRatingA');
@@ -1802,10 +1868,10 @@ export function evaluateServiceTopology(topology: ServiceTopology): TopologyEval
         checks.push(backfeedA <= allowed
           ? pass('domain.busbar-705-12', scope, `${p.label} 120% busbar allowance`,
               `${backfeedA.toFixed(1)} A of backfeed against ${allowed.toFixed(1)} A allowed `
-              + `(${p.busbarRatingA} A bus, ${p.mainBreakerA} A main).`, 'NEC 705.12(B)')
+              + `(${p.busbarRatingA} A bus, ${p.mainBreakerA} A main)${remedyNote}.`, 'NEC 705.12(B)')
           : fail('domain.busbar-705-12', scope, `${p.label} 120% busbar allowance`,
               `${backfeedA.toFixed(1)} A of backfeed exceeds the ${allowed.toFixed(1)} A allowed on `
-              + `a ${p.busbarRatingA} A bus with a ${p.mainBreakerA} A main.`, 'NEC 705.12(B)'));
+              + `a ${p.busbarRatingA} A bus with a ${p.mainBreakerA} A main${remedyNote}.`, 'NEC 705.12(B)'));
       } else {
         const missing: string[] = [];
         if (!num(p.busbarRatingA)) missing.push('panel.busbarRatingA');
@@ -1826,6 +1892,46 @@ export function evaluateServiceTopology(topology: ServiceTopology): TopologyEval
       : unknown('domain.backed-up-load', scope, `${d.label} backed-up load`,
           'No load calculation covers the panelboards this domain backs up, so the load the island '
           + 'must carry is not established.', ['loads.model'])));
+  }
+
+  // ── PROPOSED WORK ON THE PANELS — the 120% remedies the installer applied ──
+  //
+  // 🚨 A DERATE IS NOT FINISHED BY THE BUSBAR ARITHMETIC. A smaller main breaker passes the 120% rule
+  // by construction; whether the panel's own load still fits it is a load calculation, and without
+  // one the derate is NOT EVALUATED — named, required, never a quiet PASS. The token is not the
+  // optional `loads.model`: a full load analysis is optional for a design, not for a derated main.
+  for (const p of topology.panels) {
+    const r = p.remedy ?? null;
+    if (!r) continue;
+    const title = `${p.label} proposed work`;
+    if (r.kind === 'replace-main-breaker') {
+      if (num(p.mainBreakerA) && r.mainBreakerA >= p.mainBreakerA) {
+        checks.push(fail('panel.remedy', 'site', title,
+          `The proposed replacement main breaker (${r.mainBreakerA} A) is not smaller than the installed `
+          + `${p.mainBreakerA} A main, so it is not a derate. If the work has been done, remove the `
+          + 'proposed work; otherwise apply another remedy.', 'NEC 705.12(B)'));
+      }
+      const loadA = topology.loads?.byPanel.find(l => l.panelId === p.id)?.calculatedDemandA ?? null;
+      const loadTitle = `${p.label} derated main — load calculation`;
+      checks.push(viaLoadMethod(num(loadA)
+        ? (loadA <= r.mainBreakerA
+          ? pass('panel.remedy-load-calculation', 'site', loadTitle,
+              `${loadA.toFixed(1)} A calculated load on ${p.label} fits the proposed ${r.mainBreakerA} A `
+              + 'main breaker.', 'NEC 220 / 705.12(B)')
+          : fail('panel.remedy-load-calculation', 'site', loadTitle,
+              `${loadA.toFixed(1)} A calculated load on ${p.label} exceeds the proposed ${r.mainBreakerA} A `
+              + 'main breaker — the derate does not work for this panel.', 'NEC 220 / 705.12(B)'))
+        : unknown('panel.remedy-load-calculation', 'site', loadTitle,
+            `LOAD CALCULATION REQUIRED — a derated main breaker must carry ${p.label}'s calculated load, `
+            + `and no load calculation covers ${p.label}. The proposed ${r.mainBreakerA} A main has not `
+            + 'been shown to be adequate, so the derate is not complete.',
+            [`${REMEDY_LOAD_CALCULATION_TOKEN}${p.id}`], 'NEC 220 / 705.12(B)')));
+    } else if (num(p.busbarRatingA) && r.busbarRatingA <= p.busbarRatingA) {
+      checks.push(fail('panel.remedy', 'site', title,
+        `The proposed replacement panelboard's ${r.busbarRatingA} A bus is not larger than the installed `
+        + `${p.busbarRatingA} A bus, so it is not a busbar upgrade. If the work has been done, remove the `
+        + 'proposed work; otherwise apply another remedy.', 'NEC 705.12(B)'));
+    }
   }
 
   // ── STORAGE ───────────────────────────────────────────────────────────────

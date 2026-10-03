@@ -22,6 +22,7 @@
 
 import type { BOMLineItemV4 } from '@/lib/bom-types-v4';
 import type { ServiceTopology } from '@/lib/electrical/serviceTopology';
+import { panelRemedyWork } from '@/lib/electrical/serviceTopology';
 import {
   equipmentInstancesFromTopology, type EquipmentInstance,
 } from '@/lib/electrical/topologyEquipment';
@@ -97,6 +98,51 @@ function emitExpansion(
     manufacturer: nameOf(productId).manufacturer,
     model: `${nameOf(productId).model} expansion harness`,
   });
+}
+
+/** The id prefix of a proposed-work line — the BOM half of an applied 120% remedy. */
+export const PROPOSED_WORK_LINE_PREFIX = 'topology-remedy-';
+
+/** Is this line proposed work (a remedy's requirement) rather than a graph equipment instance? */
+export const isProposedWorkLine = (item: Pick<BOMLineItemV4, 'id'>): boolean =>
+  item.id.startsWith(PROPOSED_WORK_LINE_PREFIX);
+
+/**
+ * 🚨 AN APPLIED 120% REMEDY IS SOMETHING TO BUY — AND IT IS A REQUIREMENT, NOT A PART.
+ *
+ * [Apply] on the Service card recorded "replace MSP #1's 200 A main with 175 A" on the graph; the
+ * drawing shows the new breaker, so the bill of materials lists it. But the graph records a RATING,
+ * not a catalogue number — a main breaker must be the one listed for that panelboard — so the line
+ * states the requirement and is NOT orderable until the part is selected. Requirement ≠ part: no
+ * brand or catalogue number is invented here. The manufacturer is the panel's own, when recorded.
+ */
+function emitProposedWork(items: BOMLineItemV4[], t: ServiceTopology): void {
+  for (const p of t.panels) {
+    const r = p.remedy ?? null;
+    const work = panelRemedyWork(p);
+    if (!r || !work) continue;
+    const derate = r.kind === 'replace-main-breaker';
+    const what = derate ? `${r.mainBreakerA} A main breaker` : `${r.busbarRatingA} A bus panelboard, ${r.mainBreakerA} A main`;
+    items.push({
+      id: `${PROPOSED_WORK_LINE_PREFIX}${derate ? 'main-breaker' : 'panelboard'}-${p.id}`,
+      stageId: 'ac', stageLabel: 'AC / Service',
+      category: derate ? 'breaker' : 'Electrical',
+      manufacturer: derate ? (p.manufacturer ?? '') : '',
+      model: `${what} — replacement for ${p.label}`,
+      partNumber: `${p.id}-${derate ? `main-breaker-${r.mainBreakerA}a` : `panelboard-${r.busbarRatingA}a`}-replacement`,
+      description: `NEW WORK (NEC 705.12(B) remedy) — ${work.label}, ${work.replaces}`
+        + (derate ? '. Must be the main breaker listed for this panelboard; a load calculation must show the '
+          + 'panel\'s load fits it.' : '. A new panelboard: its manufacturer, SCCR and listing are the new panel\'s.'),
+      quantity: 1,
+      unit: 'ea',
+      necReference: 'NEC 705.12(B)',
+      derivedFrom: `service topology: ${p.label} applied remedy (${r.kind})`,
+      required: true,
+      nonOrderable: true,
+      nonOrderableReason: `EQUIPMENT SELECTION REQUIRED — the ${derate ? 'replacement main breaker' : 'replacement panelboard'} `
+        + `for ${p.label} is a rating, not a selected catalogue part`,
+    });
+  }
 }
 
 export function bomFromServiceTopology(t: ServiceTopology): TopologyBomResult {
@@ -185,8 +231,13 @@ export function bomFromServiceTopology(t: ServiceTopology): TopologyBomResult {
     quantities[item.partNumber] = (quantities[item.partNumber] ?? 0) + item.quantity;
   }
 
+  // Proposed work after the instance count: it is not an equipment instance the graph counts, so it
+  // stays out of `quantities` (and so out of `reconcileQuantities`), and it is not priced — it has no part.
+  emitProposedWork(items, t);
+
   // Price from the same lines, so "BOM quantity" and "priced quantity" are one number.
   for (const item of items) {
+    if (isProposedWorkLine(item)) continue;
     const unitCost = resolveUnitCost(item.partNumber, item.category);
     if (Number.isFinite(unitCost) && unitCost > 0) {
       item.unitCost = unitCost;
@@ -208,8 +259,9 @@ export function pricedQuantitiesFromBom(result: TopologyBomResult): Record<strin
   const out: Record<string, number> = {};
   for (const item of result.items) {
     // Accessories carry a derived part number; they are priced, but they are not a catalogue
-    // product whose count the topology states, so they do not enter the reconciliation.
-    if (item.partNumber.endsWith('-harness')) continue;
+    // product whose count the topology states, so they do not enter the reconciliation. Proposed
+    // work (an applied remedy) is a requirement, not an instance — it does not enter either.
+    if (item.partNumber.endsWith('-harness') || isProposedWorkLine(item)) continue;
     out[item.partNumber] = (out[item.partNumber] ?? 0) + item.quantity;
   }
   return out;

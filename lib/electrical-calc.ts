@@ -96,6 +96,19 @@ export interface InterconnectionInput {
   busRating: number;       // Panel bus bar rating (A) — e.g. 200
   mainBreaker: number;     // Main breaker size (A)    — e.g. 200
   solarBreaker?: number;   // Solar backfeed breaker (A) — computed if omitted
+  /**
+   * 🚨 THE RATINGS ABOVE ARE THE PANEL AFTER PROPOSED WORK when this is present — a 120% remedy the
+   * installer applied on the service graph (`PanelBoard.remedy`, see
+   * lib/electrical/systemConfigLegacyInterconnection.ts `complianceInterconnection`). The result says
+   * so, and a derate additionally raises the load calculation it still needs: the busbar arithmetic
+   * passing is not the derate passing.
+   */
+  proposedWork?: {
+    kind: 'replace-main-breaker' | 'replace-panelboard';
+    panelLabel: string;
+    label: string;
+    replaces: string;
+  };
 }
 
 export interface InterconnectionResult {
@@ -122,6 +135,8 @@ export interface InterconnectionResult {
   recommendedMainBreaker?: number;
   // Alternatives when LOAD_SIDE fails
   alternatives?: InterconnectionAlternative[];
+  /** Present ⇔ the ratings evaluated are the panel after an applied 120% remedy (proposed work). */
+  proposedWork?: InterconnectionInput['proposedWork'];
   issues: CalcIssue[];
 }
 
@@ -1028,6 +1043,11 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
   const icMainBreaker = input.interconnection?.mainBreaker ?? input.mainPanelAmps;
   // Use combined solar + battery backfeed for 120% rule check (NEC 705.12(B))
   const icSolarBreaker = input.interconnection?.solarBreaker ?? totalBackfeedWithBattery;
+  // An applied 120% remedy: the ratings above are the panel AFTER the proposed work — said, not hidden.
+  const icProposed = input.interconnection?.proposedWork ?? null;
+  const icProposedNote = icProposed
+    ? ` — ${icProposed.panelLabel} with the proposed ${icProposed.label.charAt(0).toLowerCase()}${icProposed.label.slice(1)} (${icProposed.replaces})`
+    : '';
 
   // Helper: nearest standard breaker at or below a value — single-sourced
   // from lib/electrical/stdSizes.ts (P0-5c).
@@ -1052,7 +1072,7 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
     interconnectionPasses = icSolarBreaker <= maxAllowedSolarBreaker;
 
     if (interconnectionPasses) {
-      interconnectionMessage = `120% Rule: PASS — Total backfeed (${icSolarBreaker}A) ≤ max allowed (${maxAllowedSolarBreaker}A). Formula: (${icBusRating}A bus × 120%) − ${icMainBreaker}A main = ${maxAllowedSolarBreaker}A max`;
+      interconnectionMessage = `120% Rule: PASS — Total backfeed (${icSolarBreaker}A) ≤ max allowed (${maxAllowedSolarBreaker}A). Formula: (${icBusRating}A bus × 120%) − ${icMainBreaker}A main = ${maxAllowedSolarBreaker}A max${icProposedNote}`;
       allInfos.push({
         code: 'I-BUSBAR-OK',
         severity: 'info',
@@ -1060,7 +1080,7 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
         necReference: interconnectionNecRef,
       });
     } else {
-      interconnectionMessage = `120% Busbar Rule Violation. Total backfeed (${icSolarBreaker}A) exceeds max allowed (${maxAllowedSolarBreaker}A). Formula: (${icBusRating}A bus × 120%) − ${icMainBreaker}A main = ${maxAllowedSolarBreaker}A max. Options: supply-side connection (insulated tap or utility-approved meter-socket lug adapter, NEC 705.11), derate main breaker, or upgrade panel bus.`;
+      interconnectionMessage = `120% Busbar Rule Violation. Total backfeed (${icSolarBreaker}A) exceeds max allowed (${maxAllowedSolarBreaker}A). Formula: (${icBusRating}A bus × 120%) − ${icMainBreaker}A main = ${maxAllowedSolarBreaker}A max${icProposedNote}. Options: supply-side connection (insulated tap or utility-approved meter-socket lug adapter, NEC 705.11), derate main breaker, or upgrade panel bus.`;
       interconnectionIssues.push({
         code: 'E-BUSBAR-120',
         severity: 'error',
@@ -1071,6 +1091,22 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
         suggestion: `Use Supply-Side Tap (NEC 705.11), derate main to ${prevStandardOCPD((icBusRating * 1.2) - icSolarBreaker)}A, or upgrade bus to ${Math.ceil(icSolarBreaker / 0.2 + icMainBreaker / 1)}A`,
       });
       allErrors.push(interconnectionIssues[0]);
+    }
+    // 🚨 A DERATE THAT PASSES THE BUSBAR ARITHMETIC IS NOT A FINISHED DERATE. The smaller main must
+    // carry the panel's calculated load, and nothing here has that number — so it is raised, loudly,
+    // as the input the remedy still needs (the service graph's `panel.remedy-load-calculation` check
+    // holds the verdict), never folded into the 120% PASS.
+    if (icProposed?.kind === 'replace-main-breaker') {
+      const _derate: CalcIssue = {
+        code: 'W-DERATE-LOAD-CALC-REQUIRED',
+        severity: 'warning',
+        message: `NOT EVALUATED — load calculation required: ${icProposed.panelLabel}'s proposed ${icProposed.label.charAt(0).toLowerCase()}${icProposed.label.slice(1)} (${icProposed.replaces}) must be shown to carry the panel's calculated load (NEC 220).`,
+        value: icMainBreaker,
+        necReference: 'NEC 220 / 705.12(B)',
+        suggestion: 'Provide the load calculation (Full load analysis in System Config) for this panel, or apply a different remedy.',
+      };
+      interconnectionIssues.push(_derate);
+      allWarnings.push(_derate);
     }
 
   } else if (icMethod === 'SUPPLY_SIDE_TAP') {
@@ -1307,6 +1343,7 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
       ? 'NOT_EVALUATED'
       : (interconnectionPasses ? 'PASS' : 'FAIL'),
     notEvaluated: interconnectionNotEvaluated,
+    ...(icProposed ? { proposedWork: icProposed } : {}),
   };
 
   // Legacy busbar result (for backward compatibility)

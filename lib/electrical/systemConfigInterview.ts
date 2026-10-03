@@ -33,7 +33,7 @@ import type {
   ServiceTopology, SolarCoupling, TopologyEvaluation, PoiRelationship,
 } from '@/lib/electrical/serviceTopology';
 import {
-  isOptionalCheck, servicePhaseInfo, serviceExistingOrNew, existingServiceReading, type ServicePhase,
+  isOptionalCheck, servicePhaseInfo, serviceExistingOrNew, existingServiceReading, panelRemedyWork, type ServicePhase,
 } from '@/lib/electrical/serviceTopology';
 import { buildServiceOverview, REQUIREMENT_OWNERS } from '@/lib/electrical/topologyOverview';
 import { buildUtilityDisconnectsItems, supersededByUtilityDisconnects } from '@/lib/electrical/systemConfigUtilityDisconnects';
@@ -382,7 +382,9 @@ export function buildSystemConfigInterview(input: InterviewInput): SystemConfigI
       section: 'service',
       question: `${p.label}: main breaker and busbar rating?`,
       state: ok ? 'answered' : 'needs-answer',
-      answer: `Main ${p.mainBreakerA ?? '—'} A · Bus ${p.busbarRatingA ?? '—'} A`,
+      // The installed reading, then any applied remedy as what it is — proposed work, not the reading.
+      answer: `Main ${p.mainBreakerA ?? '—'} A · Bus ${p.busbarRatingA ?? '—'} A`
+        + (panelRemedyWork(p) ? ` · proposed: ${panelRemedyWork(p)!.label}` : ''),
       source: ok ? 'Installer entered' : 'Not established',
       why: 'NEC 705.12(B) is evaluated on THIS panel’s busbar and main breaker — never the service’s.',
       owner: 'Installer (panel label)',
@@ -718,7 +720,10 @@ export function buildSystemConfigInterview(input: InterviewInput): SystemConfigI
   const checks = input.evaluation?.checks ?? [];
   // The busbar verdicts the graph's engine reached, per panel / per generation panel — read, never
   // recomputed. (The page's old "Max PV" strip did its own `bus × 1.2 − main` over `?? 200`.)
-  const BUSBAR_CHECKS = new Set(['domain.busbar-705-12', 'aggregation.busbar']);
+  // An applied remedy's own verdicts (a derate's load calculation, a remedy that is not one) sit
+  // beside them, so a FAIL there is a required action and not a number hidden in the overall count.
+  const BUSBAR_CHECKS = new Set(['domain.busbar-705-12', 'aggregation.busbar', 'panel.remedy',
+    'panel.remedy-load-calculation']);
   for (const c of checks.filter(x => BUSBAR_CHECKS.has(x.id))) {
     engineering.push({
       id: `engineering.${c.id}.${c.scope}`,

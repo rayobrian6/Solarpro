@@ -158,13 +158,35 @@ describe('INTERCONNECTION — one control over the service graph', () => {
     expect(screen.getByTestId('sys-interconnection-code').textContent).toBe('NEC 705.11');
   });
 
-  it('🚨 a 120% remedy already recorded survives a load-side answer, and reads as a remedy, not a connection', async () => {
-    const { writes, mirrored } = mountCard({ topology: house200(), legacy: 'MAIN_BREAKER_DERATE' });
-    expect(screen.getByTestId('sys-interconnection-remedy').textContent).toBe('120% remedy recorded: Main breaker derate');
+  it('🚨 a legacy 120% remedy TOKEN is an earlier note, never "recorded": it says not applied and points to [Apply]', async () => {
+    // Before: "120% remedy recorded: Main breaker derate" — with nothing in the graph recording it, no
+    // panel, no rating, and the compliance engine passing a derate nobody had applied.
+    const { writes, mirrored, onGoToCard } = mountCard({ topology: house200(), legacy: 'MAIN_BREAKER_DERATE' });
+    expect(screen.queryByTestId('sys-interconnection-remedy')).toBeNull();
+    const note = screen.getByTestId('sys-interconnection-remedy-note').textContent!;
+    expect(note).toContain('Earlier remedy note: Main breaker derate — not applied');
+    expect(note).not.toMatch(/recorded/i);
+    fireEvent.click(screen.getByTestId('sys-interconnection-remedy-note-link'));
+    expect(anchorOf(onGoToCard.mock.calls[0][0])).toBe('sc-card-service');
+    // Nothing migrates it by itself: a load-side answer keeps the note while the graph has no remedy.
     pick('sys-interconnection', 'load-side-busbar');
     await waitFor(() => expect(writes).toHaveLength(1));
+    expect(writes[0].panels.every(p => !p.remedy)).toBe(true);
     expect(mirrored).toEqual([]);
     expect(screen.getByTestId('legacy-scalar').textContent).toBe('MAIN_BREAKER_DERATE');
+  });
+
+  it('a remedy APPLIED on a panel is the record: stated with its panel and rating, and the scalar follows the graph', async () => {
+    const t = house200();
+    const withRemedy = { ...t, panels: t.panels.map(p => ({ ...p, mainBreakerA: 200, busbarRatingA: 200,
+      remedy: { kind: 'replace-main-breaker' as const, mainBreakerA: 175 } })) };
+    const { writes, mirrored } = mountCard({ topology: withRemedy, legacy: 'MAIN_BREAKER_DERATE' });
+    expect(screen.getByTestId('sys-interconnection-remedy').textContent)
+      .toContain('120% remedy applied (proposed work): MSP #1 — Replacement main breaker 175 A');
+    expect(screen.queryByTestId('sys-interconnection-remedy-note')).toBeNull();
+    pick('sys-interconnection', 'load-side-busbar');
+    await waitFor(() => expect(writes).toHaveLength(1));
+    await waitFor(() => expect(mirrored).toEqual(['LOAD_SIDE']));
   });
 
   it('a 120% FAIL is flagged on the card and points to the remedies on the Service card', () => {

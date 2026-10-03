@@ -48,6 +48,7 @@ import {
   serviceExistingOrNew as serviceExistingOrNewSld,
   existingServiceReading as existingServiceReadingSld,
   sourcesForAggregationInput as sourcesForAggregationInputSld,
+  panelRemedyWork as panelRemedyWorkSld,
   type ServiceTopology as ServiceTopologyForSld,
   type TopologyEvaluation as TopologyEvaluationForSld,
   type DerAggregationPanel as DerAggregationPanelForSld,
@@ -3016,14 +3017,22 @@ function overlayServiceTopologyRows(
     out.splice(i, 1, ...next);
   };
 
+  // An applied remedy reads "(E) 200 A main → (N) 175 A" — the work beside the installed rating.
+  const panelRow = (p: ServiceTopologyForSld['panels'][number]): [string, string] => {
+    const r = p.remedy ?? null;
+    if (!r) return [`${p.label}`, `${A(p.busbarRatingA)} bus / ${A(p.mainBreakerA)} main`];
+    const bus = r.kind === 'replace-panelboard'
+      ? `(E) ${A(p.busbarRatingA)} → (N) ${r.busbarRatingA} A bus` : `${A(p.busbarRatingA)} bus`;
+    return [`${p.label}`, `${bus} / (E) ${A(p.mainBreakerA)} → (N) ${r.mainBreakerA} A main`];
+  };
   replace('Main Panel Rating', [
     ['Service Rating', serviceRatingLabelSld(t)],
     ...t.branches.map(b => [`${b.label}`, `${b.ratedAmps} A`] as [string, string]),
-    ...t.panels.map(p => [`${p.label}`, `${A(p.busbarRatingA)} bus / ${A(p.mainBreakerA)} main`] as [string, string]),
+    ...t.panels.map(panelRow),
   ]);
   replace('Main Panel', [
     ['Service Rating', serviceRatingLabelSld(t)],
-    ...t.panels.map(p => [`${p.label}`, `${A(p.busbarRatingA)} bus / ${A(p.mainBreakerA)} main`] as [string, string]),
+    ...t.panels.map(panelRow),
     ...t.domains.map(d => [`${d.label} Gateway`, d.gateway.label] as [string, string]),
   ]);
   replace('Bus Rating', []);
@@ -3107,10 +3116,24 @@ const ampsSld = (v: number | null | undefined) => (typeof v === 'number' ? `${v}
 
 function servicePanelLinesSld(panel: ServiceTopologyForSld['panels'][number]): SectionLine[] {
   const amps = ampsSld;
+  // 🚨 AN APPLIED 120% REMEDY IS DRAWN AS NEW WORK, BESIDE WHAT IS INSTALLED — (N) on the rating the
+  // work changes, the installed figure kept on the line under it as (E). Never the new figure alone,
+  // as if it were already on the wall; never the installed one alone, as if nothing were proposed.
+  const r = panel.remedy ?? null;
+  const work = panelRemedyWorkSld(panel);
+  const newBus = r?.kind === 'replace-panelboard';
   return [
     { t: panel.label, sz: F.hdr, bold: true },
-    { t: `${amps(panel.busbarRatingA)} BUS`, sz: F.sub },
-    { t: `${amps(panel.mainBreakerA)} MAIN`, sz: F.sub },
+    ...(newBus
+      ? [{ t: `(N) ${r.busbarRatingA} A BUS`, sz: F.sub, bold: true, fill: SEC_AMBER } as SectionLine,
+         { t: `(E) ${amps(panel.busbarRatingA)} BUS — REPLACED`, sz: F.tiny }]
+      : [{ t: `${amps(panel.busbarRatingA)} BUS`, sz: F.sub }]),
+    ...(r
+      ? [{ t: `(N) ${r.mainBreakerA} A MAIN`, sz: F.sub, bold: true, fill: SEC_AMBER } as SectionLine,
+         { t: `(E) ${amps(panel.mainBreakerA)} MAIN — REPLACED`, sz: F.tiny }]
+      : [{ t: `${amps(panel.mainBreakerA)} MAIN`, sz: F.sub }]),
+    ...(work ? [{ t: `NEW WORK — ${work.kind === 'replace-main-breaker' ? 'MAIN BREAKER DERATE' : 'PANELBOARD REPLACEMENT'} (NEC 705.12(B))`,
+                  sz: F.tiny, fill: SEC_AMBER, bold: true } as SectionLine] : []),
     ...(panel.backedUp ? [{ t: 'BACKED UP', sz: F.tiny, fill: SEC_BLUE } as SectionLine] : []),
   ];
 }

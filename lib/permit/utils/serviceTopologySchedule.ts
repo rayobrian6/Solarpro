@@ -29,7 +29,7 @@
 import type { ServiceTopology } from '@/lib/electrical/serviceTopology';
 import {
   evaluateServiceTopology, sizeAggregationPanel, governingArticleFor, topologyNodeLabel,
-  isOptionalCheck, serviceRatingLabel, EXISTING_OR_NEW_TOKEN,
+  isOptionalCheck, serviceRatingLabel, EXISTING_OR_NEW_TOKEN, panelRemedyWork, REMEDY_LOAD_CALCULATION_TOKEN,
 } from '@/lib/electrical/serviceTopology';
 import {
   equipmentInstancesFromTopology, equipmentQuantities, type EquipmentInstanceKind,
@@ -135,15 +135,24 @@ export function serviceTopologyScheduleRows(t: ServiceTopology | null | undefine
   }
 
   for (const p of t.panels) {
+    // 🚨 AN APPLIED 120% REMEDY IS SCOPE ON THE PACKAGE: the installed rating stays (E), the work is
+    // stated beside it (N), and the notes say what is being bought — never the new figure alone, as if
+    // it were what is on the wall.
+    const work = panelRemedyWork(p);
+    const r = p.remedy ?? null;
     rows.push({
       // 🚨 MSP #1 AND MSP #2 STAY SEPARATELY IDENTIFIABLE, same model and same rating or not.
       tag: p.label.toUpperCase(),
       deviceType: 'panelboard',
       manufacturer: '', model: '',
       domain: domainOfPanel.get(p.id) ?? '',
-      rating: `${A(p.busbarRatingA)} bus`,
-      ocpd: `${A(p.mainBreakerA)} main`,
-      notes: p.backedUp ? 'Backed-up panel' : 'Not backed up',
+      rating: r?.kind === 'replace-panelboard'
+        ? `${A(p.busbarRatingA)} bus (E) → ${r.busbarRatingA} A bus (N)` : `${A(p.busbarRatingA)} bus`,
+      ocpd: r ? `${A(p.mainBreakerA)} main (E) → ${r.mainBreakerA} A main (N)` : `${A(p.mainBreakerA)} main`,
+      notes: [
+        p.backedUp ? 'Backed-up panel' : 'Not backed up',
+        work ? `PROPOSED WORK (NEC 705.12(B) remedy) — ${work.label}, ${work.replaces}` : '',
+      ].filter(Boolean).join('. '),
     });
   }
 
@@ -457,6 +466,11 @@ export function serviceTopologyReleaseReadiness(
   if (needs.includes('device.productId')) {
     requirements.push('NOT EVALUATED — DISCONNECT / SWITCH EQUIPMENT SELECTION REQUIRED');
   }
+  // A derated main is not complete without the load calculation that shows the panel fits it.
+  for (const n of needs.filter(x => x.startsWith(REMEDY_LOAD_CALCULATION_TOKEN))) {
+    const panel = t.panels.find(p => p.id === n.slice(REMEDY_LOAD_CALCULATION_TOKEN.length));
+    requirements.push(`LOAD CALCULATION REQUIRED — DERATED MAIN BREAKER (${(panel?.label ?? 'panel').toUpperCase()})`);
+  }
   if (needs.includes('device.inlineOnNodeId')) {
     requirements.push('NOT EVALUATED — SAFETY SWITCH PLACEMENT REQUIRED (WHICH PATH IT INTERRUPTS)');
   }
@@ -479,6 +493,7 @@ export function serviceTopologyReleaseReadiness(
     if (covered.has(n)) continue;
     if (n.startsWith('service.existingEquipment.')) continue;
     if (n.startsWith('manufacturer-document:') || n.startsWith('manufacturer-limit:') || n.startsWith('sccr:')) continue;
+    if (n.startsWith(REMEDY_LOAD_CALCULATION_TOKEN)) continue;
     requirements.push(`NOT EVALUATED — ${n.toUpperCase()} REQUIRED`);
   }
 
