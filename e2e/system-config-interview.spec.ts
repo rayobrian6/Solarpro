@@ -216,4 +216,137 @@ test.describe('System Config V3 — the existing cards, real browser, real route
       await expect(dialog).toContainText(/\?/);
     }
   });
+  // ══════════════════════════════════════════════════════════════════════════
+  // ENGINEERING CLOSURE — LIVE ACCEPTANCE (Ray, closure brief §7)
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /** Text of the sheet the page itself requests when the SLD tab opens. */
+  async function requestedSheetText(page: Page): Promise<string> {
+    const sld = page.waitForResponse(r => r.url().includes('/api/engineering/sld') && r.request().method() === 'POST',
+      { timeout: 90_000 });
+    await page.getByRole('button', { name: /Single-Line Diagram/ }).first().click();
+    const res = await sld;
+    expect(res.status()).toBe(200);
+    const raw = await res.text();
+    let svg = raw;
+    try { svg = String(JSON.parse(raw).svg ?? raw); } catch { /* the route answered with the SVG itself */ }
+    return svg.replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/\s+/g, ' ');
+  }
+
+  /** The BOM the page itself requests from the Bill of Materials tab's [Generate BOM]. */
+  async function requestedBom(page: Page): Promise<{ items: Array<Record<string, any>>; body: Record<string, any> }> {
+    await page.getByRole('button', { name: /Bill of Materials/ }).first().click();
+    const bomRes = page.waitForResponse(r => r.url().includes('/api/engineering/bom') && r.request().method() === 'POST',
+      { timeout: 90_000 });
+    await page.getByRole('button', { name: /Generate BOM|Regenerate/ }).first().click();
+    const res = await bomRes;
+    expect(res.status()).toBe(200);
+    const body = await res.json() as Record<string, any>;
+    const items = (body.bom?.items ?? body.items ?? []) as Array<Record<string, any>>;
+    return { items, body };
+  }
+
+  const itemText = (i: Record<string, any>) =>
+    [i.manufacturer, i.model, i.partNumber, i.description, i.category].filter(Boolean).join(' ');
+
+  test('CLOSURE · fresh project: modules and DC known, no inverter, strings NOT engineered — through reload, SLD and BOM', async ({ page }) => {
+    const projectId = await seedRaysArray(page);           // 37 × 440 W placed in Design; nothing else chosen
+    await openSystemConfig(page, projectId);
+
+    const facts = page.getByTestId('engineering-summary-facts');
+    await expect(page.getByTestId('summary-fact-pv-dc-size')).toHaveText('16.28 kW');
+    await expect(facts).toContainText('37');
+    await expect(facts).not.toContainText('20 / 17');
+
+    // Inverters & Strings: the modules are known, the stringing is not — and nothing pretends otherwise.
+    const inv = page.locator('#sc-card-inverters');
+    await expect(page.getByTestId('inv-stringing-pending')).toContainText('Stringing pending equipment selection');
+    await expect(page.getByTestId('inv-stringing-pending')).toContainText('37');
+    await expect(inv).not.toContainText(/20\s*\/\s*17/);
+    await expect(inv, 'a phantom inverter row').not.toContainText(/String Inverter\s*·/);
+    await expect(page.locator('text=/\\d+\\.\\d\\d kW AC/'), 'a PV AC rating with no PV inverter').toHaveCount(0);
+
+    // Autosave, reload: no partition resurrects.
+    await page.waitForTimeout(4_000);
+    await reloadSystemConfig(page);
+    await expect(page.getByTestId('inv-stringing-pending')).toContainText('Stringing pending equipment selection');
+    await expect(page.locator('#sc-card-inverters')).not.toContainText(/20\s*\/\s*17/);
+
+    // The drawing: 37 modules, stringing pending — no invented strings.
+    const sheet = await requestedSheetText(page);
+    expect(sheet).toContain('37');
+    expect(sheet.toUpperCase()).toContain('STRINGING PENDING');
+    expect(sheet, 'the SLD drew the fabricated partition').not.toMatch(/20\s*\/\s*17|2 × (20|17)/);
+
+    // The BOM: no PV inverter nobody chose, no string hardware for strings nobody engineered.
+    const { items, body } = await requestedBom(page);
+    expect(items.length).toBeGreaterThan(0);
+    const inverterLines = items.filter(i => /inverter/i.test(String(i.category ?? '')) && !/micro/i.test(itemText(i)));
+    expect(inverterLines.map(itemText), 'the BOM ordered a PV inverter nobody chose').toEqual([]);
+    expect(JSON.stringify(body)).toMatch(/Stringing pending equipment selection/i);
+  });
+
+  test('CLOSURE · Ray\'s Tesla job: module conflict resolved → engineered strings → save, reload, SLD, BOM agree', async ({ page }) => {
+    const projectId = await seedRaysArray(page);
+    // The live defect: an automatic swap had written a 620 W module record under Design's 440 W array.
+    await api(page, 'POST', `/api/projects/${projectId}/equipment`, {
+      selectedPanel: { id: 'panel-cs2', manufacturer: 'Canadian Solar', model: 'TOPBiHiKu7 620W', wattage: 620 },
+    });
+    await api(page, 'PUT', `/api/projects/${projectId}/service-topology`, { topology: buildRaysIntendedJob().topology });
+    await openSystemConfig(page, projectId);
+    // SolarPro does not pick which one is right — it says so, and engineers no strings on a contradiction.
+    await expect(page.getByTestId('engineering-readiness')).toContainText(/module conflict/i);
+
+    // Resolved where the record lives (Design / equipment selection): the module Design placed.
+    await api(page, 'POST', `/api/projects/${projectId}/equipment`, {
+      selectedPanel: { id: 'panel-fence-ps1', manufacturer: 'Philadelphia Solar', model: 'Nexus PS-MNB108(HCBF)-440W', wattage: 440 },
+    });
+    await reloadSystemConfig(page);
+    await expect(page.getByTestId('engineering-readiness')).not.toContainText(/module conflict/i);
+
+    // The engineered system, stated once.
+    await expect(page.getByTestId('summary-fact-pv-inverter')).toHaveText('None — DC coupled to storage');
+    await expect(page.getByTestId('summary-fact-pv-dc-size')).toHaveText('16.28 kW');
+    await expect(page.getByTestId('summary-fact-storage')).toHaveText('4 × Tesla Powerwall 3');
+    await expect(page.getByTestId('summary-fact-backup-controllers')).toHaveText('2 × Tesla Backup Gateway 3');
+    await expect(page.getByTestId('summary-fact-pv-strings')).toHaveText('5 (9 / 9 / 9 / 8 / 2)');
+    await expect(page.getByTestId('flow-node-service')).toContainText('400 A');
+    await expect(page.getByTestId('summary-fact-distribution')).toContainText('2 × 200 A main panels');
+    await expect(page.locator('text=/\\d+\\.\\d\\d kW AC/')).toHaveCount(0);
+
+    // Strings → Powerwall PV inputs: the recommendation is written only on Accept.
+    await page.getByTestId('inv-string-review').click();
+    await expect(page.getByTestId('inv-string-editor')).toBeVisible();
+    await Promise.all([graphWrite(page), page.getByTestId('inv-string-accept').click()]);
+    await page.waitForTimeout(4_000);                       // autosave of the page config
+
+    // Reload: nothing reverts, nothing is re-fabricated.
+    await reloadSystemConfig(page);
+    await expect(page.getByTestId('summary-fact-pv-strings')).toHaveText('5 (9 / 9 / 9 / 8 / 2)');
+    await expect(page.getByTestId('summary-fact-pv-inverter')).toHaveText('None — DC coupled to storage');
+    await expect(page.getByTestId('summary-fact-storage')).toHaveText('4 × Tesla Powerwall 3');
+    await expect(page.locator('#sc-card-inverters')).not.toContainText(/Not assigned/);
+
+    const stored = await page.request.get(`/api/projects/${projectId}`, { headers: { 'X-Dev-Auth': 'bypass' } });
+    const proj = await stored.json() as { data?: { selectedPanel?: { id?: string } } };
+    expect(proj.data?.selectedPanel?.id, 'the module record was rewritten by an automatic writer').toBe('panel-fence-ps1');
+
+    // The drawing.
+    const sheet = await requestedSheetText(page);
+    expect(sheet).toContain('37 × 440W');
+    expect(sheet).toContain('NONE — DC COUPLED TO STORAGE');
+    expect(sheet).not.toMatch(/620W|22\.94 kW|20\s*\/\s*17/);
+    expect(sheet, 'a microinverter path was drawn on a job with no PV inverter').not.toMatch(/MICROINVERTERS/);
+
+    // The parts list: the graph's equipment, no PV inverter nobody chose, no 620 W module.
+    const { items } = await requestedBom(page);
+    const text = items.map(itemText).join(' | ');
+    const pw3 = items.filter(i => /powerwall\s*3/i.test(itemText(i)) && !/expansion/i.test(itemText(i)));
+    expect(pw3.reduce((n, i) => n + Number(i.quantity ?? 0), 0), text).toBe(4);
+    const gw = items.filter(i => /gateway\s*3/i.test(itemText(i)));
+    expect(gw.reduce((n, i) => n + Number(i.quantity ?? 0), 0), text).toBe(2);
+    expect(text).not.toMatch(/620W|TOPBiHiKu7/);
+    const inverterLines = items.filter(i => /inverter/i.test(String(i.category ?? '')) && !/powerwall|micro/i.test(itemText(i)));
+    expect(inverterLines.map(itemText), 'the BOM ordered a PV inverter nobody chose').toEqual([]);
+  });
 });
