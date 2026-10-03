@@ -23,8 +23,14 @@
 //   · A PARTIAL MODEL IS NOT A SMALLER LOAD. The sums are shown only when every panelboard has a
 //     figure. Until then the item says they cannot be summed. It never shows a subtotal.
 //   · OPTIONAL MEANS IT NEVER HOLDS THE JOB UP. Absent, it is a known fact ("none — optional"), not
-//     a question. It adds no release blocker and no needs-answer state of its own. When it is present
-//     and a check reads it, the item states exactly what that check concluded.
+//     a question. Empty or partial, it is still the installer's own entry ('answered'), never amber:
+//     it adds no release blocker, no needs-answer and no needs-verification state of its own. When it
+//     is present and a check reads it, the item states exactly what that check concluded.
+//   · IT NEVER SILENTLY REPLACES A DEMAND RECORDED DIRECTLY. The engine reads the load model as soon
+//     as it holds one figure, and from then on a demand recorded on the service, its paths or its
+//     systems is not read at all. A partial model sums to nothing, so a recorded demand that FAILED
+//     would simply stop failing. The item says so before the first figure and after it, in a
+//     verdict-style row that carries the recorded figure's own FAIL.
 //   · THE METHOD IS NEVER ASSUMED AND NEVER OFFERED WHERE IT CANNOT APPLY. The installer chooses it
 //     when adding the analysis (the inspector, and `setPanelLoad` on its own, default to NEC 220.82).
 //     A method the electrical system cannot use is not offered, and the item says why. The gate is
@@ -39,7 +45,9 @@ import type { AnswerResult } from '@/lib/electrical/systemConfigAnswers';
 import type {
   ServiceTopology, LoadCalculationMethod, ServicePhase, TopologyCheck,
 } from '@/lib/electrical/serviceTopology';
-import { isOptionalCheck, resolveDemands, servicePhaseInfo } from '@/lib/electrical/serviceTopology';
+import {
+  evaluateServiceTopology, isOptionalCheck, resolveDemands, servicePhaseInfo,
+} from '@/lib/electrical/serviceTopology';
 import { setLoadModel, setPanelLoad } from '@/lib/electrical/topologyAuthoring';
 
 const done = (topology: ServiceTopology, did: string): AnswerResult => ({ ok: true, topology, did });
@@ -56,6 +64,14 @@ export const LOAD_ANALYSIS_ITEM_ID = 'engineering.loads';
 export const LOAD_CONSUMING_CHECK_IDS: ReadonlySet<string> = new Set([
   'load.calculation', 'service.demand', 'branch.demand', 'domain.backed-up-load',
 ]);
+
+/** The consumers that compare a demand against a rating. These are the ones a recorded demand can FAIL. */
+const DEMAND_COMPARISON_CHECK_IDS: ReadonlySet<string> = new Set([
+  'service.demand', 'branch.demand', 'domain.backed-up-load',
+]);
+
+/** The id of the row about a demand recorded directly, shown while a load analysis exists beside it. */
+export const RECORDED_DEMAND_ITEM_ID = `${LOAD_ANALYSIS_ITEM_ID}.recorded`;
 
 // ── The methods, and which electrical systems they apply to ─────────────────
 
@@ -144,9 +160,36 @@ export interface LoadAnalysisPicture {
    */
   readsRecordedDemand: boolean;
   recordedServiceA: number | null;
+  /**
+   * Every demand recorded directly on the service, its paths or its systems, in installer words
+   * ("450.0 A service demand"), WHETHER OR NOT the engineering still reads it. Null when none is.
+   */
+  recordedDemand: string | null;
+  /**
+   * The load model holds a figure, so the engineering reads the model and no longer reads
+   * `recordedDemand`. Only true when there is a recorded demand to supersede.
+   */
+  recordedSuperseded: boolean;
 }
 
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+
+/** The demand recorded directly, read the way the engine reads it when there is no load model. */
+function recordedDemandWords(t: ServiceTopology): string | null {
+  const r = resolveDemands({ ...t, loads: null });
+  if (r.source !== 'recorded') return null;
+  const parts: string[] = [];
+  if (r.serviceA !== null) parts.push(`${amps(r.serviceA)} service demand`);
+  for (const b of t.branches) {
+    const v = r.branchA[b.id];
+    if (finite(v)) parts.push(`${amps(v)} on ${b.label}`);
+  }
+  for (const d of t.domains) {
+    const v = r.domainBackedUpA[d.id];
+    if (finite(v)) parts.push(`${amps(v)} backed-up load on ${d.label}`);
+  }
+  return parts.join(', ');
+}
 
 export function describeLoadAnalysis(t: ServiceTopology): LoadAnalysisPicture {
   const loads = t.loads ?? null;
@@ -159,6 +202,7 @@ export function describeLoadAnalysis(t: ServiceTopology): LoadAnalysisPicture {
   // 🚨 THE ONE GATE ON THE SUMS: every panelboard on the service has a figure.
   const everyPanelEntered = !!loads && panels.length > 0 && entered === panels.length;
   const d = resolveDemands(t);
+  const recorded = recordedDemandWords(t);
   const sums = everyPanelEntered && d.source === 'load-model' && d.serviceA !== null
     ? {
         aggregateA: d.serviceA,
@@ -178,6 +222,8 @@ export function describeLoadAnalysis(t: ServiceTopology): LoadAnalysisPicture {
     sums,
     readsRecordedDemand: d.source === 'recorded',
     recordedServiceA: d.source === 'recorded' ? d.serviceA : null,
+    recordedDemand: recorded,
+    recordedSuperseded: recorded !== null && d.source === 'load-model',
   };
 }
 
@@ -188,7 +234,8 @@ const checkState = (c: TopologyCheck): ItemState =>
 
 /**
  * "Is there a full load analysis?" plus, where the engineering read figures from it, each consuming
- * check's verdict.
+ * check's verdict, and — while an analysis exists beside a demand recorded directly — what happens to
+ * that recorded demand.
  *
  * Asked only once the service exists: until then there is no panelboard to enter demand against,
  * and the service rating is the question.
@@ -212,10 +259,27 @@ export function buildLoadAnalysisItems(input: InterviewInput): InterviewItem[] {
   const nothing = !pic.present && !pic.readsRecordedDemand;
   const fails = stated.filter(c => c.conclusion === 'FAIL');
   const requiredOpen = stated.filter(c => c.conclusion === 'NOT_EVALUATED');
+
+  // 🚨 A DEMAND RECORDED DIRECTLY, BESIDE AN ANALYSIS. What it concludes is the engine's: the live
+  // evaluation while it is still read; once the model supersedes it, the engine run on this same graph
+  // as it reads with no model. Those are the recorded figures' own verdicts, not a comparison made here.
+  const recorded = pic.present ? pic.recordedDemand : null;
+  const recordedFails = recorded === null ? []
+    : (pic.recordedSuperseded ? evaluateServiceTopology({ ...t, loads: null }).checks : consuming)
+        .filter(c => DEMAND_COMPARISON_CHECK_IDS.has(c.id) && c.conclusion === 'FAIL');
+  // The analysis replaces the recorded figures only once the engineering evaluates it whole.
+  const replaced = pic.complete && !pic.methodOutOfScope;
+  /** A recorded FAIL the engineering no longer reads, with nothing yet in its place. */
+  const failNoLongerRead = pic.recordedSuperseded && recordedFails.length > 0 && !replaced;
+
+  // 🚨 EMPTY OR PARTIAL IS THE INSTALLER'S OWN ENTRY, NEVER AN AMBER STATE. An optional analysis
+  // half filled in holds nothing up, so it must not turn the Engineering card amber by itself.
+  // Needs-verification is kept for what needs it: a method this system cannot use, a required check
+  // left open, or no evaluation in hand. (A recorded FAIL it hid is amber on its own row, below.)
   const state: ItemState = nothing ? 'answered'
     : fails.length > 0 ? 'fails'
       : !input.evaluation || pic.methodOutOfScope || requiredOpen.length > 0 ? 'needs-verification'
-        : pic.present && !pic.complete ? 'needs-verification'
+        : pic.present && !pic.complete ? 'answered'
           : 'calculated';
 
   const missing = pic.panels.filter(p => p.demandA === null).map(p => p.label);
@@ -230,6 +294,9 @@ export function buildLoadAnalysisItems(input: InterviewInput): InterviewItem[] {
             : `${pic.entered} of ${pic.panels.length} panelboard${pic.panels.length === 1 ? '' : 's'} with a figure`,
           pic.sums ? `${amps(pic.sums.aggregateA)} aggregate`
             : pic.panels.length > 0 ? 'cannot be summed until every panelboard has a figure' : null,
+          recorded === null ? null
+            : pic.recordedSuperseded ? `supersedes the demand recorded directly (${recorded})`
+              : `the demand recorded directly (${recorded}) is read until the first figure`,
         ].filter(Boolean).join(' · ');
 
   const why = pic.methodOutOfScope
@@ -239,7 +306,11 @@ export function buildLoadAnalysisItems(input: InterviewInput): InterviewItem[] {
       : pic.present && !pic.complete
         ? `${missing.join(', ')} ${missing.length === 1 ? 'has' : 'have'} no figure. A partial load `
           + 'analysis is not a smaller load, so the aggregate, service-path and backed-up demand cannot '
-          + 'be summed until every panelboard has one. Optional: nothing waits on it.'
+          + 'be summed until every panelboard has one.'
+          // "Nothing waits on it" is said only where it is true: no FAIL, and no recorded FAIL it hid.
+          + (fails.length > 0 ? ''
+            : failNoLongerRead ? ' The demand recorded directly failed, and it is no longer read: see below.'
+              : ' Optional: nothing waits on it.')
           + (pic.readsRecordedDemand ? ' Until a panelboard has a figure, the engineering still reads the '
             + 'demand recorded directly.' : '')
         : !input.evaluation
@@ -259,8 +330,42 @@ export function buildLoadAnalysisItems(input: InterviewInput): InterviewItem[] {
     options: choices.available,
     value: pic.method,
     why,
-    owner: 'Installer or engineer — optional',
+    // A FAIL is not optional to fix, so it is not labelled so.
+    owner: state === 'fails' ? 'Installer or engineer' : 'Installer or engineer — optional',
   }];
+
+  // 🚨 THE RECORDED DEMAND, BEFORE AND AFTER THE FIRST FIGURE — never replaced in silence.
+  if (recorded !== null) {
+    const verdicts = recordedFails.map(c => c.detail).join(' ');
+    items.push({
+      id: RECORDED_DEMAND_ITEM_ID,
+      section: 'engineering',
+      question: 'Demand recorded directly on the service',
+      state: !pic.recordedSuperseded ? (recordedFails.length > 0 ? 'fails' : 'answered')
+        : failNoLongerRead ? 'needs-verification' : 'answered',
+      answer: pic.recordedSuperseded
+        ? `The demand recorded directly (${recorded}) is superseded by this analysis and no longer read.`
+          + (recordedFails.length > 0 ? ` It failed — ${verdicts}` : '')
+        : `The demand recorded directly (${recorded}) is read until the first panelboard figure is entered, `
+          + 'which supersedes it.' + (recordedFails.length > 0 ? ` It fails — ${verdicts}` : ''),
+      source: 'Installer entered',
+      why: !pic.recordedSuperseded
+        ? 'The first panelboard figure switches the engineering from this recorded demand to the analysis. '
+          + 'From then on this figure is not read, and until every panelboard has a figure nothing evaluates '
+          + 'the demand' + (recordedFails.length > 0 ? ', so this FAIL would stop being reported without being '
+            + 'resolved.' : '.')
+        : failNoLongerRead
+          ? 'Nothing evaluates this demand now. The recorded figure that failed is no longer read, and this '
+            + 'analysis does not replace it until '
+            + (!pic.complete ? 'every panelboard has a figure. Enter the remaining panelboard figures'
+              : `its method applies to ${system.label}. Choose a method that applies`)
+            + ', or remove the analysis and the recorded demand is read again.'
+          : replaced
+            ? 'The engineering reads this analysis, summed from every panelboard, in its place.'
+            : 'The engineering reads this analysis in its place. Until every panelboard has a figure, nothing '
+              + 'evaluates the demand.',
+    });
+  }
 
   for (const c of stated) {
     items.push({

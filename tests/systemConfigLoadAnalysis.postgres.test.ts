@@ -174,6 +174,31 @@ describe('🚨 the optional load analysis, answered in System Config, survives t
     expect(iv.item('engineering.loads.check.service.demand.site')?.answer).toBe('FAIL — 430.0 A calculated demand exceeds the 400 A service.');
   });
 
+  it('🚨 a recorded 450 A demand that FAILs, superseded by the first figure: the server stops failing it, the reloaded interview still states it', async () => {
+    const { answerLoadAnalysisMethod, answerPanelDemand } = await import('@/lib/electrical/systemConfigLoadAnalysis');
+    const svc = await twoPanelService();
+    await persist({ ...svc, calculatedServiceDemandA: 450 });
+    let r = await reload();
+    expect(check(r.checks, 'service.demand')?.detail).toBe('450.0 A calculated demand exceeds the 400 A service.');
+    expect(check(r.checks, 'service.demand')?.conclusion).toBe('FAIL');
+
+    await persist(ok(answerLoadAnalysisMethod(r.topology, 'standard-220-part-iii')));
+    r = await reload();
+    expect((await interviewOf(r.topology)).item('engineering.loads.recorded')?.answer)
+      .toMatch(/^The demand recorded directly \(450\.0 A service demand\) is read until the first panelboard figure/);
+
+    await persist(ok(answerPanelDemand(r.topology, r.topology.panels[0].id, 92)));
+    r = await reload();
+    expect(r.topology.calculatedServiceDemandA, 'the recorded demand is kept, not deleted').toBe(450);
+    // The server reads the half-entered model now, so its FAIL is gone…
+    expect(check(r.checks, 'service.demand')?.conclusion).toBe('NOT_EVALUATED');
+    // …and System Config, built from the reloaded graph, says exactly that.
+    const iv = await interviewOf(r.topology);
+    expect(iv.item('engineering.loads.recorded')?.state).toBe('needs-verification');
+    expect(iv.item('engineering.loads.recorded')?.answer).toBe('The demand recorded directly (450.0 A service demand) '
+      + 'is superseded by this analysis and no longer read. It failed — 450.0 A calculated demand exceeds the 400 A service.');
+  });
+
   it('remove → PUT → GET: the model is gone after the reload and the item is "None — optional" again', async () => {
     const { answerLoadAnalysisMethod, answerPanelDemand, answerRemoveLoadAnalysis } =
       await import('@/lib/electrical/systemConfigLoadAnalysis');

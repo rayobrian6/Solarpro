@@ -196,7 +196,8 @@ function ItemRow({ item, children, isNext }: { item: InterviewItem; children?: R
         {item.answer ? <span className="text-xs text-slate-300" data-testid={`interview-answer-${item.id}`}>{item.answer}</span> : null}
         {item.source ? <span className="ml-auto text-[10px] text-slate-500">{item.source}</span> : null}
       </div>
-      {(item.state === 'needs-answer' || item.state === 'needs-verification') && item.why ? (
+      {/* A FAIL says why, too: a red verdict with no reason is not a next step. */}
+      {(item.state === 'needs-answer' || item.state === 'needs-verification' || item.state === 'fails') && item.why ? (
         <div className="mt-1 text-[11px] text-slate-400">
           {item.why}
           {item.owner ? <span className="text-slate-500"> · Answer from: {item.owner}</span> : null}

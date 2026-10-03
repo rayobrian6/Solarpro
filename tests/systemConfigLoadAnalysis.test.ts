@@ -11,12 +11,16 @@
 
 import { describe, it, expect } from 'vitest';
 import { buildSystemConfigInterview, type InterviewInput } from '@/lib/electrical/systemConfigInterview';
-import { answerServiceRating, answerElectricalSystem } from '@/lib/electrical/systemConfigAnswers';
+import {
+  answerServiceRating, answerElectricalSystem, answerDistribution, answerInterconnection,
+  answerIsolationRequired, answerAvailableFaultCurrent, answerPanel,
+} from '@/lib/electrical/systemConfigAnswers';
 import {
   buildLoadAnalysisItems, describeLoadAnalysis, loadMethodChoices, loadMethodUnavailableBecause,
   answerLoadAnalysisMethod, answerPanelDemand, answerRemoveLoadAnalysis,
-  LOAD_ANALYSIS_ITEM_ID, LOAD_CONSUMING_CHECK_IDS,
+  LOAD_ANALYSIS_ITEM_ID, LOAD_CONSUMING_CHECK_IDS, RECORDED_DEMAND_ITEM_ID,
 } from '@/lib/electrical/systemConfigLoadAnalysis';
+import { addProtectiveDevice, setSolarCoupling, updatePanel } from '@/lib/electrical/topologyAuthoring';
 import { resolvePvArrayDesign } from '@/lib/electrical/pvArrayDesign';
 import { buildRaysIntendedJob } from '@/lib/electrical/fixtures/tesla400aTwoGateway';
 import {
@@ -48,6 +52,24 @@ const withFigures = (t: ServiceTopology, method: LoadCalculationMethod, figures:
   for (const [panelId, a] of Object.entries(figures)) next = ok(answerPanelDemand(next, panelId, a));
   return next;
 };
+/**
+ * A 400 A house on micros, split into two 200 A main panels (MSP #1, MSP #2), with EVERY required
+ * fact answered: the Engineering card reads Complete and the job is release-ready without any load
+ * analysis. The control against which an optional analysis must change nothing by itself.
+ */
+const resolved400 = (): ServiceTopology => {
+  let t = ok(answerServiceRating(null, 400));
+  t = ok(answerDistribution(t, 'two-main-panels'));
+  t = ok(answerInterconnection(t, 'load-side-busbar'));
+  t = ok(answerIsolationRequired(t, false));
+  t = ok(answerAvailableFaultCurrent(t, 10_000));
+  for (const p of t.panels) t = ok(answerPanel(t, p.id, { mainBreakerA: 200, busbarRatingA: 225 }));
+  for (const p of t.panels) t = updatePanel(t, p.id, { sccrA: 22_000 });
+  t = addProtectiveDevice(t, { label: 'Service disconnect', roles: ['service-disconnect'], ratedAmps: 400 }).topology;
+  t = { ...t, devices: t.devices.map(d => ({ ...d, sccrA: 22_000, productId: 'eaton-dg224urk' })) };
+  return setSolarCoupling(t, 'ac-coupled-inverter');
+};
+const engineering = (t: ServiceTopology) => interview(t).sections.find(s => s.id === 'engineering')!;
 
 describe('optional: absent, it is a known fact — never a question, never a blocker', () => {
   it('no service yet ⇒ not asked at all (the service rating is the question)', () => {
@@ -79,6 +101,16 @@ describe('optional: absent, it is a known fact — never a question, never a blo
 });
 
 describe('the method is the installer\'s — never assumed', () => {
+  it('a method SolarPro does not record is refused, and the graph is untouched', () => {
+    for (const t of [house200(), withFigures(rays(), 'standard-220-part-iii', { 'msp-1': 92 })]) {
+      const loadsBefore = JSON.stringify(t.loads ?? null);
+      const r = answerLoadAnalysisMethod(t, 'nec-made-up' as LoadCalculationMethod);
+      expect(r.ok).toBe(false);
+      if (r.ok === false) expect(r.refused).toBe('\'nec-made-up\' is not a load calculation method SolarPro records.');
+      expect(JSON.stringify(t.loads ?? null)).toBe(loadsBefore);
+    }
+  });
+
   it('a panel figure before the analysis exists is REFUSED (setPanelLoad alone would default to NEC 220.82)', () => {
     const r = answerPanelDemand(house200(), 'msp-1', 90);
     expect(r.ok).toBe(false);
@@ -129,6 +161,31 @@ describe('a partial model is not a smaller load', () => {
     expect(after.openQuestions.map(o => o.id)).toEqual(before.openQuestions.map(o => o.id));
     expect(after.release.blockers).toEqual(before.release.blockers);
     expect(after.release.releaseReady).toBe(before.release.releaseReady);
+  });
+
+  it('🚨 an empty or partial analysis leaves the Engineering card exactly as it was on a fully resolved job', () => {
+    const t = resolved400();
+    expect(engineering(t).status, 'fixture: every required fact is answered').toBe('complete');
+    expect(interview(t).release.releaseReady, 'fixture').toBe(true);
+    const empty = ok(answerLoadAnalysisMethod(t, 'standard-220-part-iii'));
+    const half = ok(answerPanelDemand(empty, 'msp-1', 92));
+    for (const [name, x] of [['empty', empty], ['partial', half]] as const) {
+      expect(engineering(x).status, `${name} analysis turned the Engineering card`).toBe(engineering(t).status);
+      // The installer's own entry — not amber.
+      expect(item(x)?.state, name).toBe('answered');
+      expect(interview(x).release, name).toEqual(interview(t).release);
+    }
+    // The reason is kept, for the installer to read.
+    expect(item(half)?.answer).toContain('cannot be summed until every panelboard has a figure');
+    expect(item(half)?.why).toMatch(/^MSP #2 has no figure\. A partial load analysis is not a smaller load/);
+    expect(item(half)?.why).toMatch(/Optional: nothing waits on it\.$/);
+  });
+
+  it('…needs-verification is kept for what needs it: a method this system cannot use, no evaluation in hand', () => {
+    const half = withFigures(resolved400(), 'standard-220-part-iii', { 'msp-1': 92 });
+    expect(buildLoadAnalysisItems(input(half, false))[0].state).toBe('needs-verification');
+    const wrongMethod = ok(answerElectricalSystem(withFigures(house200(), 'optional-220-82', { 'msp-1': 90 }), 'wye-208'));
+    expect(item(wrongMethod)?.state).toBe('needs-verification');
   });
 
   it('the engine agrees: the model\'s own check is NOT EVALUATED, never a pass on half a house', () => {
@@ -268,5 +325,85 @@ describe('the method respects the electrical system — gated exactly as the eng
     const fixed = ok(answerLoadAnalysisMethod(t3, 'standard-220-part-iii'));
     expect(fixed.loads?.byPanel).toEqual([{ panelId: 'msp-1', calculatedDemandA: 90 }]);
     expect(item(fixed)?.answer).not.toMatch(/does not apply/);
+  });
+});
+
+describe('🚨 a demand recorded directly is never replaced in silence', () => {
+  // 450 A recorded straight onto a 400 A service: the engine FAILs it and release is blocked by it.
+  // The engine reads a load model as soon as it holds ONE figure, and a partial model sums to nothing,
+  // so the first figure on a two-panel job would make that FAIL simply stop being reported.
+  const over = (): ServiceTopology => ({ ...resolved400(), calculatedServiceDemandA: 450 });
+  const FAILED = '450.0 A calculated demand exceeds the 400 A service.';
+
+  it('control: with no analysis the recorded 450 A FAILs, and the release says so', () => {
+    const t = over();
+    expect(item(t, 'engineering.loads.check.service.demand.site')?.answer).toBe(`FAIL — ${FAILED}`);
+    expect(interview(t).release.blockers).toEqual(['1 engineering check fail.']);
+    // Nothing supersedes it yet, so there is nothing to warn about.
+    expect(item(t, RECORDED_DEMAND_ITEM_ID)).toBeUndefined();
+  });
+
+  it('before the first figure: still read, still failing, and the item says the first figure supersedes it', () => {
+    const t = ok(answerLoadAnalysisMethod(over(), 'standard-220-part-iii'));
+    const r = item(t, RECORDED_DEMAND_ITEM_ID)!;
+    expect(r.state).toBe('fails');
+    expect(r.answer).toBe('The demand recorded directly (450.0 A service demand) is read until the first panelboard '
+      + `figure is entered, which supersedes it. It fails — ${FAILED}`);
+    expect(r.why).toMatch(/so this FAIL would stop being reported without being resolved\.$/);
+    expect(item(t)?.answer).toContain('the demand recorded directly (450.0 A service demand) is read until the first figure');
+    expect(interview(t).release.blockers).toEqual(['1 engineering check fail.']);
+  });
+
+  it('after the first figure: the engine no longer fails it — and the interview states the FAIL it no longer reads', () => {
+    const t = withFigures(over(), 'standard-220-part-iii', { 'msp-1': 92 });
+    // The hole, exactly: the engine reads the half-entered model and the FAIL is gone from it.
+    expect(evaluateServiceTopology(t).checks.find(c => c.id === 'service.demand')?.conclusion).toBe('NOT_EVALUATED');
+    expect(t.calculatedServiceDemandA, 'the recorded figure is kept, not deleted').toBe(450);
+
+    const r = item(t, RECORDED_DEMAND_ITEM_ID)!;
+    expect(r.state).toBe('needs-verification');
+    expect(r.answer).toBe('The demand recorded directly (450.0 A service demand) is superseded by this analysis and '
+      + `no longer read. It failed — ${FAILED}`);
+    expect(r.why).toMatch(/^Nothing evaluates this demand now\./);
+    expect(r.why).toMatch(/remove the analysis and the recorded demand is read again\.$/);
+    expect(item(t)?.answer).toContain('supersedes the demand recorded directly (450.0 A service demand)');
+    expect(item(t)?.why, 'an optional label over a hidden FAIL').not.toMatch(/nothing waits on it/);
+    // The Engineering card cannot read Complete over a FAIL that was stopped being read, not resolved.
+    expect(engineering(t).status).toBe('needs-verification');
+  });
+
+  it('every panelboard entered: the analysis replaces it — still stated, no longer amber, its own verdict governs', () => {
+    const t = withFigures(over(), 'standard-220-part-iii', { 'msp-1': 92, 'msp-2': 80 });
+    const r = item(t, RECORDED_DEMAND_ITEM_ID)!;
+    expect(r.state).toBe('answered');
+    expect(r.answer).toContain(`superseded by this analysis and no longer read. It failed — ${FAILED}`);
+    expect(item(t, 'engineering.loads.check.service.demand.site')?.answer)
+      .toBe('PASS — 172.0 A calculated demand against a 400 A service.');
+    expect(engineering(t).status).toBe('complete');
+  });
+
+  it('removing the analysis reads the recorded demand again, and its FAIL is back', () => {
+    const t = ok(answerRemoveLoadAnalysis(withFigures(over(), 'standard-220-part-iii', { 'msp-1': 92 })));
+    expect(item(t, 'engineering.loads.check.service.demand.site')?.state).toBe('fails');
+    expect(interview(t).release.blockers).toEqual(['1 engineering check fail.']);
+  });
+
+  it('a recorded demand on a service path is named by that path, with the engine\'s own FAIL', () => {
+    const base = resolved400();
+    const t = withFigures({ ...base, branches: base.branches.map(b => b.id === base.branches[0].id
+      ? { ...b, calculatedDemandA: 250 } : b) }, 'standard-220-part-iii', { 'msp-2': 80 });
+    const r = item(t, RECORDED_DEMAND_ITEM_ID)!;
+    expect(r.state).toBe('needs-verification');
+    expect(r.answer).toBe(`The demand recorded directly (250.0 A on ${base.branches[0].label}) is superseded by this `
+      + 'analysis and no longer read. It failed — 250.0 A exceeds the 200 A branch.');
+  });
+
+  it('a recorded demand that passed is still disclosed, but nothing turns amber', () => {
+    const t = withFigures({ ...resolved400(), calculatedServiceDemandA: 150 }, 'standard-220-part-iii', { 'msp-1': 92 });
+    const r = item(t, RECORDED_DEMAND_ITEM_ID)!;
+    expect(r.state).toBe('answered');
+    expect(r.answer).toBe('The demand recorded directly (150.0 A service demand) is superseded by this analysis and '
+      + 'no longer read.');
+    expect(engineering(t).status).toBe('complete');
   });
 });

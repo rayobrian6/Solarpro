@@ -8,7 +8,13 @@
 // `lib/electrical/systemConfigLoadAnalysis.ts` (pure, tested). Every edit goes through its answer
 // functions, which call the inspector's own writers, into the page's one write path. This component
 // computes nothing and holds no engineering state; the only local state is the method picked before
-// "Add" is pressed.
+// "Add" is pressed, which is cleared by Add and by Remove and is ignored once the electrical system
+// no longer offers it.
+//
+// 🚨 A FIGURE THE INSTALLER DID NOT DELIBERATELY BLANK IS NEVER DELETED. A number input holding
+// something that is not a number reports an empty value; that is refused, not read as "remove". A
+// refused figure is put back to what the project holds, so the screen never shows a figure the
+// project does not have.
 // ═══════════════════════════════════════════════════════════════════════════
 
 import React, { useState } from 'react';
@@ -35,6 +41,34 @@ export function LoadAnalysisEditor({ item, topology: t, apply, busy }: {
 
   const pic = describeLoadAnalysis(t);
   const choices = loadMethodChoices(t.service.phase);
+  // A method picked earlier and no longer offered (the system changed) is not a choice.
+  const picked = choices.available.some(o => o.value === method) ? method : '';
+
+  // 🚨 BEFORE THE FIRST FIGURE, SAY WHAT IT WILL REPLACE. (After it, the interview's own row says so.)
+  const supersedes = pic.recordedDemand !== null && !pic.recordedSuperseded ? (
+    <div data-testid="answer-loads-supersedes" className="text-[11px] text-amber-300">
+      The engineering reads the demand recorded directly ({pic.recordedDemand}). The first panelboard figure
+      entered here supersedes it: from then on the engineering reads this analysis instead, and until every
+      panelboard has a figure nothing evaluates the demand.
+    </div>
+  ) : null;
+
+  const writeFigure = (el: HTMLInputElement, panelId: string, label: string, stored: number | null) => {
+    const restore = () => { el.value = stored === null ? '' : String(stored); };
+    // Something that is not a number reads as '' — that is not a deliberate blank.
+    if (el.validity?.badInput) {
+      restore();
+      void apply({ ok: false, refused: `${label}: enter a number of amperes. Leave the field empty to remove `
+        + 'this panelboard’s figure.' });
+      return;
+    }
+    const raw = el.value.trim();
+    const v = raw === '' ? null : Number(raw);
+    if (v === stored) return;
+    const r = answerPanelDemand(t, panelId, v);
+    if (r.ok === false) restore();
+    void apply(r);
+  };
 
   // 🚨 A METHOD THE SYSTEM CANNOT USE IS NOT OFFERED, AND THE SCREEN SAYS WHY.
   const notOffered = choices.unavailable.length > 0 ? (
@@ -61,18 +95,23 @@ export function LoadAnalysisEditor({ item, topology: t, apply, busy }: {
           </div>
         ) : (
           <div className="flex flex-wrap items-center gap-2">
-            <select data-testid="answer-loads-method" className={box} disabled={busy} value={method}
+            <select data-testid="answer-loads-method" className={box} disabled={busy} value={picked}
                     onChange={e => setMethod(e.target.value)}>
               <option value="">Choose the calculation method…</option>
               {choices.available.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
-            <button type="button" data-testid="answer-loads-add" disabled={busy || !method}
+            <button type="button" data-testid="answer-loads-add" disabled={busy || !picked}
                     className="rounded bg-slate-700 px-2 py-1 text-[11px] text-slate-100 hover:bg-slate-600 disabled:opacity-40"
-                    onClick={() => void apply(answerLoadAnalysisMethod(t, method as LoadCalculationMethod))}>
+                    onClick={() => {
+                      const r = answerLoadAnalysisMethod(t, picked as LoadCalculationMethod);
+                      setMethod('');
+                      void apply(r);
+                    }}>
               Add a full load analysis
             </button>
           </div>
         )}
+        {supersedes}
         {notOffered}
       </div>
     );
@@ -98,6 +137,7 @@ export function LoadAnalysisEditor({ item, topology: t, apply, busy }: {
         </div>
       ) : null}
       {notOffered}
+      {supersedes}
 
       {pic.panels.length === 0 ? (
         <div className="text-[11px] text-amber-300">
@@ -109,14 +149,11 @@ export function LoadAnalysisEditor({ item, topology: t, apply, busy }: {
             // Keyed on the stored figure so a reload shows what the store holds, not what was typed.
             <label key={`${p.id}:${p.demandA ?? ''}`} className="text-[11px] text-slate-400">
               {p.label} — calculated demand (A)
-              <input type="number" min={0} step="any" data-testid={`answer-loads-panel-${p.id}`}
+              {/* No `min`: zero is refused too, and the refusal says why. */}
+              <input type="number" step="any" data-testid={`answer-loads-panel-${p.id}`}
                      className={`mt-0.5 block w-28 ${box}`} disabled={busy} placeholder="not entered"
                      defaultValue={p.demandA ?? ''}
-                     onBlur={e => {
-                       const raw = e.target.value.trim();
-                       const v = raw === '' ? null : Number(raw);
-                       if (v !== p.demandA) void apply(answerPanelDemand(t, p.id, v));
-                     }} />
+                     onBlur={e => writeFigure(e.currentTarget, p.id, p.label, p.demandA)} />
             </label>
           ))}
         </div>
@@ -147,7 +184,10 @@ export function LoadAnalysisEditor({ item, topology: t, apply, busy }: {
           ) : (
             <span>
               Aggregate, service-path and backed-up demand cannot be summed until every panelboard has a
-              figure ({pic.entered} of {pic.panels.length} entered).
+              figure ({pic.entered} of {pic.panels.length} entered). Still without one:{' '}
+              <span data-testid="answer-loads-missing">
+                {pic.panels.filter(p => p.demandA === null).map(p => p.label).join(', ')}
+              </span>.
             </span>
           )}
         </div>
@@ -155,7 +195,7 @@ export function LoadAnalysisEditor({ item, topology: t, apply, busy }: {
 
       <button type="button" data-testid="answer-loads-remove" disabled={busy}
               className="rounded border border-slate-600 px-2 py-1 text-[11px] text-slate-300 hover:bg-slate-800 disabled:opacity-40"
-              onClick={() => void apply(answerRemoveLoadAnalysis(t))}>
+              onClick={() => { setMethod(''); void apply(answerRemoveLoadAnalysis(t)); }}>
         Remove the load analysis
       </button>
     </div>
