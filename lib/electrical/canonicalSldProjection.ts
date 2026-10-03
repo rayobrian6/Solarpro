@@ -142,11 +142,15 @@ const NOTHING: CanonicalSldProjection = {
  *
  * Where the store has no answer (no layout, no recorded module), the caller's value is left exactly
  * as posted — this never invents. The routes refuse to fabricate what is still missing.
+ *
+ * `microModulesPerDevice` is the catalogue ratio of the project's RECORDED microinverter (never the
+ * request's), or null when the recorded inverter is not a catalogue micro.
  */
 export function projectPvArray(
   input: Record<string, any>,
   pv: PvArrayDesign | null | undefined,
   tag: string,
+  microModulesPerDevice: number | null = null,
 ): void {
   if (!pv) return;
   if (pv.moduleCount !== null) {
@@ -154,6 +158,34 @@ export function projectPvArray(
     if (posted !== pv.moduleCount) {
       console.warn(`[${tag}] PV module count corrected from Design:`
         + ` posted=${posted || 'none'} design=${pv.moduleCount} (${pv.moduleCountSource})`);
+      // ════════════════════════════════════════════════════════════════════
+      // 🚨 AND THE MICROINVERTER COUNT THE CALLER DERIVED FROM ITS OWN WRONG COUNT GOES WITH IT.
+      //
+      // Found by the brand-family fixtures: a stale body posting 21 modules for a 24-module Enphase
+      // design came back from the PDF route as `24 × 405 W` beside `21 × IQ8+` — a sheet that
+      // contradicts itself, which the old stale body (21 and 21) did not. Correcting the module
+      // count alone made the posted `deviceCount` / `microBranches` describe a different array.
+      // Re-derived from the recorded micro's catalogue ratio; with no recorded micro the caller's
+      // values are left as posted (logged), because a 1:1 guess is wrong for a dual-module micro.
+      // ════════════════════════════════════════════════════════════════════
+      if (input.deviceCount != null && pv.moduleCount > 0) {
+        if (microModulesPerDevice && microModulesPerDevice > 0) {
+          const devices = Math.ceil(pv.moduleCount / microModulesPerDevice);
+          if (Number(input.deviceCount) !== devices) {
+            console.warn(`[${tag}] microinverter count re-derived from Design: posted=${input.deviceCount}`
+              + ` design=${devices} (${pv.moduleCount} modules / ${microModulesPerDevice} per device)`);
+          }
+          input.deviceCount = devices;
+          const branches = Array.isArray(input.microBranches) ? input.microBranches : null;
+          if (branches
+              && branches.reduce((n: number, b: any) => n + (Number(b?.deviceCount) || 0), 0) !== devices) {
+            delete input.microBranches;
+          }
+        } else {
+          console.warn(`[${tag}] posted deviceCount=${input.deviceCount} was derived from a module count`
+            + ' Design does not hold, and the project records no catalogue microinverter to re-derive it from.');
+        }
+      }
     }
     input.totalModules = pv.moduleCount;
   }
@@ -228,7 +260,9 @@ export async function projectCanonicalArchitecture(
   // The physical array is a Design fact, not a service-graph fact: a plain 200 A house with no graph
   // has an array too, so this runs before the topology gate below.
   const pvArray = loaded?.pvArray ?? null;
-  projectPvArray(input, pvArray, tag);
+  const { getInverterById, getMicroinverterById } = await import('@/lib/equipment-db');
+  const recordedMicro = model?.externalInverterId ? getMicroinverterById(model.externalInverterId) : undefined;
+  projectPvArray(input, pvArray, tag, recordedMicro?.modulesPerDevice ?? null);
 
   if (!model?.topology) return { ...NOTHING, pvArray };
 
@@ -344,13 +378,31 @@ export async function projectCanonicalArchitecture(
     const postedInv = String(input.inverterModel ?? '');
     if (model.externalInverterId) {
       input.inverterId = model.externalInverterId;
-      // The route resolves the display name from the id against the catalogue; clearing the posted
-      // pair stops a stale React-state name outliving the id it was supposed to describe.
+      // Clearing the posted pair stops a stale React-state name outliving the id it was supposed to
+      // describe.
       delete input.inverterModel;
       delete input.inverterManufacturer;
+      // ════════════════════════════════════════════════════════════════════
+      // 🚨 AND THE NAME IS RESOLVED HERE, BECAUSE NO ROUTE EVER DID.
+      //
+      // This said "the route resolves the display name from the id against the catalogue". The SVG
+      // route reads only `body.inverterModel`, so every legitimately AC-coupled job — a Sunny Boy
+      // beside a Powerwall 2, an SE7600H beside a Powerwall 3, IQ8M micros beside an IQ Battery,
+      // each one SELECTED by the installer — was drawn on the Diagram tab as ⚠ INVERTER NOT SELECTED,
+      // while the PDF of the same project named the inverter from the page's `inverterSpecs`. Found
+      // by tests/brandFamiliesSurviveTheArrayProjection.postgres.test.ts. A dangling id names
+      // nothing, so the sheet keeps saying NOT SELECTED for it.
+      // ════════════════════════════════════════════════════════════════════
+      const product = getInverterById(model.externalInverterId)
+        ?? getMicroinverterById(model.externalInverterId);
+      if (product) {
+        input.inverterManufacturer = product.manufacturer;
+        input.inverterModel = product.model;
+      }
       if (postedInv) {
         console.warn(`[${tag}] the caller posted inverterModel='${postedInv}' — cleared; the name `
-          + `follows the project's recorded id '${model.externalInverterId}'.`);
+          + `follows the project's recorded id '${model.externalInverterId}'`
+          + (product ? ` (${product.manufacturer} ${product.model}).` : ', which the catalogue does not hold.'));
       }
     } else {
       // 🚨 AC-COUPLED WITH NO INVERTER ON THE RECORD. `resolveElectricalProject` now raises
