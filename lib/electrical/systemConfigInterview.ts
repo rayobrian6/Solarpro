@@ -36,6 +36,7 @@ import { isOptionalCheck, servicePhaseInfo, type ServicePhase } from '@/lib/elec
 import { buildServiceOverview, REQUIREMENT_OWNERS } from '@/lib/electrical/topologyOverview';
 import { buildUtilityDisconnectsItems, supersededByUtilityDisconnects } from '@/lib/electrical/systemConfigUtilityDisconnects';
 import { buildSystemEquipmentItems, placeSystemEquipmentItems } from '@/lib/electrical/systemConfigSystemEquipment';
+import { buildLoadAnalysisItems } from '@/lib/electrical/systemConfigLoadAnalysis';
 
 // ── The vocabulary an installer reads ───────────────────────────────────────
 
@@ -733,6 +734,8 @@ export function buildSystemConfigInterview(input: InterviewInput): SystemConfigI
   // Per system: its controller / batteries / expansions, where its batteries land, and which panels
   // are backed up (adds "Only the panels I choose" to 4b) — lib/electrical/systemConfigSystemEquipment.ts.
   placeSystemEquipmentItems({ equipment, behavior }, buildSystemEquipmentItems(input), input);
+  // Optional full load analysis — lib/electrical/systemConfigLoadAnalysis.ts (before the overall verdict, which is the card's summary)
+  engineering.splice(engineering.findIndex(i => i.id === 'engineering.overall'), 0, ...buildLoadAnalysisItems(input));
 
   // ── Assemble ─────────────────────────────────────────────────────────────
   const sectionOf = (id: SectionId, title: string, items: InterviewItem[], summary: string): InterviewSection => ({

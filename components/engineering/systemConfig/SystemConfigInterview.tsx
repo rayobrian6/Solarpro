@@ -31,6 +31,7 @@ import {
 } from '@/lib/electrical/systemConfigAnswers';
 import { UtilityDisconnectsEditor } from '@/components/engineering/systemConfig/UtilityDisconnectsEditor';
 import { SystemEquipmentEditor } from '@/components/engineering/systemConfig/SystemEquipmentEditor';
+import { LoadAnalysisEditor } from '@/components/engineering/systemConfig/LoadAnalysisEditor';
 
 const SERVICE_RATINGS = [100, 125, 150, 200, 225, 320, 400, 600, 800];
 const PANEL_RATINGS = [100, 125, 150, 200, 225, 320, 400];
@@ -239,6 +240,7 @@ function Editor({ item, props, apply, busy }: {
   if (id.startsWith('behavior.utility.') || id.startsWith('engineering.disconnect.')) return <UtilityDisconnectsEditor item={item} topology={t} apply={apply} busy={busy} />;
 
   if (id.startsWith('equipment.system.') || id === 'behavior.backup') return <SystemEquipmentEditor item={item} topology={t} apply={apply} busy={busy} equipment={props.equipment} />;
+  if (id.startsWith('engineering.loads')) return <LoadAnalysisEditor item={item} topology={t} apply={apply} busy={busy} />;
 
   if (id === 'service.rating') {
     return (
