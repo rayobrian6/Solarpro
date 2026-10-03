@@ -210,6 +210,29 @@ export function outputConfigOf(t: ServiceTopology, d: BackupDomain): number | nu
   return u?.outputConfigKw ?? null;
 }
 
+/**
+ * 🚨 ONE BATTERY'S AC CIRCUIT AS THE GRAPH RECORDS IT — at the output setting it is commissioned at.
+ *
+ * The graph's inverting units carry the RESOLVED continuous current and OCPD of that setting (the
+ * catalogue table, hydrated on every read), so this is the owner every battery-circuit consumer reads
+ * — not the catalogue's maximum (`maxContinuousOutputA` / `backfeedBreakerA`), which is what the
+ * conductor schedule's BATTERY_TO_BUI_RUN printed at 48 A ‖ 60 A beside a sheet that said 7.6 kW
+ * CONFIGURED · 40 A OCPD. That schedule has ONE battery-circuit row, so with systems commissioned
+ * differently it is the LARGEST circuit installed — never one below it.
+ *
+ * Null ⇒ no inverting unit, or one whose current / OCPD is not resolved: the caller keeps what it
+ * had (nothing is invented here).
+ */
+export function batteryCircuitOf(t: ServiceTopology | null | undefined): { continuousOutputA: number; ocpdA: number } | null {
+  const units = (t?.storage ?? []).filter(u => u.role === 'inverter-unit');
+  if (units.length === 0) return null;
+  if (units.some(u => typeof u.continuousOutputA !== 'number' || typeof u.ocpdA !== 'number')) return null;
+  return {
+    continuousOutputA: Math.max(...units.map(u => u.continuousOutputA as number)),
+    ocpdA: Math.max(...units.map(u => u.ocpdA as number)),
+  };
+}
+
 export interface SystemEquipmentFacts {
   domain: BackupDomain;
   inverting: StorageUnit[];

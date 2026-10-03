@@ -595,6 +595,12 @@ export interface ComputedSystemInput {
   batteryBackfeedA?: number;        // A — battery backfeed breaker (from equipment-db backfeedBreakerA)
   batteryCount?: number;            // qty of battery units (for multi-unit systems)
   batteryContinuousOutputA?: number; // A — battery continuous output current (from maxContinuousOutputA)
+  /**
+   * A — ONE battery circuit's OCPD as the service graph records it (the output setting the unit is
+   * commissioned at — `batteryCircuitOf`). BATTERY_TO_BUI_RUN is protected at this when given;
+   * `batteryBackfeedA` (the busbar contribution) stays what the 705.12(B) arithmetic reads.
+   */
+  batteryCircuitOcpdA?: number;
   generatorOutputBreakerA?: number; // A — generator output breaker (from equipment-db outputBreakerA)
   generatorKw?: number;             // kW — generator rated output
   atsAmpRating?: number;            // A — ATS amp rating (from equipment-db ampRating)
@@ -2289,7 +2295,12 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
   // Conductor sized at 125% of continuous output per NEC 690.8 / NEC 705.
   // EGC per NEC 250.122 based on OCPD.
   if (input.batteryBackfeedA && input.batteryBackfeedA > 0) {
-    const batContinuousA = input.batteryContinuousOutputA ?? input.batteryBackfeedA;
+    // 🚨 THE CIRCUIT THE GRAPH RECORDS, WHEN THERE IS ONE. A Powerwall 3 commissioned at 7.6 kW is a
+    // 31.7 A circuit on a 40 A device; the catalogue's 48 A ‖ 60 A is its MAXIMUM setting. Without
+    // this the conductor schedule sized the 7.6 kW circuit at 11.5 kW beside a sheet that said 40 A.
+    const batCircuitA = input.batteryCircuitOcpdA && input.batteryCircuitOcpdA > 0
+      ? input.batteryCircuitOcpdA : input.batteryBackfeedA;
+    const batContinuousA = input.batteryContinuousOutputA ?? batCircuitA;
     // Battery AC circuit: 2-wire 240V (L1+L2, no neutral — AC-coupled battery output)
     // Conductor count = 2 (ungrounded) per NEC 690.8 / battery manufacturer spec
     const batWire = autoSizeWire(
@@ -2305,7 +2316,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     );
     // OCPD must match backfeedBreakerA from equipment spec (not auto-calculated)
     // NEC 705.12(B): backfeed breaker size is equipment-specified
-    const batOcpd = nextStandardOCPD(input.batteryBackfeedA);
+    const batOcpd = nextStandardOCPD(batCircuitA);
     const batEgc  = getEGCGauge(batOcpd);
 
     // 🚨 THE AUTHORITY PUBLISHED A CONDUCTOR FLOOR AND NOTHING READ IT.

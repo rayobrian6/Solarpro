@@ -109,6 +109,9 @@ export async function POST(req: NextRequest) {
     // than re-deriving it. Set from `loadElectricalProject` below; null until then, which is exactly
     // today's behaviour for a request that carries no project.
     let _canonicalCoupling: import('@/lib/computed-system').ComputedSolarCoupling | null = null;
+    // One battery's AC circuit as the stored graph records it (its commissioned output setting) —
+    // read from the store by the projection, never taken from the request.
+    let _graphBatteryCircuit: { continuousOutputA: number; ocpdA: number } | null = null;
     // 🚨 WHAT THE PAGE ACTUALLY SENT, captured BEFORE anything overwrites it. The architecture
     // projection below mutates `body` in place, so reading `body.topologyType` afterwards reports
     // the override rather than the request — which would make the response claim agreement that
@@ -159,6 +162,7 @@ export async function POST(req: NextRequest) {
           body, String(body.projectId), _auth.user.id, 'sld/POST');
         if (_proj.refusal) return NextResponse.json(_proj.refusal, { status: 409 });
         _canonicalCoupling = _proj.coupling;
+        _graphBatteryCircuit = _proj.batteryCircuit;
       } catch (e) {
         console.warn('[sld/POST] service topology unreadable; drawing the legacy service tail', e);
       }
@@ -1002,7 +1006,11 @@ export async function POST(req: NextRequest) {
 
         // Battery/BUI/Generator/ATS segment sizing inputs
         batteryBackfeedA:              _batBackfeedA,
-        batteryContinuousOutputA:      _batContinuousA,
+        // 🚨 THE BATTERY CIRCUIT AT ITS COMMISSIONED SETTING, from the graph when it records one. The
+        // catalogue figures above are the product's MAXIMUM (a PW3's 48 A ‖ 60 A at 11.5 kW): the
+        // conductor schedule printed them for a unit the same sheet drew at 7.6 kW · 40 A OCPD.
+        batteryContinuousOutputA:      _graphBatteryCircuit?.continuousOutputA ?? _batContinuousA,
+        batteryCircuitOcpdA:           _graphBatteryCircuit?.ocpdA,
         batteryIds:                    _batId ? [_batId] : (body.batteryIds ?? undefined),
         // 🚨 MISSING, AND THE OMISSION LOST 40-100 A IN THE PERMISSIVE DIRECTION.
         // resolveBatteryBranch evaluates the manufacturer's STEP FUNCTION - a battery's

@@ -117,7 +117,7 @@ import { gateMayReplaceModule, moduleSwapWithheld } from '@/lib/electrical/modul
 import { deriveStorageDcStrings } from '@/lib/electrical/storageDcStrings';
 import { dcStringLimits } from '@/lib/electrical/dcStringLimits';
 import { buildSystemConfigInterview, type InterviewEquipment } from '@/lib/electrical/systemConfigInterview';
-import { selectionPairOf, controllersByProduct, storageByProduct } from '@/lib/electrical/systemConfigSystemEquipment';
+import { selectionPairOf, controllersByProduct, storageByProduct, batteryCircuitOf } from '@/lib/electrical/systemConfigSystemEquipment';
 import { evaluateServiceTopology, type SolarCoupling } from '@/lib/electrical/serviceTopology';
 // Closure slice 1 — the PV coupling's writer, chosen by what is on file (Service Topology left the nav).
 import { answerSolarCoupling, pvCouplingWritePath } from '@/lib/electrical/systemConfigAnswers';
@@ -3903,9 +3903,14 @@ function EngineeringPageInner() {
       batteryIds: includePoi && config.batteryId ? [config.batteryId] : [],
       // BUILD v24: Battery/Generator/ATS NEC-sized segment inputs
       batteryBackfeedA: includePoi && config.batteryId ? calcBatteryBackfeedAmps(config.batteryId, config.batteryCount) : undefined,
+      // 🚨 THE BATTERY CIRCUIT AT ITS COMMISSIONED SETTING — the graph's units when it records them
+      // (`batteryCircuitOf`), the catalogue's maximum only without one. BATTERY_TO_BUI_RUN is sized from
+      // these, so a PW3 at 7.6 kW is a 31.7 A circuit on 40 A here exactly as on the sheet.
       batteryContinuousOutputA: includePoi && config.batteryId
-        ? (() => { const b = getBatteryById(config.batteryId); return b?.maxContinuousOutputA ?? 0; })()
+        ? (batteryCircuitOf(svcTopology)?.continuousOutputA
+          ?? (() => { const b = getBatteryById(config.batteryId); return b?.maxContinuousOutputA ?? 0; })())
         : undefined,
+      batteryCircuitOcpdA: includePoi && config.batteryId ? batteryCircuitOf(svcTopology)?.ocpdA : undefined,
       generatorOutputBreakerA: includePoi && config.generatorId
         ? (() => { const g = getGeneratorById(config.generatorId); return g?.outputBreakerA ?? undefined; })()
         : undefined,
@@ -6917,8 +6922,10 @@ function EngineeringPageInner() {
         // Battery NEC 705.12(B) — bus loading impact
         batteryBackfeedA: calcBatteryBackfeedAmps(config.batteryId, config.batteryCount),
         batteryCount: config.batteryCount || 0,
+        // The graph's battery circuit (its commissioned setting) before the catalogue maximum.
         batteryContinuousOutputA: config.batteryId
-          ? (() => { const b = getBatteryById(config.batteryId); return b?.maxContinuousOutputA ?? 0; })()
+          ? (batteryCircuitOf(svcTopology)?.continuousOutputA
+            ?? (() => { const b = getBatteryById(config.batteryId); return b?.maxContinuousOutputA ?? 0; })())
           : 0,
         batteryModel: config.batteryModel || undefined,
         batteryManufacturer: config.batteryBrand || undefined,
@@ -7049,7 +7056,7 @@ function EngineeringPageInner() {
         };
       })(),
     };
-  }, [config, totalPanels, sizingRecommendation, projectLayout, subSystemCounts, pvModule]);
+  }, [config, totalPanels, sizingRecommendation, projectLayout, subSystemCounts, pvModule, svcTopology]);
 
   // ── saveEngineeringOutputs: persist live engine state to project_files ──────
   const saveEngineeringOutputs = useCallback(async (calcData: any) => {

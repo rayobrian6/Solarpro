@@ -121,10 +121,17 @@ export interface CanonicalSldProjection {
    * project could not be read at all. Projected onto the input by `projectPvArray`.
    */
   pvArray: PvArrayDesign | null;
+  /**
+   * One battery's AC circuit as the graph records it — at the output setting it is commissioned at
+   * (`batteryCircuitOf`). Null without a graph or an inverting unit. The route sizes the conductor
+   * schedule's battery circuit from it instead of the catalogue maximum. Returned, never written onto
+   * the request body, so a caller cannot post one.
+   */
+  batteryCircuit: { continuousOutputA: number; ocpdA: number } | null;
 }
 
 const NOTHING: CanonicalSldProjection = {
-  refusal: null, applied: false, coupling: null, revision: null, pvArray: null,
+  refusal: null, applied: false, coupling: null, revision: null, pvArray: null, batteryCircuit: null,
 };
 
 /**
@@ -505,11 +512,13 @@ export async function projectCanonicalArchitecture(
   // patch, so this runs once per project and then never again.
   void persistElectricalCanonicalization(loaded!, userId);
 
+  const { batteryCircuitOf } = await import('@/lib/electrical/systemConfigSystemEquipment');
   return {
     refusal: null,
     applied: true,
     coupling: model.solarCoupling,
     revision: loaded!.revision,
     pvArray,
+    batteryCircuit: batteryCircuitOf(model.topology),
   };
 }

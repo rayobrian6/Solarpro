@@ -1,0 +1,179 @@
+// ═══════════════════════════════════════════════════════════════════════════
+// 🚨 CLOSURE SLICE 1 — REVIEW FIXES, THROUGH THE REAL PATH.
+//
+// answer → PUT /api/projects/[id]/service-topology → real PostgreSQL (PGlite, in-process) → GET →
+// the SLD / BOM / electrical-architecture routes. Each decision this slice moved into System Config
+// reaches every consumer that prints it:
+//   · a PW3's commissioned output setting → the conductor schedule's battery circuit (computeSystem);
+//   · the generation panel's chosen part → the BOM;
+//   · a CHANGE of a recorded PV coupling (DC onto the batteries) → the separate inverter retired, so
+//     the architecture resolves and the SLD draws.
+// ═══════════════════════════════════════════════════════════════════════════
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { PGlite } from '@electric-sql/pglite';
+import { pgcrypto } from '@electric-sql/pglite/contrib/pgcrypto';
+import type { ServiceTopology } from '@/lib/electrical/serviceTopology';
+import type { AnswerResult } from '@/lib/electrical/systemConfigAnswers';
+
+const ROOT = join(__dirname, '..');
+const read = (...p: string[]) => readFileSync(join(ROOT, ...p), 'utf8');
+const USER_ID = '11111111-1111-4111-8111-111111111111';
+const HOUSE = '9d4e9a4f-2e3d-4b9a-9f77-5c1d0e9f8a99';
+const MODULE = 'ps-mnb108-440';
+const PW3 = 'tesla-powerwall-3';
+const GW3 = 'tesla-backup-gateway-3';
+let db: PGlite;
+
+function neonShim(pg: PGlite) {
+  return (async (strings: TemplateStringsArray | string, ...values: unknown[]) => {
+    if (typeof strings === 'string') return (await pg.query(strings, (values[0] as unknown[]) ?? [])).rows;
+    let text = ''; const params: unknown[] = [];
+    strings.forEach((s, i) => { text += s; if (i < values.length) { params.push(values[i]); text += `$${params.length}`; } });
+    return (await pg.query(text, params)).rows;
+  }) as unknown as never;
+}
+vi.mock('@/lib/db-neon', async (o) => ({ ...(await o<Record<string, unknown>>()), getDbReady: async () => neonShim(db) }));
+vi.mock('@/lib/db/core', async (o) => ({ ...(await o<Record<string, unknown>>()), getDbReady: async () => neonShim(db) }));
+vi.mock('@/lib/auth', async (o) => ({
+  ...(await o<Record<string, unknown>>()),
+  getUserFromRequest: () => ({ id: USER_ID, email: 'ray@example.com', name: 'Ray' }),
+}));
+
+beforeAll(async () => {
+  db = new PGlite({ extensions: { pgcrypto } });
+  const nc = (s: string) => s.replace(/CONCURRENTLY/gi, '');
+  await db.exec(nc(read('lib', 'migrations', '001_initial_schema.sql')));
+  await db.exec(nc(read('lib', 'migrations', '002_project_coordinates.sql')));
+  for (const c of [
+    `ALTER TABLE projects ADD COLUMN IF NOT EXISTS service_topology JSONB`,
+    `ALTER TABLE projects ADD COLUMN IF NOT EXISTS selected_equipment JSONB`,
+    `ALTER TABLE projects ADD COLUMN IF NOT EXISTS engineering_config JSONB`,
+    `ALTER TABLE projects ADD COLUMN IF NOT EXISTS engineering_updated_at TIMESTAMPTZ`,
+    `ALTER TABLE layouts ADD COLUMN IF NOT EXISTS total_panels INTEGER`,
+  ]) await db.exec(c);
+  await Promise.all([
+    import('@/app/api/projects/[id]/service-topology/route'),
+    import('@/app/api/engineering/sld/route'),
+    import('@/app/api/engineering/bom/route'),
+    import('@/app/api/engineering/electrical-architecture/route'),
+    import('@/lib/electrical/loadElectricalProject'),
+  ]);
+}, 120_000);
+afterAll(async () => { await db?.close(); });
+
+beforeEach(async () => {
+  await db.exec('DELETE FROM layouts');
+  await db.exec('DELETE FROM projects');
+  await db.query(
+    `INSERT INTO projects (id, user_id, name, status, system_type, address, selected_equipment)
+     VALUES ($1, $2, 'Probe', 'lead', 'roof', '238 N Warwick Ave', $3)`,
+    [HOUSE, USER_ID, JSON.stringify({ panelId: MODULE, batteryId: PW3, batteryCount: 4, backupControllerId: GW3 })]);
+  await db.query(`INSERT INTO layouts (project_id, user_id, total_panels) VALUES ($1,$2,37)`, [HOUSE, USER_ID]);
+});
+
+const ctx = { params: Promise.resolve({ id: HOUSE }) };
+async function persist(r: AnswerResult | ServiceTopology) {
+  const t = 'ok' in (r as object) ? (() => { const a = r as AnswerResult; if (a.ok === false) throw new Error(a.refused); return a.topology; })() : r as ServiceTopology;
+  const { PUT } = await import('@/app/api/projects/[id]/service-topology/route');
+  const { NextRequest } = await import('next/server');
+  const res = await PUT(new NextRequest(`http://localhost/api/projects/${HOUSE}/service-topology`, {
+    method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ topology: t }),
+  }), ctx);
+  expect(res.status, JSON.stringify(await res.clone().json()).slice(0, 300)).toBe(200);
+}
+async function reload(): Promise<ServiceTopology> {
+  const { GET } = await import('@/app/api/projects/[id]/service-topology/route');
+  const { NextRequest } = await import('next/server');
+  const res = await GET(new NextRequest(`http://localhost/api/projects/${HOUSE}/service-topology`), ctx);
+  const json = await res.json() as { available: boolean; topology: ServiceTopology };
+  return json.topology;
+}
+async function sld(over: Record<string, unknown> = {}) {
+  const { POST } = await import('@/app/api/engineering/sld/route');
+  const { NextRequest } = await import('next/server');
+  const res = await POST(new NextRequest('http://localhost/api/engineering/sld', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      projectId: HOUSE, format: 'json', projectName: 'Probe', address: '238 N Warwick Ave',
+      topologyType: 'DC_COUPLED', totalModules: 37,
+      panelModel: 'Philadelphia Solar PS-MNB108(HCBF)-440W', panelWatts: 440, panelVoc: 52.7, panelIsc: 13.7,
+      mainPanelAmps: 400, utilityName: 'Local Utility',
+      hasBattery: true, batteryModel: 'Powerwall 3', batteryId: PW3, batteryCount: 4, backupInterfaceId: GW3,
+      ...over,
+    }),
+  }));
+  const json = await res.json() as Record<string, unknown>;
+  return { status: res.status, json, svg: String(json.svg ?? '') };
+}
+async function bom() {
+  const { POST } = await import('@/app/api/engineering/bom/route');
+  const { NextRequest } = await import('next/server');
+  const res = await POST(new NextRequest('http://localhost/api/engineering/bom', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ projectId: HOUSE, totalPanels: 37, batteryCount: 4, batteryId: PW3, inverters: [] }),
+  }));
+  return { status: res.status, json: await res.json() as Record<string, unknown> };
+}
+const texts = (svg: string) => [...svg.matchAll(/<text[^>]*>([\s\S]*?)<\/text>/g)].map(m => m[1].replace(/<[^>]+>/g, '').trim()).filter(Boolean);
+
+async function raysJob(): Promise<ServiceTopology> {
+  const A = await import('@/lib/electrical/systemConfigAnswers');
+  const ok = (r: AnswerResult) => { if (r.ok === false) throw new Error(r.refused); return r.topology; };
+  let t = ok(A.answerServiceRating(null, 400));
+  t = ok(A.answerDistribution(t, 'two-main-panels'));
+  t = ok(A.answerBackup(t, 'whole', { gatewayProductId: GW3, storageProductId: PW3, totalUnits: 4,
+    unitsPerPanel: { [t.panels[0].id]: 2, [t.panels[1].id]: 2 } }));
+  t = { ...t, solarCoupling: 'dc-coupled-storage' };
+  t = ok(A.answerStorageLanding(t, 'der-aggregation-panel'));
+  t = ok(A.answerSystemsArrangement(t, 'independent-branch'));
+  t = ok(A.answerInterconnection(t, 'manufacturer-integrated'));
+  return t;
+}
+
+
+/** The conductor schedule's battery-circuit row, as printed: the cells after its run id. */
+const batteryRunRow = (svg: string): string[] => {
+  const t = texts(svg);
+  const i = t.indexOf('BATTERY_TO_BUI_RUN');
+  return i < 0 ? [] : t.slice(i, i + 9);
+};
+
+describe('🚨 the commissioned output setting reaches the conductor schedule (computeSystem), not only the topology section', () => {
+  it('both systems at 7.6 kW: the battery circuit row is 31.7 A on 40 A — and the setting survives the store', async () => {
+    const { answerSystemEquipment, outputConfigOf } = await import('@/lib/electrical/systemConfigSystemEquipment');
+    await persist(await raysJob());
+    const at115 = await sld();
+    expect(at115.status).toBe(200);
+    const row115 = batteryRunRow(at115.svg);
+    expect(row115, 'the battery circuit row at the published maximum').toEqual(expect.arrayContaining(['48A', '60A']));
+
+    let t = await reload();
+    for (const d of t.domains) t = (r => { if (r.ok === false) throw new Error(r.refused); return r.topology; })(answerSystemEquipment(t, d.id, { outputConfigKw: 7.6 }));
+    await persist(t);
+    const back = await reload();
+    expect(back.domains.map(d => outputConfigOf(back, d))).toEqual([7.6, 7.6]);
+
+    const at76 = await sld();
+    expect(at76.status).toBe(200);
+    const row76 = batteryRunRow(at76.svg);
+    expect(row76.join(' ‖ '), 'the conductor schedule still sizes the 7.6 kW circuit at 11.5 kW').not.toMatch(/\b60A\b|\b48A\b/);
+    expect(row76).toEqual(expect.arrayContaining(['40A']));
+    expect(row76.some(c => /^31\.7A$|^32A$/.test(c)), row76.join(' ‖ ')).toBe(true);
+    // The same sheet's topology section says the same circuit.
+    expect(texts(at76.svg)).toContain('40 A OCPD');
+  }, 120_000);
+
+  it('systems commissioned differently: the one battery-circuit row is the LARGEST circuit installed', async () => {
+    const { answerSystemEquipment } = await import('@/lib/electrical/systemConfigSystemEquipment');
+    await persist(await raysJob());
+    const t = await reload();
+    const r = answerSystemEquipment(t, t.domains[0].id, { outputConfigKw: 7.6 });
+    if (r.ok === false) throw new Error(r.refused);
+    await persist(r.topology);
+    const s = await sld();
+    expect(s.status).toBe(200);
+    expect(batteryRunRow(s.svg)).toEqual(expect.arrayContaining(['48A', '60A']));
+  }, 120_000);
+});
