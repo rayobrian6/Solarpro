@@ -73,6 +73,26 @@ export interface EcosystemApplyPayload {
   kit: ResolvedBrandEquipment;
   selections: {
     inverterId?: string;
+    /**
+     * 🚨 "NO SEPARATE PV INVERTER" AS A DECISION — not as a missing key.
+     *
+     * Ray, 2026-10-02, on his live project: "This entire fucking problem can be wired into the
+     * ecosystem picker. I literally pick equipment. I could select the right equipment."
+     *
+     * He selected Tesla, Powerwall 3, and Inverter: — None —, clicked Apply, and two
+     * `Tesla Solar Inverter 5.7kW` stayed in the fleet. `inverterId` is optional, '— None —' has
+     * `value=""`, and the host only acts `if (payload.selections.inverterId)` — so an explicit
+     * NONE was byte-identical to "did not choose", and the documented behaviour of that state was
+     * to PRESERVE whatever the auto-pick had already written. The installer's declaration could
+     * not be expressed by the payload at all.
+     *
+     * Set ONLY when the ecosystem actually offers inverters AND the project's storage takes PV on
+     * its own DC inputs (`pvCoupledToStorage`). On every other brand and every other design,
+     * leaving the dropdown empty keeps meaning exactly what it meant before — "leave it alone" —
+     * because there NONE is genuinely ambiguous. Ray: "every auto pick selection works for
+     * installs that do not have batteries. Do not fuck my entire website up."
+     */
+    inverterExplicitlyNone?: boolean;
     batteryId?: string;
     /**
      * 🚨 The Envoy the installer picked: a BOS combiner id (`isSelectableCombiner`
@@ -217,11 +237,30 @@ export default function EcosystemPicker({
 
   const handleApply = () => {
     if (!expandedBrand || !kit || !onApply) return;
+    // 🚨 Does this ecosystem even OFFER an inverter? A battery-only kit has none to decline, so
+    // an empty dropdown there is absence, not a decision.
+    const offersInverter =
+      kit.microinverters.length + kit.stringInverters.length + kit.optimizers.length > 0;
+    // 🚨 THE BATTERY HE JUST PICKED ANSWERS THIS, WITHOUT THE GRAPH.
+    //
+    // Ray: "I literally pick equipment. I could select the right equipment." Keying the
+    // declaration solely off `pvCoupledToStorage` would make it depend on the
+    // service graph carrying hydrated `pvInputLimits` — a different store, loaded by a
+    // different fetch, for a fact the selection in front of him already settles.
+    // `pvInput` is published by exactly one catalogue product today
+    // (`tesla-powerwall-3`), so no other brand is reachable.
+    const pickedBatteryTakesPvOnDc =
+      !!selectedBattery && !!kit.batteries.find(b => b.id === selectedBattery)?.pvInput;
     onApply({
       brand: expandedBrand,
       kit,
       selections: {
         inverterId: selectedInverter || undefined,
+        // 🚨 THE DECLARATION. See the field's note: scoped to a project whose storage takes PV on
+        // DC, where 'none' has exactly one meaning.
+        inverterExplicitlyNone:
+          offersInverter && !selectedInverter
+          && (!!pvCoupledToStorage || pickedBatteryTakesPvOnDc),
         batteryId: selectedBattery || undefined,
         // Only a storable, explicitly picked device, and only to a host that
         // records it — anything else would be dropped by the page or refused by

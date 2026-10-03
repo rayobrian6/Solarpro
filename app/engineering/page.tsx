@@ -11636,6 +11636,23 @@ function EngineeringPageInner() {
                             updates.inverters = updatedInverters;
                             }
                           }
+                        } else if (payload.selections.inverterExplicitlyNone) {
+                          // ══════════════════════════════════════════════════════════════════
+                          // 🚨 THE INSTALLER SAID 'NO SEPARATE PV INVERTER'. HONOUR IT.
+                          //
+                          // Ray: "This entire fucking problem can be wired into the ecosystem
+                          // picker. I literally pick equipment. I could select the right
+                          // equipment." He picked Tesla + Powerwall 3 + Inverter: — None —,
+                          // pressed Apply, and two Tesla Solar Inverter 5.7kW stayed in the fleet,
+                          // went on to the SLD request, and were drawn.
+                          //
+                          // Everything else in this slice derives the architecture from evidence
+                          // because nobody had stated it. HERE SOMEBODY STATED IT. An explicit
+                          // declaration outranks every derivation, and it is also the cheapest
+                          // possible fix for the whole class: the equipment picker is where an
+                          // installer says what the system is.
+                          // ══════════════════════════════════════════════════════════════════
+                          updates.inverters = [];
                         }
                         // v63 (Ray, 2026-06-30): an inverter ecosystem must NOT auto-add or
                         // auto-enable a battery. Battery is user-driven only — added in
@@ -11759,6 +11776,29 @@ function EngineeringPageInner() {
                             }
                           }
                           updateConfig(updates);
+                          // ══════════════════════════════════════════════════════════════════
+                          // 🚨 AND IT IS RECORDED ON THE PROJECT, NOT JUST IN REACT.
+                          //
+                          // Clearing the fleet alone would last until the next writer ran: the
+                          // server's canonical model still reads `selected_equipment`, Smart
+                          // Defaults fires precisely when the fleet is EMPTY, and the sizing gate
+                          // follows the server's coupling. So the pick is posted through the SAME
+                          // route the resolution dialog uses — which records
+                          // `provenance.architecture = USER_SELECTED`, retires the inverter from
+                          // `selected_equipment` with its history, clears the stale sheet and
+                          // re-reads the graph.
+                          //
+                          // That is the difference between a derivation that has to be re-made on
+                          // every load and a decision the project carries: after this, nothing
+                          // downstream has to infer anything about Ray's architecture again.
+                          //
+                          // The route refuses on a project whose coupling a designer already
+                          // recorded, which is correct — this must not silently overwrite someone
+                          // else's stated architecture.
+                          // ══════════════════════════════════════════════════════════════════
+                          if (payload.selections.inverterExplicitlyNone && currentProjectId) {
+                            void resolveElectricalArchitecture('dc-coupled-storage');
+                          }
                           // Count what was APPLIED, not what was offered: the retired `gatewayId`
                           // and the EV charger were counted here and applied nowhere, and a battery
                           // is applied only when one is enabled. The Envoy counts once the store
@@ -11780,7 +11820,12 @@ function EngineeringPageInner() {
                           // approves via the visible per-sub controls, never a silent rebuild
                           // (guided's silent rebuild was part of the "some fields revert" class,
                           // and on hybrids the whole-project rebuild re-corrupts per-sub fleets).
-                          if (controlMode === 'auto' && sizingAutoApply) {
+                          // 🚨 AND THE REBUILD BELOW MUST NOT UNDO THE DECLARATION. It clears
+                          // `userHasEditedInverters` and re-applies the whole-project
+                          // recommendation — which is how an explicit 'no inverter' would have
+                          // been overwritten 150 ms after being honoured.
+                          if (controlMode === 'auto' && sizingAutoApply
+                              && !payload.selections.inverterExplicitlyNone) {
                             setTimeout(() => {
                               if (sizingRecommendation) {
                                 setConfig(prev => ({ ...prev, userHasEditedInverters: false }));
