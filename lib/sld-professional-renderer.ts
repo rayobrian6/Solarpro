@@ -33,7 +33,7 @@ import { isGroundingConductor, type ConductorBundle } from './segment-schedule';
 import { calcDcAcRatio } from './system/calcDcAcRatio';
 import { SLD_SYMBOL_MAP } from './sld-symbols';
 import { emitBrandEmblem } from './sld-brand-emblems';
-import { resolveDeviceIllustration, resolveDeviceIllustrationByModel, forPrintedSheet, illustrationBox, type DeviceIllustration } from './sld-device-illustrations';
+import { resolveDeviceIllustration, resolveDeviceIllustrationByModel, forPrintedSheet, illustrationBox, illustrationTerminal, illustrationBody, type DeviceIllustration } from './sld-device-illustrations';
 import type { Conductor, WireRun, ConductorType, WireEnvironment } from './sld-types';
 import { getBosDevice, laneCombinerSelection, resolveHybridAcCollection, type HybridAcCollectionPlan, type HybridGatewayInstance } from '@/lib/equipment/integratedBos';
 import { branchRangeText } from '@/lib/equipment/enphaseGatewayMultiplicity';
@@ -57,7 +57,8 @@ import {
 // so a requirement is asked for in the same words on the sheet and on the screen.
 import { labelForToken } from '@/lib/electrical/topologyOverview';
 import {
-  engineerServiceRuns, runScheduleCells, runTags, NO_FACTS_RUN_ENVIRONMENT, type EngineeredRun,
+  engineerServiceRuns, runScheduleCells, runTags, runCallout, NO_FACTS_RUN_ENVIRONMENT,
+  SERVICE_DISTRIBUTION_ID, type EngineeredRun,
 } from '@/lib/electrical/electricalRuns';
 import { foldConclusions } from '@/lib/engineering/engineeringStatus';
 
@@ -3495,6 +3496,8 @@ function panelMarksSld(panel: Parameters<typeof panelRemedyWorkSld>[0] | null | 
 
 type SectionEmblem = {
   kind: string; slotW: number; art: (x: number, y: number, w: number, h: number) => string;
+  /** The manufacturer illustration behind `art`, when it is one — it owns the device's terminals. */
+  ill?: DeviceIllustration;
   /** Drawn small in the box's top-left corner instead of in a left slot — for a layout with a fixed
    *  horizontal budget, whose boxes cannot widen and must not grow. */
   corner?: boolean;
@@ -3516,7 +3519,7 @@ function exactIllustrationSld(name: string | undefined, kind: 'battery' | 'bui')
   if (!d || d.kind !== kind) return null;
   // Tagged by MODEL ('tesla-backup-gateway-3'), not brand::kind — two models share Tesla's BUI slot.
   const model = d.label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-  return { kind: model, slotW: 36, art: (x, y, w, h) => artOnlySld(d.render(x + w / 2, y + h / 2, w, h)) };
+  return { kind: model, slotW: 36, ill: d, art: (x, y, w, h) => artOnlySld(d.render(x + w / 2, y + h / 2, w, h)) };
 }
 const essEmblemSld = (u: { label?: string }): SectionEmblem =>
   exactIllustrationSld(u.label, 'battery') ?? symbolEmblemSld('battery-ac', 40);
@@ -3629,6 +3632,45 @@ function sectionCanvas(p: string[], boxes: ServiceSectionBox[]) {
     return { x, y, w, h, cx, cy, top: y, bottom: y + h, left: x, right: x + w };
   };
 
+  /**
+   * 🚨 A DEVICE THAT HAS ITS OWN ARTWORK IS DRAWN AS THE ARTWORK — no box around it.
+   *
+   * Ray: "no generic equipment boxes around equipment that has actual artwork; draw the actual
+   * device; conductors land on named terminals." The art is drawn at `artCx`, its words beside it
+   * (on `textSide`), and `terminal(id)` answers where a run lands — from the ART's own terminal
+   * table (lib/sld-device-illustrations.ts), never from this layout.
+   */
+  const drawDevice = (
+    id: string, artCx: number, top: number, lines: SectionLine[], emblem: SectionEmblem & { ill: DeviceIllustration },
+    o: { artH: number; textSide: 'L' | 'R'; textW: number },
+  ) => {
+    const ill = emblem.ill;
+    const slotW = o.artH * ill.aspectW / ill.aspectH;
+    const { lines: wrapped } = wrapSectionLines(lines, o.textW + 14);
+    const pitch = Math.max(LBL_PITCH, MIN_TYPE_UU + 2);
+    const textH = wrapped.length * pitch;
+    const h = Math.max(o.artH, textH + 4);
+    const cy = top + h / 2;
+    const body = illustrationBody(ill, artCx, cy, slotW, o.artH);
+    p.push(`<g data-emblem="${emblem.kind}">${artOnlySld(ill.render(artCx, cy, slotW, o.artH))}</g>`);
+    const tx = o.textSide === 'R' ? body.x + body.w + 8 : body.x - 8;
+    let by = cy - textH / 2 + capUu(wrapped[0]?.sz ?? F.sub) + 1;
+    wrapped.forEach(l => {
+      p.push(txt(tx, +by.toFixed(2), l.t, { sz: l.sz, bold: l.bold, anc: o.textSide === 'R' ? 'start' : 'end', fill: l.fill, italic: l.italic }));
+      by += pitch;
+    });
+    const textX = o.textSide === 'R' ? tx : tx - o.textW;
+    boxes.push({ id, x: body.x, y: body.y, w: body.w, h: body.h, kind: 'device' });
+    boxes.push({ id: `${id}-words`, x: textX, y: cy - textH / 2, w: o.textW, h: textH, kind: 'label' });
+    const left = Math.min(body.x, textX), right = Math.max(body.x + body.w, textX + o.textW);
+    return {
+      x: left, y: top, w: right - left, h, cx: artCx, cy, top, bottom: top + h, left, right, body,
+      /** Where a run lands on this device — the art's terminal, or null when it has none. */
+      terminal: (terminalId: string, facing?: 'L' | 'R') =>
+        illustrationTerminal(ill, terminalId, artCx, cy, slotW, o.artH, facing),
+    };
+  };
+
   /** A conductor callout placed on a span, reserved so nothing else is drawn through it. */
   const spanLabel = (id: string, x1: number, x2: number, y: number, lines: string[],
                      fill = BLK) => {
@@ -3639,9 +3681,43 @@ function sectionCanvas(p: string[], boxes: ServiceSectionBox[]) {
     p.push(tspan(cx, +(y - h - 2).toFixed(2), lines, { sz: F.seg, anc: 'middle', fill, lh: LBL_PITCH }));
     boxes.push({ id, x: cx - w / 2, y: y - h - 2 - capUu(F.seg), w, h: h + 2, kind: 'label' });
   };
-  return { drawBox, spanLabel };
+  return { drawBox, drawDevice, spanLabel };
 }
 type SectionBoxGeom = ReturnType<ReturnType<typeof sectionCanvas>['drawBox']>;
+
+/** The height `drawDevice` gives these words beside art this tall — the same wrap, the same pitch. */
+function framelessDeviceHeight(lines: SectionLine[], textW: number, artH: number): number {
+  const { lines: wrapped } = wrapSectionLines(lines, textW + 14);
+  return Math.max(artH, wrapped.length * Math.max(LBL_PITCH, MIN_TYPE_UU + 2) + 4);
+}
+
+/** An emblem that is a manufacturer illustration with terminals — drawn frameless. */
+const hasTerminalArt = (e: SectionEmblem | undefined): e is SectionEmblem & { ill: DeviceIllustration } =>
+  !!e?.ill?.terminals;
+
+/** The dot at a terminal a conductor lands on — "show where the lines land in said device". */
+const terminalDot = (x: number, y: number, fill = BLK) =>
+  `<circle cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="1.9" fill="${fill}" stroke="none" data-terminal="1"/>`;
+
+/** A run's callout lines, stacked beside a conductor; the NOT EVALUATED / INPUT REQUIRED line amber. */
+function runCalloutSvg(
+  p: string[], boxes: ServiceSectionBox[], id: string, x: number, yTop: number,
+  lines: string[], anc: 'start' | 'end' | 'middle',
+): { w: number; h: number } {
+  const w = Math.max(...lines.map(l => textWidthUu(l, F.tiny)));
+  let by = yTop + capUu(F.tiny);
+  for (const l of lines) {
+    const pending = /NOT EVALUATED|INPUT REQUIRED/.test(l);
+    p.push(txt(x, +by.toFixed(2), l, { sz: F.tiny, anc, fill: pending ? SEC_AMBER : BLK, bold: pending }));
+    by += LBL_PITCH;
+  }
+  const h = lines.length * LBL_PITCH;
+  const bx = anc === 'start' ? x : anc === 'end' ? x - w : x - w / 2;
+  boxes.push({ id, x: bx, y: yTop, w, h, kind: 'label' });
+  return { w, h };
+}
+/** How wide a callout block prints. */
+const runCalloutW = (lines: string[]) => Math.max(0, ...lines.map(l => textWidthUu(l, F.tiny)));
 
 /** The height `drawBox` will give these lines at this width — the same wrap, the same pitch. */
 function sectionBoxHeight(lines: SectionLine[], w: number, marks: SectionMarks = {}): number {
@@ -3738,9 +3814,31 @@ function renderCompactDcServiceSection(
   const boxes: ServiceSectionBox[] = [];
   const groundX: number[] = [];
   const notes: string[] = serviceCheckNotesSld(ev, opts.hasGenerator);
-  const { drawBox } = sectionCanvas(p, boxes);
+  const { drawBox, drawDevice } = sectionCanvas(p, boxes);
   const amps = ampsSld;
   let calloutN = opts.calloutStart;
+
+  // 🚨 THE RUNS ARE THE ENGINE'S. Ray: "DO NOT SIZE CONDUCTORS IN THE RENDERER." Each conductor
+  // drawn below is a canonical run, landed on the terminals its run names, with `runCallout` beside
+  // it — the same words the schedule, the BOM and PV-4B print.
+  const runs = opts.runs ?? engineerServiceRuns(t, NO_FACTS_RUN_ENVIRONMENT);
+  const runOf = {
+    ess: (unitId: string) => runs.find(r => r.role === 'der-circuit' && r.source.deviceId === unitId) ?? null,
+    gen: (aggId: string) => runs.find(r => r.role === 'generation-feeder' && r.source.deviceId === aggId) ?? null,
+    backup: (gwId: string, panelId: string) => runs.find(r => r.role === 'backup-feeder'
+      && r.source.deviceId === gwId && r.destination.deviceId === panelId) ?? null,
+    branch: (branchId: string) => runs.find(r => r.role === 'branch-feeder'
+      && r.source.deviceId === SERVICE_DISTRIBUTION_ID
+      && (r.id === `branch-feeder:${branchId}` || r.id.startsWith(`branch-feeder:${branchId}:`))) ?? null,
+  };
+  const calloutOf = (r: EngineeredRun | null): string[] => (r ? runCallout(r) : []);
+  /** A FEEDER's callout says which feeder it is: an engineered run's callout carries only its
+   *  conductors, so its name heads it (a not-evaluated one already leads with "200 A BACKUP FEEDER").
+   *  The gateway → panel run must read as the BACKUP feeder, never as the service branch. */
+  const feederCalloutOf = (r: EngineeredRun | null): string[] =>
+    (r ? (r.conductor.status === 'ENGINEERED' ? [r.name, ...runCallout(r)] : runCallout(r)) : []);
+  /** Artwork heights for devices drawn as their art (no box). */
+  const ART_ESS_H = 78, ART_GW_H = 76;
 
   const GREEN = '#1B5E20';
   // Sized so the lines these boxes actually carry wrap once at most: at the column layout's 178 uu
@@ -3749,6 +3847,10 @@ function renderCompactDcServiceSection(
   // Each box is its text width (as before) plus its emblem's slot and gutter (emblemInsetSld).
   const W_ESS = 168 + 50, ESS_GAP = 18, EXP_GAP = 30;
   const W_GEN = 262 + 62, W_GW = 250 + 66, W_PNL = 158 + 52, W_DIST = 220 + 52, W_DEV = 186 + 56;
+  /** Width of the words beside a frameless device's art, inside the slot its box used to take. */
+  const artW = (e: SectionEmblem & { ill: DeviceIllustration }, h: number) => h * e.ill.aspectW / e.ill.aspectH;
+  const essTextW = (e: SectionEmblem & { ill: DeviceIllustration }) => W_ESS - artW(e, ART_ESS_H) - 12;
+  const gwTextW = (e: SectionEmblem & { ill: DeviceIllustration }) => W_GW - artW(e, ART_GW_H) - 12;
   /** From the junction box's DC output to where the trunk turns down. */
   const TRUNK_LEG = 36;
   /** Gateway bottom → MSP top: the backup feeder, its label, the CT note and the feeder callout. */
@@ -3773,7 +3875,7 @@ function renderCompactDcServiceSection(
   const HARNESS = 'DC EXPANSION HARNESS — MFR ASSEMBLY';
 
   // ── 1. WHAT EACH SYSTEM COLUMN HOLDS, AND HOW BIG IT IS ──────────────────
-  type RowItem = { kind: 'ess' | 'exp'; u: SldStorageUnit; lines: SectionLine[]; h: number };
+  type RowItem = { kind: 'ess' | 'exp'; u: SldStorageUnit; lines: SectionLine[]; h: number; emblem: SectionEmblem };
   const cols = t.branches.map((branch, i) => {
     const domain = t.domains.find(d => d.branchId === branch.id) ?? null;
     const panel = (domain?.backedUpPanelIds ?? branch.panelIds ?? [])
@@ -3799,11 +3901,17 @@ function renderCompactDcServiceSection(
       (inverting.some(h => h.id === u.attachedToUnitId) ? u.attachedToUnitId! : inverting[0]?.id ?? null);
     const ess = (u: SldStorageUnit): RowItem => {
       const lines = storageUnitLinesSld(t, u, true);
-      return { kind: 'ess', u, lines, h: sectionBoxHeight(lines, W_ESS, { emblem: essEmblemSld(u) }) };
+      const emblem = essEmblemSld(u);
+      return {
+        kind: 'ess', u, lines, emblem,
+        h: hasTerminalArt(emblem)
+          ? framelessDeviceHeight(lines, essTextW(emblem), ART_ESS_H)
+          : sectionBoxHeight(lines, W_ESS, { emblem }),
+      };
     };
     const exp = (u: SldStorageUnit): RowItem => {
       const lines = expansionLinesSld(u);
-      return { kind: 'exp', u, lines, h: sectionBoxHeight(lines, W_ESS, { emblem: EXP_EMBLEM_SLD() }) };
+      return { kind: 'exp', u, lines, emblem: EXP_EMBLEM_SLD(), h: sectionBoxHeight(lines, W_ESS, { emblem: EXP_EMBLEM_SLD() }) };
     };
     const expsOf = (hostId: string) => expansions.filter(e => hostOf(e) === hostId).map(exp);
     // Expansions sit on the OUTBOARD side of their host, chained cabinet to cabinet, so a harness
@@ -3842,17 +3950,26 @@ function renderCompactDcServiceSection(
 
     const gen = [...ownAgg].reverse().map(agg => {
       const lines = generationPanelLinesSld(t, agg);
-      const label = agg.outputOcpdA === null
-        ? 'GENERATION FEEDER — OUTPUT OCPD NOT EVALUATED' : `${agg.outputOcpdA} A GENERATION FEEDER`;
-      return { agg, lines, h: sectionBoxHeight(lines, W_GEN, { emblem: GEN_EMBLEM_SLD() }), label };
+      // The generation feeder's callout — the engine's run, not a label built from the breaker.
+      const callout = feederCalloutOf(runOf.gen(agg.id));
+      return { agg, lines, h: sectionBoxHeight(lines, W_GEN, { emblem: GEN_EMBLEM_SLD() }), callout };
     });
     const gwLines = domain ? gatewayLinesSld(domain.gateway) : null;
+    const gwEmblem = domain ? gatewayEmblemSld(domain.gateway) : null;
+    const gwArt = hasTerminalArt(gwEmblem ?? undefined) ? gwEmblem as SectionEmblem & { ill: DeviceIllustration } : null;
     const panelLines = panel ? servicePanelLinesSld(panel) : null;
     const coreW = domain ? W_GW : W_PNL;
-    const coreH = domain ? sectionBoxHeight(gwLines!, W_GW, { emblem: gatewayEmblemSld(domain.gateway) })
+    const coreH = domain
+      ? (gwArt ? framelessDeviceHeight(gwLines!, gwTextW(gwArt), ART_GW_H) : sectionBoxHeight(gwLines!, W_GW, { emblem: gwEmblem! }))
       : panelLines ? sectionBoxHeight(panelLines, W_PNL, panelMarksSld(panel)) : 38;
+    // A frameless gateway's art sits on the column line with its words on the OUTBOARD side, so the
+    // generation feeder, the backup feeder and the branch feeder all meet it at its own terminals.
+    const coreIn = gwArt ? artW(gwArt, ART_GW_H) / 2 : coreW / 2;
+    const coreOut = gwArt ? artW(gwArt, ART_GW_H) / 2 + 8 + gwTextW(gwArt) : coreW / 2;
     const mspH = domain && panelLines ? sectionBoxHeight(panelLines, W_PNL, panelMarksSld(panel)) : 0;
-    const feederLabel = `BACKUP FEEDER — ${amps(panel?.mainBreakerA ?? branch.ratedAmps)}`;
+    const backupRun = domain && panel ? runOf.backup(domain.gateway.id, panel.id) : null;
+    const feederCallout = backupRun ? feederCalloutOf(backupRun)
+      : [`BACKUP FEEDER — ${amps(panel?.mainBreakerA ?? branch.ratedAmps)}`];
 
     // The devices IN this branch's feeder, and how much run they need: each knife switch gets a slot
     // as wide as its tag, and the OCPD label sits at the service end.
@@ -3865,8 +3982,28 @@ function renderCompactDcServiceSection(
       const tagW = Math.max(...tag.map(l => textWidthUu(l, F.tiny)));
       return { dev, tag, tagW, slotW: Math.max(44, tagW + 14) };
     });
-    const ocpdLbl = `${amps(branch.ocpdAmps ?? branch.ratedAmps)} OCPD`;
-    const ocpdW = textWidthUu(ocpdLbl, F.tiny);
+    // 🚨 THE BACKUP FEEDER'S CALLOUT CLEARS THE SWITCH TAG. A frameless gateway takes its branch at
+    // its utility terminal (part-way down the art), so an in-line switch's tag, hung under the branch,
+    // reaches below the gateway — where the backup feeder's callout prints. The drop grows until the
+    // callout sits under the tag.
+    const backupDrop = (() => {
+      const fh = feederCallout.length * LBL_PITCH;
+      let top = coreH + (BACKUP_DROP - fh) / 2;
+      if (gwArt && inlineSlots.length) {
+        const aw = artW(gwArt, ART_GW_H);
+        const g = illustrationTerminal(gwArt.ill, 'GRID_IN', 0, 0, aw, ART_GW_H, outboard === 'L' ? 'R' : 'L');
+        const gridRel = (coreH - ART_GW_H) / 2 + (g ? g.y + ART_GW_H / 2 : ART_GW_H / 2);
+        const tagRel = gridRel + 18 + Math.max(...inlineSlots.map(sl => sl.tag.length)) * LBL_PITCH + 2;
+        top = Math.max(top, tagRel + 4);
+      }
+      return Math.max(BACKUP_DROP, top + fh + 6 - coreH);
+    })();
+    // The branch feeder's callout (its run at the service end — every segment through an in-line
+    // switch is the same conductor set) — or, with no run, the OCPD alone, as before.
+    const branchRun = runOf.branch(branch.id);
+    const branchCallout = branchRun ? feederCalloutOf(branchRun) : [`${amps(branch.ocpdAmps ?? branch.ratedAmps)} OCPD`];
+    const ocpdLbl = branchCallout[branchCallout.length - 1];
+    const ocpdW = runCalloutW(branchCallout);
     const noDomainFeeder = `${branch.label} — ${amps(branch.ocpdAmps ?? branch.ratedAmps)} FEEDER`;
     let runLen = Math.max(96, 16 + inlineSlots.reduce((a, s) => a + s.slotW, 0) + ocpdW + 16);
     if (!domain) runLen = Math.max(runLen, textWidthUu(noDomainFeeder, F.seg) + 28);
@@ -3876,19 +4013,23 @@ function renderCompactDcServiceSection(
     const rightOf = (k: number) => itemDx[k] + W_ESS / 2;
     const rowL = row.length ? -Math.min(...row.map((_, k) => leftOf(k))) : 0;
     const rowR = row.length ? Math.max(...row.map((_, k) => rightOf(k))) : 0;
-    const genL = gen.length ? Math.max(W_GEN / 2, ...gen.map(g => 6 + textWidthUu(g.label, F.tiny))) : 0;
+    // The generation feeder's callout goes on the OUTBOARD side of its conductor.
+    const genOut = gen.length ? Math.max(W_GEN / 2, ...gen.map(g => 6 + runCalloutW(g.callout))) : 0;
+    const genL = outboard === 'L' ? genOut : (gen.length ? W_GEN / 2 : 0);
+    const genR = outboard === 'R' ? genOut : (gen.length ? W_GEN / 2 : 0);
     const ctW = domain && ctDocMissing ? 8 + textWidthUu(CT_NOTE, F.tiny, true) : 0;
-    const fbW = domain && panel ? 8 + textWidthUu(feederLabel, F.seg) : 0;
-    const coreHalf = Math.max(coreW / 2, mspH ? W_PNL / 2 : 0);
-    const extL = Math.max(rowL, genL, coreHalf, outboard === 'L' ? ctW : fbW, 28);
-    const extR = Math.max(rowR, gen.length ? W_GEN / 2 : 0, coreHalf, outboard === 'R' ? ctW : fbW, 28);
+    const fbW = domain && panel ? 8 + runCalloutW(feederCallout) : 0;
+    const inHalf = Math.max(coreIn, mspH ? W_PNL / 2 : 0);
+    const outHalf = Math.max(coreOut, mspH ? W_PNL / 2 : 0);
+    const extL = Math.max(rowL, genL, outboard === 'L' ? outHalf : inHalf, outboard === 'L' ? ctW : fbW, 28);
+    const extR = Math.max(rowR, genR, outboard === 'R' ? outHalf : inHalf, outboard === 'R' ? ctW : fbW, 28);
     // Above the gateway row only — where the trunk callout has to find its room.
     const upperL = Math.max(rowL, genL);
-    const upperR = Math.max(rowR, gen.length ? W_GEN / 2 : 0);
+    const upperR = Math.max(rowR, genR);
     return {
       branch, domain, panel, outboard, row, itemDx, rowH, hasExp, harnessLines, gen,
-      gwLines, panelLines, coreW, coreH, mspH, feederLabel, inlineSlots, ocpdLbl, noDomainFeeder,
-      runLen, extL, extR, upperL, upperR, cx: 0,
+      gwLines, gwEmblem, gwArt, panelLines, coreW, coreIn, coreH, mspH, feederCallout, inlineSlots, backupDrop,
+      ocpdLbl, branchCallout, noDomainFeeder, runLen, extL, extR, upperL, upperR, cx: 0,
     };
   });
 
@@ -3911,7 +4052,7 @@ function renderCompactDcServiceSection(
 
   const c0 = cols[0];
   c0.cx = 0;
-  let cxD = c0.coreW / 2 + c0.runLen + W_DIST / 2;
+  let cxD = c0.coreIn + c0.runLen + W_DIST / 2;
   // The trunk callout lives between the systems' upper rows (or right of the only one): widen the
   // feeders until it has room, rather than printing it over a cabinet.
   const halfNeed = hasTrunkText ? trunkW / 2 + 14 : 0;
@@ -3921,7 +4062,7 @@ function renderCompactDcServiceSection(
   }
   if (n === 2) {
     const c1 = cols[1];
-    c1.cx = cxD + W_DIST / 2 + c1.runLen + c1.coreW / 2;
+    c1.cx = cxD + W_DIST / 2 + c1.runLen + c1.coreIn;
     if (c1.cx - c1.upperL - cxD < halfNeed) {
       const grow = halfNeed - (c1.cx - c1.upperL - cxD);
       c1.runLen += grow; c1.cx += grow;
@@ -3957,10 +4098,13 @@ function renderCompactDcServiceSection(
       let rowBottom = rowTop;
       if (col.row.length) {
         rowBottom = rowTop + col.rowH;
-        cur = rowBottom + (col.hasExp ? 44 : 32);
+        // Each storage circuit drops from its unit's AC terminal with its callout beside it, so the
+        // drop is as tall as three callout lines before it turns toward its breaker.
+        const callouts = col.row.some(r => r.kind === 'ess' && hasTerminalArt(r.emblem) && !!runOf.ess(r.u.id));
+        cur = rowBottom + (callouts ? Math.max(32, 6 + 3 * LBL_PITCH + 16) : 32) + (col.hasExp ? 12 : 0);
       }
       const genTops: number[] = [];
-      for (const g of col.gen) { genTops.push(cur); cur += g.h + 40; }
+      for (const g of col.gen) { genTops.push(cur); cur += g.h + Math.max(40, g.callout.length * LBL_PITCH + 12); }
       return { rowBottom, genTops, coreTopMin: cur };
     });
     const coreTop = Math.max(...colPlan.map(x => x.coreTopMin));
@@ -3975,7 +4119,7 @@ function renderCompactDcServiceSection(
     const meterCy = chainTop + mR;
     const gridCy = meterCy + mR + gap;
     const mspBottom = Math.max(0, ...cols.map(col => (col.mspH
-      ? coreTop + col.coreH + BACKUP_DROP + col.mspH : coreTop + col.coreH)));
+      ? coreTop + col.coreH + col.backupDrop + col.mspH : coreTop + col.coreH)));
     const bottom = Math.max(gridCy + 44, mspBottom);
     return { hdr, rowTop, colPlan, coreTop, coreCy, distTop, devTops, meterCy, gridCy, bottom };
   };
@@ -3998,16 +4142,25 @@ function renderCompactDcServiceSection(
   const rowTop = Y(below.rowTop);
 
   // ── 5. EACH SYSTEM, TOP DOWN ─────────────────────────────────────────────
-  const coreBoxes: SectionBoxGeom[] = [];
-  const essBoxById = new Map<string, SectionBoxGeom>();
+  type DeviceGeom = SectionBoxGeom & { terminal?: (id: string, facing?: 'L' | 'R') => { x: number; y: number } | null };
+  const coreBoxes: DeviceGeom[] = [];
+  const essBoxById = new Map<string, DeviceGeom>();
   cols.forEach((col, i) => {
     const cp = below.colPlan[i];
     const x = col.cx;
-    // The storage row. Every cabinet's top is the row's top: the DC enters there.
-    const itemBoxes = col.row.map((r, k) => drawBox(`${r.kind}-${r.u.id}`, x + col.itemDx[k], rowTop,
-      W_ESS, r.lines, r.kind === 'ess'
-        ? { stroke: GREEN, emblem: essEmblemSld(r.u), anchor: 'top' }
-        : { stroke: SEC_DC, dash: '6 4', anchor: 'top', emblem: EXP_EMBLEM_SLD() }));
+    // The storage row. A unit with its own artwork is drawn AS the artwork (its words beside it);
+    // one without keeps its box. Every unit's top is the row's top.
+    const itemBoxes: DeviceGeom[] = col.row.map((r, k) => {
+      const ix = x + col.itemDx[k];
+      if (r.kind === 'ess' && hasTerminalArt(r.emblem)) {
+        const aw = artW(r.emblem, ART_ESS_H);
+        return drawDevice(`${r.kind}-${r.u.id}`, ix - W_ESS / 2 + aw / 2 + 2, rowTop, r.lines, r.emblem,
+          { artH: ART_ESS_H, textSide: 'R', textW: essTextW(r.emblem) });
+      }
+      return drawBox(`${r.kind}-${r.u.id}`, ix, rowTop, W_ESS, r.lines, r.kind === 'ess'
+        ? { stroke: GREEN, emblem: r.emblem, anchor: 'top' }
+        : { stroke: SEC_DC, dash: '6 4', anchor: 'top', emblem: r.emblem });
+    });
     col.row.forEach((r, k) => { if (r.kind === 'ess') essBoxById.set(r.u.id, itemBoxes[k]); });
     // Each Expansion is chained to its neighbour toward its host: dashed, orange, no OCPD.
     col.row.forEach((r, k) => {
@@ -4028,57 +4181,95 @@ function renderCompactDcServiceSection(
                    w: lw, h: col.harnessLines.length * LBL_PITCH + 2, kind: 'label' });
     });
 
-    // AC out of the bottom of each inverting unit, onto one collector, down the column.
-    const invBoxes = col.row.map((r, k) => (r.kind === 'ess' ? itemBoxes[k] : null))
-      .filter((b): b is SectionBoxGeom => !!b);
-    const firstBelow = cp.genTops.length ? Y(cp.genTops[0]) : Y(below.coreTop);
-    if (invBoxes.length) {
-      const collectY = Math.max(...invBoxes.map(b => b.bottom)) + 14;
-      for (const b of invBoxes) p.push(ln(b.cx, b.bottom, b.cx, collectY, { sw: SW_MED, stroke: GREEN }));
-      const xs = invBoxes.map(b => b.cx);
-      if (xs.length > 1) p.push(ln(Math.min(...xs), collectY, Math.max(...xs), collectY, { sw: SW_MED, stroke: GREEN }));
-      p.push(ln(x, collectY, x, firstBelow, { sw: SW_MED, stroke: GREEN }));
-    }
+    // The system's own generation panel(s) — panelboards, so a panelboard rectangle.
+    const genBoxes = col.gen.map((g, k) => drawBox(`aggregation-${g.agg.id}`, x, Y(cp.genTops[k]), W_GEN, g.lines,
+      { stroke: GREEN, anchor: 'top', emblem: GEN_EMBLEM_SLD() }));
 
-    // The system's own generation panel(s), between its Powerwalls and its Gateway — the order the
-    // current travels: PW3 → branch OCPD → generation panel → feeder → Gateway.
-    col.gen.forEach((g, k) => {
-      const gb = drawBox(`aggregation-${g.agg.id}`, x, Y(cp.genTops[k]), W_GEN, g.lines,
-        { stroke: GREEN, anchor: 'top', emblem: GEN_EMBLEM_SLD() });
-      const nextTop = k + 1 < col.gen.length ? Y(cp.genTops[k + 1]) : Y(below.coreTop);
-      p.push(ln(x, gb.bottom, x, nextTop, { sw: SW_MED, stroke: GREEN }));
-      // Beside its conductor, on the side away from the service equipment's feeders.
-      const fw = textWidthUu(g.label, F.tiny);
-      const fy = (gb.bottom + nextTop) / 2 + capUu(F.tiny) / 2;
-      p.push(txt(x - 6, +fy.toFixed(2), g.label, { sz: F.tiny, anc: 'end' }));
-      boxes.push({ id: `aggregation-feeder-label-${g.agg.id}`, x: x - 6 - fw, y: fy - capUu(F.tiny),
-                   w: fw, h: LBL_PITCH, kind: 'label' });
-    });
-
-    // The gateway — or, on a branch nobody backs up, the panel it feeds directly.
+    // The gateway — drawn as its artwork, on the column line — or, on a branch nobody backs up, the
+    // panel it feeds directly.
     const coreTop = Y(below.coreTop);
-    const core = col.domain
-      ? drawBox(`gateway-${col.domain.gateway.id}`, x, coreTop, W_GW, col.gwLines!,
-          { stroke: SEC_BLUE, emblem: gatewayEmblemSld(col.domain.gateway), anchor: 'top' })
+    const core: DeviceGeom = col.domain
+      ? (col.gwArt
+        ? drawDevice(`gateway-${col.domain.gateway.id}`, x, coreTop, col.gwLines!, col.gwArt,
+            { artH: ART_GW_H, textSide: col.outboard, textW: gwTextW(col.gwArt) })
+        : drawBox(`gateway-${col.domain.gateway.id}`, x, coreTop, W_GW, col.gwLines!,
+            { stroke: SEC_BLUE, emblem: col.gwEmblem!, anchor: 'top' }))
       : drawBox(`panel-${col.panel?.id ?? col.branch.id}`, x, coreTop, W_PNL,
           col.panelLines ?? [{ t: col.branch.label, sz: F.hdr, bold: true }],
           { anchor: 'top', ...(col.panel ? panelMarksSld(col.panel) : {}) });
     coreBoxes.push(core);
+    /** A device's terminal, or (a boxed device) the edge point the old layout used. */
+    const landOn = (g: DeviceGeom, id: string, fallback: { x: number; y: number }, facing?: 'L' | 'R') =>
+      g.terminal?.(id, facing) ?? fallback;
 
-    // The MSP on the gateway's BACKUP side, by its backup feeder.
+    // ── The storage circuits: each unit's AC terminal to ITS OWN breaker — never a shared collector.
+    //    Ray: "Every line terminates at actual equipment." Two Powerwalls are two circuits, each
+    //    with its own OCPD in the generation panel (or in the gateway's own panelboard).
+    const essItems = col.row.map((r, k) => ({ r, b: itemBoxes[k] })).filter(e => e.r.kind === 'ess');
+    const genIdxOf = (unitId: string) => col.gen.findIndex(g => g.agg.inputs.some(inp =>
+      sourcesForAggregationInputSld(t, inp).some(src => src.id === unitId)));
+    const coreDerIn = landOn(core, 'DER_IN', { x, y: core.top });
+    // Branch positions on each generation panel's top edge, in the order its units stand left→right.
+    const slotX = new Map<string, number>();
+    genBoxes.forEach((gb, gi) => {
+      const units = essItems.filter(e => genIdxOf(e.r.u.id) === gi).sort((a, b2) => a.b.cx - b2.b.cx);
+      const sp = units.length > 1 ? Math.min(56, (W_GEN - 60) / (units.length - 1)) : 0;
+      units.forEach((e, k) => slotX.set(e.r.u.id, gb.cx + (k - (units.length - 1) / 2) * sp));
+    });
+    essItems.forEach(({ r, b }, k) => {
+      const tAc = landOn(b, 'BATTERY_AC', { x: b.cx, y: b.bottom });
+      const gi = genIdxOf(r.u.id);
+      const dest = gi >= 0 ? { x: slotX.get(r.u.id)!, y: genBoxes[gi].top } : coreDerIn;
+      const yj = dest.y - 12 - (gi < 0 ? k * 6 : 0);
+      if (Math.abs(tAc.x - dest.x) < 0.5) {
+        p.push(ln(tAc.x, tAc.y, dest.x, dest.y, { sw: SW_MED, stroke: GREEN }));
+      } else {
+        p.push(ln(tAc.x, tAc.y, tAc.x, yj, { sw: SW_MED, stroke: GREEN }));
+        p.push(ln(tAc.x, yj, dest.x, yj, { sw: SW_MED, stroke: GREEN }));
+        p.push(ln(dest.x, yj, dest.x, dest.y, { sw: SW_MED, stroke: GREEN }));
+      }
+      p.push(terminalDot(tAc.x, tAc.y, GREEN), terminalDot(dest.x, dest.y, GREEN));
+      // Its callout beside its own drop — to the right, under the unit's own words, so it stays
+      // inside the unit's footprint and never runs into the next system or off the sheet.
+      const lines = calloutOf(runOf.ess(r.u.id));
+      if (lines.length) runCalloutSvg(p, boxes, `ess-circuit-callout-${r.u.id}`, tAc.x + 6, tAc.y + 6, lines, 'start');
+    });
+
+    // ── Each generation panel's feeder: its main lugs to the next panel, or into the gateway's DER
+    //    terminal, with the engine's callout on the outboard side.
+    genBoxes.forEach((gb, k) => {
+      const g = col.gen[k];
+      const next = k + 1 < genBoxes.length ? { x, y: genBoxes[k + 1].top } : coreDerIn;
+      if (Math.abs(next.x - gb.cx) < 0.5) {
+        p.push(ln(gb.cx, gb.bottom, next.x, next.y, { sw: SW_MED, stroke: GREEN }));
+      } else {
+        const yj = next.y - 10;
+        p.push(ln(gb.cx, gb.bottom, gb.cx, yj, { sw: SW_MED, stroke: GREEN }));
+        p.push(ln(gb.cx, yj, next.x, yj, { sw: SW_MED, stroke: GREEN }));
+        p.push(ln(next.x, yj, next.x, next.y, { sw: SW_MED, stroke: GREEN }));
+      }
+      p.push(terminalDot(gb.cx, gb.bottom, GREEN), terminalDot(next.x, next.y, GREEN));
+      if (g.callout.length) {
+        const out = col.outboard === 'L' ? -1 : 1;
+        const h = g.callout.length * LBL_PITCH;
+        runCalloutSvg(p, boxes, `aggregation-feeder-callout-${g.agg.id}`, gb.cx + out * 6,
+          (gb.bottom + next.y) / 2 - h / 2, g.callout, out < 0 ? 'end' : 'start');
+      }
+    });
+
+    // The MSP on the gateway's BACKUP side: its backup feeder from the gateway's LOAD terminal to
+    // the panel's main, with the engine's callout on the inboard side.
     if (col.domain && col.panel && col.panelLines) {
-      const mspTop = core.bottom + BACKUP_DROP;
-      p.push(ln(x, core.bottom, x, mspTop, { sw: SW_MED }));
+      const mspTop = core.bottom + col.backupDrop;
+      const tLoad = landOn(core, 'LOAD_OUT', { x, y: core.bottom });
+      p.push(ln(tLoad.x, tLoad.y, x, mspTop, { sw: SW_MED }));
       drawBox(`panel-${col.panel.id}`, x, mspTop, W_PNL, col.panelLines, { anchor: 'top', ...panelMarksSld(col.panel) });
+      p.push(terminalDot(tLoad.x, tLoad.y), terminalDot(x, mspTop));
       const inboardRight = col.outboard === 'L';
-      const fbW = textWidthUu(col.feederLabel, F.seg);
-      const fbY = core.bottom + BACKUP_DROP / 2 + capUu(F.seg) / 2;
-      const fbX = inboardRight ? x + 8 : x - 8;
-      p.push(txt(fbX, +fbY.toFixed(2), col.feederLabel,
-        { sz: F.seg, anc: inboardRight ? 'start' : 'end' }));
-      boxes.push({ id: `feeder-${col.branch.id}`, x: inboardRight ? fbX : fbX - fbW,
-                   y: fbY - capUu(F.seg), w: fbW, h: LBL_PITCH, kind: 'label' });
-      // The CT note and the feeder's callout go on the OUTBOARD side, clear of the label above.
+      const fh = col.feederCallout.length * LBL_PITCH;
+      runCalloutSvg(p, boxes, `feeder-${col.branch.id}`, inboardRight ? x + 8 : x - 8,
+        mspTop - fh - 6, col.feederCallout, inboardRight ? 'start' : 'end');
+      // The CT note and the feeder's callout bubble go on the OUTBOARD side, clear of the words above.
       const out = inboardRight ? -1 : 1;
       if (ctDocMissing) {
         const lw = textWidthUu(CT_NOTE, F.tiny, true);
@@ -4101,10 +4292,14 @@ function renderCompactDcServiceSection(
   cols.forEach((col, i) => {
     const core = coreBoxes[i];
     const dir = col.outboard === 'L' ? 1 : -1;          // toward the service equipment
-    const xs = dir > 0 ? core.right : core.left;
+    // 🚨 THE BRANCH LANDS ON THE GATEWAY'S UTILITY TERMINAL — the flank that faces the service
+    // equipment, at the height the art puts it — not on the middle of a box edge.
+    const grid = core.terminal?.('GRID_IN', dir > 0 ? 'R' : 'L') ?? null;
+    const xs = grid ? grid.x : dir > 0 ? core.right : core.left;
     const xe = dir > 0 ? dist.left : dist.right;
-    const y = core.cy;
+    const y = grid ? grid.y : core.cy;
     const ye = Math.min(Math.max(y, dist.top + 10), dist.bottom - 10);
+    if (grid) p.push(terminalDot(grid.x, grid.y));
     // Knife switch centres along the run, from the gateway end.
     let along = 16;
     const knives = col.inlineSlots.map(s => {
@@ -4134,13 +4329,16 @@ function renderCompactDcServiceSection(
       boxes.push({ id: `inline-device-${k.dev.id}`, x: k.sx - k.tagW / 2, y: y + 18,
                    w: k.tagW, h: k.tag.length * LBL_PITCH + 2, kind: 'label' });
     }
-    // The branch's own OCPD in the service equipment, at the service end of its feeder.
-    const ow = textWidthUu(col.ocpdLbl, F.tiny);
-    const ox = xe - dir * 6;
-    const oy = col.domain ? ye - 6 : ye + 6 + capUu(F.tiny);
-    p.push(txt(ox, +oy.toFixed(2), col.ocpdLbl, { sz: F.tiny, anc: dir > 0 ? 'end' : 'start' }));
-    boxes.push({ id: `branch-ocpd-${col.branch.id}`, x: dir > 0 ? ox - ow : ox, y: oy - capUu(F.tiny),
-                 w: ow, h: LBL_PITCH, kind: 'label' });
+    // The branch feeder's callout — the engine's run (conductors, raceway, the branch OCPD) — over
+    // the span between the last in-line switch and the service equipment.
+    p.push(terminalDot(xe, ye));
+    {
+      const lines = col.branchCallout;
+      const h = lines.length * LBL_PITCH;
+      const ox = xe - dir * 6;
+      const oy = col.domain ? ye - 6 - h : ye + 6;
+      runCalloutSvg(p, boxes, `branch-ocpd-${col.branch.id}`, ox, oy, lines, dir > 0 ? 'end' : 'start');
+    }
     if (!col.domain) {
       const fw = textWidthUu(col.noDomainFeeder, F.seg);
       const fx = (xs + xe) / 2;
@@ -4215,14 +4413,19 @@ function renderCompactDcServiceSection(
     p.push(ln(jb.x, jb.y, trunkX, jb.y, { sw: SW_MED, stroke: SEC_DC }));
     p.push(ln(trunkX, jb.y, trunkX, hdrY, { sw: SW_MED, stroke: SEC_DC }));
     const landed = landedUnits.map(r => essBoxById.get(r.u.id)!).filter(Boolean);
-    const xs = [trunkX, ...landed.map(b => b.cx)];
+    // Each landed unit's PV input terminal, from its art — or its box top.
+    const pvIn = landed.map(b => b.terminal?.('PV_DC_IN') ?? { x: b.cx, y: b.top });
+    const xs = [trunkX, ...pvIn.map(q => q.x)];
     p.push(ln(Math.min(...xs), hdrY, Math.max(...xs), hdrY, { sw: SW_MED, stroke: SEC_DC }));
     if (Math.min(...xs) < trunkX && Math.max(...xs) > trunkX) {
       p.push(circ(trunkX, hdrY, 2.2, { fill: SEC_DC, stroke: SEC_DC, sw: 0 }));
     }
-    for (const b of landed) p.push(ln(b.cx, hdrY, b.cx, b.top, { sw: SW_MED, stroke: SEC_DC }));
+    for (const q of pvIn) {
+      p.push(ln(q.x, hdrY, q.x, q.y, { sw: SW_MED, stroke: SEC_DC }));
+      p.push(terminalDot(q.x, q.y, SEC_DC));
+    }
     landedUnits.forEach((r, k) => dcEntries.push({
-      cx: landed[k].cx, bottom: landed[k].bottom, label: storageUnitLabelSld(t, r.u),
+      cx: pvIn[k].x, bottom: landed[k].bottom, label: storageUnitLabelSld(t, r.u),
       mppts: r.u.pvInputLimits?.mppts ?? null,
     }));
     trunkText(trunkLines, hdrY + 8, SEC_DC, false, F.seg, 'dc-trunk-callout');
@@ -4284,6 +4487,12 @@ export function renderTopologyServiceSection(opts: {
    * the column layout below, unchanged.
    */
   compactDc?: CompactDcLayoutInput;
+  /**
+   * The service graph's runs, ENGINEERED by the canonical engine (lib/electrical/electricalRuns.ts).
+   * The compact layout lands each one on its devices' terminals and prints its callout; absent ⇒ the
+   * same runs engineered from no facts (every callout NOT EVALUATED).
+   */
+  runs?: EngineeredRun[] | null;
 }): ServiceSectionResult {
   const t = opts.topology;
   const ev = opts.evaluation ?? evaluateServiceTopology(t);
@@ -6403,6 +6612,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
                  : Math.max(320, xDisco - SCH_X - 60),
                maxY: CALC_Y - 40 },
       compactDc: _compactInput,
+      runs: _graphRuns,
     });
     // ── …AND MOVED, AS ONE, TO WHERE THE COMPACT LAYOUT PUT IT ──────────────
     if (_compactDc && _pvGroup && _svcSection.pvBlockAt) {

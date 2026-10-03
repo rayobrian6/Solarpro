@@ -332,8 +332,11 @@ describe('🚨 the rendered sheet keeps every fact, and the PV group really move
     }
     for (const n of [1, 2, 3, 4]) expect(svg).toContain(`Tesla Powerwall 3 #${n}`);
     expect((svg.match(/200 A CONTINUOUS/g) ?? []).length).toBe(2);
-    expect((svg.match(/>200 A OCPD</g) ?? []).length).toBe(2);
-    expect((svg.match(/BACKUP FEEDER — 200 A/g) ?? []).length).toBe(2);
+    // Each run's callout is the canonical engine's (lib/electrical/electricalRuns.ts). This sheet is
+    // rendered with no site facts, so every run says what it is and that it is NOT EVALUATED — the
+    // rating in the run's name, never a conductor size.
+    expect((svg.match(/>200 A SERVICE BRANCH FEEDER</g) ?? []).length).toBe(2);
+    expect((svg.match(/>200 A BACKUP FEEDER</g) ?? []).length).toBe(2);
     expect((svg.match(/LANDING TO BE ASSIGNED/g) ?? []).length).toBe(5);
     expect(svg).not.toContain('AC DISCONNECT');
     expect(svg).not.toContain('PV PV STRING');

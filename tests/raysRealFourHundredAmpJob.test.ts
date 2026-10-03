@@ -801,7 +801,9 @@ describe('the SLD shows the system Ray intends to install', () => {
     // and the selection requirement are on the equipment schedule against that callout.
     expect((svg.match(/>ISOLATION</g) ?? []).length).toBe(2);
     expect((svg.match(/>LOCK\/VIS OPEN</g) ?? []).length).toBe(2);
-    expect((svg.match(/>200 A OCPD</g) ?? []).length).toBe(2);
+    // The branch's run callout (canonical engine, no site facts on this sheet): its rating and
+    // NOT EVALUATED — never a conductor read off the breaker.
+    expect((svg.match(/>200 A SERVICE BRANCH FEEDER</g) ?? []).length).toBe(2);
   });
 
   it('🚨 the existing assembly is drawn as EXISTING, with its unknowns on the sheet', () => {

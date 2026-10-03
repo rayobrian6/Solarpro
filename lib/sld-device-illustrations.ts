@@ -79,6 +79,47 @@ export interface DeviceIllustration {
    * All coords are in the HOST symbol's native coordinate space.
    */
   render: (cx: number, cy: number, slotW: number, slotH: number) => string;
+  /**
+   * 🚨 WHERE A CONDUCTOR LANDS ON THIS DEVICE — owned by the ART, never by a layout.
+   *
+   * Ray (SLD run authority): "Each device artwork exposes semantic anchors as appropriate to that
+   * actual equipment… Do not invent visual terminal positions in the layout engine. Device artwork
+   * owns terminal coordinates. The engineered run owns source terminal + destination terminal. The
+   * renderer connects them."
+   *
+   * Keys are the run engine's semantic terminal ids (lib/electrical/electricalRuns.ts RUN_TERMINAL);
+   * values are FRACTIONS of the drawn body (0,0 top-left … 1,1 bottom-right), so they hold at any
+   * size. A terminal reachable from either flank carries a side suffix — 'GRID_IN@L' / 'GRID_IN@R' —
+   * and the renderer takes the one facing the run's other end. Absent ⇒ the art has no terminals and
+   * the layout draws it in a box, as before.
+   */
+  terminals?: Readonly<Record<string, readonly [number, number]>>;
+}
+
+/**
+ * A terminal of an illustration drawn at (cx, cy) in a slotW × slotH slot — the same uniform fit
+ * every `render` uses — or null when the art has no such terminal.
+ */
+export function illustrationTerminal(
+  ill: Pick<DeviceIllustration, 'aspectW' | 'aspectH' | 'terminals'>,
+  terminalId: string, cx: number, cy: number, slotW: number, slotH: number, facing?: 'L' | 'R',
+): { x: number; y: number } | null {
+  const t = ill.terminals;
+  if (!t) return null;
+  const uv = (facing ? t[`${terminalId}@${facing}`] : undefined) ?? t[terminalId];
+  if (!uv) return null;
+  const scale = Math.min(slotW / ill.aspectW, slotH / ill.aspectH);
+  const W = ill.aspectW * scale, H = ill.aspectH * scale;
+  return { x: cx - W / 2 + uv[0] * W, y: cy - H / 2 + uv[1] * H };
+}
+
+/** The drawn body of an illustration in a slot (the box its terminals are fractions of). */
+export function illustrationBody(
+  ill: Pick<DeviceIllustration, 'aspectW' | 'aspectH'>, cx: number, cy: number, slotW: number, slotH: number,
+): { x: number; y: number; w: number; h: number } {
+  const scale = Math.min(slotW / ill.aspectW, slotH / ill.aspectH);
+  const w = ill.aspectW * scale, h = ill.aspectH * scale;
+  return { x: cx - w / 2, y: cy - h / 2, w, h };
 }
 
 // ─── Shared drawing helpers ──────────────────────────────────────────────────
@@ -1679,6 +1720,10 @@ const DEVICE_REGISTRY: Record<string, DeviceIllustration> = {
     aspectW: 60,
     aspectH: 108,
     render: renderTeslaPowerwall,
+    // The integrated inverter's wiring compartment is the lower trim: the AC circuit leaves its
+    // bottom face; the PV string conductors enter the unit's PV input bank, drawn on the top face so
+    // the DC (from the array above) and the AC (to the panel below) never cross the cabinet.
+    terminals: { BATTERY_AC: [0.5, 1], PV_DC_IN: [0.5, 0] },
   },
   'tesla::bui': {
     brand: 'tesla',
@@ -1903,6 +1948,12 @@ const MODEL_ONLY_ILLUSTRATIONS: DeviceIllustration[] = [
     aspectW: 64,
     aspectH: 84,
     render: renderTeslaGateway3,
+    // Utility (grid) conductors on a flank — either side, whichever faces the service; the backed-up
+    // loads leave the bottom wiring compartment; the Powerwall / generation-panel circuit lands on the
+    // internal panelboard from the top.
+    terminals: {
+      'GRID_IN@L': [0, 0.42], 'GRID_IN@R': [1, 0.42], DER_IN: [0.5, 0], LOAD_OUT: [0.5, 1],
+    },
   },
 ];
 
