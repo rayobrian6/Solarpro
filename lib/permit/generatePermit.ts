@@ -35,6 +35,10 @@ import {
 import { deriveRunLengths } from '@/lib/bom/deriveRunLengths';
 import { necNextStandardOcpd } from './utils/helpers';
 import { permitInterconnectionToken } from './utils/interconnectionRule';
+import { permitPanelPostWork, withPermittedPanelRatings } from './utils/panelPostWork';
+import {
+  complianceInterconnection, consumerInterconnectionToken,
+} from '@/lib/electrical/systemConfigLegacyInterconnection';
 import { classifyPanel, isSubSystemKey } from './utils/subSystems';
 import { runElectricalCalc, type ElectricalCalcInput, type InverterInput, type StringInput, type InterconnectionMethod } from '@/lib/electrical-calc';
 import { getPanelById, getInverterById, getMicroinverterById,
@@ -96,6 +100,15 @@ export function generatePermitHTML(
     totalDcKw: input.system?.totalDcKw ?? null,
     totalAcKw: input.system?.totalAcKw ?? null,
   };
+
+  // 🚨 A 120% REMEDY TOKEN IS A NOTE, NOT A RECORD — for every caller of this function, not only the
+  // permit route. MAIN_BREAKER_DERATE / PANEL_UPGRADE name no panel and no rating; E-1 printed one as
+  // "Interconnection MAIN_BREAKER_DERATE" on a project where nothing recorded a derate. Read as the
+  // load-side connection it refines (the graph's `PanelBoard.remedy` is the one record of a remedy).
+  {
+    const _read = consumerInterconnectionToken(project.interconnectionMethod);
+    if (_read != null && _read !== project.interconnectionMethod) project.interconnectionMethod = _read;
+  }
 
   // ── CANONICAL STATE, DERIVED ONCE, BEFORE ANYTHING READS IT ───────────────
   // `compliance.jurisdiction` is a CLIENT-COMPUTED record frozen into the posted
@@ -991,14 +1004,22 @@ export function generatePermitHTML(
         acDisconnect:       input.project.acDisconnect ?? false,
         dcDisconnect:       input.project.dcDisconnect ?? false,
         necVersion,
-        interconnection: {
-          method: (interconnMethod === 'SUPPLY_SIDE_TAP' ? 'SUPPLY_SIDE_TAP'
-                  : interconnMethod === 'MAIN_BREAKER_DERATE' ? 'MAIN_BREAKER_DERATE'
-                  : interconnMethod === 'PANEL_UPGRADE' ? 'PANEL_UPGRADE'
-                  : 'LOAD_SIDE') as InterconnectionMethod,
-          busRating:   panelBusRating,
-          mainBreaker: input.project.mainPanelAmps || panelBusRating,
-        },
+        // 🚨 THE SAME INTERCONNECTION THE PAGE'S COMPLIANCE CHECK RUNS (`complianceInterconnection`):
+        // the primary panel AFTER an applied 120% remedy, with the proposed work and the derate's
+        // load-calculation verdict travelling with it; a MAIN_BREAKER_DERATE / PANEL_UPGRADE token
+        // read as the load-side connection it is (the scalar records no remedy, so it must not make
+        // the derate branch "pass" one).
+        interconnection: (() => {
+          const _ic = complianceInterconnection({
+            method: interconnMethod,
+            busRating: panelBusRating,
+            mainBreaker: input.project.mainPanelAmps || panelBusRating,
+          }, input.project.serviceTopology ?? null);
+          return {
+            ..._ic,
+            method: (_ic.method === 'SUPPLY_SIDE_TAP' ? 'SUPPLY_SIDE_TAP' : 'LOAD_SIDE') as InterconnectionMethod,
+          };
+        })(),
         // Battery fields
         batteryBackfeedA:        input.project.batteryBackfeedA ?? 0,
         batteryCount:            input.project.batteryCount ?? 0,
@@ -1194,9 +1215,11 @@ export function generatePermitHTML(
           + `${a.verified ? 'FIELD-VERIFIED' : 'field-reported'})`).join(' · '));
     }
     (input as unknown as Record<string, unknown>)._computeSystem = csFull;
+    // The panel the verdict was computed on: after an applied 120% remedy, the permitted panel.
+    const _permittedPanel = permitPanelPostWork(input.project);
     input.compliance.electrical = mapComputedSystemToCompliance(csFull, {
-      busRatingA: input.project.panelBusRating ?? input.project.mainPanelAmps ?? null,
-      mainBreakerA: input.project.mainPanelAmps ?? null,
+      busRatingA: _permittedPanel?.busRatingA ?? input.project.panelBusRating ?? input.project.mainPanelAmps ?? null,
+      mainBreakerA: _permittedPanel?.mainBreakerA ?? input.project.mainPanelAmps ?? null,
       // 🚨 THE DECIDING ENGINE'S INPUT. `?? 'LOAD_SIDE'` here chose the article that
       // `mapComputedSystemToCompliance` evaluates, for the compliance block that is actually
       // stamped (computeSystem, not the shadow). An unestablished connection now arrives as
@@ -1307,7 +1330,14 @@ export function generatePermitHTML(
     // snapshot to project. Building once left the frozen index describing a BOM that
     // no longer existed. Nothing else differs between the two calls: the only input
     // that moves is `input.bom`, which `computePlansetManifest` reads at call time.
-    const buildSnapshot = () => buildPermitDesignSnapshot(input, cad, {
+    //
+    // 🚨 AND THE SNAPSHOT'S POI DESCRIBES THE PERMITTED PANEL. With a 120% remedy applied on the
+    // primary panel, its `electrical.poi` arithmetic (PV-4B step 5, the cover's 705.12(B) line), its
+    // NEC-705-12B-EXCEEDED blocker text and its service-disconnect rating read the panel AFTER the
+    // work — the same panel the verdict above was computed on. A view, never a mutation: every
+    // sheet that prints the INSTALLED panel as (E) still reads `input.project`. No remedy ⇒ the
+    // same object, byte-identical digest.
+    const buildSnapshot = () => buildPermitDesignSnapshot(withPermittedPanelRatings(input), cad, {
       projectId: (input as { projectId?: string }).projectId ?? null,
       // W4 §8/§9/§12 — thread the async-resolved document + ledger authority into
       // the pure build (fail-soft null defaults when the route did not resolve it).

@@ -250,6 +250,13 @@ export interface BOMGenerationInputV4 {
    *  Changes no quantity — only whether the metering MODE resolves. */
   consumptionCtLocation?: string | null;
   panelBusRating?: number;  // For NEC 705.12(B) 120% rule calculation
+  /**
+   * 🚨 THE PRIMARY PANEL AFTER ITS APPLIED 120% REMEDY (`PanelBoard.remedy`, read through
+   * `primaryPanelPostWork`). Present ⇒ the load-side backfeed breaker is sized on THESE ratings —
+   * the panel as it will be after the proposed work the same BOM lists — and the note says so.
+   * `mainPanelAmps` / `panelBusRating` stay the projections they are. Absent ⇒ unchanged.
+   */
+  busbarRemedy?: { busbarRatingA: number; mainBreakerA: number; label: string } | null;
 
   // Generator / ATS / BUI — for BOM line items
   generatorId?: string;
@@ -1907,8 +1914,11 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
 
   if (isLoadSide) {
     // NEC 705.12(B) — backfed breaker required in main load center. Enforce 120% rule.
-    const busRating    = input.panelBusRating ?? input.mainPanelAmps ?? 200;
-    const mainAmps     = input.mainPanelAmps ?? 200;
+    // An applied 120% remedy: the breaker is sized on the panel AFTER the work this BOM lists.
+    const _remedy      = input.busbarRemedy ?? null;
+    const busRating    = _remedy?.busbarRatingA ?? input.panelBusRating ?? input.mainPanelAmps ?? 200;
+    const mainAmps     = _remedy?.mainBreakerA ?? input.mainPanelAmps ?? 200;
+    const _remedyNote  = _remedy ? ` — on the panel after the proposed work (${_remedy.label})` : '';
     // 🚨 THE 120% ALLOWANCE HAD NO BATTERY TERM. This was
     //     const maxPVBreaker = Math.floor(busRating * 1.2 - mainAmps);
     // in this block and in its twin below, with no term for any other source on the
@@ -1962,7 +1972,7 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     if (_bf.warning) warnings.push(_bf.warning);
     items.push(addItem('ac', 'breaker', 'Square D', `${backfeedAmps}A Backfeed Breaker`,
       `QO${backfeedAmps}`,
-      `${backfeedAmps}A 2-pole backfeed breaker — NEC 705.12(B) load-side (bus: ${busRating}A, ${_bf.evaluated ? `PV max: ${pvAllowance}A` : 'PV max: NOT EVALUATED'})`,
+      `${backfeedAmps}A 2-pole backfeed breaker — NEC 705.12(B) load-side (bus: ${busRating}A, ${_bf.evaluated ? `PV max: ${pvAllowance}A` : 'PV max: NOT EVALUATED'})${_remedyNote}`,
       1, 'ea', 'NEC 705.12(B)', 'perSystem', '1', true));
     log.push({ stageId: 'ac', category: 'breaker', item: `${backfeedAmps}A Backfeed Breaker`,
       quantity: 1, derivedFrom: 'backfeedAmps',
@@ -1971,7 +1981,7 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     // The note states the resolver's own derivation, so it cannot drift from the number the
     // breaker was sized against — and when the rule was not evaluated it says that instead
     // of printing a 120% conclusion nobody reached.
-    complianceNotes.push(`Backfeed breaker ${backfeedAmps}A — ${_bf.basis}`);
+    complianceNotes.push(`Backfeed breaker ${backfeedAmps}A — ${_bf.basis}${_remedyNote}`);
   } else if (isSupplySideTap) {
     // NEC 705.11 — supply-side tap, no backfed breaker in load center.
     // The tap itself needs PHYSICAL connectors (was a compliance note only —
@@ -3300,8 +3310,11 @@ function generateBOMV4PerSubSystem(
   const isMainBreakerDerate = interconMethod === 'MAIN_BREAKER_DERATE';
   const isPanelUpgrade = interconMethod === 'PANEL_UPGRADE';
   if (isLoadSide) {
-    const busRating = input.panelBusRating ?? input.mainPanelAmps ?? 200;
-    const mainAmps = input.mainPanelAmps ?? 200;
+    // An applied 120% remedy: the breaker is sized on the panel AFTER the work this BOM lists.
+    const _remedy = input.busbarRemedy ?? null;
+    const busRating = _remedy?.busbarRatingA ?? input.panelBusRating ?? input.mainPanelAmps ?? 200;
+    const mainAmps = _remedy?.mainBreakerA ?? input.mainPanelAmps ?? 200;
+    const _remedyNote = _remedy ? ` — on the panel after the proposed work (${_remedy.label})` : '';
     // 🚨 THE 120% ALLOWANCE HAD NO BATTERY TERM. This was
     //     const maxPVBreaker = Math.floor(busRating * 1.2 - mainAmps);
     // in this block and in its twin below, with no term for any other source on the
@@ -3355,12 +3368,12 @@ function generateBOMV4PerSubSystem(
     if (_bf.warning) warnings.push(_bf.warning);
     push(undefined, addItem('ac', 'breaker', 'Square D', `${backfeedAmps}A Backfeed Breaker`,
       `QO${backfeedAmps}`,
-      `${backfeedAmps}A 2-pole backfeed breaker — NEC 705.12(B) load-side (bus: ${busRating}A, ${_bf.evaluated ? `PV max: ${pvAllowance}A` : 'PV max: NOT EVALUATED'})`,
+      `${backfeedAmps}A 2-pole backfeed breaker — NEC 705.12(B) load-side (bus: ${busRating}A, ${_bf.evaluated ? `PV max: ${pvAllowance}A` : 'PV max: NOT EVALUATED'})${_remedyNote}`,
       1, 'ea', 'NEC 705.12(B)', 'perSystem (aggregate of all sub-systems)', '1', true));
     // The note states the resolver's own derivation, so it cannot drift from the number the
     // breaker was sized against — and when the rule was not evaluated it says that instead
     // of printing a 120% conclusion nobody reached.
-    complianceNotes.push(`Backfeed breaker ${backfeedAmps}A — ${_bf.basis}`);
+    complianceNotes.push(`Backfeed breaker ${backfeedAmps}A — ${_bf.basis}${_remedyNote}`);
   } else if (isSupplySideTap) {
     push(undefined, addItem('ac', 'connector', 'NSI Polaris',
       'Insulated Multi-Tap Connector (350 kcmil–#6)', 'IPLD350-3',

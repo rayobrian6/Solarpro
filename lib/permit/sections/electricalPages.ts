@@ -18,6 +18,7 @@ import { projectCanonicalFeeder, projectCanonicalBranch, projectSharedBranchRace
 import { projectRackingBondingAuthority } from '../snapshot/rackingBonding';
 import { GROUNDING_PENDING_LABEL, GROUNDING_PENDING_BONDING_CELL_LABEL, GROUNDING_NON_ORDERABLE_LABEL, GROUNDING_AUTHORITY_BLOCKER_CODE } from '../snapshot/groundingAuthority';
 import { escapeH } from '../utils/drawing';
+import { permitPanelPostWork } from '../utils/panelPostWork';
 import { TAP_SPAN_DESIGN_CONSTRAINT_NOTE } from '@/lib/electrical/tapSpan';
 // D6 — every project-facing date on a sheet resolves in the DOCUMENT's timezone.
 import { formatInDocumentTimezone, documentIssueContextOf } from '../utils/documentIssueContext';
@@ -1537,6 +1538,19 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
         // path below does not require one: supply-side taps are governed by
         // NEC 705.11, and the load-side path is governed by the 120% busbar
         // rule — neither depends on a dwelling load calc.
+        //
+        // 🚨 …UNLESS A DERATE IS APPLIED. A smaller main must carry the panel's calculated load, so
+        // Step 1 states the service graph's verdict on that (`panel.remedy-load-calculation`) instead
+        // of "not required". And with any applied 120% remedy, the bus / main below are the panel
+        // AFTER the work (./utils/panelPostWork via the snapshot) — marked (N), with what they replace.
+        const _pw = _lcSupply ? null : permitPanelPostWork(input.project);
+        const _lc = _pw?.loadCalculation ?? null;
+        const _nMain = _pw ? ' (N)' : '';
+        const _nBus = _pw?.kind === 'replace-panelboard' ? ' (N)' : '';
+        const _pwLine = _pw ? `PROPOSED WORK (NEC 705.12(B) remedy) — ${_pw.panelLabel}: ${_pw.label}, ${_pw.replaces}.` : '';
+        const _step1 = _lc
+          ? `<tr ><td class="fw9 mono">1</td><td>Load Calculation — Derated Main Breaker</td><td>REQUIRED for the proposed ${_pw!.mainBreakerA}A main (NEC 220 / 705.12(B)): the panel's calculated load must fit the derated main. ${_lc.conclusion === 'NOT_EVALUATED' ? 'LOAD CALCULATION REQUIRED — no load calculation covers this panel.' : escapeH(_lc.detail)}</td><td class="tr fw9">${_lc.conclusion === 'PASS' ? 'PASS' : _lc.conclusion === 'FAIL' ? 'FAIL' : 'REQUIRED'}</td></tr>`
+          : `<tr ><td class="fw9 mono">1</td><td>Dwelling Load Calculation</td><td>Not provided — no verified dwelling load inputs on file. Not required for the selected interconnection method (${_lcSupply ? 'NEC 705.11 supply-side tap' : 'NEC 705.12(B) 120% busbar rule'}).</td><td class="tr fw9">N/A</td></tr>`;
         return `
         <table class="equip-table">
           <thead><tr>
@@ -1546,8 +1560,8 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
             <th style="width:25%">Result</th>
           </tr></thead>
           <tbody>
-            <tr ><td class="fw9 mono">1</td><td>Dwelling Load Calculation</td><td>Not provided — no verified dwelling load inputs on file. Not required for the selected interconnection method (${_lcSupply ? 'NEC 705.11 supply-side tap' : 'NEC 705.12(B) 120% busbar rule'}).</td><td class="tr fw9">N/A</td></tr>
-            <tr class="bg-lt"><td class="fw9 mono">2</td><td>Service Rating</td><td>${mainA}A main service disconnect / ${busA}A busbar</td><td class="tr fw9">${mainA}A</td></tr>
+            ${_step1}
+            <tr class="bg-lt"><td class="fw9 mono">2</td><td>Service Rating</td><td>${mainA}A${_nMain} main service disconnect / ${busA}A${_nBus} busbar${_pw ? ` — ${_pwLine}` : ''}</td><td class="tr fw9">${mainA}A${_nMain}</td></tr>
             <tr ><td class="fw9 mono">3</td><td>PV AC Output</td><td>${acKw.toFixed(2)} kW AC ÷ 240V</td><td class="tr fw9">${acAmps.toFixed(1)}A PV</td></tr>
             ${_lcSupply ? `
             <tr class="bg-lt"><td class="fw9 mono">4</td><td>Tap OCPD — NEC 705.11 / 690.8(A)(1)</td><td>${acAmps.toFixed(1)}A × 125% → next standard OCPD per NEC 240.6(A)</td><td class="tr fw9">${bfAmps}A fused disconnect</td></tr>
@@ -1581,7 +1595,7 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
             })()}
             ` : `
             <tr class="bg-lt"><td class="fw9 mono">4</td><td>PV Backfeed Breaker — NEC 690.8(A)(1)</td><td>${acAmps.toFixed(1)}A × 125% → next standard OCPD per NEC 240.6(A)</td><td class="tr fw9">${bfAmps}A breaker required</td></tr>
-            <tr style="background:#fff;border:2px solid #000;"><td class="fw9 mono">5</td><td style="font-weight:900;">120% Busbar Rule — NEC 705.12(B)</td><td>${busA}A bus × 120% = ${busLimit.toFixed(0)}A max; minus ${mainA}A main = ${maxBfAllowed.toFixed(0)}A for PV</td><td style="font-weight:900;text-align:right;font-size:11px;">${_rulePasses == null ? 'PENDING — NO CANONICAL BUSBAR VERDICT' : (_rulePasses ? 'PASS' : 'EXCEEDS 120% — SUPPLY-SIDE TAP OR PANEL UPGRADE REQUIRED')}</td></tr>
+            <tr style="background:#fff;border:2px solid #000;"><td class="fw9 mono">5</td><td style="font-weight:900;">120% Busbar Rule — NEC 705.12(B)</td><td>${busA}A${_nBus} bus × 120% = ${busLimit.toFixed(0)}A max; minus ${mainA}A${_nMain} main = ${maxBfAllowed.toFixed(0)}A for PV${_pw ? ` (with the proposed ${_pw.label.charAt(0).toLowerCase()}${_pw.label.slice(1)})` : ''}</td><td style="font-weight:900;text-align:right;font-size:11px;">${_rulePasses == null ? 'PENDING — NO CANONICAL BUSBAR VERDICT' : (_rulePasses ? (_pw ? 'PASS WITH PROPOSED WORK' : 'PASS') : 'EXCEEDS 120% — SUPPLY-SIDE TAP OR PANEL UPGRADE REQUIRED')}</td></tr>
             `}
           </tbody>
         </table>
@@ -1636,10 +1650,10 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
         ${''/* formula-tutorial box removed — displaced project content */}` : `
         <div style="padding:var(--xs);font-size:var(--f-md);line-height:1.5;border:var(--border);border-top:none;background:#fafafa;">
           <strong>120% RULE INTERPRETATION:</strong>
-          The PV system requires a ${bfAmps}A backfeed breaker installed at the load end of the existing ${busA}A busbar.
-          Per NEC 705.12(B)(2)(3), the sum of the main breaker (${mainA}A) and the PV backfeed breaker (${bfAmps}A) = ${mainA + bfAmps}A,
+          The PV system requires a ${bfAmps}A backfeed breaker installed at the load end of the ${_nBus ? 'new' : 'existing'} ${busA}A busbar.
+          Per NEC 705.12(B)(2)(3), the sum of the main breaker (${mainA}A${_nMain}) and the PV backfeed breaker (${bfAmps}A) = ${mainA + bfAmps}A,
           which ${_rulePasses == null ? 'has NOT been evaluated on the canonical snapshot for' : (_rulePasses ? 'does not exceed' : 'exceeds')} the 120% limit of ${busLimit.toFixed(0)}A.
-          ${_rulePasses == null ? 'The 120% busbar evaluation is PENDING — resolve before submission.' : (_rulePasses ? 'No panel upgrade is required.' : 'A supply-side connection per NEC 705.11 or a panel upgrade is required.')}
+          ${_rulePasses == null ? 'The 120% busbar evaluation is PENDING — resolve before submission.' : (_rulePasses ? (_pw ? `This relies on the proposed work: ${_pwLine}` : 'No panel upgrade is required.') : 'A supply-side connection per NEC 705.11 or a panel upgrade is required.')}
         </div>
         ${''/* formula-tutorial box removed — displaced project content */}`}`;
       })()}

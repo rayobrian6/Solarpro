@@ -131,8 +131,9 @@ import {
 } from '@/components/engineering/systemConfig/ItemEditor';
 import { MeterCollarControl, SystemArchitectureControls } from '@/components/engineering/systemConfig/cards/SystemConfigurationControls';
 import {
-  legacyInterconnectionMirror, complianceInterconnection, consumerInterconnectionToken, appliedPanelRemedies,
+  legacyInterconnectionMirror, complianceInterconnection, consumerInterconnectionToken, appliedRemedyKey,
 } from '@/lib/electrical/systemConfigLegacyInterconnection';
+import { RemedyApplyPointer, ComplianceProposedWorkRow, ScheduleRemedyRows } from '@/components/engineering/BusbarRemedyRows';
 import { EngineeringReadinessPanel } from '@/components/engineering/systemConfig/EngineeringReadinessPanel';
 import { GuidedStrip, revealHomeCard } from '@/components/engineering/systemConfig/GuidedStrip';
 import { ExistingElectricalServiceCard } from '@/components/engineering/systemConfig/cards/ExistingElectricalServiceCard';
@@ -7640,9 +7641,7 @@ function EngineeringPageInner() {
 
   // An applied 120% remedy moves the compliance check without moving any config field, so its key is a
   // dependency of the re-run too: [Apply] / [Remove] re-checks the panel they changed.
-  const appliedRemedyKey = appliedPanelRemedies(svcTopology)
-    .map(r => `${r.panel.id}:${r.remedy.kind}:${r.remedy.mainBreakerA}`
-      + (r.remedy.kind === 'replace-panelboard' ? `:${r.remedy.busbarRatingA}` : '')).join('|');
+  const remedyKey = appliedRemedyKey(svcTopology);
   useEffect(() => {
     setConfigDirty(true);
     const timer = setTimeout(() => {
@@ -7652,7 +7651,7 @@ function EngineeringPageInner() {
     }, 800);
     return () => clearTimeout(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config, engineeringMode, appliedRemedyKey]);
+  }, [config, engineeringMode, remedyKey]);
 
   // Override management
   const addOverride = (ruleId: string, field: string, value: string, justification: string) => {
@@ -9569,7 +9568,8 @@ function EngineeringPageInner() {
           rafterSpan: config.rafterSpan || undefined,
           rafterSpecies: config.rafterSpecies || undefined,
           attachmentSpacing: config.attachmentSpacing,
-          interconnectionMethod: config.interconnectionMethod ?? 'UNRESOLVED',
+          // A 120% remedy token is a note, not a record: the package reads the graph's remedy.
+          interconnectionMethod: consumerInterconnectionToken(config.interconnectionMethod) ?? 'UNRESOLVED',
           // The topology's own CT record: a hybrid never inherits a
           // single-lane-era location (its digest would move) — see
           // ctLocationForRequests.
@@ -14222,14 +14222,7 @@ function EngineeringPageInner() {
                                     <span className="font-bold text-emerald-400">Supply-Side Tap (NEC 705.11)</span>
                                   </div>
                                 ) : null}
-                                {ic?.proposedWork ? (
-                                  <div data-testid="compliance-proposed-work" className="flex justify-between gap-2">
-                                    <span className="text-slate-500">Proposed work (120% remedy)</span>
-                                    <span className="text-right font-bold text-amber-300">
-                                      {ic.proposedWork.panelLabel}: {ic.proposedWork.label} — {ic.proposedWork.replaces}
-                                    </span>
-                                  </div>
-                                ) : null}
+                                <ComplianceProposedWorkRow proposedWork={ic?.proposedWork} />
                                 {elec?.acSizing?.ocpdAmps != null ? (
                                   <div className="flex justify-between">
                                     <span className="text-slate-500">OCPD</span>
@@ -14657,17 +14650,12 @@ function EngineeringPageInner() {
                                       </button>
                                     ) : null}
                                     {alt.method === 'MAIN_BREAKER_DERATE' || alt.method === 'PANEL_UPGRADE' ? (
-                                      // A suggestion here; applied only by its own [Apply] on the panel it changes.
-                                      <button
-                                        data-testid="electrical-apply-remedy"
-                                        onClick={() => {
-                                          setActiveTab('config');
-                                          window.setTimeout(() => revealHomeCard('service.rating'), 50);
-                                        }}
-                                        className="mt-1.5 text-[10px] px-2 py-0.5 rounded bg-amber-500/15 border border-amber-500/40 text-amber-300 hover:bg-amber-500/25 transition-colors font-semibold"
-                                      >
-                                        Apply a remedy on Existing Electrical Service →
-                                      </button>
+                                      // A suggestion here; applied only by its own [Apply] on the panel it changes —
+                                      // and pointed at only when the Service card has one to offer.
+                                      <RemedyApplyPointer topology={svcTopology} onOpen={() => {
+                                        setActiveTab('config');
+                                        window.setTimeout(() => revealHomeCard('service.rating'), 50);
+                                      }} />
                                     ) : null}
                                   </div>
                                 </div>
@@ -16499,7 +16487,6 @@ function EngineeringPageInner() {
                   // 🚨 A remedy token on the scalar is NOT scheduled as a derate / panel upgrade: it records
                   // no panel and no rating. The schedule's remedy rows come from the graph, where [Apply] wrote them.
                   const icToken = consumerInterconnectionToken(config.interconnectionMethod) ?? '';
-                  const scheduledRemedies = appliedPanelRemedies(svcTopology);
                   return (
                     <div className="mb-6">
                       <div className="text-sm font-black text-slate-700 mb-2 uppercase tracking-wide">Electrical Equipment</div>
@@ -16556,16 +16543,7 @@ function EngineeringPageInner() {
                             <td className="border border-slate-200 px-3 py-2 font-bold text-amber-700">{config.mainPanelAmps}A Panel</td>
                             <td className="border border-slate-200 px-3 py-2 text-slate-500">{icToken === 'SUPPLY_SIDE_TAP' ? 'NEC 705.11' : 'NEC 705.12(B)'}</td>
                           </tr>
-                          {scheduledRemedies.map(r => (
-                            <tr key={`remedy-${r.panel.id}`} data-testid={`schedule-remedy-${r.panel.id}`} className="bg-amber-50">
-                              <td className="border border-slate-200 px-3 py-2 font-semibold">(N) {r.panel.label} — proposed work</td>
-                              <td className="border border-slate-200 px-3 py-2">{r.label} — {r.replaces}</td>
-                              <td className="border border-slate-200 px-3 py-2 font-bold text-amber-700">
-                                {r.remedy.kind === 'replace-panelboard' ? `${r.remedy.busbarRatingA}A bus / ` : ''}{r.remedy.mainBreakerA}A main
-                              </td>
-                              <td className="border border-slate-200 px-3 py-2 text-slate-500">NEC 705.12(B)</td>
-                            </tr>
-                          ))}
+                          <ScheduleRemedyRows topology={svcTopology} />
                           {config.utilityId ? (
                             <tr className="bg-white">
                               <td className="border border-slate-200 px-3 py-2 font-semibold">Utility Provider</td>
@@ -18106,7 +18084,7 @@ function EngineeringPageInner() {
                                 rafterSize: config.rafterSize,
                                 rafterSpacing: config.rafterSpacing,
                                 attachmentSpacing: config.attachmentSpacing,
-                                interconnectionMethod: config.interconnectionMethod ?? 'UNRESOLVED',
+                                interconnectionMethod: consumerInterconnectionToken(config.interconnectionMethod) ?? 'UNRESOLVED',
                                 consumptionCtLocation: ctLocationForRequests || undefined,
                                 panelBusRating: config.panelBusRating ?? config.mainPanelAmps ?? 200,
                                 combinerId: config.combinerId || undefined,

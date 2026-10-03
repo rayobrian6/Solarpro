@@ -318,7 +318,9 @@ describe('the page\'s compliance input — the graph\'s remedy, never the scalar
     expect(complianceInterconnection(posted('LOAD_SIDE'), derated(150))).toEqual({
       method: 'LOAD_SIDE', busRating: 200, mainBreaker: 150,
       proposedWork: { kind: 'replace-main-breaker', panelLabel: 'Main service panel', label: 'Replacement main breaker 150 A',
-        replaces: 'replaces the installed 200 A main' },
+        replaces: 'replaces the installed 200 A main',
+        // The graph's own verdict on the derate's load calculation travels with it.
+        loadCalculation: { conclusion: 'NOT_EVALUATED', detail: check(derated(150), 'panel.remedy-load-calculation')!.detail } },
     });
     expect(complianceInterconnection(posted('LOAD_SIDE'), upgraded(225))).toMatchObject({ busRating: 225, mainBreaker: 200 });
     expect(complianceInterconnection(posted('LOAD_SIDE'), failing())).toEqual(posted('LOAD_SIDE'));
@@ -370,13 +372,19 @@ describe('🚨 the page: suggestions are never applied silently, and its legacy 
   });
 
   it('the compliance request carries the graph\'s remedy (and the scalar token read as LOAD_SIDE)', () => {
-    expect(page).toMatch(/interconnection: complianceInterconnection\(\{\s*method: config\.interconnectionMethod \?\? 'UNRESOLVED',/);
-    // [Apply] / [Remove] move no config field, so the re-check keys on the applied remedies too.
-    expect(page).toMatch(/\}, \[config, engineeringMode, appliedRemedyKey\]\);/);
+    // 🚨 THE WHOLE CALL, SECOND ARGUMENT INCLUDED — `}, null)` here ignores every applied remedy, and a
+    // regex on the call's first line alone stayed green under exactly that (review finding).
+    expect(page).toMatch(/interconnection: complianceInterconnection\(\{\s*method: config\.interconnectionMethod \?\? 'UNRESOLVED',\s*busRating: config\.panelBusRating \?\? 200,\s*mainBreaker: config\.mainPanelAmps \?\? 200,\s*\}, svcTopology\),/);
+    // [Apply] / [Remove] move no config field, so the re-check keys on the applied remedies too —
+    // through the pure key (proven to move below), never a constant.
+    expect(page).toContain('const remedyKey = appliedRemedyKey(svcTopology);');
+    expect(page).toMatch(/\}, \[config, engineeringMode, remedyKey\]\);/);
   });
 
   it('the BOM request and the schedule never read a remedy token as a remedy', () => {
     expect(page).toContain("interconnectionMethod: consumerInterconnectionToken(config.interconnectionMethod) ?? 'UNRESOLVED',");
+    // The BOM request and BOTH permit requests (download + draft): the token never reaches a sheet raw.
+    expect(page.split("interconnectionMethod: consumerInterconnectionToken(config.interconnectionMethod) ?? 'UNRESOLVED',").length - 1).toBe(3);
     expect(page).not.toMatch(/MAIN_BREAKER_DERATE: 'Main Breaker Derate'/);
     expect(page).not.toMatch(/const isMainDerate = /);
   });

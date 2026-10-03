@@ -100,14 +100,20 @@ export interface InterconnectionInput {
    * 🚨 THE RATINGS ABOVE ARE THE PANEL AFTER PROPOSED WORK when this is present — a 120% remedy the
    * installer applied on the service graph (`PanelBoard.remedy`, see
    * lib/electrical/systemConfigLegacyInterconnection.ts `complianceInterconnection`). The result says
-   * so, and a derate additionally raises the load calculation it still needs: the busbar arithmetic
-   * passing is not the derate passing.
+   * so, and a derate additionally states its load calculation: the busbar arithmetic passing is not
+   * the derate passing.
    */
   proposedWork?: {
     kind: 'replace-main-breaker' | 'replace-panelboard';
     panelLabel: string;
     label: string;
     replaces: string;
+    /**
+     * A derate's load calculation AS THE SERVICE GRAPH CONCLUDED IT (`panel.remedy-load-calculation`)
+     * — the one owner of that verdict. This engine has no load figure of its own, so it restates
+     * this; absent ⇒ NOT EVALUATED.
+     */
+    loadCalculation?: { conclusion: 'PASS' | 'FAIL' | 'NOT_EVALUATED'; detail: string };
   };
 }
 
@@ -1093,20 +1099,42 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
       allErrors.push(interconnectionIssues[0]);
     }
     // 🚨 A DERATE THAT PASSES THE BUSBAR ARITHMETIC IS NOT A FINISHED DERATE. The smaller main must
-    // carry the panel's calculated load, and nothing here has that number — so it is raised, loudly,
-    // as the input the remedy still needs (the service graph's `panel.remedy-load-calculation` check
-    // holds the verdict), never folded into the 120% PASS.
+    // carry the panel's calculated load. This engine has no load figure; the service graph's
+    // `panel.remedy-load-calculation` check owns that verdict and it is restated here exactly —
+    // PASS as an info, FAIL as an error (the derate does not work, whatever the 120% arithmetic
+    // says), and only an undecided one as the NOT EVALUATED requirement. Never folded into the 120% PASS.
     if (icProposed?.kind === 'replace-main-breaker') {
-      const _derate: CalcIssue = {
-        code: 'W-DERATE-LOAD-CALC-REQUIRED',
-        severity: 'warning',
-        message: `NOT EVALUATED — load calculation required: ${icProposed.panelLabel}'s proposed ${icProposed.label.charAt(0).toLowerCase()}${icProposed.label.slice(1)} (${icProposed.replaces}) must be shown to carry the panel's calculated load (NEC 220).`,
-        value: icMainBreaker,
-        necReference: 'NEC 220 / 705.12(B)',
-        suggestion: 'Provide the load calculation (Full load analysis in System Config) for this panel, or apply a different remedy.',
-      };
+      const _work = `${icProposed.panelLabel}'s proposed ${icProposed.label.charAt(0).toLowerCase()}${icProposed.label.slice(1)} (${icProposed.replaces})`;
+      const _lc = icProposed.loadCalculation ?? null;
+      const _derate: CalcIssue = _lc?.conclusion === 'PASS'
+        ? {
+            code: 'I-DERATE-LOAD-CALC-OK',
+            severity: 'info',
+            message: `Load calculation PASS — ${_work}: ${_lc.detail}`,
+            value: icMainBreaker,
+            necReference: 'NEC 220 / 705.12(B)',
+          }
+        : _lc?.conclusion === 'FAIL'
+          ? {
+              code: 'E-DERATE-LOAD-EXCEEDS',
+              severity: 'error',
+              message: `Load calculation FAIL — ${_work}: ${_lc.detail}`,
+              value: icMainBreaker,
+              necReference: 'NEC 220 / 705.12(B)',
+              suggestion: 'Apply a different remedy (a busbar upgrade or a supply-side connection), or a larger derate that still satisfies the 120% rule.',
+            }
+          : {
+              code: 'W-DERATE-LOAD-CALC-REQUIRED',
+              severity: 'warning',
+              message: `NOT EVALUATED — load calculation required: ${_work} must be shown to carry the panel's calculated load (NEC 220).`,
+              value: icMainBreaker,
+              necReference: 'NEC 220 / 705.12(B)',
+              suggestion: 'Provide the load calculation (Full load analysis in System Config) for this panel, or apply a different remedy.',
+            };
       interconnectionIssues.push(_derate);
-      allWarnings.push(_derate);
+      if (_derate.severity === 'error') allErrors.push(_derate);
+      else if (_derate.severity === 'warning') allWarnings.push(_derate);
+      else allInfos.push(_derate);
     }
 
   } else if (icMethod === 'SUPPLY_SIDE_TAP') {

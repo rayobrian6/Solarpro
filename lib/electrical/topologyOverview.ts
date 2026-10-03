@@ -22,7 +22,7 @@
 import {
   evaluateServiceTopology, OPTIONAL_REQUIREMENT_TOKENS, solarCouplingLabel, serviceRatingLabel,
   servicePhaseInfo, isServicePhase, isSiteLevelCheck, serviceExistingOrNew, EXISTING_OR_NEW_TOKEN,
-  REMEDY_LOAD_CALCULATION_TOKEN as REMEDY_LOAD_TOKEN,
+  REMEDY_LOAD_CALCULATION_TOKEN as REMEDY_LOAD_TOKEN, REMEDY_SCCR_TOKEN, panelRemedyWork,
   type ServiceTopology, type TopologyEvaluation, type TopologyCheck, type ExistingOrNew,
 } from '@/lib/electrical/serviceTopology';
 import { foldConclusions, type EngineeringConclusion } from '@/lib/engineering/engineeringStatus';
@@ -327,6 +327,13 @@ export function labelForToken(token: string, t: ServiceTopology): string {
     return `Load calculation for ${panel?.label ?? 'the panel'} — its load must fit the derated `
       + `${main != null ? `${main} A ` : ''}main breaker`;
   }
+  if (token.startsWith(REMEDY_SCCR_TOKEN)) {
+    // New equipment the installer applied as proposed work — its rating is the replacement's own.
+    const panel = t.panels.find(p => p.id === token.slice(REMEDY_SCCR_TOKEN.length));
+    const work = panel ? panelRemedyWork(panel) : null;
+    return `Interrupting rating (SCCR) of the ${work ? work.label.charAt(0).toLowerCase() + work.label.slice(1)
+      : 'proposed replacement'} on ${panel?.label ?? 'the panel'} — not the installed panel's`;
+  }
   if (token.startsWith('aggregation.input-source:')) {
     return `A DER source for the aggregation input '${token.slice('aggregation.input-source:'.length)}'`;
   }
@@ -410,7 +417,7 @@ function ownerForToken(token: string): RequirementOwner {
   // Enter the panel's load in the load analysis and SolarPro checks the derated main against it.
   if (token.startsWith(REMEDY_LOAD_TOKEN)) return 'solarpro-can-calculate';
   if (token.startsWith('manufacturer-document:') || token.startsWith('manufacturer-limit:')
-      || token.startsWith('sccr:') || token === 'gateway.continuousRatingA') {
+      || token.startsWith('sccr:') || token.startsWith(REMEDY_SCCR_TOKEN) || token === 'gateway.continuousRatingA') {
     return 'manufacturer-authority';
   }
   if (token === 'service.availableFaultCurrentA') return 'utility-must-provide';
@@ -512,6 +519,11 @@ function focusFor(check: TopologyCheck, token: string, t: ServiceTopology): Over
       return { kind: 'panel', nodeId: panelId, field: token.slice('panel.'.length) };
     }
     return { kind: 'domain', nodeId: domainId, field: token };
+  }
+  // The replacement's rating belongs to the panel's proposed work — sent to that panel, never to
+  // its installed `sccrA`, which this question is explicitly not about.
+  if (token.startsWith(REMEDY_SCCR_TOKEN)) {
+    return { kind: 'panel', nodeId: token.slice(REMEDY_SCCR_TOKEN.length), field: 'remedy' };
   }
   if (token.startsWith('sccr:')) {
     const id = token.slice(5);

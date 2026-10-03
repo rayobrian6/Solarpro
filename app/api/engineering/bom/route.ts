@@ -508,6 +508,20 @@ export async function POST(req: NextRequest) {
         _arrayWarnings.push(`${STRINGING_PENDING} — no PV inverter or DC receiving equipment is chosen, so no `
           + 'string hardware is ordered.');
       }
+      // 🚨 AN APPLIED 120% REMEDY IS WHAT THE BACKFEED BREAKER IS SIZED AGAINST. The same BOM lists
+      // the replacement main / panelboard (`bomFromServiceTopology`); sizing the breaker on the main
+      // being replaced would buy a part for a panel that will not exist. Only the 705.12(B) inputs
+      // move, and only when the stored graph's primary panel carries a remedy — `mainPanelAmps` stays
+      // the service-rating projection above, and every graph without a remedy is unchanged.
+      let _busbarRemedy: BOMGenerationInputV4['busbarRemedy'] = null;
+      if (_electrical?.model?.topology) {
+        const { primaryPanelPostWork } = await import('@/lib/electrical/systemConfigLegacyInterconnection');
+        const _pw = primaryPanelPostWork(_electrical.model.topology);
+        if (_pw && _pw.busbarRatingA != null && _pw.mainBreakerA != null) {
+          _busbarRemedy = { busbarRatingA: _pw.busbarRatingA, mainBreakerA: _pw.mainBreakerA,
+            label: `${_pw.panel.label}: ${_pw.label}, ${_pw.replaces}` };
+        }
+      }
 
       const input: BOMGenerationInputV4 = {
         inverterId:         resolvedInverterId,
@@ -682,6 +696,7 @@ export async function POST(req: NextRequest) {
       interconnectionMethod:   body.interconnectionMethod ?? body.interconnection ?? 'UNRESOLVED',
       consumptionCtLocation:   typeof body.consumptionCtLocation === 'string' ? body.consumptionCtLocation : undefined,
       panelBusRating:          Number(body.panelBusRating) || Number(body.mainPanelAmps) || 200,
+      busbarRemedy:            _busbarRemedy,
       runs:                    body.runs,
       // Pre-calculated quantities from ComputedSystem.bomQuantities (exact match with summary cards)
       bomQuantities:            body.bomQuantities,

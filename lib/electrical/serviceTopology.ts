@@ -473,6 +473,18 @@ export type PanelRemedy =
  */
 export const REMEDY_LOAD_CALCULATION_TOKEN = 'remedy.loadCalculation:';
 
+/**
+ * What ANY applied remedy owes the fault-current chain: `remedy.sccr:<panelId>`. A replacement main
+ * breaker or panelboard is new equipment, and the installed panel's `sccrA` is not its interrupting
+ * rating — so the chain is NOT EVALUATED for that panel until the work is installed and recorded.
+ */
+export const REMEDY_SCCR_TOKEN = 'remedy.sccr:';
+
+/** The title of a derate's load-calculation check — one spelling for the engine and its readers. */
+export function remedyLoadCalculationTitle(p: Pick<PanelBoard, 'label'>): string {
+  return `${p.label} derated main — load calculation`;
+}
+
 /** The ratings the 120% rule is evaluated on: the panel after any applied remedy, else as installed. */
 export function effectivePanelRatings(p: Pick<PanelBoard, 'busbarRatingA' | 'mainBreakerA' | 'remedy'>): {
   busbarRatingA: number | null; mainBreakerA: number | null;
@@ -1912,7 +1924,7 @@ export function evaluateServiceTopology(topology: ServiceTopology): TopologyEval
           + 'proposed work; otherwise apply another remedy.', 'NEC 705.12(B)'));
       }
       const loadA = topology.loads?.byPanel.find(l => l.panelId === p.id)?.calculatedDemandA ?? null;
-      const loadTitle = `${p.label} derated main — load calculation`;
+      const loadTitle = remedyLoadCalculationTitle(p);
       checks.push(viaLoadMethod(num(loadA)
         ? (loadA <= r.mainBreakerA
           ? pass('panel.remedy-load-calculation', 'site', loadTitle,
@@ -1969,10 +1981,22 @@ export function evaluateServiceTopology(topology: ServiceTopology): TopologyEval
   // ── FAULT CURRENT / SCCR ──────────────────────────────────────────────────
 
   const afc = topology.service.availableFaultCurrentA;
-  const rated: Array<{ id: string; label: string; sccrA: number | null }> = [
-    ...topology.devices.map(d => ({ id: d.id, label: d.label, sccrA: d.sccrA })),
-    ...topology.domains.map(d => ({ id: d.gateway.id, label: d.gateway.label, sccrA: d.gateway.sccrA })),
-    ...topology.panels.map(p => ({ id: p.id, label: p.label, sccrA: p.sccrA })),
+  // 🚨 A PANEL WITH PROPOSED WORK IS CHECKED AS IT WILL BE, AND ITS NEW EQUIPMENT HAS NO RATING YET.
+  // A replacement panelboard's interrupting rating is the new panel's, and a replacement main
+  // breaker's AIC sets the panel's series / fully-rated SCCR — neither is the installed `sccrA`.
+  // Carrying the old figure across would certify equipment nobody has rated, so the chain names the
+  // replacement as unrated (`remedy.sccr:<panel>`) until the work is installed and recorded.
+  const rated: Array<{ id: string; label: string; sccrA: number | null; token: string }> = [
+    ...topology.devices.map(d => ({ id: d.id, label: d.label, sccrA: d.sccrA, token: `sccr:${d.id}` })),
+    ...topology.domains.map(d => ({ id: d.gateway.id, label: d.gateway.label, sccrA: d.gateway.sccrA,
+      token: `sccr:${d.gateway.id}` })),
+    ...topology.panels.map(p => {
+      const work = panelRemedyWork(p);
+      return work
+        ? { id: p.id, label: `${p.label} after the proposed work (${work.label.charAt(0).toLowerCase()}`
+            + `${work.label.slice(1)})`, sccrA: null, token: `${REMEDY_SCCR_TOKEN}${p.id}` }
+        : { id: p.id, label: p.label, sccrA: p.sccrA, token: `sccr:${p.id}` };
+    }),
   ];
   if (!num(afc)) {
     checks.push(unknown('sccr.chain', 'site', 'Fault-current compatibility',
@@ -1991,7 +2015,7 @@ export function evaluateServiceTopology(topology: ServiceTopology): TopologyEval
         `${missing.map(r => r.label).join(', ')} state no interrupting rating, so the chain is `
         + 'incomplete. Note that a gateway\'s supported rating depends on the main breaker selected '
         + 'in it — a breaker amperage alone does not establish it.',
-        missing.map(r => `sccr:${r.id}`), 'NEC 110.9 / 110.24'));
+        missing.map(r => r.token), 'NEC 110.9 / 110.24'));
     } else {
       checks.push(pass('sccr.chain', 'site', 'Fault-current compatibility',
         `Every device in the chain is rated at or above the ${afc} A available at the service.`,

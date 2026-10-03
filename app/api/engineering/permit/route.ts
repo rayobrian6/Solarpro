@@ -870,6 +870,28 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // 🚨 A 120% REMEDY TOKEN ON THE SCALAR IS A NOTE, NOT A RECORD — ON THE SEALED PACKAGE TOO.
+    //
+    // MAIN_BREAKER_DERATE / PANEL_UPGRADE name no panel and no rating, so E-1 printing
+    // "Interconnection MAIN_BREAKER_DERATE" asserted a derate nothing recorded. The graph's
+    // `PanelBoard.remedy` is the one record of a remedy (and the package carries it from there); the
+    // token is read as the load-side connection it refines — on every project, graph or not, and
+    // whether or not the graph resolved a point of interconnection above. The BOM route does the same.
+    {
+      const { consumerInterconnectionToken } = await import('@/lib/electrical/systemConfigLegacyInterconnection');
+      const _pb = body as unknown as Record<string, unknown>;
+      for (const holder of [(_pb.project ?? {}) as Record<string, unknown>, _pb]) {
+        const _posted = holder.interconnectionMethod;
+        if (typeof _posted !== 'string') continue;
+        const _read = consumerInterconnectionToken(_posted);
+        if (_read !== _posted) {
+          console.warn(`[permit/POST] a 120% remedy token was posted as the interconnection method (${_posted})`
+            + ` — read as ${_read}; the service graph holds the remedy record.`);
+          holder.interconnectionMethod = _read;
+        }
+      }
+    }
+
     // 🚨 AN ELECTRICAL CONFLICT REFUSES THE PACKAGE.
     //
     // This is the one surface where surfacing-and-continuing is the wrong answer. The Diagram tab

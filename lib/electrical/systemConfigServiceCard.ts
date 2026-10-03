@@ -264,3 +264,20 @@ export function busbarRemedies(panel: PanelBoard, check: TopologyCheck | null): 
       .map(amps => ({ amps, allowsA: maxLoadSideBackfeedA(amps, main) })),
   };
 }
+
+/**
+ * The panels whose Service-card failure block offers an [Apply] right now — the same two readers
+ * (`panelBusbarCheck` → `busbarRemedies`) the card renders from, so a pointer elsewhere ("Apply a
+ * remedy on Existing Electrical Service →") is shown only when there is something there to apply.
+ * Empty when the graph reached no per-panel 120% FAIL — e.g. a PV-only load-side job, whose 705.12(B)
+ * verdict is the legacy single-panel one and has no remedy writer yet.
+ */
+export function panelsOfferingBusbarRemedy(
+  t: ServiceTopology | null, checks: ReadonlyArray<TopologyCheck> | null | undefined,
+): string[] {
+  if (!t || !checks) return [];
+  return t.panels.filter(p => {
+    const r = busbarRemedies(p, panelBusbarCheck(t, checks, p.id));
+    return !!r && (r.derateMain.length > 0 || r.upgradeBus.length > 0);
+  }).map(p => p.id);
+}

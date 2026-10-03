@@ -36,6 +36,7 @@ import { applyFieldMeasurementsToRuns } from '../snapshot/applyFieldMeasurements
 import type { FieldRouteMeasurementAuthority } from '@/lib/fieldMeasurement/resolver';
 import { normalizeConduitType as necNormalizeConduitType } from '@/lib/nec/chapter9';
 import { interconnectionRuleOf } from './interconnectionRule';
+import { permitPanelPostWork } from './panelPostWork';
 
 /**
  * Wave 2a (contract §3, 2a Compute): per-subsystem scoping for the permit-path
@@ -71,6 +72,7 @@ export function buildComputedRunsForPermit(
 ): RunSegment[] | null {
   try {
     const eq = getEquipmentContext(input, cad);
+    const _postWork = permitPanelPostWork(input.project);
     const _projTh = input.project as { lat?: number; lng?: number; state?: string };
     const _temps = getDesignTemps(_projTh.lat, _projTh.lng,
       (typeof _projTh.state === 'string' && /^[A-Za-z]{2}$/.test(_projTh.state.trim()))
@@ -289,8 +291,12 @@ export function buildComputedRunsForPermit(
         ...runLengths,
         ...(firstStr?.wireLength ? { DC_STRING_RUN: firstStr.wireLength } : {}),
       },
-      panelBusRating: input.project.panelBusRating || input.project.mainPanelAmps || 200,
+      // The 705.12(B) inputs: the primary panel AFTER an applied 120% remedy when one exists
+      // (./panelPostWork) — this engine's `interconnectionPass` IS the package's stamped verdict.
+      // `mainPanelAmps` stays the installed figure: it also sizes the existing service conductors.
+      panelBusRating: _postWork?.busRatingA ?? (input.project.panelBusRating || input.project.mainPanelAmps || 200),
       mainPanelAmps: input.project.mainPanelAmps || 200,
+      ...(_postWork ? { interconnectionMainBreakerAmps: _postWork.mainBreakerA } : {}),
       mainPanelBrand: input.project.mainPanelBrand || 'Square D',
       // ══ 2026-08-29 — THE RACEWAY MATERIAL, NOT A DISPLAY LABEL ══════════════
       // This packed the SIZE and the TYPE into one string — `3/4" EMT` — and

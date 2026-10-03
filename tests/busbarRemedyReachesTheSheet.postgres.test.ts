@@ -247,5 +247,44 @@ describe('🚨 the BOM route lists it — and never honours the stale token as a
     const b = await bom();
     expect(b.items.find(i => i.id === 'topology-remedy-panelboard-msp-1')!.model)
       .toBe('225 A bus panelboard, 200 A main — replacement for Main service panel');
+    // The backfeed breaker is sized on the NEW bus, and the note says on what.
+    const note = b.notes.find(n => n.startsWith('Backfeed breaker'))!;
+    expect(note).toContain('(225A bus × 1.2) − 200A main');
+    expect(note).toContain('on the panel after the proposed work');
+  });
+});
+
+describe('🚨 the BOM sizes the backfeed breaker on the panel AFTER the work it lists — never the main being replaced', () => {
+  const backfeed = (b: Awaited<ReturnType<typeof bom>>) => ({
+    note: b.notes.find(n => n.startsWith('Backfeed breaker')) ?? '',
+    line: b.items.find(i => /Backfeed Breaker$/.test(i.model ?? '')) ?? null,
+  });
+
+  it('control: without [Apply] the allowance is computed on the installed 200 A main — and says nothing of proposed work', async () => {
+    await persist(await failingHouse());
+    const { note, line } = backfeed(await bom());
+    expect(note).toContain('(200A bus × 1.2) − 200A main − 60A non-PV backfeed');
+    expect(note).toContain('= -20A available to the PV breaker');
+    expect(note).not.toContain('proposed work');
+    expect(line!.partNumber).toBe('QO15');
+  });
+
+  it('after [Apply] 150 A derate → reload: (200 × 1.2) − 150 − 60 = 30 A, a QO30, and no note on the replaced main', async () => {
+    const { answerBusbarRemedy } = await import('@/lib/electrical/systemConfigAnswers');
+    const r = answerBusbarRemedy(await failingHouse(), 'msp-1', { kind: 'replace-main-breaker', mainBreakerA: 150 });
+    if (r.ok === false) throw new Error(r.refused);
+    await persist(r.topology);
+    await reload();
+    const b = await bom();
+    expect(b.status, JSON.stringify(b.json).slice(0, 400)).toBe(200);
+    const { note, line } = backfeed(b);
+    expect(note).toContain('(200A bus × 1.2) − 150A main − 60A non-PV backfeed');
+    expect(note).toContain('= 30A available to the PV breaker');
+    expect(note).toContain('on the panel after the proposed work (Main service panel: Replacement main breaker 150 A, replaces the installed 200 A main)');
+    expect(line!.partNumber).toBe('QO30');
+    expect(line!.description).toContain('PV max: 30A) — on the panel after the proposed work');
+    expect(b.notes.join(' | ')).not.toMatch(/− 200A main/);
+    // …and the same response still lists the replacement it was sized for.
+    expect(b.items.some(i => i.id === 'topology-remedy-main-breaker-msp-1')).toBe(true);
   });
 });

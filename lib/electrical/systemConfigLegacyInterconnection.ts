@@ -54,8 +54,12 @@
 // Pure and isomorphic. Writes nothing.
 // ═══════════════════════════════════════════════════════════════════════════
 
-import type { PoiRelationship, ServiceTopology, PanelBoard, PanelRemedy } from '@/lib/electrical/serviceTopology';
-import { effectivePanelRatings, panelRemedyWork } from '@/lib/electrical/serviceTopology';
+import type {
+  PoiRelationship, ServiceTopology, PanelBoard, PanelRemedy, Verdict,
+} from '@/lib/electrical/serviceTopology';
+import {
+  effectivePanelRatings, panelRemedyWork, evaluateServiceTopology, remedyLoadCalculationTitle,
+} from '@/lib/electrical/serviceTopology';
 
 /** The scalar's tokens this mirror can write (lib/electrical-calc.ts `InterconnectionMethod`). */
 export type LegacyInterconnectionToken =
@@ -150,30 +154,89 @@ export function legacyRemedyNote(
 }
 
 /**
+ * 🚨 THE PRIMARY PANEL AS IT WILL BE AFTER ITS APPLIED 120% REMEDY — or null when none is applied.
+ *
+ * Every single-panel NEC 705.12(B) consumer (the page's compliance engine, the BOM engine's backfeed
+ * sizing, the permit's computeSystem verdict and its printed PV-4B arithmetic) checks ONE panel: the
+ * primary one, whose readings the legacy scalars mirror (`legacyServiceScalars`). With a remedy
+ * applied there, that arithmetic runs on these ratings — never on the installed ones the scalars
+ * still carry, which stay what is printed as (E). Null ⇒ that consumer is unchanged.
+ */
+export function primaryPanelPostWork(t: ServiceTopology | null | undefined): {
+  panel: PanelBoard;
+  kind: PanelRemedy['kind'];
+  busbarRatingA: number | null;
+  mainBreakerA: number | null;
+  label: string;
+  replaces: string;
+} | null {
+  const p0 = t?.panels?.[0] ?? null;
+  const work = p0 ? panelRemedyWork(p0) : null;
+  if (!p0 || !work) return null;
+  return { panel: p0, kind: work.kind, ...effectivePanelRatings(p0), label: work.label, replaces: work.replaces };
+}
+
+/**
+ * A key that moves whenever an applied remedy does. [Apply] / [Remove] change no config field, so a
+ * re-check keyed on the config alone would never re-run for them.
+ */
+export function appliedRemedyKey(t: ServiceTopology | null | undefined): string {
+  return appliedPanelRemedies(t)
+    .map(r => `${r.panel.id}:${r.remedy.kind}:${r.remedy.mainBreakerA}`
+      + (r.remedy.kind === 'replace-panelboard' ? `:${r.remedy.busbarRatingA}` : ''))
+    .join('|');
+}
+
+/** A derate's load calculation, as the service graph concluded it (`panel.remedy-load-calculation`). */
+export interface DerateLoadCalculation {
+  conclusion: Verdict;
+  detail: string;
+}
+
+/**
+ * The graph's verdict on `panel`'s derate load calculation — read from the engine, never recomputed.
+ * Null when the panel carries no derate.
+ */
+export function derateLoadCalculation(t: ServiceTopology, panel: PanelBoard): DerateLoadCalculation | null {
+  if (panel.remedy?.kind !== 'replace-main-breaker') return null;
+  const c = evaluateServiceTopology(t).checks.find(x =>
+    x.id === 'panel.remedy-load-calculation' && x.title === remedyLoadCalculationTitle(panel)) ?? null;
+  return { conclusion: c?.conclusion ?? 'NOT_EVALUATED', detail: c?.detail ?? '' };
+}
+
+/**
  * The single-panel interconnection the page's compliance request carries.
  *
  * The legacy compliance engine (lib/electrical-calc.ts) checks ONE panel — the primary one, whose
  * readings `config.mainPanelAmps` / `config.panelBusRating` mirror. When that panel has an applied
  * remedy, the 120% rule re-runs on the panel AFTER the work, and `proposedWork` travels with it so the
- * engine says so (and, for a derate, names the load calculation the derate still needs). A remedy
- * token on the scalar is read as LOAD_SIDE: the scalar records no remedy.
+ * engine says so. For a derate it also carries the graph's OWN verdict on the derate's load
+ * calculation — the one owner of that question — so the engine restates PASS / FAIL / NOT EVALUATED
+ * exactly as the graph concluded it, never a standing "not evaluated" beside a graph that decided.
+ * A remedy token on the scalar is read as LOAD_SIDE: the scalar records no remedy.
  */
 export function complianceInterconnection(
   posted: { method: string | null | undefined; busRating: number; mainBreaker: number },
   t: ServiceTopology | null | undefined,
 ): {
   method: string; busRating: number; mainBreaker: number;
-  proposedWork?: { kind: PanelRemedy['kind']; panelLabel: string; label: string; replaces: string };
+  proposedWork?: {
+    kind: PanelRemedy['kind']; panelLabel: string; label: string; replaces: string;
+    loadCalculation?: DerateLoadCalculation;
+  };
 } {
   const method = consumerInterconnectionToken(posted.method) ?? 'UNRESOLVED';
-  const p0 = t?.panels[0] ?? null;
-  const work = p0 ? panelRemedyWork(p0) : null;
-  if (!p0 || !work) return { method, busRating: posted.busRating, mainBreaker: posted.mainBreaker };
-  const after = effectivePanelRatings(p0);
+  const after = primaryPanelPostWork(t);
+  if (!t || !after) return { method, busRating: posted.busRating, mainBreaker: posted.mainBreaker };
+  const p0 = after.panel;
+  const loadCalculation = derateLoadCalculation(t, p0) ?? undefined;
   return {
     method,
     busRating: after.busbarRatingA ?? posted.busRating,
     mainBreaker: after.mainBreakerA ?? posted.mainBreaker,
-    proposedWork: { kind: work.kind, panelLabel: p0.label, label: work.label, replaces: work.replaces },
+    proposedWork: {
+      kind: after.kind, panelLabel: p0.label, label: after.label, replaces: after.replaces,
+      ...(loadCalculation ? { loadCalculation } : {}),
+    },
   };
 }

@@ -593,6 +593,13 @@ export interface ComputedSystemInput {
   mainPanelAmps: number;
   mainPanelBrand: string;
   panelBusRating: number;
+  /**
+   * The main breaker NEC 705.12(B) is evaluated against when it is NOT `mainPanelAmps` — the primary
+   * panel's replacement main after an applied 120% remedy (lib/permit/utils/panelPostWork.ts).
+   * `mainPanelAmps` keeps sizing what it sizes (service-entrance conductors, the schedule row).
+   * Absent ⇒ `mainPanelAmps`, exactly as before.
+   */
+  interconnectionMainBreakerAmps?: number;
 
   // Compliance thresholds
   maxACVoltageDropPct: number;  // typically 2%
@@ -1744,11 +1751,13 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
       'NEC 705.12(B) NOT EVALUATED — no PV inverter or DC receiving equipment is chosen, so the PV '
       + 'backfeed breaker the 120% rule adds is not known. Choose the equipment the strings land on.';
   }
+  // The main the 120% rule runs against: an applied derate's replacement main when there is one.
+  const _icMainA = input.interconnectionMainBreakerAmps ?? input.mainPanelAmps;
   const interconnectionPass = (_interconUnresolved || _pvEndpointUnresolved)
     ? false  // not evaluated; see `interconnectionRefusal` on the result
     : _isSupplySideTap
       ? true  // NEC 705.11: supply-side tap — no busbar loading concern
-      : (totalBackfeedA + input.mainPanelAmps) <= (input.panelBusRating * 1.2);
+      : (totalBackfeedA + _icMainA) <= (input.panelBusRating * 1.2);
   if (!interconnectionPass && !_interconUnresolved && !_pvEndpointUnresolved) {
     // Use correct terminology based on interconnection method
     const _interconLabel = (_interconMethodRaw.includes('BACKFED') || _interconMethodRaw.includes('BREAKER'))
@@ -1758,7 +1767,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     issues.push({
       severity: 'error',
       code: 'NEC_705_12B_120PCT',
-      message: `Interconnection: ${backfeedBreakerAmps}A ${_interconLabel}${_batteryNote} + ${input.mainPanelAmps}A main = ${totalBackfeedA + input.mainPanelAmps}A > 120% of ${input.panelBusRating}A bus (${Math.round(input.panelBusRating * 1.2)}A max)`,
+      message: `Interconnection: ${backfeedBreakerAmps}A ${_interconLabel}${_batteryNote} + ${_icMainA}A main = ${totalBackfeedA + _icMainA}A > 120% of ${input.panelBusRating}A bus (${Math.round(input.panelBusRating * 1.2)}A max)`,
       necReference: 'NEC 705.12(B)',
       autoFixed: false,
       suggestion: 'Consider supply-side tap (NEC 705.11) or panel upgrade',

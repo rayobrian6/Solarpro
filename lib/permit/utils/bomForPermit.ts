@@ -23,6 +23,7 @@
 
 import type { PermitInput } from '../types';
 import { permitInterconnectionToken } from './interconnectionRule';
+import { permitPanelPostWork } from './panelPostWork';
 import type { CADModel } from '@/lib/cad/types';
 import {
   generateBOMV4,
@@ -841,6 +842,12 @@ export function generateBOMForPermit(
         interconnectionMethod:   permitInterconnectionToken(project.interconnectionMethod),
         consumptionCtLocation:   project.consumptionCtLocation ?? undefined,
         panelBusRating:          project.panelBusRating || mainPanelA,
+        // An applied 120% remedy: the backfeed breaker is sized on the permitted panel (./panelPostWork).
+        busbarRemedy: (() => {
+          const _pw = permitPanelPostWork(project);
+          return _pw ? { busbarRatingA: _pw.busRatingA, mainBreakerA: _pw.mainBreakerA,
+            label: `${_pw.panelLabel}: ${_pw.label}, ${_pw.replaces}` } : null;
+        })(),
         systemType:              bomSystemType,
         generatorKw:             project.generatorKw,
         batteryCount:            project.batteryCount,

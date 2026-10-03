@@ -29,7 +29,7 @@
 import type { ServiceTopology } from '@/lib/electrical/serviceTopology';
 import {
   evaluateServiceTopology, sizeAggregationPanel, governingArticleFor, topologyNodeLabel,
-  isOptionalCheck, serviceRatingLabel, EXISTING_OR_NEW_TOKEN, panelRemedyWork, REMEDY_LOAD_CALCULATION_TOKEN,
+  isOptionalCheck, serviceRatingLabel, EXISTING_OR_NEW_TOKEN, panelRemedyWork, REMEDY_LOAD_CALCULATION_TOKEN, REMEDY_SCCR_TOKEN,
 } from '@/lib/electrical/serviceTopology';
 import {
   equipmentInstancesFromTopology, equipmentQuantities, type EquipmentInstanceKind,
@@ -480,6 +480,13 @@ export function serviceTopologyReleaseReadiness(
   for (const n of needs.filter(x => x.startsWith('sccr:'))) {
     requirements.push(`NOT EVALUATED — INTERRUPTING RATING REQUIRED (${n.slice(5)})`);
   }
+  // Proposed new equipment carries no rating of its own yet; the installed panel's does not transfer.
+  for (const n of needs.filter(x => x.startsWith(REMEDY_SCCR_TOKEN))) {
+    const panel = t.panels.find(p => p.id === n.slice(REMEDY_SCCR_TOKEN.length));
+    requirements.push('NOT EVALUATED — INTERRUPTING RATING OF THE PROPOSED REPLACEMENT REQUIRED '
+      + `(${(panel?.label ?? 'panel').toUpperCase()})${typeof t.service.availableFaultCurrentA === 'number'
+        ? ` — RATE AT OR ABOVE THE ${t.service.availableFaultCurrentA} A AVAILABLE` : ''}`);
+  }
   // Anything else that is missing, named rather than dropped.
   const covered = new Set([
     'service.availableFaultCurrentA', 'device.role:service-disconnect', 'domain.storageConnection',
@@ -493,7 +500,7 @@ export function serviceTopologyReleaseReadiness(
     if (covered.has(n)) continue;
     if (n.startsWith('service.existingEquipment.')) continue;
     if (n.startsWith('manufacturer-document:') || n.startsWith('manufacturer-limit:') || n.startsWith('sccr:')) continue;
-    if (n.startsWith(REMEDY_LOAD_CALCULATION_TOKEN)) continue;
+    if (n.startsWith(REMEDY_LOAD_CALCULATION_TOKEN) || n.startsWith(REMEDY_SCCR_TOKEN)) continue;
     requirements.push(`NOT EVALUATED — ${n.toUpperCase()} REQUIRED`);
   }
 

@@ -267,6 +267,15 @@ export function answerPanel(
   if (patch.sccrA !== undefined && patch.sccrA !== null && (!Number.isFinite(patch.sccrA) || patch.sccrA <= 0)) {
     return refuse(`${p.label}: the interrupting rating (SCCR) is a positive number read off the panel label, or left blank until it is read.`);
   }
+  // 🚨 AN APPLIED REMEDY IS WORKED OUT FROM THE INSTALLED RATINGS — `answerBusbarRemedy` refuses one
+  // without them, and clearing one afterwards would leave proposed work that "replaces the installed
+  // unrecorded main". Remove the proposed work first; a changed (non-null) reading is fine — the
+  // engine re-checks the remedy against it.
+  const work = panelRemedyWork(p);
+  if (work && (patch.mainBreakerA === null || patch.busbarRatingA === null)) {
+    return refuse(`${p.label} has proposed work applied (${work.label}), worked out from its installed main `
+      + 'breaker and busbar. Remove the proposed work before clearing either reading.');
+  }
   const clean: Record<string, unknown> = {};
   if (patch.mainBreakerA !== undefined) clean.mainBreakerA = patch.mainBreakerA;
   if (patch.busbarRatingA !== undefined) clean.busbarRatingA = patch.busbarRatingA;
