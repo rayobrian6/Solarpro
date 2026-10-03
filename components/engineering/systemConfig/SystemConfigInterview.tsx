@@ -74,8 +74,16 @@ export function SystemConfigInterview(props: SystemConfigInterviewProps) {
     await props.onWrite(r.topology, r.did);
   };
 
+  // One engineering state, three ways through it (the owners are the same in every mode):
+  //   · MANUAL — every card open; the installer drives.
+  //   · GUIDED — one question at a time: only the card holding the NEXT open question is open, and
+  //     that question is marked. Answering it moves the interview on.
+  //   · AUTO   — every card that still needs something is open; complete cards collapse.
+  // The Engineering Result card is always open — it is what every answer is for.
+  const next = interview.openQuestions[0] ?? null;
   const isOpen = (s: InterviewSection) =>
-    open[s.id] ?? (mode === 'manual' || s.status !== 'complete' || s.id === 'engineering');
+    open[s.id] ?? (mode === 'manual' || s.id === 'engineering'
+      || (mode === 'guided' ? (next ? next.section === s.id : s.status !== 'complete') : s.status !== 'complete'));
 
   return (
     <div data-testid="system-config-interview" className="space-y-3">
@@ -113,7 +121,7 @@ export function SystemConfigInterview(props: SystemConfigInterviewProps) {
                     {props.equipmentSlot}
                   </div>
                 ) : s.items.map(item => (
-                  <ItemRow key={item.id} item={item}>
+                  <ItemRow key={item.id} item={item} isNext={mode === 'guided' && next?.id === item.id}>
                     <Editor item={item} props={props} apply={apply} busy={busy} />
                   </ItemRow>
                 ))}
@@ -168,14 +176,17 @@ function ItemList({ items }: { items: InterviewItem[] }) {
   return <div className="space-y-1">{items.map(i => <ItemRow key={i.id} item={i} />)}</div>;
 }
 
-function ItemRow({ item, children }: { item: InterviewItem; children?: React.ReactNode }) {
+function ItemRow({ item, children, isNext }: { item: InterviewItem; children?: React.ReactNode; isNext?: boolean }) {
   const tone = item.state === 'answered' || item.state === 'calculated' ? 'text-slate-200'
     : item.state === 'fails' ? 'text-rose-300'
       : item.state === 'needs-answer' ? 'text-sky-200' : 'text-amber-200';
   return (
-    <div data-testid={`interview-item-${item.id}`} data-state={item.state}
-         className="rounded-lg border border-slate-700/60 bg-slate-900/40 p-2">
+    <div data-testid={`interview-item-${item.id}`} data-state={item.state} data-next={isNext ? 'true' : undefined}
+         className={`rounded-lg border p-2 ${isNext ? 'border-sky-400 bg-sky-500/10' : 'border-slate-700/60 bg-slate-900/40'}`}>
       <div className="flex flex-wrap items-baseline gap-2">
+        {isNext ? (
+          <span data-testid="interview-next" className="rounded-full bg-sky-500 px-1.5 text-[10px] font-black text-white">NEXT</span>
+        ) : null}
         <span className={`text-xs font-bold ${tone}`}>{item.question}</span>
         {item.answer ? <span className="text-xs text-slate-300" data-testid={`interview-answer-${item.id}`}>{item.answer}</span> : null}
         {item.source ? <span className="ml-auto text-[10px] text-slate-500">{item.source}</span> : null}
