@@ -403,19 +403,30 @@ export function updateDomain(
 export function setDomainEquipment(
   t: ServiceTopology,
   domainId: string,
-  opts: { gatewayProductId?: string; storageProductIds: string[]; expansionProductIds?: string[] },
+  opts: {
+    gatewayProductId?: string; storageProductIds: string[]; expansionProductIds?: string[];
+    /** The output setting the units are commissioned at. Omitted ⇒ the catalogue's top row. */
+    outputConfigKw?: number | null;
+  },
 ): { topology: ServiceTopology; unresolved: string[] } {
   const domain = t.domains.find(d => d.id === domainId);
   if (!domain) return { topology: t, unresolved: [`No domain '${domainId}' to re-equip.`] };
 
+  // 🚨 A DIFFERENT CONTROLLER IS A DIFFERENT INSTANCE. The main breaker fitted and the interrupting
+  // rating it gives were established on the product that was there; carried onto another product
+  // they are stale facts that read as established. Same product ⇒ kept; new product ⇒ its own
+  // catalogue main breaker and an interrupting rating that is not established until somebody says.
+  const gatewayProductId = opts.gatewayProductId ?? domain.gateway.productId;
+  const sameGateway = gatewayProductId === domain.gateway.productId;
   const build = buildDomainFromCatalogue({
     id: domain.id,
     label: domain.label,
-    gatewayProductId: opts.gatewayProductId ?? domain.gateway.productId,
-    mainBreakerA: domain.gateway.mainBreakerA,
-    sccrA: domain.gateway.sccrA,
+    gatewayProductId,
+    mainBreakerA: sameGateway ? domain.gateway.mainBreakerA : null,
+    sccrA: sameGateway ? domain.gateway.sccrA : null,
     storageProductIds: opts.storageProductIds,
     expansionProductIds: opts.expansionProductIds,
+    outputConfigKw: opts.outputConfigKw ?? null,
   });
   const dropped = new Set(domain.storageUnitIds);
   return {

@@ -30,6 +30,7 @@ import {
   answerAvailableFaultCurrent, answerExistingService, type AnswerResult,
 } from '@/lib/electrical/systemConfigAnswers';
 import { UtilityDisconnectsEditor } from '@/components/engineering/systemConfig/UtilityDisconnectsEditor';
+import { SystemEquipmentEditor } from '@/components/engineering/systemConfig/SystemEquipmentEditor';
 
 const SERVICE_RATINGS = [100, 125, 150, 200, 225, 320, 400, 600, 800];
 const PANEL_RATINGS = [100, 125, 150, 200, 225, 320, 400];
@@ -118,7 +119,11 @@ export function SystemConfigInterview(props: SystemConfigInterviewProps) {
               <div className="mt-3 space-y-2">
                 {s.id === 'equipment' && props.equipmentSlot ? (
                   <div className="space-y-2">
-                    <ItemList items={s.items} />
+                    {s.items.map(item => (
+                      <ItemRow key={item.id} item={item} isNext={mode === 'guided' && next?.id === item.id}>
+                        <Editor item={item} props={props} apply={apply} busy={busy} />
+                      </ItemRow>
+                    ))}
                     {props.equipmentSlot}
                   </div>
                 ) : s.items.map(item => (
@@ -171,10 +176,6 @@ function ReleaseBanner({ interview }: { interview: Interview }) {
       ) : null}
     </div>
   );
-}
-
-function ItemList({ items }: { items: InterviewItem[] }) {
-  return <div className="space-y-1">{items.map(i => <ItemRow key={i.id} item={i} />)}</div>;
 }
 
 function ItemRow({ item, children, isNext }: { item: InterviewItem; children?: React.ReactNode; isNext?: boolean }) {
@@ -234,6 +235,8 @@ function Editor({ item, props, apply, busy }: {
   const t = props.topology;
   const id = item.id;
   if (id.startsWith('behavior.utility.') || id.startsWith('engineering.disconnect.')) return <UtilityDisconnectsEditor item={item} topology={t} apply={apply} busy={busy} />;
+
+  if (id.startsWith('equipment.system.') || id === 'behavior.backup') return <SystemEquipmentEditor item={item} topology={t} apply={apply} busy={busy} equipment={props.equipment} />;
 
   if (id === 'service.rating') {
     return (
@@ -336,10 +339,6 @@ function Editor({ item, props, apply, busy }: {
              onPick={v => { void props.onRecordCoupling(v as SolarCoupling); }} />
     );
   }
-  if (id === 'behavior.backup' && t && item.options) {
-    return <BackupEditor t={t} props={props} apply={apply} busy={busy} value={t.domains.length > 0
-      ? (t.panels.every(p => p.backedUp) ? 'whole' : null) : null} />;
-  }
   if (id === 'behavior.storage-landing' && t && item.options) {
     return (
       <div className="space-y-2">
@@ -402,58 +401,6 @@ function Editor({ item, props, apply, busy }: {
     );
   }
   return null;
-}
-
-function BackupEditor({ t, props, apply, busy, value }: {
-  t: ServiceTopology; props: SystemConfigInterviewProps; apply: (r: AnswerResult) => Promise<void>;
-  busy: boolean; value: string | null;
-}) {
-  const multi = t.panels.length > 1;
-  const [perPanel, setPerPanel] = useState<Record<string, number>>({});
-  const eq = props.equipment;
-  return (
-    <div className="space-y-2">
-      {multi && t.domains.length === 0 ? (
-        <div className="grid gap-1 sm:grid-cols-2">
-          {t.panels.map(p => (
-            <label key={p.id} className="text-[11px] text-slate-400">
-              {eq.storageLabel ?? 'Batteries'} in the {p.label} system
-              <input type="number" min={0} data-testid={`answer-backup-units-${p.id}`}
-                     className={`mt-0.5 block w-20 ${box}`} value={perPanel[p.id] ?? ''}
-                     onChange={e => setPerPanel(m => ({ ...m, [p.id]: Math.max(0, Number(e.target.value)) }))} />
-            </label>
-          ))}
-          <div className="text-[10px] text-slate-500 sm:col-span-2">
-            {eq.totalUnits} selected in total. SolarPro does not split them for you.
-          </div>
-        </div>
-      ) : null}
-      <Radio name="backup" testid="answer-backup" disabled={busy} value={value}
-             options={[
-               { value: 'whole', label: multi ? 'Every panel — whole home' : 'Whole main panel' },
-               { value: 'none', label: 'No backup' },
-             ]}
-             onPick={v => void apply(answerBackup(t, v as 'whole' | 'none', {
-               gatewayProductId: eq.gatewayProductId, storageProductId: eq.storageProductId,
-               totalUnits: eq.totalUnits, unitsPerPanel: perPanel,
-             }))} />
-      {t.domains.length > 0 && eq.storageProductId ? (
-        <div className="grid gap-1 sm:grid-cols-2">
-          {t.domains.map(d => {
-            const n = d.storageUnitIds.filter(id => t.storage.find(u => u.id === id)?.role === 'inverter-unit').length;
-            return (
-              <label key={d.id} className="text-[11px] text-slate-400">
-                {d.label} — {eq.storageLabel ?? 'batteries'}
-                <input type="number" min={0} data-testid={`answer-system-units-${d.id}`} defaultValue={n}
-                       className={`mt-0.5 block w-20 ${box}`} disabled={busy}
-                       onBlur={e => { const v = Number(e.target.value); if (v !== n) void apply(answerSystemBatteries(t, d.id, eq.storageProductId!, v)); }} />
-              </label>
-            );
-          })}
-        </div>
-      ) : null}
-    </div>
-  );
 }
 
 function PvLandingEditor({ t, props, apply, busy }: {

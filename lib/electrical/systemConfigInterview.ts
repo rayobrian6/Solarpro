@@ -35,6 +35,7 @@ import type {
 import { isOptionalCheck, servicePhaseInfo, type ServicePhase } from '@/lib/electrical/serviceTopology';
 import { buildServiceOverview, REQUIREMENT_OWNERS } from '@/lib/electrical/topologyOverview';
 import { buildUtilityDisconnectsItems, supersededByUtilityDisconnects } from '@/lib/electrical/systemConfigUtilityDisconnects';
+import { buildSystemEquipmentItems, placeSystemEquipmentItems } from '@/lib/electrical/systemConfigSystemEquipment';
 
 // ── The vocabulary an installer reads ───────────────────────────────────────
 
@@ -704,6 +705,9 @@ export function buildSystemConfigInterview(input: InterviewInput): SystemConfigI
   const udItems = buildUtilityDisconnectsItems(input), udDrop = supersededByUtilityDisconnects(input, udItems);
   for (let k = engineering.length - 1; k >= 0; k--) if (udDrop.has(engineering[k].id)) engineering.splice(k, 1);
   for (const i of udItems) { const a = ({ service, equipment, behavior, engineering } as Record<string, InterviewItem[]>)[i.section]; a?.splice(i.section === 'engineering' ? a.length - 1 : a.length, 0, i); }
+  // Per system: its controller / batteries / expansions, where its batteries land, and which panels
+  // are backed up (adds "Only the panels I choose" to 4b) — lib/electrical/systemConfigSystemEquipment.ts.
+  placeSystemEquipmentItems({ equipment, behavior }, buildSystemEquipmentItems(input), input);
 
   // ── Assemble ─────────────────────────────────────────────────────────────
   const sectionOf = (id: SectionId, title: string, items: InterviewItem[], summary: string): InterviewSection => ({
