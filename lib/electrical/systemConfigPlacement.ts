@@ -182,12 +182,24 @@ export function requiredQueue(interview: Pick<SystemConfigInterview, 'sections' 
   });
   const rank = (i: InterviewItem) => (i.section === 'design' ? 0 : 1 + GROUP_ORDER.indexOf(homeOf(i.id)));
   const order = new Map(all.map((i, k) => [i.id, k]));
-  return deduped
+  const sorted = deduped
     .map((i, k) => ({ i, k }))
     .sort((a, b) => rank(a.i) - rank(b.i)
       || (order.get(a.i.id) ?? a.k) - (order.get(b.i.id) ?? b.k))
     .map(x => x.i);
+  // 🚨 ONE SITE VISIT IS ONE ACTION. Ray (V3): "Existing service equipment · Field verification 4 items
+  // required [Verify]" — the model number, the main and feeder arrangements, the AIC/SCCR and "read on
+  // site" are read off the same equipment in one visit, and answered in one Verify dialog. Listed as five
+  // required answers they buried everything else. They stay five facts; they are ONE next action, which
+  // opens that dialog.
+  const ee = sorted.filter(i => i.id.startsWith(EXISTING_EQUIPMENT_NEED));
+  if (ee.length <= 1) return sorted;
+  const grouped: InterviewItem = { ...ee[0], question: `${VERIFY_EXISTING_GROUP} (${ee.length} items)` };
+  return sorted.filter(i => !ee.includes(i) || i === ee[0]).map(i => (i === ee[0] ? grouped : i));
 }
+
+/** The one next action that stands for every existing-service-equipment field reading. */
+export const VERIFY_EXISTING_GROUP = 'Verify the existing service equipment';
 
 // ── What to call the next action ────────────────────────────────────────────
 
@@ -247,6 +259,7 @@ const subjectOf = (question: string) => question.split(':')[0].trim();
  */
 export function nextActionLabel(item: InterviewItem): string {
   const id = item.id;
+  if (id.startsWith(EXISTING_EQUIPMENT_NEED) && item.question.startsWith(VERIFY_EXISTING_GROUP)) return item.question;
   if (id === 'behavior.isolation') {
     return item.value === 'yes' && item.state === 'needs-verification' ? 'Confirm utility isolation acceptance'
       : item.value === 'yes' ? 'Select the utility isolation equipment'

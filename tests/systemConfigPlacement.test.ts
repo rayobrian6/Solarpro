@@ -118,8 +118,12 @@ describe('the required queue — one ordered list, nothing asked twice', () => {
     const queue = requiredQueue(iv);
     const ids = queue.map(i => i.id);
     expect(ids).toContain('behavior.pv-landing');
-    expect(ids).toContain('engineering.needs.service.existingEquipment.sccrA');
     expect(ids).toContain('behavior.isolation');
+    // 🚨 ONE SITE VISIT IS ONE ACTION: the five existing-equipment readings (model, both arrangements,
+    // AIC/SCCR, read on site) are ONE next action that opens the Verify dialog — never five answers.
+    const ee = queue.filter(i => i.id.startsWith('engineering.needs.service.existingEquipment.'));
+    expect(ee).toHaveLength(1);
+    expect(nextActionLabel(ee[0])).toBe('Verify the existing service equipment (5 items)');
     // deduped against the questions that ask them
     expect(ids).not.toContain('engineering.needs.pv.stringAssignment');
     expect(ids).not.toContain('engineering.needs.interconnection.isolationArrangementAccepted');
@@ -132,7 +136,8 @@ describe('the required queue — one ordered list, nothing asked twice', () => {
     expect(homes).toEqual([...homes].sort((a, b) => a - b));
     expect(new Set(ids).size).toBe(ids.length);
     expect(queue.map(nextActionLabel)).toEqual(expect.arrayContaining([
-      'Assign PV strings to storage inputs', 'Confirm service equipment AIC/SCCR', 'Confirm utility isolation acceptance',
+      'Assign PV strings to storage inputs', 'Verify the existing service equipment (5 items)',
+      'Confirm utility isolation acceptance',
     ]));
   });
 
