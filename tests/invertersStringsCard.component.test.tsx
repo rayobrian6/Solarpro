@@ -14,14 +14,31 @@ import { resolve } from 'node:path';
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, screen, cleanup, fireEvent, waitFor, within, act } from '@testing-library/react';
 import { buildSystemConfigInterview, type InterviewEquipment } from '@/lib/electrical/systemConfigInterview';
-import { answerServiceRating, answerBackup, type AnswerResult } from '@/lib/electrical/systemConfigAnswers';
+import {
+  answerServiceRating, answerBackup, answerPvLanding, answerAvailableFaultCurrent, answerStorageLanding, type AnswerResult,
+} from '@/lib/electrical/systemConfigAnswers';
 import { resolvePvArrayDesign } from '@/lib/electrical/pvArrayDesign';
 import { buildRaysIntendedJob } from '@/lib/electrical/fixtures/tesla400aTwoGateway';
 import { evaluateServiceTopology, type ServiceTopology } from '@/lib/electrical/serviceTopology';
-import { findInterviewItem } from '@/lib/electrical/systemConfigPlacement';
-import { invertingUnits } from '@/lib/electrical/storageStringAssignment';
+import { findInterviewItem, homeOf, requiredQueue } from '@/lib/electrical/systemConfigPlacement';
+import { invertingUnits, recommendStringAssignment } from '@/lib/electrical/storageStringAssignment';
 import { QuestionDialog, applyVia, type ItemEditorContext } from '@/components/engineering/systemConfig/ItemEditor';
 import { InvertersStringsDecisions } from '@/components/engineering/systemConfig/cards/InvertersStringsCard';
+import { EngineeringReadinessPanel } from '@/components/engineering/systemConfig/EngineeringReadinessPanel';
+
+// Every call the card and the editor make to the recommender is counted (and passed straight through),
+// so "it is not recomputed on every page render" is a measurement, not a reading of the deps array.
+const recommendCalls = vi.hoisted(() => ({ n: 0 }));
+vi.mock('@/lib/electrical/storageStringAssignment', async (orig) => {
+  const m = await orig<typeof import('@/lib/electrical/storageStringAssignment')>();
+  return {
+    ...m,
+    recommendStringAssignment: (...a: Parameters<typeof m.recommendStringAssignment>) => {
+      recommendCalls.n++;
+      return m.recommendStringAssignment(...a);
+    },
+  };
+});
 
 afterEach(() => { cleanup(); document.body.innerHTML = ''; });
 
@@ -246,6 +263,209 @@ describe('only where it applies', () => {
   });
 });
 
+// ── Review fixes ────────────────────────────────────────────────────────────
+
+const CONFLICT_EQ: InterviewEquipment = { ...PW3, pvInverter: { state: 'CONFLICT' } };
+/** The page in conflict: `_archUnresolved` ⇒ pvInverter CONFLICT ⇒ both PV items read 'fails'. */
+const conflictInterview = (t: ServiceTopology) => buildSystemConfigInterview({
+  pvArray: pv37, topology: t, coupling: 'dc-coupled-storage', couplingIsDecision: false, architectureConflict: true,
+  equipment: CONFLICT_EQ, evaluation: evaluateServiceTopology(t), derivedStrings: RAYS_STRINGS.map(panelCount => ({ panelCount })),
+});
+
+describe('an architecture in conflict is resolved in ONE place on the card', () => {
+  it('with the card\'s conflict banner offering the resolution: the PV lines defer to it — no second control, no repeated sentence, no second error', () => {
+    const t = raysJob();
+    const iv = conflictInterview(t);
+    expect(findInterviewItem(iv, 'behavior.pv-connection')!.state).toBe('fails');
+    const recorded: string[] = [];
+    const { container } = render(
+      <InvertersStringsDecisions topology={t} pvArray={pv37} derivedStrings={RAYS_STRINGS} busy={false}
+                                 equipment={PW3_SELECTION} apply={async () => true} interview={iv}
+                                 onRecordCoupling={async c => { recorded.push(c); return true; }}
+                                 coupling="dc-coupled-storage" pvInverterState="CONFLICT"
+                                 conflictResolvedAbove connectionError="The architecture route refused." />);
+    expect(container.querySelectorAll('select')).toHaveLength(0);
+    expect(screen.queryByTestId('inv-pv-connection-select')).toBeNull();
+    const line = screen.getByTestId('inv-pv-conflict');
+    expect(line.getAttribute('data-state')).toBe('fails');
+    expect(line.textContent).toContain('In conflict — resolve the electrical configuration conflict above.');
+    // The banner states the conflict and prints the route's error; the card repeats neither.
+    expect(container.textContent).not.toContain('the project records an inverter AND an architecture');
+    expect(container.textContent).not.toContain('The architecture route refused.');
+    expect(screen.queryByTestId('inv-strings-summary')).toBeNull();
+    expect(recorded).toEqual([]);
+  });
+
+  it('with no banner control above: the card\'s select is the one control — nothing pre-selected, and EITHER side records (even the one on file)', async () => {
+    const t = raysJob();
+    const recorded: string[] = [];
+    render(
+      <InvertersStringsDecisions topology={t} pvArray={pv37} derivedStrings={RAYS_STRINGS} busy={false}
+                                 equipment={PW3_SELECTION} apply={async () => true} interview={conflictInterview(t)}
+                                 onRecordCoupling={async c => { recorded.push(c); return true; }}
+                                 coupling="dc-coupled-storage" pvInverterState="CONFLICT"
+                                 connectionError="The architecture route refused." />);
+    const select = screen.getByTestId('inv-pv-connection-select') as HTMLSelectElement;
+    expect(screen.getByTestId('inv-pv-connection').getAttribute('data-state')).toBe('fails');
+    // The recorded coupling is one side of the conflict, not an answer — it is not pre-selected.
+    expect(select.value).toBe('');
+    expect([...select.options].map(o => o.textContent))
+      .toEqual(['Choose…', 'DC coupled to Tesla Powerwall 3', 'Through an external PV inverter']);
+    fireEvent.change(select, { target: { value: 'dc-coupled-storage' } });
+    await waitFor(() => expect(recorded).toEqual(['dc-coupled-storage']));
+    // The route's error, once.
+    expect(screen.getAllByText('The architecture route refused.')).toHaveLength(1);
+  });
+
+  it('[Answer Next] on the conflict (QuestionDialog): no side pre-checked, and the one on file can be chosen', async () => {
+    const t = raysJob();
+    const item = findInterviewItem(conflictInterview(t), 'behavior.pv-connection')!;
+    const recorded: string[] = [];
+    render(<QuestionDialog topology={t} pvArray={pv37} derivedStrings={RAYS_STRINGS} equipment={PW3_SELECTION} busy={false}
+                           apply={async () => true} onRecordCoupling={async c => { recorded.push(c); return true; }}
+                           item={item} onClose={() => {}} />);
+    const radios = screen.getAllByRole('radio') as HTMLInputElement[];
+    expect(radios).toHaveLength(2);
+    expect(radios.some(r => r.checked)).toBe(false);
+    fireEvent.click(within(screen.getByTestId('answer-pv-connection-dc-coupled-storage')).getByRole('radio'));
+    await waitFor(() => expect(recorded).toEqual(['dc-coupled-storage']));
+  });
+});
+
+describe('a recorded landing that no longer matches the array is stale, not absent', () => {
+  it('Design grows 37 → 38 modules after Accept: "Recorded 16.28 kW does not match the 16.72 kW array — review"', () => {
+    const t = raysJob();
+    const rec = recommendStringAssignment({ strings: RAYS_STRINGS, moduleWatts: 440, units: invertingUnits(t) });
+    if (rec.ok === false) throw new Error(rec.reason);
+    const landed = ok(answerPvLanding(t, rec.perUnit, 440, 37));
+    const pv38 = resolvePvArrayDesign({ placedModuleCount: 38, selectedPanelId: 'panel-fence-ps1' });
+    const strings38 = [9, 9, 9, 9, 2];
+    const iv = buildSystemConfigInterview({
+      pvArray: pv38, topology: landed, coupling: 'dc-coupled-storage', couplingIsDecision: true, architectureConflict: false,
+      equipment: PW3, evaluation: evaluateServiceTopology(landed), derivedStrings: strings38.map(panelCount => ({ panelCount })),
+    });
+    render(<InvertersStringsDecisions topology={landed} pvArray={pv38} derivedStrings={strings38} busy={false}
+                                      equipment={PW3_SELECTION} apply={async () => true} interview={iv}
+                                      coupling="dc-coupled-storage" pvInverterState="NONE" />);
+    const status = screen.getByTestId('inv-string-status');
+    expect(status.getAttribute('data-state')).toBe('stale');
+    expect(status.textContent).toBe('Recorded 16.28 kW does not match the 16.72 kW array — review');
+    expect(screen.getByTestId('inv-strings-summary').getAttribute('data-assigned')).toBe('false');
+  });
+
+  it('control: nothing recorded still reads "Not assigned"', () => {
+    mountCard(raysJob());
+    expect(screen.getByTestId('inv-string-status').getAttribute('data-state')).toBe('needs-answer');
+    expect(screen.getByTestId('inv-string-status').textContent).toBe('Not assigned');
+  });
+});
+
+describe('the String assignment dialog is honest about what the record holds', () => {
+  it('a landing read back from the graph says it was read back from each unit\'s recorded kW', async () => {
+    mountCard(raysJob());
+    fireEvent.click(screen.getByTestId('inv-string-review'));
+    expect(screen.queryByTestId('inv-string-readback-note')).toBeNull();   // nothing recorded yet
+    fireEvent.click(screen.getByTestId('inv-string-accept'));
+    await waitFor(() => expect(screen.queryByTestId('inv-string-dialog')).toBeNull());
+    fireEvent.click(screen.getByTestId('inv-string-review'));
+    expect(screen.getByTestId('inv-string-recommendation').textContent).toContain('Recorded — matches the recommended assignment');
+    expect(screen.getByTestId('inv-string-readback-note').textContent).toMatch(/recorded kW per unit/);
+  });
+});
+
+describe('the recommendation is not recomputed on every page render', () => {
+  it('a fresh-but-equal strings array (the page maps computedSystem.strings inline each render) costs no new search', () => {
+    const t = raysJob();
+    const iv = interviewOf(t);
+    const props = {
+      topology: t, pvArray: pv37, busy: false, equipment: PW3_SELECTION, apply: async () => true, interview: iv,
+      coupling: 'dc-coupled-storage' as const, pvInverterState: 'NONE' as const,
+    };
+    const view = render(<InvertersStringsDecisions {...props} derivedStrings={[...RAYS_STRINGS]} />);
+    const afterMount = recommendCalls.n;
+    view.rerender(<InvertersStringsDecisions {...props} derivedStrings={[...RAYS_STRINGS]} />);
+    view.rerender(<InvertersStringsDecisions {...props} derivedStrings={[...RAYS_STRINGS]} />);
+    expect(recommendCalls.n).toBe(afterMount);
+    // …nor in the dialog's editor while it is open.
+    fireEvent.click(screen.getByTestId('inv-string-review'));
+    const afterOpen = recommendCalls.n;
+    view.rerender(<InvertersStringsDecisions {...props} derivedStrings={[...RAYS_STRINGS]} />);
+    view.rerender(<InvertersStringsDecisions {...props} derivedStrings={[...RAYS_STRINGS]} />);
+    expect(recommendCalls.n).toBe(afterOpen);
+    // A real change of strings IS recomputed.
+    view.rerender(<InvertersStringsDecisions {...props} derivedStrings={[9, 9, 9, 9, 1]} />);
+    expect(recommendCalls.n).toBeGreaterThan(afterOpen);
+  });
+});
+
+describe('one Powerwall 3: the unit\'s landing is asked where the strings are, never a dead end', () => {
+  const oneUnit = () => {
+    const base = { ...ok(answerBackup(ok(answerServiceRating(null, 200)), 'whole', {
+      gatewayProductId: 'tesla-backup-gateway-3', storageProductId: 'tesla-powerwall-3', totalUnits: 1,
+    })), solarCoupling: 'dc-coupled-storage' as const };
+    // The service and battery questions above it in the queue, answered — so the strings are next.
+    return ok(answerStorageLanding(ok(answerAvailableFaultCurrent(base, 10_000)), 'gateway-panelboard'));
+  };
+  const ONE: InterviewEquipment = { ...PW3, storage: { ...PW3.storage!, count: 1 }, gateway: { label: 'Tesla Gateway 3', count: 1 } };
+
+  it('"Assign PV strings to storage inputs" is homed on Inverters & Strings, and [Answer Next] opens the String assignment editor', async () => {
+    expect(homeOf('engineering.needs.pv.stringAssignment')).toBe('inverters');
+    const writes: ServiceTopology[] = [];
+    function Page() {
+      const [t, setT] = useState(oneUnit());
+      return (
+        <EngineeringReadinessPanel topology={t} pvArray={pv37} derivedStrings={RAYS_STRINGS} busy={false}
+                                   equipment={{ ...PW3_SELECTION, totalUnits: 1 }} interview={interviewOf(t, ONE)}
+                                   apply={applyVia(async n => { writes.push(n); setT(n); return true; })} />
+      );
+    }
+    render(<Page />);
+    expect(findInterviewItem(interviewOf(oneUnit(), ONE), 'behavior.pv-landing')).toBeNull();
+    expect(requiredQueue(interviewOf(oneUnit(), ONE))[0].id).toBe('engineering.needs.pv.stringAssignment');
+    expect(screen.getByTestId('readiness-next-0').textContent).toContain('Assign PV strings to storage inputs');
+    expect(screen.getByTestId('readiness-next-0').textContent).toContain('Inverters & Strings');
+    fireEvent.click(screen.getByTestId('readiness-answer-next'));
+    const dialog = screen.getByTestId('question-dialog');
+    expect(screen.queryByTestId('question-no-editor')).toBeNull();
+    const editor = within(within(dialog).getByTestId('question-editor'));
+    expect(editor.getByTestId('inv-string-editor')).toBeTruthy();
+    fireEvent.click(editor.getByTestId('inv-string-accept'));
+    await waitFor(() => expect(writes).toHaveLength(1));
+    expect(invertingUnits(writes[0]).map(u => u.pvDcStcKw)).toEqual([16.28]);
+    await waitFor(() => expect(screen.queryByTestId('question-dialog')).toBeNull());
+    // Answered: the need is gone from the queue.
+    expect(requiredQueue(interviewOf(writes[0], ONE)).map(i => i.id)).not.toContain('engineering.needs.pv.stringAssignment');
+  });
+});
+
+describe('no dead imports in the card\'s files (eslint\'s no-unused-vars is off in this repo)', () => {
+  const FILES = [
+    'components/engineering/systemConfig/ItemEditor.tsx',
+    'components/engineering/systemConfig/StringAssignmentEditor.tsx',
+    'components/engineering/systemConfig/cards/InvertersStringsCard.tsx',
+    'lib/electrical/storageStringAssignment.ts',
+  ];
+  it.each(FILES)('%s uses every name it imports', (file) => {
+    const src = readFileSync(resolve(process.cwd(), file), 'utf8');
+    const names: string[] = [];
+    for (const m of src.matchAll(/^import\s+(?:type\s+)?([\s\S]*?)\s+from\s+'[^']+';/gm)) {
+      const clause = m[1];
+      const braces = clause.match(/\{([\s\S]*)\}/);
+      if (braces) {
+        for (const part of braces[1].split(',').map(x => x.trim()).filter(Boolean)) {
+          names.push(part.replace(/^type\s+/, '').split(/\s+as\s+/).pop()!.trim());
+        }
+      }
+      const def = clause.replace(/\{[\s\S]*\}/, '').replace(/,/g, ' ').trim();
+      if (def && !def.startsWith('*')) names.push(...def.split(/\s+/).filter(Boolean));
+    }
+    expect(names.length).toBeGreaterThan(0);
+    // `React` is the repo's convention for JSX files (the automatic runtime does not reference it).
+    const unused = names.filter(n => n !== 'React' && (src.match(new RegExp(`\\b${n}\\b`, 'g')) ?? []).length < 2);
+    expect(unused).toEqual([]);
+  });
+});
+
 describe('the page mounts the card\'s decisions inside the Inverters & Strings card, on the one write path', () => {
   const page = readFileSync(resolve(process.cwd(), 'app/engineering/page.tsx'), 'utf8');
   it('inside #sc-card-inverters, before the fleet rows, with the shared editor context and the live interview', () => {
@@ -257,5 +477,24 @@ describe('the page mounts the card\'s decisions inside the Inverters & Strings c
     const tag = page.slice(mount, page.indexOf('/>', mount));
     expect(tag).toContain('coupling={electrical?.solarCoupling ?? null}');
     expect(tag).toContain('pvInverterState={interviewEquipment.pvInverter.state}');
+  });
+
+  it('the conflict is resolved in one place: the card defers to the banner exactly when the banner offers the resolution, and the error prints once', () => {
+    const card = page.indexOf('id="sc-card-inverters"');
+    const mount = page.indexOf('<InvertersStringsDecisions {...interviewEditorContext} interview={systemConfigInterview}');
+    const tag = page.slice(mount, page.indexOf('/>', mount));
+    expect(tag).toContain('conflictResolvedAbove={_archBannerResolves}');
+    expect(tag).toContain('connectionError={_archBannerShown ? null : _archResolveError}');
+    // The banner is drawn by the same condition the card is told about — one expression, not two copies.
+    const banner = page.slice(card, mount);
+    expect(banner).toContain('{_archBannerShown && _archOrigin ? (');
+    expect(banner).toContain('data-testid="config-inverter-provenance"');
+    const decl = page.indexOf('const _archBannerShown =');
+    expect(decl).toBeGreaterThan(0);
+    expect(page.slice(decl, page.indexOf(';', decl)))
+      .toMatch(/electrical\?\.hasExternalInverter && _archOrigin\s*&& \(_archUnresolved \|\| _archOrigin\.kind === 'AUTO_SUGGESTED_LEGACY'\)/);
+    const resolves = page.indexOf('const _archBannerResolves =');
+    expect(page.slice(resolves, page.indexOf(';', resolves)))
+      .toMatch(/_archBannerShown && _archUnresolved && \(electrical\?\.architectureChoices\?\.length \?\? 0\) > 0/);
   });
 });

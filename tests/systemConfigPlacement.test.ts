@@ -74,6 +74,9 @@ describe('every item has ONE home card (the spec\'s table)', () => {
     ['equipment.system.equip.domain-a', 'battery'], ['equipment.system.landing.domain-b', 'battery'],
     ['behavior.storage-landing', 'battery'],
     ['equipment.pv-inverter', 'inverters'], ['behavior.pv-connection', 'inverters'], ['behavior.pv-landing', 'inverters'],
+    // With one inverting unit behavior.pv-landing is not asked, so the engine's own need is the
+    // question — answered by the card's String assignment editor, never a dead end in readiness.
+    ['engineering.needs.pv.stringAssignment', 'inverters'],
     ['behavior.backup', 'systemConfig'], ['behavior.systems', 'systemConfig'], ['behavior.interconnection', 'systemConfig'],
     ['behavior.utility.meter-collar', 'systemConfig'], ['behavior.isolation', 'systemConfig'],
     ['engineering.disconnect.der-isolation-disconnect', 'systemConfig'],

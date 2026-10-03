@@ -17,6 +17,14 @@
 //       String assignment · Not assigned · Recommended assignment available [Review]
 //     [Review] opens the String assignment dialog (`StringAssignmentEditor`): "String i → unit #k"
 //     rows and "Recommended assignment available [Accept] [Edit]". Nothing is written until a click.
+//     A record that no longer matches the array says so ("Recorded 16.28 kW does not match the
+//     16.72 kW array — review"); it is never shown as absent.
+//
+// An architecture in CONFLICT is resolved in ONE place. Where the card's own conflict banner (the
+// page's, above these lines) offers the resolution, both PV lines defer to it — no second control, no
+// second copy of the conflict sentence or of the route's error. Where it does not, the PV connection
+// select here is the control, with nothing pre-selected: the coupling on file is one side of the
+// conflict, not an answer, and choosing it must record it.
 //
 // Every write goes through `apply` (the page's one write path) or `onRecordCoupling`; nothing here
 // holds engineering state.
@@ -30,7 +38,7 @@ import { invertingUnits, recommendStringAssignment, unitDisplayLabels } from '@/
 import {
   ProvenanceChip, SystemConfigModal, type ApplyAnswer, type ItemEditorContext,
 } from '@/components/engineering/systemConfig/ItemEditor';
-import { StringAssignmentEditor } from '@/components/engineering/systemConfig/StringAssignmentEditor';
+import { StringAssignmentEditor, useStableStrings } from '@/components/engineering/systemConfig/StringAssignmentEditor';
 
 export interface InvertersStringsDecisionsProps extends ItemEditorContext {
   interview: Pick<SystemConfigInterview, 'sections'>;
@@ -38,8 +46,13 @@ export interface InvertersStringsDecisionsProps extends ItemEditorContext {
   coupling: SolarCoupling | null;
   /** The PV inverter decision the interview was built from. */
   pvInverterState: EquipmentDecision;
-  /** The architecture route's error, when recording the PV connection failed. */
+  /** The architecture route's error, when recording the PV connection failed (null where the page prints it). */
   connectionError?: string | null;
+  /**
+   * The page's conflict banner above these lines offers the architecture resolution. In CONFLICT the
+   * card then states only where to resolve it, and asks nothing itself.
+   */
+  conflictResolvedAbove?: boolean;
 }
 
 const box = 'rounded bg-slate-800 px-2 py-1 text-xs text-slate-100 border border-slate-700';
@@ -52,7 +65,9 @@ function connectionLabel(value: string, label: string, storageLabel: string | nu
 }
 
 export function InvertersStringsDecisions(props: InvertersStringsDecisionsProps) {
-  const { interview, topology: t, pvArray, derivedStrings, equipment, busy, coupling, pvInverterState } = props;
+  const { interview, topology: t, pvArray, equipment, busy, coupling, pvInverterState } = props;
+  // By value: the page maps its strings afresh on every render, and that must not re-run the search.
+  const derivedStrings = useStableStrings(props.derivedStrings);
   const inverterItem = findInterviewItem(interview, 'equipment.pv-inverter');
   const connectionItem = findInterviewItem(interview, 'behavior.pv-connection');
   const landingItem = findInterviewItem(interview, 'behavior.pv-landing');
@@ -62,8 +77,14 @@ export function InvertersStringsDecisions(props: InvertersStringsDecisionsProps)
   // The strings block exists where the PV lands on the batteries' own inputs and there is no PV inverter.
   const dcCoupledNoInverter = hasPv && coupling === 'dc-coupled-storage'
     && pvInverterState !== 'SELECTED' && pvInverterState !== 'CONFLICT';
+  // A conflict the banner above resolves is stated there; the card only points at it.
+  const deferToBanner = pvInverterState === 'CONFLICT' && !!props.conflictResolvedAbove && hasPv;
   // A chosen inverter is stated by the fleet rows below; only an undecided / None / conflicting one here.
-  const showInverterLine = !!inverterItem && hasPv && pvInverterState !== 'SELECTED';
+  const showInverterLine = !!inverterItem && hasPv && pvInverterState !== 'SELECTED' && !deferToBanner;
+  const showConnection = !!connectionItem && !deferToBanner;
+  // In conflict the coupling on file is one side of the dispute: nothing is pre-selected, either records.
+  const connConflict = connectionItem?.state === 'fails';
+  const connValue = connConflict ? '' : connectionItem?.value ?? '';
 
   const units = useMemo(() => invertingUnits(t), [t]);
   const unitLabels = useMemo(() => unitDisplayLabels(t), [t]);
@@ -76,6 +97,16 @@ export function InvertersStringsDecisions(props: InvertersStringsDecisionsProps)
   const assigned = landingItem ? landingItem.state === 'answered'
     : units.length > 0 && units.every(u => u.pvDcStcKw !== null && u.pvDcStcKw !== undefined)
       && pvArray.dcStcKw !== null && Math.abs(recordedKw - pvArray.dcStcKw) < 0.01;
+  // A landing on file that no longer adds up to the array (the design changed) is STALE, not absent.
+  const stale = !assigned && units.some(u => u.pvDcStcKw !== null && u.pvDcStcKw !== undefined);
+  const statusState = assigned ? 'answered' : stale ? 'stale' : 'needs-answer';
+  const arrayKw = pvArray.dcStcKw;
+  const statusText = assigned
+    ? `Assigned — ${carrying} of ${units.length} unit${units.length === 1 ? '' : 's'} ${carrying === 1 ? 'carries' : 'carry'} PV`
+    : stale
+      ? `Recorded ${recordedKw.toFixed(2)} kW ${arrayKw !== null
+        ? `does not match the ${arrayKw.toFixed(2)} kW array` : 'against an array whose kW is not established'} — review`
+      : 'Not assigned';
 
   const [reviewOpen, setReviewOpen] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
@@ -90,10 +121,17 @@ export function InvertersStringsDecisions(props: InvertersStringsDecisionsProps)
     return ok;
   };
 
-  if (!showInverterLine && !connectionItem && !dcCoupledNoInverter) return null;
+  if (!showInverterLine && !showConnection && !dcCoupledNoInverter && !deferToBanner) return null;
 
   return (
     <div data-testid="inv-decisions" className="mb-4 space-y-2">
+      {deferToBanner ? (
+        <div data-testid="inv-pv-conflict" data-state="fails" className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">PV inverter · PV connection</span>
+          <span className="text-rose-300">In conflict — resolve the electrical configuration conflict above.</span>
+        </div>
+      ) : null}
+
       {showInverterLine ? (
         <div data-testid="inv-pv-inverter" data-state={inverterItem!.state}
              className="flex flex-wrap items-center gap-2 text-xs">
@@ -109,21 +147,21 @@ export function InvertersStringsDecisions(props: InvertersStringsDecisionsProps)
         </div>
       ) : null}
 
-      {connectionItem ? (
+      {showConnection && connectionItem ? (
         <div data-testid="inv-pv-connection" data-state={connectionItem.state} className="space-y-0.5">
           <label className="flex flex-wrap items-center gap-2 text-xs">
             <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">PV connection</span>
             {connectionItem.options ? (
               <select data-testid="inv-pv-connection-select" className={box}
                       disabled={busy || !t || !props.onRecordCoupling}
-                      value={connectionItem.value ?? ''}
+                      value={connValue}
                       onChange={e => {
                         const v = e.target.value;
-                        if (v && v !== connectionItem.value && props.onRecordCoupling) {
+                        if (v && (connConflict || v !== connectionItem.value) && props.onRecordCoupling) {
                           void props.onRecordCoupling(v as SolarCoupling);
                         }
                       }}>
-                {connectionItem.value ? null : <option value="">Choose…</option>}
+                {connValue ? null : <option value="">Choose…</option>}
                 {connectionItem.options.map(o => (
                   <option key={o.value} value={o.value}>{connectionLabel(o.value, o.label, storageLabel)}</option>
                 ))}
@@ -163,13 +201,12 @@ export function InvertersStringsDecisions(props: InvertersStringsDecisionsProps)
           </div>
           <div className="mt-1 flex flex-wrap items-center gap-2">
             <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">String assignment</span>
-            <span data-testid="inv-string-status" data-state={assigned ? 'answered' : 'needs-answer'}
+            <span data-testid="inv-string-status" data-state={statusState}
                   title={units.map(u => `${unitLabels[u.id]}: ${u.pvDcStcKw == null ? 'not assigned' : `${u.pvDcStcKw.toFixed(2)} kW`}`).join(' · ')}
-                  className={assigned ? 'text-slate-200' : 'text-amber-200'}>
-              {assigned ? `Assigned — ${carrying} of ${units.length} unit${units.length === 1 ? '' : 's'} `
-                + `${carrying === 1 ? 'carries' : 'carry'} PV` : 'Not assigned'}
+                  className={assigned ? 'text-slate-200' : stale ? 'text-rose-300' : 'text-amber-200'}>
+              {statusText}
             </span>
-            <ProvenanceChip source={landingItem?.source ?? (assigned ? 'Installer entered' : 'Not established')} compact />
+            <ProvenanceChip source={landingItem?.source ?? (assigned || stale ? 'Installer entered' : 'Not established')} compact />
             {!assigned && rec.ok ? (
               <span data-testid="inv-string-recommended-hint" className="text-[10px] text-sky-300">Recommended assignment available</span>
             ) : null}

@@ -10053,6 +10053,12 @@ function EngineeringPageInner() {
     // `svcTopologyReloadKey` moves when a resolution is recorded, so the answer is re-read.
   }, [currentProjectId, _svcTopologyReloadKey]);
   const _archOrigin = _archDetail?.externalInverter?.origin ?? electrical?.externalInverterOrigin ?? null;
+  // The Inverters & Strings card's provenance / conflict banner — ONE condition, read by the banner
+  // and by the card's PV lines: where the banner offers the resolution, the card defers to it (one
+  // control, one copy of the route's error), and where it does not, the card's select is the control.
+  const _archBannerShown = !!(electrical?.hasExternalInverter && _archOrigin
+    && (_archUnresolved || _archOrigin.kind === 'AUTO_SUGGESTED_LEGACY'));
+  const _archBannerResolves = _archBannerShown && _archUnresolved && (electrical?.architectureChoices?.length ?? 0) > 0;
   // 🚨 THE ORDER LIVES IN `topologyBadge`, NOT IN A TERNARY HERE. A chain in JSX is a chain no test
   // can reach, and this one spent a whole green slice printing STRING INVERTER over a conflict.
   const _topoBadge = topologyBadge({
@@ -12252,8 +12258,8 @@ function EngineeringPageInner() {
                           would say nothing: "we don't know how this was chosen" is not news on a
                           legacy row. What IS news is an origin that cannot stand as a decision
                           (`AUTO_SUGGESTED_LEGACY`) or an architecture nobody has settled. */}
-                      {electrical?.hasExternalInverter && _archOrigin
-                        && (_archUnresolved || _archOrigin.kind === 'AUTO_SUGGESTED_LEGACY') ? (
+                      {/* The condition is `_archBannerShown` — the card's PV lines below read the same one. */}
+                      {_archBannerShown && _archOrigin ? (
                         <div data-testid="config-inverter-provenance"
                              className="mb-3 rounded-lg border border-amber-500/50 bg-amber-950/30 p-2.5">
                           <div className="text-xs font-black text-amber-300">
@@ -12348,7 +12354,8 @@ function EngineeringPageInner() {
                       <InvertersStringsDecisions {...interviewEditorContext} interview={systemConfigInterview}
                                                  coupling={electrical?.solarCoupling ?? null}
                                                  pvInverterState={interviewEquipment.pvInverter.state}
-                                                 connectionError={_archResolveError} />
+                                                 conflictResolvedAbove={_archBannerResolves}
+                                                 connectionError={_archBannerShown ? null : _archResolveError} />
 
                       {/* Branch Visualization — only for strings that land on a chosen inverter. On a
                           DC-coupled job the strings are the PV STRINGS line above (the engine's, against the

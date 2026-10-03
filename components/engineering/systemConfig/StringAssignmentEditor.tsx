@@ -13,7 +13,11 @@
 //   · [Edit] puts the recommendation into the rows so the installer adjusts it rather than starting
 //     from nothing; Save records whatever the rows say, refused while a unit is over its published
 //     MPPT count or kW STC.
-//   · A landing already recorded is read back into the rows when these strings reproduce it exactly.
+//   · A landing already recorded is read back into the rows: ONE wiring of these strings that gives
+//     each unit its recorded kW. The graph records each unit's kW, not which string went where, so the
+//     rows are consistent with the record — and the dialog says so — not a replay of the rows saved.
+//   · The strings are keyed by their panel counts, so a page that maps them afresh on every render
+//     does not re-run the search on every render.
 //
 // The same editor is asked wherever `behavior.pv-landing` is asked — the card's [Review] dialog,
 // [Answer Next], the guided strip — because `ItemEditor` renders it for that id.
@@ -24,8 +28,8 @@ import type { ServiceTopology } from '@/lib/electrical/serviceTopology';
 import type { PvArrayDesign } from '@/lib/electrical/pvArrayDesign';
 import { answerPvLanding } from '@/lib/electrical/systemConfigAnswers';
 import {
-  assignmentViolations, invertingUnits, recommendStringAssignment, recordedStringAssignment,
-  sameAssignment, stringsPerUnit, unitDisplayLabels, unitKwOf, type StringAssignmentInput,
+  assignmentViolations, invertingUnits, recommendStringAssignment, recordMatchesUnitKw, recordedStringAssignment,
+  stringsPerUnit, unitDisplayLabels, unitKwOf, type StringAssignmentInput,
 } from '@/lib/electrical/storageStringAssignment';
 import type { ApplyAnswer } from '@/components/engineering/systemConfig/ItemEditor';
 
@@ -40,7 +44,14 @@ export interface StringAssignmentEditorProps {
   busy: boolean;
 }
 
-export function StringAssignmentEditor({ t, pvArray, strings, apply, busy }: StringAssignmentEditorProps) {
+/** The same strings, by value: a fresh-but-equal array keeps the same identity (no re-search). */
+export function useStableStrings(strings: readonly number[]): number[] {
+  const key = strings.join('/');
+  return useMemo(() => (key ? key.split('/').map(Number) : []), [key]);
+}
+
+export function StringAssignmentEditor({ t, pvArray, strings: stringsProp, apply, busy }: StringAssignmentEditorProps) {
+  const strings = useStableStrings(stringsProp);
   const watts = pvArray.module?.watts ?? null;
   const count = pvArray.moduleCount ?? 0;
   const units = useMemo(() => invertingUnits(t), [t]);
@@ -48,7 +59,11 @@ export function StringAssignmentEditor({ t, pvArray, strings, apply, busy }: Str
   const input: StringAssignmentInput = useMemo(
     () => ({ strings, moduleWatts: watts, units }), [strings, watts, units]);
   const rec = useMemo(() => recommendStringAssignment(input), [input]);
-  const recorded = useMemo(() => recordedStringAssignment(input), [input]);
+  // The record is each unit's kW: when it equals the recommendation's, the recorded landing IS the
+  // recommended one, and the rows show the recommendation's wiring.
+  const recordedIsRecommended = rec.ok && recordMatchesUnitKw(units, rec.unitKw);
+  const recorded = useMemo(() => (recordedIsRecommended && rec.ok ? rec.unitOf : recordedStringAssignment(input)),
+    [input, rec, recordedIsRecommended]);
 
   // The rows start at what is recorded (read back), else empty; they follow a new record or new strings.
   const resetKey = `${strings.join('/')}|${watts}|${units.map(u => `${u.id}:${u.pvDcStcKw ?? ''}`).join(',')}`;
@@ -75,7 +90,6 @@ export function StringAssignmentEditor({ t, pvArray, strings, apply, busy }: Str
   const kw = unitKwOf(perUnit, watts);
   const unassigned = landing.filter(u => !u || !unitIds.includes(u)).length;
   const violations = assignmentViolations(input, landing, labels);
-  const recordedIsRecommended = rec.ok && sameAssignment(recorded, rec.unitOf);
 
   return (
     <div data-testid="inv-string-editor" className="space-y-2">
@@ -85,7 +99,7 @@ export function StringAssignmentEditor({ t, pvArray, strings, apply, busy }: Str
              className="rounded-lg border border-sky-500/30 bg-sky-500/5 p-2 text-[11px] text-slate-300">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-bold text-sky-200">
-              {recordedIsRecommended ? 'Recorded — this is the recommended assignment' : 'Recommended assignment available'}
+              {recordedIsRecommended ? 'Recorded — matches the recommended assignment' : 'Recommended assignment available'}
             </span>
             <span className="ml-auto flex gap-1.5">
               {!recordedIsRecommended ? (
@@ -122,6 +136,13 @@ export function StringAssignmentEditor({ t, pvArray, strings, apply, busy }: Str
           No recommended assignment — {rec.ok === false ? rec.reason : null}
         </div>
       )}
+
+      {recorded ? (
+        <div data-testid="inv-string-readback-note" className="text-[10px] text-slate-500">
+          Read back from the recorded kW per unit. SolarPro records each unit’s kW, not which string went
+          where, so these rows are one wiring that gives those totals.
+        </div>
+      ) : null}
 
       <div className="space-y-1">
         {strings.map((n, i) => (

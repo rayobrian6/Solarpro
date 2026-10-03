@@ -146,6 +146,27 @@ describe('the published limits are never exceeded', () => {
   });
 });
 
+describe('a search that runs out is not a proof that nothing fits', () => {
+  it('hitting the search limit says so — it does not tell the installer to revise a design that fits', () => {
+    // 3+3 | 2+2+2 into 6 + 6 fits (the backtracking case above); with a search limit of 2 placements
+    // SolarPro gives up before finding it, and must say THAT, not "no assignment fits".
+    const units = [unit('a', lim({ maxStcKw: 6, mppts: 3 })), unit('b', lim({ maxStcKw: 6, mppts: 3 }))];
+    const input = { strings: [3, 3, 2, 2, 2], moduleWatts: 1000, units };
+    expect(recommendStringAssignment(input).ok).toBe(true);
+    const r = recommendStringAssignment(input, { searchBudget: 2 });
+    expect(r.ok).toBe(false);
+    if (r.ok === false) {
+      expect(r.reason).toMatch(/search limit/);
+      expect(r.reason).not.toMatch(/No assignment fits|revise the string design/);
+    }
+    // …and a PROVEN no-fit still says so (the no-packing case, untouched by the limit).
+    const none = recommendStringAssignment({ strings: [7, 7, 6], moduleWatts: 1000,
+      units: [unit('a', lim({ maxStcKw: 10, mppts: 3 })), unit('b', lim({ maxStcKw: 10, mppts: 3 }))] });
+    expect(none.ok).toBe(false);
+    if (none.ok === false) expect(none.reason).toMatch(/^No assignment fits/);
+  });
+});
+
 describe('no recommendation without the facts it needs — each with its reason', () => {
   it('no strings, no wattage, no units', () => {
     expect(recommendStringAssignment({ strings: [], moduleWatts: 440, units: [unit('a')] }))
@@ -163,7 +184,7 @@ describe('no recommendation without the facts it needs — each with its reason'
 });
 
 describe('reading a recorded landing back, and judging a hand-made one', () => {
-  it('a recorded landing is read back exactly; one these strings cannot reproduce is not guessed at', () => {
+  it('a recorded landing reads back as a wiring consistent with each unit\'s recorded kW; one these strings cannot reproduce is not guessed at', () => {
     const t = rays();
     const ids = invertingUnits(t).map(u => u.id);
     const hand = ok(answerPvLanding(t, { [ids[0]]: [9, 9, 9, 8], [ids[1]]: [2] }, 440, 37));
@@ -182,6 +203,41 @@ describe('reading a recorded landing back, and judging a hand-made one', () => {
     const landed = ok(answerPvLanding(t, rec.perUnit, 440, 37));
     const back = recordedStringAssignment({ strings: RAYS_STRINGS, moduleWatts: 440, units: invertingUnits(landed) });
     expect(sameAssignment(back, rec.unitOf)).toBe(true);
+  });
+
+  it('the record holds each unit\'s kW, not which string: the read-back reproduces the kW, not necessarily the rows saved', () => {
+    // [5, 4, 3, 2] saved as [B, A, A, B] records A = 7, B = 7 modules. The graph keeps those two
+    // figures (answerPvLanding), so any wiring with the same per-unit kW is the same record.
+    const units = [unit('A'), unit('B')];
+    const saved = ['B', 'A', 'A', 'B'];
+    const kw = (perUnit: Record<string, number[]>) => Object.fromEntries(
+      Object.entries(perUnit).map(([id, ns]) => [id, ns.reduce((a, b) => a + b, 0) * 400 / 1000]));
+    const recorded = kw(stringsPerUnit([5, 4, 3, 2], saved, ['A', 'B']));
+    const back = recordedStringAssignment({
+      strings: [5, 4, 3, 2], moduleWatts: 400, units: units.map(u => ({ ...u, pvDcStcKw: recorded[u.id] })),
+    });
+    expect(back).not.toBeNull();
+    expect(kw(stringsPerUnit([5, 4, 3, 2], back!, ['A', 'B']))).toEqual(recorded);
+  });
+
+  it('a valid record reads back VALID — inside each unit\'s own MPPT count where one exists', () => {
+    // A has 2 MPPT inputs, B has 1. [B, A, A] on strings [4, 2, 2] is a valid landing (B: one string,
+    // A: two). Read back with no MPPT bound it came back as [A, B, B] — two strings on B's one MPPT —
+    // and the editor then reported a violation on a record that has none.
+    const units = [unit('A', lim({ mppts: 2 })), unit('B', lim({ mppts: 1 }))];
+    const input = { strings: [4, 2, 2], moduleWatts: 400, units: units.map((u, k) => ({ ...u, pvDcStcKw: [1.6, 1.6][k] })) };
+    const back = recordedStringAssignment(input);
+    expect(back).toEqual(['B', 'A', 'A']);
+    expect(assignmentViolations(input, back!)).toEqual([]);
+  });
+
+  it('a record that is over a unit\'s MPPT count still reads back — as the over-full unit it is', () => {
+    // Recorded A = 3 strings' worth on a 2-MPPT unit: no MPPT-bounded wiring reproduces it, so it is
+    // read back unbounded and the violation is named rather than the record being hidden.
+    const units = [unit('A', lim({ mppts: 2 }), 1.2), unit('B', lim({ mppts: 2 }), 0)];
+    const input = { strings: [1, 1, 1], moduleWatts: 400, units };
+    expect(recordedStringAssignment(input)).toEqual(['A', 'A', 'A']);
+    expect(assignmentViolations(input, ['A', 'A', 'A'])).toEqual(['Unit has 2 MPPT inputs; 3 strings are assigned to it.']);
   });
 
   it('a hand-made assignment over a unit\'s MPPT count or kW STC is named, unit by unit', () => {

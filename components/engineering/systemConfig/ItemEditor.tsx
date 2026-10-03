@@ -21,14 +21,14 @@
 // the architecture decision route. Nothing here holds engineering state.
 // ═══════════════════════════════════════════════════════════════════════════
 
-import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { ServiceTopology, SolarCoupling, BackupDomain } from '@/lib/electrical/serviceTopology';
 import type { PvArrayDesign } from '@/lib/electrical/pvArrayDesign';
 import type { FactSource, InterviewItem } from '@/lib/electrical/systemConfigInterview';
 import {
   answerStorageLanding, answerSystemsArrangement, answerInterconnection,
-  answerIsolationRequired, answerIsolationArrangement, answerIsolationAccepted, answerPvLanding,
+  answerIsolationRequired, answerIsolationArrangement, answerIsolationAccepted,
   type AnswerResult,
 } from '@/lib/electrical/systemConfigAnswers';
 import {
@@ -36,7 +36,7 @@ import {
 } from '@/lib/electrical/systemConfigUtilityDisconnects';
 import { SYSTEM_EQUIPMENT_PREFIX, parseSystemEquipmentItemId } from '@/lib/electrical/systemConfigSystemEquipment';
 import { LOAD_ANALYSIS_ITEM_ID } from '@/lib/electrical/systemConfigLoadAnalysis';
-import { CARD_TITLE, homeOf } from '@/lib/electrical/systemConfigPlacement';
+import { CARD_TITLE, PV_STRING_ASSIGNMENT_NEED, homeOf } from '@/lib/electrical/systemConfigPlacement';
 import { UtilityDisconnectsEditor } from '@/components/engineering/systemConfig/UtilityDisconnectsEditor';
 import { SystemEquipmentEditor, type SystemEquipmentSelection } from '@/components/engineering/systemConfig/SystemEquipmentEditor';
 import { LoadAnalysisEditor } from '@/components/engineering/systemConfig/LoadAnalysisEditor';
@@ -153,6 +153,8 @@ export function hasItemEditor(item: InterviewItem, t: ServiceTopology | null): b
   }
   if (id === 'behavior.backup' || id === LOAD_ANALYSIS_ITEM_ID) return true;
   if (id === 'service.system' || id === 'service.existing' || id === 'service.fault-current' || id === 'behavior.pv-landing') return true;
+  // One inverting unit: the engine's "assign the strings" need IS the question (nothing else asks it).
+  if (id === PV_STRING_ASSIGNMENT_NEED) return true;
   if (id.startsWith('service.panel.')) return t.panels.some(p => id === `service.panel.${p.id}`);
   if (id === 'service.distribution' || id === 'behavior.storage-landing' || id === 'behavior.systems'
     || id === 'behavior.interconnection' || id === 'behavior.isolation') return !!item.options;
@@ -485,8 +487,11 @@ export function ItemEditor(props: ItemEditorProps) {
   }
   if (id === 'behavior.pv-connection' && item.options) {
     const record = props.onRecordCoupling;
+    // In conflict ('fails') the coupling on file is one side of the dispute, not an answer: nothing is
+    // pre-checked, so either side — the one on file included — can be chosen and recorded.
     return (
-      <Radio name="pv-connection" testid="answer-pv-connection" options={item.options} value={item.value}
+      <Radio name="pv-connection" testid="answer-pv-connection" options={item.options}
+             value={item.state === 'fails' ? null : item.value}
              disabled={busy || !t || !record}
              onPick={v => { if (record) void record(v as SolarCoupling); }} />
     );
@@ -509,7 +514,7 @@ export function ItemEditor(props: ItemEditorProps) {
              onPick={v => void apply(answerSystemsArrangement(t, v as 'independent-branch' | 'common-aggregation' | 'custom'))} />
     );
   }
-  if (id === 'behavior.pv-landing' && t) {
+  if ((id === 'behavior.pv-landing' || id === PV_STRING_ASSIGNMENT_NEED) && t) {
     return <PvLandingEditor t={t} pvArray={props.pvArray} strings={props.derivedStrings} apply={apply} busy={busy} />;
   }
   if (id === 'behavior.interconnection' && t && item.options) {

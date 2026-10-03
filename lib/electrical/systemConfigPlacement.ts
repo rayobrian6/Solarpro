@@ -55,6 +55,13 @@ export const CARD_TITLE: Readonly<Record<CardHome, string>> = {
 const NEEDS_PREFIX = 'engineering.needs.';
 const EXISTING_EQUIPMENT_NEED = `${NEEDS_PREFIX}service.existingEquipment.`;
 const DER_ISOLATION_ITEM = disconnectItemId('der-isolation-disconnect');
+/**
+ * "Assign PV strings to storage inputs" — what the engine waits on while a unit's PV input has no
+ * landing. With more than one unit `behavior.pv-landing` asks it (and this need is dropped as the
+ * same answer twice); with ONE unit nothing else asks it, so the need itself is the question, and it
+ * is asked where the strings are: the Inverters & Strings card's String assignment editor.
+ */
+export const PV_STRING_ASSIGNMENT_NEED = `${NEEDS_PREFIX}pv.stringAssignment`;
 
 /**
  * Where an interview item is asked (SYSCONFIG V3 spec, "Where every interview item lives now").
@@ -68,7 +75,8 @@ export function homeOf(itemId: string): CardHome {
   if (id.startsWith('service.') || id.startsWith(EXISTING_EQUIPMENT_NEED)) return 'service';
   if (id === 'equipment.storage' || id === 'equipment.gateway' || id.startsWith(SYSTEM_EQUIPMENT_PREFIX)
     || id === 'behavior.storage-landing') return 'battery';
-  if (id === 'equipment.pv-inverter' || id === 'behavior.pv-connection' || id === 'behavior.pv-landing') {
+  if (id === 'equipment.pv-inverter' || id === 'behavior.pv-connection' || id === 'behavior.pv-landing'
+    || id === PV_STRING_ASSIGNMENT_NEED) {
     return 'inverters';
   }
   if (id === 'behavior.backup' || id === 'behavior.systems' || id === 'behavior.interconnection'

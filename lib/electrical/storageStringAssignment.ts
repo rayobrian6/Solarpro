@@ -23,7 +23,8 @@
 // inputs ⇒ same answer, always.
 //
 // No assignment fits ⇒ null with the reason, in the installer's words. Never a partial assignment,
-// never a unit over its published limit.
+// never a unit over its published limit. A search that runs out of budget says THAT — it is not a
+// proof that nothing fits, so it never tells the installer to revise a design that may be fine.
 //
 // Pure and isomorphic: no React, no catalogue lookup — the limits travel on the graph's units.
 // ═══════════════════════════════════════════════════════════════════════════
@@ -62,7 +63,12 @@ export type StringAssignment =
   | { ok: false; reason: string };
 
 /** How many partial assignments the search may try before it gives up and says so. */
-const SEARCH_BUDGET = 200_000;
+export const SEARCH_BUDGET = 200_000;
+
+export interface RecommendOptions {
+  /** Placements the search may try (default `SEARCH_BUDGET`). Tests lower it to reach the give-up path. */
+  searchBudget?: number;
+}
 
 /** The inverting units of a graph, in order — the only units that can receive strings. */
 export function invertingUnits(t: ServiceTopology | null | undefined): StorageUnit[] {
@@ -152,7 +158,7 @@ interface Slot { id: string; capModules: number; mppts: number }
  * Everything is counted in whole modules, so no rounding can make two runs disagree.
  */
 function search(
-  strings: readonly number[], slots: readonly Slot[], exact: boolean,
+  strings: readonly number[], slots: readonly Slot[], exact: boolean, budget: number = SEARCH_BUDGET,
 ): { unitOf: string[] } | 'exhausted' | null {
   const order = strings.map((_, i) => i).sort((a, b) => strings[b] - strings[a] || a - b);
   const load = slots.map(() => 0);
@@ -176,7 +182,7 @@ function search(
       const key = `${load[j]}|${used[j]}|${slots[j].capModules}|${slots[j].mppts}`;
       if (tried.has(key)) continue;
       tried.add(key);
-      if (++nodes > SEARCH_BUDGET) return 'exhausted';
+      if (++nodes > budget) return 'exhausted';
       load[j] += n; used[j] += 1; at[i] = j;
       const r = go(k + 1);
       if (r === true || r === 'exhausted') return r;
@@ -195,7 +201,7 @@ function search(
  * The recommended assignment of the derived strings to the inverting units, or the reason there is
  * none. Deterministic; never exceeds a unit's published MPPT count or PV STC limit.
  */
-export function recommendStringAssignment(input: StringAssignmentInput): StringAssignment {
+export function recommendStringAssignment(input: StringAssignmentInput, opts: RecommendOptions = {}): StringAssignment {
   const { strings, moduleWatts, units } = input;
   if (strings.length === 0 || strings.some(n => !(Number.isInteger(n) && n > 0))) {
     return { ok: false, reason: 'The strings have not been derived yet, so there is nothing to assign.' };
@@ -232,8 +238,13 @@ export function recommendStringAssignment(input: StringAssignmentInput): StringA
     return { ok: false, reason: `A ${largest}-module string (${kw(stcW(largest, moduleWatts))} kW STC) is more than `
       + `any unit accepts (${kw(maxCapW)} kW).` };
   }
-  const found = search(strings, slots, false);
-  if (!found || found === 'exhausted') {
+  const found = search(strings, slots, false, opts.searchBudget ?? SEARCH_BUDGET);
+  if (found === 'exhausted') {
+    // Not a finding: the search stopped before it could prove either way.
+    return { ok: false, reason: 'SolarPro could not find an assignment within its search limit — that is not '
+      + 'a finding that none fits. Assign the strings by hand; Save still checks each unit’s published PV inputs.' };
+  }
+  if (!found) {
     return { ok: false, reason: 'No assignment fits every unit’s published PV inputs (MPPT count and kW STC). '
       + 'Assign the strings by hand, or revise the string design.' };
   }
@@ -242,8 +253,15 @@ export function recommendStringAssignment(input: StringAssignmentInput): StringA
 }
 
 /**
- * Read a RECORDED landing back as "string i → unit", when the graph's per-unit PV STC can be
- * reproduced exactly from the derived strings. Null when nothing is recorded, or when the record no
+ * Read a RECORDED landing back as "string i → unit": ONE wiring of the derived strings that
+ * reproduces each unit's recorded PV STC exactly. The graph records each unit's kW
+ * (`answerPvLanding`), not which string went where, so this is a wiring CONSISTENT WITH the record —
+ * not necessarily the rows the installer saved (strings 5/4/3/2 saved as B·A·A·B read back as
+ * A·B·B·A: the same 7 + 7 modules, which is all the engineering consumes).
+ *
+ * It is searched inside each unit's own MPPT count first, so a valid record reads back valid; only
+ * where no such wiring exists is it read back unbounded, so an over-full record shows as the
+ * over-full unit it is rather than disappearing. Null when nothing is recorded, or when the record no
  * longer matches these strings (the design changed) — it is then shown as recorded, not guessed at.
  */
 export function recordedStringAssignment(input: StringAssignmentInput): string[] | null {
@@ -256,11 +274,21 @@ export function recordedStringAssignment(input: StringAssignmentInput): string[]
     const m = Math.round(recordedW / moduleWatts);
     // A record no whole number of these modules produces is not a landing of these strings.
     if (stcW(m, moduleWatts) !== recordedW) return null;
-    // The record is read back as it is — not bounded by MPPTs, so an over-full unit shows as one.
-    slots.push({ id: u.id, capModules: m, mppts: strings.length });
+    slots.push({ id: u.id, capModules: m, mppts: u.pvInputLimits?.mppts ?? strings.length });
   }
-  const found = search(strings, slots, true);
-  return found && found !== 'exhausted' ? found.unitOf : null;
+  const bounded = search(strings, slots, true);
+  if (bounded && bounded !== 'exhausted') return bounded.unitOf;
+  const unbounded = search(strings, slots.map(s => ({ ...s, mppts: strings.length })), true);
+  return unbounded && unbounded !== 'exhausted' ? unbounded.unitOf : null;
+}
+
+/**
+ * Does every unit's RECORDED PV STC equal what this assignment puts on it? (The record is per-unit
+ * kW, so this is what "the recorded landing is the recommended one" can honestly mean.)
+ */
+export function recordMatchesUnitKw(units: readonly AssignableUnit[], unitKw: Record<string, number>): boolean {
+  return units.length > 0 && units.every(u => u.pvDcStcKw !== null && u.pvDcStcKw !== undefined
+    && unitKw[u.id] !== undefined && Math.round(u.pvDcStcKw * 1000) === Math.round(unitKw[u.id] * 1000));
 }
 
 /** Do two assignments land every string on the same unit? */
