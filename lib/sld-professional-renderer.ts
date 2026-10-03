@@ -56,6 +56,9 @@ import {
 // The canonical token → words function the needs-input screen uses. Imported rather than reimplemented
 // so a requirement is asked for in the same words on the sheet and on the screen.
 import { labelForToken } from '@/lib/electrical/topologyOverview';
+import {
+  engineerServiceRuns, runScheduleCells, runTags, NO_FACTS_RUN_ENVIRONMENT, type EngineeredRun,
+} from '@/lib/electrical/electricalRuns';
 import { foldConclusions } from '@/lib/engineering/engineeringStatus';
 
 // ── Canvas ──────────────────────────────────────────────────────────────────
@@ -690,6 +693,13 @@ export interface SLDProfessionalInput {
   branchOcpdAmps?:         number;
   stringDetails?:          { stringIndex: number; panelCount: number; ocpdAmps: number; wireGauge: string; voc: number; isc: number }[];
   runs?:                   RunSegment[];
+  /**
+   * 🚨 THE SERVICE GRAPH'S CONDUCTORS, ENGINEERED — `engineerServiceRuns` (lib/electrical/
+   * electricalRuns.ts), computed by the route from the project's own facts. The renderer PRINTS these
+   * (schedule rows, run callouts); it never sizes a conductor. Absent on a graph job ⇒ the same runs
+   * with no facts, every one NOT EVALUATED.
+   */
+  electricalRuns?:         EngineeredRun[] | null;
   // v25 — Single Source of Truth: pre-computed values from computeSystem() engine
   systemModel?:            import('./plan-set/permit-system-model').PermitSystemModel;
   // EGC gauge from computeSystem() NEC 250.122 table
@@ -5239,6 +5249,12 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   // same checks into two different verdicts.
   const _svcTopology = input.serviceTopology ?? null;
   const _svcEval = _svcTopology ? evaluateServiceTopology(_svcTopology) : null;
+  // 🚨 THE CANONICAL RUNS. Ray: "DO NOT SIZE CONDUCTORS IN THE RENDERER." The route engineers them;
+  // a caller that passes none gets the same runs engineered from NO facts — every one NOT EVALUATED,
+  // never a gauge borrowed from another circuit or read off a breaker.
+  const _graphRuns: EngineeredRun[] = _svcTopology
+    ? (input.electricalRuns ?? engineerServiceRuns(_svcTopology, NO_FACTS_RUN_ENVIRONMENT))
+    : [];
 
   // ── SVG root ──────────────────────────────────────────────────────────────
   // Embedded mode crops the viewBox at the title-block column so the diagram
@@ -7049,9 +7065,26 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       ['AC Output Amps',`${input.acOutputAmps} A`] as [string,string],
       ['AC OCPD (125%)',`${resolvedAcOCPD} A`] as [string,string],
     ]),
-    ['AC Wire Gauge',`${resolvedAcWire}`],
-    ['AC Conduit Type',resolvedAcCondType],
-    ['Conduit Size',resolvedAcConduit||'—'],
+    // 🚨 ON A DC-COUPLED GRAPH JOB THERE IS NO PV AC FEEDER, so its gauge / conduit (`resolvedAcWire`
+    // …) described a conductor that does not exist. The rows name the graph's runs instead, in the
+    // engine's words — one value when every run of that kind agrees, never a borrowed gauge.
+    ...(_cbDcCoupled && _graphRuns.length > 0 ? (() => {
+      const said = (role: EngineeredRun['role']): string | null => {
+        const rs = _graphRuns.filter(r => r.role === role);
+        if (rs.length === 0) return null;
+        const words = [...new Set(rs.map(r => runScheduleCells(r).conductors))];
+        return words.length === 1 ? words[0] : 'SEE CONDUCTOR SCHEDULE';
+      };
+      return ([
+        ['ESS Circuit Conductors', said('der-circuit')],
+        ['Generation Feeder', said('generation-feeder')],
+        ['Backup Feeder', said('backup-feeder')],
+      ] as [string, string | null][]).filter((r): r is [string, string] => r[1] !== null);
+    })() : [
+      ['AC Wire Gauge',`${resolvedAcWire}`] as [string,string],
+      ['AC Conduit Type',resolvedAcCondType] as [string,string],
+      ['Conduit Size',resolvedAcConduit||'—'] as [string,string],
+    ]),
     ['Service Voltage','120/240V, 1Ø'],
     ['Main Panel Rating',`${input.mainPanelAmps} A`],
     ...(isLoadSide ? (() => {
@@ -7317,7 +7350,11 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   // Under the headers with daylight: at hY+2 the rule touched their baselines.
   parts.push(ln(DX, hY+4.5, DX+DW, hY+4.5, {sw:SW_THIN}));
 
-  type SR = {id:string;from:string;to:string;conductors:string;conduit:string;fill:number;amp:number;ocpd:number;vdrop:number;len:number;pass:boolean};
+  type SR = {id:string;from:string;to:string;conductors:string;conduit:string;fill:number;amp:number;ocpd:number;vdrop:number;len:number;pass:boolean;
+    /** A canonical run that is not fully engineered prints NOT EVAL. — never ✓ PASS. */
+    notEvaluated?:boolean;
+    /** The overflow line: no verdict. */
+    note?:boolean};
   let sRows: SR[] = [];
 
   if (input.runs && input.runs.length > 0) {
@@ -7350,9 +7387,14 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     const _dcCoupledInverterChainRuns = [
       'DC_DISCO_TO_INV_RUN', 'INV_TO_DISCO_RUN', 'DISCO_TO_METER_RUN',
     ];
+    // 🚨 ON A GRAPH JOB THE STORAGE SIDE IS THE SERVICE GRAPH'S. computeSystem's single battery →
+    // BUI → MSP pair (with its defaulted 10 / 15 ft) describes one battery and one interface; the
+    // canonical runs below describe the conductors the graph actually has. One set, not two.
+    const _graphOwnsStorage = _graphRuns.some(r => r.role === 'der-circuit' || r.role === 'backup-feeder');
     const _scheduleExcluded = new Set([
       ...(isMicro ? ['MSP_TO_UTILITY_RUN', 'ROOF_RUN'] : ['MSP_TO_UTILITY_RUN']),
       ...(_couplingIsDc ? _dcCoupledInverterChainRuns : []),
+      ...(_graphOwnsStorage ? ['BATTERY_TO_BUI_RUN', 'BUI_TO_MSP_RUN'] : []),
     ]);
     sRows = input.runs.filter(r=>!_scheduleExcluded.has(r.id)).map(r => {
       let cond = '';
@@ -7458,8 +7500,13 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       // ═══════════════════════════════════════════════════════════════════
       {id:'D-1',from:'PV ARRAY',to:'ROOF J-BOX',conductors:`${resolvedDcWire} USE-2 + 1×#${egcNum} GRN`,conduit:'OPEN AIR',fill:0,amp:0,ocpd:input.dcOCPD,vdrop:0,len:0,pass:true},
       {id:'D-2',from:'ROOF J-BOX',to:'ESS PV DC INPUTS',conductors:`${resolvedDcWire} USE-2 + 1×#${egcNum} GRN`,conduit:`${input.dcConduitType??'EMT'} 3/4"`,fill:0,amp:0,ocpd:input.dcOCPD,vdrop:0,len:0,pass:true},
+      // 🚨 NOT ON A GRAPH JOB: `resolvedAcWire` is the PV AC feeder's gauge, and these two rows put
+      // it on a 60 A storage circuit and a 125 A generation feeder alike. The graph's own runs,
+      // engineered, are appended below instead.
+      ...(_graphRuns.length > 0 ? [] : [
       {id:'A-1',from:'ESS AC OUTPUT',to:'GENERATION PANEL',conductors:`${resolvedAcWire} THWN-2 + 1×#${egcNum} GRN`,conduit:`${resolvedAcCondType} ${resolvedAcConduit}`,fill:_fFill,amp:input.acOutputAmps,ocpd:resolvedAcOCPD,vdrop:0,len:0,pass:_fPass},
       {id:'A-2',from:'GENERATION PANEL',to:'BACKUP GATEWAY',conductors:`${resolvedAcWire} THWN-2 + 1×#${egcNum} GRN`,conduit:`${resolvedAcCondType} ${resolvedAcConduit}`,fill:_fFill,amp:input.acOutputAmps,ocpd:resolvedAcOCPD,vdrop:_fVd,len:_fLen,pass:_fPass},
+      ]),
     ] : [
       {id:'D-1',from:'PV ARRAY',to:'ROOF J-BOX',conductors:`${resolvedDcWire} USE-2 + 1×#${egcNum} GRN`,conduit:'OPEN AIR',fill:0,amp:0,ocpd:input.dcOCPD,vdrop:0,len:0,pass:true},
       {id:'D-2',from:'ROOF J-BOX',to:'DC DISCO',conductors:`${resolvedDcWire} USE-2 + 1×#${egcNum} GRN`,conduit:`${input.dcConduitType??'EMT'} 3/4"`,fill:0,amp:0,ocpd:input.dcOCPD,vdrop:0,len:0,pass:true},
@@ -7469,68 +7516,47 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   }
 
   // ═══════════════════════════════════════════════════════════════════════
-  // 🚨 THE STORAGE SIDE HAS CONDUCTORS TOO, AND THE SIZING ENGINE DOES NOT MODEL THEM.
+  // 🚨 THE SERVICE GRAPH'S CONDUCTORS — ONE ROW PER CANONICAL RUN.
   //
-  // With engine runs present the schedule is built from those, and the engine only knows the
-  // string-inverter chain — so once its inverter runs were excluded for a DC-coupled job, the table
-  // was left with ONE row describing the DC strings, while the drawing above it showed four
-  // cabinets feeding two generation panels feeding two gateways feeding two panels. A schedule that
-  // omits every AC conductor on the sheet is as contradictory as one that invents them.
-  //
-  // These rows come from the GRAPH, which is the only thing that knows how many systems there are
-  // and what each panel's output device is. Ray: "The calculation blocks and conductor schedule must
-  // describe the same system drawn above them."
-  //
-  // Appended only when the engine path ran AND the job is DC-coupled: the hand-built branch above
-  // already carries them, and every other architecture is untouched.
-  if (input.runs && input.runs.length > 0 && _couplingIsDc && _svcTopology) {
-    const _egc = resolvedEgcGauge.replace('#', '').replace(' AWG', '');
-    const _aggs = _svcTopology.aggregationPanels ?? [];
-    const _byDomain = new Map(_svcTopology.domains.map(d => [d.id, d]));
-    _aggs.forEach((agg, i) => {
-      const n = i + 1;
-      const units = (agg.inputs ?? []).length;
-      const perUnit = [...new Set((agg.inputs ?? []).map(x => x.ocpdA).filter(v => v != null))] as number[];
-      const dom = agg.domainId ? _byDomain.get(agg.domainId) : undefined;
-      // 🚨 A CONDUCTOR SolarPro HAS NOT SIZED IS NOT PRINTED AS IF IT HAD.
-      //
-      // `resolvedAcWire` is the PV AC feeder's gauge. Borrowing it for a storage branch put "#6 AWG"
-      // behind a 60 A device by luck and, on the backup feeders below, "#6 AWG" behind a 200 A one —
-      // #6 is about 65 A. A schedule row an installer pulls wire from must not contain a gauge that
-      // came from a different circuit. Where the graph records the conductor, it is printed; where it
-      // does not, the row says so. Ray: "No fake arithmetic."
-      const _ampsFor = (ocpd: number) => ocpd > 0 ? `SIZE FOR ${ocpd} A — NOT EVALUATED` : 'NOT EVALUATED';
+  // Ray: "60 A breaker → #6 / 200 A breaker → 3/0 and then print that like engineered truth" was
+  // this block: it borrowed the PV feeder's gauge for the storage circuits, read a feeder size off a
+  // panel's main breaker, and printed a gauge an earlier recommendation had derived from the
+  // breaker. Every row now IS a run from `engineerServiceRuns` (lib/electrical/electricalRuns.ts):
+  // its conductors and raceway are the engine's, worded by `runScheduleCells` — the same words the
+  // drawing's callout, the BOM and the permit print — and a run the engine could not engineer says
+  // NOT EVALUATED rather than showing a size. Every graph job, whatever its coupling.
+  // ═══════════════════════════════════════════════════════════════════════
+  if (_graphRuns.length > 0) {
+    // The graph's own names, as the drawing above prints them (not upper-cased into a second
+    // spelling), shortened only where a column would otherwise run into the next.
+    const _schedName = (label: string) => {
+      const s = label
+        .replace(/^the /i, '')
+        .replace(/utility isolation switch/i, 'Isolation switch')
+        .replace(/\d+ A service path /i, 'path ');
+      // One line per row: a name the column cannot hold is shortened, never run into the next cell.
+      const room = 0.11 * DW - 2 * 5;
+      if (textWidthUu(s, F.tiny) <= room) return s;
+      let t = s;
+      while (t.length > 1 && textWidthUu(`${t}…`, F.tiny) > room) t = t.slice(0, -1);
+      return `${t.trimEnd()}…`;
+    };
+    const _tags = runTags(_graphRuns);
+    _graphRuns.forEach((r, k) => {
+      const cells = runScheduleCells(r);
       sRows.push({
-        id: `A-${n}a`, from: `ESS AC OUTPUT (${units} UNIT${units === 1 ? '' : 'S'})`,
-        to: agg.label || `GENERATION PANEL ${n}`,
-        conductors: _ampsFor(perUnit.length === 1 ? perUnit[0] : 0),
-        conduit: `${resolvedAcCondType} ${resolvedAcConduit}`,
-        fill: 0, amp: 0, ocpd: perUnit.length === 1 ? perUnit[0] : 0, vdrop: 0, len: 0, pass: true,
-      });
-      sRows.push({
-        id: `A-${n}b`, from: agg.label || `GENERATION PANEL ${n}`,
-        to: dom?.gateway.label || 'BACKUP GATEWAY',
-        // This one the graph DOES record — the generation panel's own output conductor.
-        conductors: agg.outputConductorGauge
-          ? `${agg.outputConductorGauge} THWN-2 + 1×#${_egc} GRN`
-          : _ampsFor(agg.outputOcpdA ?? 0),
-        conduit: `${resolvedAcCondType} ${resolvedAcConduit}`,
-        fill: 0, amp: 0, ocpd: agg.outputOcpdA ?? 0, vdrop: 0, len: 0, pass: true,
-      });
-    });
-    // And the backup feeder out of each gateway to the panel it backs up — the run Tesla's manual
-    // puts on the Gateway's BACKUP terminals, downstream of the contactor.
-    _svcTopology.domains.forEach((d, i) => {
-      const panel = _svcTopology.panels.find(p => d.backedUpPanelIds.includes(p.id));
-      if (!panel) return;
-      sRows.push({
-        id: `B-${i + 1}`, from: d.gateway.label || 'BACKUP GATEWAY', to: panel.label || 'MSP',
-        // The backup feeder carries the whole backed-up panel, so it is sized from that panel's
-        // main — a 200 A feeder, not the PV circuit's #6. SolarPro has not sized it, and says so.
-        conductors: panel.mainBreakerA
-          ? `SIZE FOR ${panel.mainBreakerA} A — NOT EVALUATED` : 'NOT EVALUATED',
-        conduit: `${resolvedAcCondType} ${resolvedAcConduit}`,
-        fill: 0, amp: 0, ocpd: panel.mainBreakerA ?? 0, vdrop: 0, len: 0, pass: true,
+        id: _tags[k],
+        from: _schedName(r.source.deviceLabel),
+        to: _schedName(r.destination.deviceLabel),
+        conductors: cells.conductors,
+        conduit: cells.raceway,
+        fill: r.raceway.fillPct ?? 0,
+        amp: r.conductor.allowableAmpacityA ?? 0,
+        ocpd: r.ocpdA ?? 0,
+        vdrop: r.voltageDrop.pct ?? 0,
+        len: r.voltageDrop.lengthFt ?? 0,
+        pass: r.evaluationStatus === 'ENGINEERED' && r.voltageDrop.pass !== false,
+        notEvaluated: r.evaluationStatus !== 'ENGINEERED',
       });
     });
   }
@@ -7545,11 +7571,20 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   // ever scheduled, it goes into BOTH lists from one source, together.
 
   const maxRows = Math.floor((SCHED_H-30)/rH);
-  sRows.slice(0, maxRows).forEach((row, ri) => {
+  // 🚨 A ROW THAT DOES NOT FIT IS SAID, NOT DROPPED. `slice` used to cut the table at the frame with
+  // nothing to show that conductors were missing from it.
+  if (sRows.length > maxRows) {
+    const hidden = sRows.length - (maxRows - 1);
+    sRows = [...sRows.slice(0, maxRows - 1), {
+      id: '…', from: `${hidden} MORE RUNS`, to: '', conductors: 'NOT SHOWN ON THIS SHEET', conduit: '',
+      fill: 0, amp: 0, ocpd: 0, vdrop: 0, len: 0, pass: true, note: true,
+    }];
+  }
+  sRows.forEach((row, ri) => {
     const ry = hY+4+(ri+1)*rH;
     if (ri%2===1) parts.push(rect(DX, ry-rH+2, DW, rH, {fill:LGY, stroke:'none', sw:0}));
-    const pc = row.pass ? PASS : FAIL;
-    const pv = row.pass ? '✓ PASS' : '✗ FAIL';
+    const pc = row.notEvaluated ? SEC_AMBER : row.pass ? PASS : FAIL;
+    const pv = row.note ? '' : row.notEvaluated ? 'NOT EVAL.' : row.pass ? '✓ PASS' : '✗ FAIL';
     const vals = [
       row.id, row.from, row.to, row.conductors, row.conduit,
       row.fill>0?`${row.fill.toFixed(1)}%`:(row.conduit==='OPEN AIR'?'N/A':'—'),

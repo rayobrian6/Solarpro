@@ -841,6 +841,26 @@ export async function POST(req: NextRequest) {
             _added.map(i => `${i.partNumber}×${i.quantity}`).join(', '));
         }
 
+        // 🚨 THE GRAPH'S CONDUCTORS — the canonical runs, engineered from the same facts the SLD
+        // route uses (lib/electrical/electricalRuns.ts), worded exactly as the SLD's schedule rows.
+        // Requirement lines: no recorded length ⇒ no footage, and nothing priced.
+        {
+          const { engineerServiceRuns, runEnvironmentFrom } = await import('@/lib/electrical/electricalRuns');
+          const { bomLinesFromRuns } = await import('@/lib/bom/topologyBom');
+          const _runLines = bomLinesFromRuns(engineerServiceRuns(_t, runEnvironmentFrom({
+            lat: typeof body.lat === 'number' ? body.lat : null,
+            lng: typeof body.lng === 'number' ? body.lng : null,
+            state: typeof body.state === 'string' ? body.state : null,
+            address: typeof body.address === 'string' ? body.address : null,
+            racewayType: typeof body.conduitType === 'string' ? body.conduitType : null,
+          })));
+          if (_runLines.length > 0) {
+            v4Result.items.push(..._runLines);
+            v4Result.totalLineItems = v4Result.items.length;
+            console.log('[bom/POST] service-graph conductor runs:', _runLines.length, 'line(s)');
+          }
+        }
+
         // 🚨 THE PROOF. Pricing multiplies these exact quantities, so if they disagree with the
         // graph, pricing disagrees with the drawing.
         _quantityDisagreements.push(...reconcileQuantities(_t, pricedQuantitiesFromBom(_tBom)));

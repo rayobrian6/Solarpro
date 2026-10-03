@@ -28,6 +28,7 @@ import {
 } from '@/lib/electrical/topologyEquipment';
 import { getBatteryById, getBackupInterfaceById } from '@/lib/equipment-db';
 import { resolveUnitCost } from '@/lib/bom/distributorPricing';
+import { runScheduleCells, type EngineeredRun } from '@/lib/electrical/electricalRuns';
 
 /** A catalogue-resolved name for a product id, or the id itself when unresolved. */
 function nameOf(productId: string): { manufacturer: string; model: string } {
@@ -265,4 +266,67 @@ export function pricedQuantitiesFromBom(result: TopologyBomResult): Record<strin
     out[item.partNumber] = (out[item.partNumber] ?? 0) + item.quantity;
   }
   return out;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// THE SERVICE GRAPH'S CONDUCTORS — FROM THE CANONICAL RUNS.
+//
+// Ray: "The exact same engineered run must feed SLD, conductor schedule, BOM, permit…". Each line
+// below is a group of identical engineered runs (lib/electrical/electricalRuns.ts), worded by
+// `runScheduleCells` — the SLD's schedule cell, letter for letter. A conductor footage needs the
+// run's length; none is recorded, so the quantity is PENDING (never a default footage) and the line
+// is a requirement, not an orderable part. A run the engine could not engineer says NOT EVALUATED
+// and names what it needs.
+// ═══════════════════════════════════════════════════════════════════════════
+
+export const RUN_LINE_PREFIX = 'topology-run-';
+export const isRunLine = (item: Pick<BOMLineItemV4, 'id'>): boolean => item.id.startsWith(RUN_LINE_PREFIX);
+
+export function bomLinesFromRuns(runs: readonly EngineeredRun[]): BOMLineItemV4[] {
+  const groups = new Map<string, EngineeredRun[]>();
+  for (const r of runs) {
+    const c = runScheduleCells(r);
+    const key = `${r.role}|${r.name}|${r.ocpdA}|${c.conductors}|${c.raceway}`;
+    groups.set(key, [...(groups.get(key) ?? []), r]);
+  }
+  return [...groups.values()].map(group => {
+    const r = group[0];
+    const c = runScheduleCells(r);
+    const engineered = r.conductor.status === 'ENGINEERED';
+    const lengths = group.map(g => g.voltageDrop.lengthFt);
+    const allLengths = lengths.every((l): l is number => typeof l === 'number');
+    const footage = allLengths ? (lengths as number[]).reduce((a, b) => a + b, 0) : null;
+    const needs = [...new Set(group.flatMap(g => g.missingInputs.filter(m => m.blocking).map(m => m.need)))];
+    const n = group.length;
+    return {
+      id: `${RUN_LINE_PREFIX}${r.id}`,
+      stageId: 'ac',
+      stageLabel: 'AC / Service',
+      // Not 'wire': that category carries a per-foot fallback price, and a requirement line is not priced.
+      category: 'Conductor Run',
+      manufacturer: '',
+      model: `${r.ocpdA != null ? `${r.ocpdA} A ` : ''}${r.name}`,
+      partNumber: `${RUN_LINE_PREFIX}${r.id}`,
+      description: engineered ? `${c.conductors} · ${c.raceway}` : 'CONDUCTORS / RACEWAY — NOT EVALUATED',
+      quantity: footage ?? 0,
+      unit: 'ft',
+      necReference: r.conductor.necReferences.join(', ') || undefined,
+      derivedFrom: `canonical electrical run${n === 1 ? '' : 's'}: `
+        + group.map(g => `${g.source.deviceLabel} → ${g.destination.deviceLabel}`).join('; '),
+      required: true,
+      nonOrderable: true,
+      nonOrderableReason: !engineered
+        ? `NOT EVALUATED — ${needs.join('; ') || 'the run is not engineered'}`
+        : footage === null
+          ? `LENGTH REQUIRED — the one-way length of ${n === 1 ? 'this run' : `these ${n} runs`} is not recorded, so no footage is ordered`
+          : 'RUN TAKE-OFF — conductor and raceway footage from the recorded run lengths',
+      ...(footage === null ? {
+        quantityState: 'pending' as const,
+        quantityStateLabel: `LENGTH REQUIRED — ${n} RUN${n === 1 ? '' : 'S'}`,
+      } : { quantityState: 'established' as const }),
+      quantitySource: footage === null ? 'unknown' as const : 'route-derived' as const,
+      affectedRouteIds: group.map(g => g.id),
+      affectedEquipmentIds: [...new Set(group.flatMap(g => [g.source.deviceId, g.destination.deviceId]))],
+    };
+  });
 }

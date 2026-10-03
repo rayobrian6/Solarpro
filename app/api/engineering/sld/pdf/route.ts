@@ -25,6 +25,7 @@ import {
 } from '@/lib/electrical/canonicalStrings';
 import type { DcStringLimits } from '@/lib/electrical/dcStringLimits';
 import { getThermalDesignBasis } from '@/lib/permit/utils/designTemps';
+import { engineerServiceRuns, runEnvironmentFrom } from '@/lib/electrical/electricalRuns';
 import { getPanelById } from '@/lib/equipment-db';
 
 export const dynamic = 'force-dynamic';
@@ -492,6 +493,19 @@ export async function POST(req: NextRequest) {
         ? buildInput.consumptionCtLocation : null,
     });
 
+    // 🚨 THE SERVICE GRAPH'S RUNS, ENGINEERED HERE from the project's own facts — the same builder the
+    // SLD, BOM and permit routes call, so the PDF prints the same conductors they do.
+    const _electricalRuns = buildInput.serviceTopology
+      ? engineerServiceRuns(buildInput.serviceTopology, runEnvironmentFrom({
+          lat: typeof buildInput.lat === 'number' ? buildInput.lat : null,
+          lng: typeof buildInput.lng === 'number' ? buildInput.lng : null,
+          state: typeof buildInput.state === 'string' ? buildInput.state : null,
+          address: typeof buildInput.address === 'string' ? buildInput.address : null,
+          racewayType: typeof (buildInput.acConduitType ?? buildInput.conduitType) === 'string'
+            ? String(buildInput.acConduitType ?? buildInput.conduitType) : null,
+        }))
+      : null;
+
     const input: SLDProfessionalInput = {
       projectName:             String(buildInput.projectName             ?? 'Solar PV System'),
       clientName:              String(buildInput.clientName              ?? 'Homeowner'),
@@ -567,6 +581,7 @@ export async function POST(req: NextRequest) {
       // 🚨 THE SERVICE GRAPH REACHES THE EXPORTED SHEET. Attached above from the canonical model, so
       // the PDF and the Diagram tab draw the same service for the same project.
       serviceTopology:         buildInput.serviceTopology ?? null,
+      electricalRuns:          _electricalRuns,
       utilityName:             String(buildInput.utilityName ?? buildInput.utilityCompany ?? buildInput.utility ?? 'Local Utility'),
       // Map interconnection method to renderer-friendly string
       interconnection:         (() => {

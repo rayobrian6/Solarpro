@@ -134,11 +134,18 @@ async function raysJob(): Promise<ServiceTopology> {
 
 
 /** The conductor schedule's battery-circuit row, as printed: the cells after its run id. */
-const batteryRunRow = (svg: string): string[] => {
+/**
+ * The conductor schedule's storage-circuit rows. On a graph job these are the CANONICAL runs
+ * (lib/electrical/electricalRuns.ts) — one row per Powerwall circuit, tagged E-n — not computeSystem's
+ * single BATTERY_TO_BUI_RUN, which described one battery and one interface.
+ */
+const essRows = (svg: string): string[][] => {
   const t = texts(svg);
-  const i = t.indexOf('BATTERY_TO_BUI_RUN');
-  return i < 0 ? [] : t.slice(i, i + 9);
+  const rows: string[][] = [];
+  t.forEach((c, i) => { if (/^E-\d+$/.test(c)) rows.push(t.slice(i, i + 11)); });
+  return rows;
 };
+const OCPD = 7;
 
 describe('🚨 the commissioned output setting reaches the conductor schedule (computeSystem), not only the topology section', () => {
   it('both systems at 7.6 kW: the battery circuit row is 31.7 A on 40 A — and the setting survives the store', async () => {
@@ -146,8 +153,11 @@ describe('🚨 the commissioned output setting reaches the conductor schedule (c
     await persist(await raysJob());
     const at115 = await sld();
     expect(at115.status).toBe(200);
-    const row115 = batteryRunRow(at115.svg);
-    expect(row115, 'the battery circuit row at the published maximum').toEqual(expect.arrayContaining(['48A', '60A']));
+    const rows115 = essRows(at115.svg);
+    expect(rows115, 'one schedule row per Powerwall circuit').toHaveLength(4);
+    expect(rows115.map(r => r[OCPD]), 'the circuits at the published maximum').toEqual(['60A', '60A', '60A', '60A']);
+    // The graph owns the storage side: computeSystem's one-battery pair is not scheduled beside it.
+    expect(texts(at115.svg)).not.toContain('BATTERY_TO_BUI_RUN');
 
     let t = await reload();
     for (const d of t.domains) t = (r => { if (r.ok === false) throw new Error(r.refused); return r.topology; })(answerSystemEquipment(t, d.id, { outputConfigKw: 7.6 }));
@@ -157,15 +167,16 @@ describe('🚨 the commissioned output setting reaches the conductor schedule (c
 
     const at76 = await sld();
     expect(at76.status).toBe(200);
-    const row76 = batteryRunRow(at76.svg);
-    expect(row76.join(' ‖ '), 'the conductor schedule still sizes the 7.6 kW circuit at 11.5 kW').not.toMatch(/\b60A\b|\b48A\b/);
-    expect(row76).toEqual(expect.arrayContaining(['40A']));
-    expect(row76.some(c => /^31\.7A$|^32A$/.test(c)), row76.join(' ‖ ')).toBe(true);
+    const rows76 = essRows(at76.svg);
+    expect(rows76.map(r => r[OCPD]), 'the conductor schedule still sizes the 7.6 kW circuits at 11.5 kW')
+      .toEqual(['40A', '40A', '40A', '40A']);
     // The same sheet's topology section says the same circuit.
     expect(texts(at76.svg)).toContain('40 A OCPD');
   }, 120_000);
 
-  it('systems commissioned differently: the one battery-circuit row is the LARGEST circuit installed', async () => {
+  it('systems commissioned differently: each circuit row carries its OWN unit\'s setting', async () => {
+    // computeSystem's single battery row could only show the LARGEST circuit; the canonical runs
+    // have one row per circuit, so a 7.6 kW system and an 11.5 kW system each print their own OCPD.
     const { answerSystemEquipment } = await import('@/lib/electrical/systemConfigSystemEquipment');
     await persist(await raysJob());
     const t = await reload();
@@ -174,7 +185,12 @@ describe('🚨 the commissioned output setting reaches the conductor schedule (c
     await persist(r.topology);
     const s = await sld();
     expect(s.status).toBe(200);
-    expect(batteryRunRow(s.svg)).toEqual(expect.arrayContaining(['48A', '60A']));
+    const back = await reload();
+    const panelOf = (domainId: string) => back.aggregationPanels.find(a => a.domainId === domainId)!.label;
+    const rows = essRows(s.svg);
+    const to = (domainId: string) => rows.filter(row => row[2] === panelOf(domainId)).map(row => row[OCPD]);
+    expect(to(back.domains[0].id)).toEqual(['40A', '40A']);
+    expect(to(back.domains[1].id)).toEqual(['60A', '60A']);
   }, 120_000);
 });
 

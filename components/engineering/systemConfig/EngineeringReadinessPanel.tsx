@@ -23,6 +23,7 @@
 import React, { useId, useMemo, useRef, useState } from 'react';
 import type { SystemConfigInterview, InterviewItem } from '@/lib/electrical/systemConfigInterview';
 import { isOptionalCheck, type TopologyCheck } from '@/lib/electrical/serviceTopology';
+import { runReadiness, type EngineeredRun } from '@/lib/electrical/electricalRuns';
 import {
   CARD_TITLE, findInterviewItem, homeOf, nextActionLabel, readinessCounts, releaseStatus, requiredQueue,
 } from '@/lib/electrical/systemConfigPlacement';
@@ -43,6 +44,12 @@ export interface EngineeringReadinessPanelProps extends ItemEditorContext {
    * Engineering, behind a disclosure that says what it is, and only once that disclosure is opened.
    */
   advancedEditor?: React.ReactNode;
+  /**
+   * The service graph's conductor runs, engineered by the canonical engine (lib/electrical/
+   * electricalRuns.ts) from the same facts the SLD route uses. The panel lists what the runs that are
+   * not engineered still need — it never sizes anything itself.
+   */
+  conductorRuns?: EngineeredRun[] | null;
 }
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
@@ -157,6 +164,10 @@ export function EngineeringReadinessPanel(props: EngineeringReadinessPanelProps)
         </div>
       </div>
 
+      {props.conductorRuns && props.conductorRuns.length > 0 ? (
+        <ConductorRunsReadiness runs={props.conductorRuns} />
+      ) : null}
+
       <QuestionDialog {...ctx} item={findInterviewItem(interview, questionId)} error={props.error}
                       onClose={closeQuestion} onAnswered={() => { answeredRef.current = true; }}
                       onGoToCard={props.onGoToCard} />
@@ -164,6 +175,46 @@ export function EngineeringReadinessPanel(props: EngineeringReadinessPanelProps)
                          queue={queue} ctx={ctx} error={props.error} onAnswer={openQuestion}
                          advancedEditor={props.advancedEditor} />
     </section>
+  );
+}
+
+// ── Conductors & raceway ────────────────────────────────────────────────────
+
+/**
+ * Ray: "If any required input is missing → NOT EVALUATED… Then Engineering Readiness tells the user
+ * exactly what is missing." Each missing fact once, with how many runs wait on it; what only the
+ * voltage-drop check waits on is listed apart, because it does not stop the conductors.
+ */
+export function ConductorRunsReadiness({ runs }: { runs: EngineeredRun[] }) {
+  const rd = runReadiness(runs);
+  return (
+    <div data-testid="readiness-conductors" data-engineered={rd.engineered} data-not-evaluated={rd.notEvaluated}
+         className="mt-3 border-t border-slate-700/60 pt-2 text-xs">
+      <div className="flex flex-wrap items-baseline gap-x-2">
+        <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Conductors &amp; raceway</span>
+        <span className="font-bold tabular-nums text-slate-200">
+          {rd.engineered} of {runs.length} runs engineered
+        </span>
+        {rd.notEvaluated > 0 ? <span className="font-bold text-amber-300">· {rd.notEvaluated} NOT EVALUATED</span> : null}
+      </div>
+      {rd.blocking.length > 0 ? (
+        <ul className="mt-1 space-y-0.5">
+          {rd.blocking.map(item => (
+            <li key={`${item.key}:${item.need}`} data-testid="readiness-conductor-need" data-key={item.key}
+                className="flex items-baseline gap-2">
+              <span className="text-slate-500">•</span>
+              <span className="text-slate-200">{item.need}</span>
+              <span className="text-[10px] text-slate-500">{plural(item.runs.length, 'run', 'runs')}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {rd.voltageDrop.length > 0 ? (
+        <div data-testid="readiness-conductor-vd" className="mt-1 text-[11px] text-slate-500">
+          Voltage drop not evaluated — needs {rd.voltageDrop.map(i => i.need).join('; ')}.
+        </div>
+      ) : null}
+    </div>
   );
 }
 

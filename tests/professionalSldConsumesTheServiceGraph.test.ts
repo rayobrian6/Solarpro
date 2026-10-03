@@ -251,10 +251,14 @@ describe('🚨 the conductor schedule describes the drawing above it', () => {
       expect(sched.includes(`>${phantom}<`),
         `the conductor schedule names '${phantom}', which is not on a DC-coupled sheet`).toBe(false);
     }
-    // And it names what IS there.
+    // And it names what IS there — the graph's own devices, one row per canonical run
+    // (lib/electrical/electricalRuns.ts), not generic "GENERATION PANEL → BACKUP GATEWAY" rows.
     expect(sched).toContain('ESS PV DC INPUTS');
-    expect(sched).toContain('GENERATION PANEL');
-    expect(sched).toContain('BACKUP GATEWAY');
+    expect(sched).toContain('Tesla Backup Gateway 3');
+    expect(sched).toContain('>B-1<');
+    // 🚨 This graph has NO generation panel (its storage landing is not stated). The hand-built rows
+    // printed "ESS AC OUTPUT → GENERATION PANEL → BACKUP GATEWAY" on it anyway.
+    expect(sched).not.toContain('>GENERATION PANEL<');
   });
 
   it('🚨 an AC-coupled sheet still gets its inverter and disconnect runs', () => {

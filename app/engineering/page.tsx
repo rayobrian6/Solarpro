@@ -135,6 +135,7 @@ import {
 } from '@/lib/electrical/systemConfigLegacyInterconnection';
 import { RemedyApplyPointer, ComplianceProposedWorkRow, ScheduleRemedyRows } from '@/components/engineering/BusbarRemedyRows';
 import { EngineeringReadinessPanel } from '@/components/engineering/systemConfig/EngineeringReadinessPanel';
+import { engineerServiceRuns, runEnvironmentFrom } from '@/lib/electrical/electricalRuns';
 import { GuidedStrip, revealHomeCard } from '@/components/engineering/systemConfig/GuidedStrip';
 import { ExistingElectricalServiceCard } from '@/components/engineering/systemConfig/cards/ExistingElectricalServiceCard';
 import { EngineeringSummaryFacts } from '@/components/engineering/systemConfig/EngineeringSummaryFacts';
@@ -7758,6 +7759,9 @@ function EngineeringPageInner() {
           projectName:    config.projectName,
           clientName:     config.clientName,
           address:        config.address,
+          // The site's state, so the route's conductor engineering reads the same design temperature
+          // the permit route does (lib/electrical/electricalRuns.ts → runEnvironmentFrom).
+          state:          config.state || undefined,
           designer:       config.designer,
           drawingDate:    config.date,
           drawingNumber:  'SLD-001',
@@ -8378,6 +8382,9 @@ function EngineeringPageInner() {
           // Trench length for the NEC 300.5 underground conduit line (ground/fence).
           trenchRunLengthFt: (config.systemType === 'ground' || config.systemType === 'fence') ? (config.trenchRunLengthFt || 0) : 0,
           conduitType:      config.conduitType,
+          // The site, so the BOM's conductor lines come from the same engineered runs the SLD prints.
+          address:          config.address || undefined,
+          state:            config.state || undefined,
           // Use ComputedSystem conduit size
           conduitSizeInch:  (() => {
             const acRun = csRun(cs.isMicro ? 'COMBINER_TO_DISCO_RUN' : 'INV_TO_DISCO_RUN');
@@ -10097,6 +10104,17 @@ function EngineeringPageInner() {
     setOpenQuestionId(itemId);
   };
   /** What every System Config editor needs besides its item (ItemEditor / QuestionDialog context). */
+  // 🚨 THE SERVICE GRAPH'S CONDUCTOR RUNS, engineered by the canonical engine from the same facts the
+  // SLD / BOM / permit routes send (site state + address, the recorded raceway type) — so readiness
+  // lists exactly what those sheets print as NOT EVALUATED.
+  const conductorRuns = useMemo(() => (svcTopology
+    ? engineerServiceRuns(svcTopology, runEnvironmentFrom({
+        state: config.state || null,
+        address: config.address || null,
+        racewayType: config.conduitType || null,
+      }))
+    : null), [svcTopology, config.state, config.address, config.conduitType]);
+
   const interviewEditorContext = {
     topology: svcTopology,
     pvArray,
@@ -13838,6 +13856,7 @@ function EngineeringPageInner() {
                     The one place for leftovers: PASS / FAIL / NOT EVALUATED, the release status, the
                     top required answers, [Answer Next] and [Review Engineering]. */}
                 <EngineeringReadinessPanel {...interviewEditorContext} interview={systemConfigInterview}
+                                           conductorRuns={conductorRuns}
                                            error={_svcError ?? _archResolveError}
                                            onGoToCard={itemId => { revealHomeCard(itemId); }}
                                            // 🚨 THE GRAPH EDITOR, AS A DIAGNOSTIC SURFACE ONLY — not a tab.
@@ -15863,6 +15882,7 @@ function EngineeringPageInner() {
                                 projectName: config.projectName,
                                 clientName: config.clientName,
                                 address: config.address,
+                                state: config.state || undefined,
                                 designer: config.designer,
                                 date: config.date,
                                 necVersion: `NEC ${compliance.jurisdiction?.necVersion || '2023'}`,

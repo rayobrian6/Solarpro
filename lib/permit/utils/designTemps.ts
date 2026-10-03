@@ -113,6 +113,26 @@ function resolveStateAbbr(state?: string | null, address?: string | null): strin
 }
 
 /**
+ * The site's 2 % design HIGH, or **null** when the site's state is not known.
+ *
+ * 🚨 STRICT, FOR AN ENGINE THAT MUST NOT DEFAULT A FACT. `getDesignTemps` answers an unresolved state
+ * with the conservative national envelope, which is right for a sheet that must print something;
+ * the canonical electrical-run engine (lib/electrical/electricalRuns.ts) instead reports the
+ * ampacity derating NOT EVALUATED and names the project location as the missing input.
+ */
+export function siteDesignHighC(opts: {
+  lat?: number | null;
+  lng?: number | null;
+  state?: string | null;
+  address?: string | null;
+}): { highC: number; source: string } | null {
+  const stateAbbr = resolveStateAbbr(opts.state, opts.address);
+  if (!stateAbbr || !STATE_TEMPS[stateAbbr]) return null;
+  const t = getDesignTemps(opts.lat, opts.lng, stateAbbr);
+  return { highC: t.ashrae2pctHighC, source: t.source };
+}
+
+/**
  * Resolve the singular ThermalDesignBasis for a site. An explicit
  * `designTempMinOverrideC` (the project's AHJ design-low field) always wins
  * over the ASHRAE state envelope; otherwise the ASHRAE 2021 state-envelope

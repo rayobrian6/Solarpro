@@ -22,6 +22,7 @@ import { renderSLDProfessional, SLDProfessionalInput } from '@/lib/sld-professio
 import { sanitizeClientSourceBranches } from '@/lib/permit/utils/sldAdapter';
 import { microBranchCount } from '@/lib/permit/utils/branching';
 import { getThermalDesignBasis } from '@/lib/permit/utils/designTemps';
+import { engineerServiceRuns, runEnvironmentFrom } from '@/lib/electrical/electricalRuns';
 import { unselectedInverterLabel, isInverterUnselectedMarker } from '@/lib/permit/utils/helpers';
 import { TOPOLOGY_UNRESOLVED_TOKEN, pvArrayInputRequired } from '@/lib/electrical/canonicalSldProjection';
 // The adopted NEC edition (canonical authority) and the ONE rooftop-adder gate that
@@ -1172,6 +1173,21 @@ export async function POST(req: NextRequest) {
     const resolvedStringVoc    = systemModel?.stringVoc       ?? stringResult?.strings[0]?.stringVoc ?? (stringResult?.vocCorrected ? stringResult.vocCorrected * panelsPerString : undefined);
     const resolvedStringIsc    = systemModel?.stringIsc       ?? stringResult?.strings[0]?.stringIsc ?? panelIsc;
 
+    // 🚨 THE SERVICE GRAPH'S RUNS, ENGINEERED HERE — not in the renderer. The environment is the
+    // project's own facts: its location (the same lat / lng / state / address the thermal basis
+    // above reads) and its RECORDED raceway type, with no 'EMT' default — an unrecorded wiring
+    // method leaves the raceway NOT EVALUATED.
+    const _electricalRuns = body.serviceTopology
+      ? engineerServiceRuns(body.serviceTopology, runEnvironmentFrom({
+          lat: typeof body.lat === 'number' ? body.lat : null,
+          lng: typeof body.lng === 'number' ? body.lng : null,
+          state: typeof body.state === 'string' ? body.state : null,
+          address: typeof body.address === 'string' ? body.address : null,
+          racewayType: typeof (body.acConduitType ?? body.conduitType) === 'string'
+            ? String(body.acConduitType ?? body.conduitType) : null,
+        }))
+      : null;
+
     const input: SLDProfessionalInput = {
       projectName:             String(body.projectName             ?? 'Solar PV System'),
       clientName:              String(body.clientName              ?? 'Homeowner'),
@@ -1206,6 +1222,7 @@ export async function POST(req: NextRequest) {
       // 🚨 THE SERVICE GRAPH. Present ⇒ the renderer draws the service side from it and the two
       // scalars below are only the derived compatibility projection for surfaces still reading them.
       serviceTopology:         body.serviceTopology ?? null,
+      electricalRuns:          _electricalRuns,
       mainPanelAmps:           Number(body.mainPanelAmps)          || 200,
       panelBusRating:          Number(body.panelBusRating ?? body.mainPanelAmps) || 200,  // C1: busbar rating for the 120% rule
       utilityName:             String(body.utilityName ?? body.utilityCompany ?? body.utility ?? 'Local Utility'),

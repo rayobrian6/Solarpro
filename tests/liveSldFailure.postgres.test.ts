@@ -130,6 +130,9 @@ async function generateSld(): Promise<{ status: number; svg: string; json: Recor
     body: JSON.stringify({
       projectId: PROJECT,
       projectName: 'Hussey Ethos', clientName: 'Hussey Ethos', address: '238 N Warwick Ave',
+      // The site's state, as the page now posts it (config.state) — the conductor engineering reads
+      // the ASHRAE design high from it, as the permit route does.
+      state: 'IL',
       drawingDate: '2026-07-29', drawingNumber: 'SLD-001', revision: 'A',
       // 🚨 THE WRONG ARCHITECTURE, POSTED. This is what the live page sent.
       topologyType: 'STRING',
@@ -416,18 +419,24 @@ describe('🚨 THE LIVE SHEET, through the real route, with the wrong architectu
     // gateway → backed-up panel. Excluding the engine's inverter-chain runs had left ONE row
     // describing only the DC strings, which is as contradictory as inventing rows.
     expect(svg).toContain('ESS PV DC INPUTS');
-    expect(svg).toContain('ESS AC OUTPUT (2 UNITS)');
     expect(svg).toContain('Generation panel — System 1');
     expect(svg).toContain('Generation panel — System 2');
     expect(svg).toContain('MSP #1');
     expect(svg).toContain('MSP #2');
+    // One row per CANONICAL RUN (lib/electrical/electricalRuns.ts), tagged E / G / B / F.
+    for (const tag of ['E-1', 'E-4', 'G-1', 'G-2', 'B-1', 'B-2']) expect(svg).toContain(`>${tag}<`);
 
-    // 🚨 AND NO CONDUCTOR GAUGE SolarPro DID NOT SIZE. The backup feeder carries a 200 A panel;
-    // borrowing the PV circuit's #6 AWG for it would be a gauge an installer pulls wire from.
-    expect(svg).toContain('SIZE FOR 200 A — NOT EVALUATED');
-    expect(svg).toContain('SIZE FOR 60 A — NOT EVALUATED');
-    // The one the graph DOES record is printed as a real gauge.
-    expect(svg).toContain('#1 AWG THWN-2');
+    // 🚨 THE ENGINE'S CONDUCTORS, NOT A BREAKER'S. The backup feeder: 3/0 under NEC 705.12(B)(1)(b),
+    // in 2" EMT. The PW3 circuit: #4 (110.14(C)(1)(a) 60 °C column), its raceway waiting on the
+    // manufacturer's neutral fact. Never the PV circuit's borrowed #6, never "SIZE FOR 200 A".
+    expect(svg).toContain('2 #3/0 CU THWN-2 + #3/0 N + #6 EGC');
+    expect(svg).toContain('2 #4 CU THWN-2 + #10 EGC');
+    expect(svg).toContain('NEUTRAL / RACEWAY — INPUT REQUIRED');
+    expect(svg).not.toContain('SIZE FOR 200 A');
+    expect(svg).not.toContain('#6 THWN-2 + 1×#10 GRN');
+    // The gauge an earlier breaker-based recommendation stored on the generation panel is not
+    // printed as if the panel's output conductor had been engineered.
+    expect(svg).not.toContain('#1 AWG THWN-2');
   });
 
   it('🚨 the equipment schedule lists no disconnect this design does not have', async () => {

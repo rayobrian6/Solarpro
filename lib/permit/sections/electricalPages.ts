@@ -31,6 +31,7 @@ import { resolveDesignMetering } from '@/lib/equipment/designMetering';
 import { activeSheetIds, sheetRef } from '../utils/sheetRef';
 import { SUB_LABEL } from './subSystemSheets';
 import { getEGCSize } from '@/lib/manufacturer-specs';
+import { engineerServiceRuns, runEnvironmentFrom, runScheduleCells, runTags } from '@/lib/electrical/electricalRuns';
 // W4 §2/§11: code editions project from the ONE snapshot codeAuthority record
 // (single source) — no sheet-local NEC/ASCE year literal. Missing ⇒ PENDING.
 import { projectCodeAuthorityFromInput, PENDING_EDITION } from '../snapshot/codeAuthorityProjection';
@@ -1090,6 +1091,45 @@ export function pageNECCompliance(input: PermitInput, cad: CADModel, pageNum: nu
   </div>`;
 }
 
+/**
+ * 🚨 THE SERVICE GRAPH'S CONDUCTORS on PV-4B — the canonical runs (lib/electrical/electricalRuns.ts),
+ * engineered from the project's own location and recorded raceway type exactly as the SLD route
+ * does, tagged and worded as the SLD's schedule rows (`runTags`, `runScheduleCells`). A run the
+ * engine could not engineer says NOT EVALUATED; nothing here sizes a conductor.
+ */
+export function serviceRunRowsHtml(input: PermitInput): string {
+  const t = input.project.serviceTopology;
+  if (!t) return '';
+  const p = input.project as PermitInput['project'] & { state?: string };
+  const runs = engineerServiceRuns(t, runEnvironmentFrom({
+    lat: typeof p.lat === 'number' ? p.lat : null,
+    lng: typeof p.lng === 'number' ? p.lng : null,
+    state: typeof p.state === 'string' ? p.state : null,
+    address: typeof p.address === 'string' ? p.address : null,
+    racewayType: typeof p.conduitType === 'string' ? p.conduitType : null,
+  }));
+  if (runs.length === 0) return '';
+  const e = (v: string) => v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const tags = runTags(runs);
+  return `<tr style="background:#000;color:#fff;font-weight:900;"><td colspan="9" style="letter-spacing:0.6px;">`
+    + 'SERVICE &amp; STORAGE CONDUCTORS — ENGINEERED RUNS (SAME AS THE SLD SCHEDULE)</td></tr>'
+    + runs.map((r, k) => {
+      const c = runScheduleCells(r);
+      return `
+          <tr>
+            <td class="fw7">${tags[k]} · ${e(r.name)}</td>
+            <td>${e(r.source.deviceLabel)}</td>
+            <td>${e(r.destination.deviceLabel)}</td>
+            <td>${e(c.conductors)}</td>
+            <td>${r.conductor.allowableAmpacityA != null ? `${r.conductor.allowableAmpacityA}A` : '—'}</td>
+            <td>${r.ocpdA != null ? `${r.ocpdA}A` : '—'}</td>
+            <td>${r.voltageDrop.pct != null ? `${r.voltageDrop.pct.toFixed(2)}%` : '—'}</td>
+            <td>${e(c.raceway)}</td>
+            <td>${r.voltageDrop.lengthFt != null ? `${r.voltageDrop.lengthFt} ft` : '—'}</td>
+          </tr>`;
+    }).join('');
+}
+
 export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum: number, totalPages: number): string {
   const { project, system, compliance } = input;
   const elec = compliance.electrical;
@@ -1323,6 +1363,7 @@ export function pageConductorSchedule(input: PermitInput, cad: CADModel, pageNum
                 state. Replaced by the canonical GroundingSegment objects below
                 (gate 10: every rendered grounding row carries a groundingSegmentId). */
             renderGroundingSegmentRows(_snap)}` : ''}
+          ${serviceRunRowsHtml(input)}
         </tbody>
       </table>
       ${(() => {
