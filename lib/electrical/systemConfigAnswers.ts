@@ -20,7 +20,7 @@
 import {
   createServiceTopology, addBackupDomain, removeBackupDomain, setDomainEquipment, updatePanel,
   updateDomain, setInterconnection, addPointOfInterconnection, updatePointOfInterconnection,
-  setStoragePvInput,
+  setStoragePvInput, setExistingServiceEquipment,
 } from '@/lib/electrical/topologyAuthoring';
 import {
   buildServiceFromPreset, applyDerArrangement, applyIsolationArrangement,
@@ -139,6 +139,23 @@ export function answerAvailableFaultCurrent(t: ServiceTopology, amps: number | n
   }
   return done({ ...t, service: { ...t.service, availableFaultCurrentA: amps } },
     amps === null ? 'Available fault current cleared' : `Available fault current ${amps} A`);
+}
+
+/**
+ * "Is the service already on the wall, and has somebody read it?" — existing equipment is CONNECTED
+ * TO, never priced or replaced, and whether its internals were read on site is a field fact the
+ * installer states. `verified` is never derived from the fields being filled in.
+ */
+export function answerExistingService(
+  t: ServiceTopology,
+  patch: { existing: boolean; manufacturer?: string | null; verified?: boolean },
+): AnswerResult {
+  if (!patch.existing) return done(setExistingServiceEquipment(t, null), 'Service equipment: new');
+  const next = setExistingServiceEquipment(t, {
+    ...(patch.manufacturer !== undefined ? { manufacturer: patch.manufacturer?.trim() || null } : {}),
+    ...(patch.verified !== undefined ? { verified: patch.verified } : {}),
+  });
+  return done(next, `Existing service equipment${patch.verified ? ' — read on site' : ''}`);
 }
 
 /** A panel card: main breaker, busbar, manufacturer. Never the service rating. */

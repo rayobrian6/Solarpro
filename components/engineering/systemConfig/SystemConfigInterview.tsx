@@ -27,7 +27,7 @@ import {
   answerServiceRating, answerElectricalSystem, answerDistribution, answerPanel, answerBackup,
   answerSystemBatteries, answerStorageLanding, answerSystemsArrangement, answerInterconnection,
   answerIsolationRequired, answerIsolationArrangement, answerIsolationAccepted, answerPvLanding,
-  answerAvailableFaultCurrent, type AnswerResult,
+  answerAvailableFaultCurrent, answerExistingService, type AnswerResult,
 } from '@/lib/electrical/systemConfigAnswers';
 
 const SERVICE_RATINGS = [100, 125, 150, 200, 225, 320, 400, 600, 800];
@@ -238,6 +238,30 @@ function Editor({ item, props, apply, busy }: {
               onChange={e => void apply(answerElectricalSystem(t, e.target.value))}>
         {SYSTEMS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
       </select>
+    );
+  }
+  if (id === 'service.existing' && t) {
+    const ex = t.service.existingEquipment ?? null;
+    return (
+      <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-300">
+        <label className="flex items-center gap-1">
+          <input type="checkbox" data-testid="answer-existing-service" checked={ex !== null} disabled={busy}
+                 onChange={e => void apply(answerExistingService(t, { existing: e.target.checked }))} />
+          Existing equipment on the wall
+        </label>
+        {ex ? (
+          <>
+            <input data-testid="answer-existing-mfr" className={`w-28 ${box}`} placeholder="Manufacturer"
+                   defaultValue={ex.manufacturer ?? ''} disabled={busy}
+                   onBlur={e => { if ((e.target.value || null) !== ex.manufacturer) void apply(answerExistingService(t, { existing: true, manufacturer: e.target.value })); }} />
+            <label className="flex items-center gap-1">
+              <input type="checkbox" data-testid="answer-existing-verified" checked={ex.verified} disabled={busy}
+                     onChange={e => void apply(answerExistingService(t, { existing: true, verified: e.target.checked }))} />
+              Internals read on site
+            </label>
+          </>
+        ) : null}
+      </div>
     );
   }
   if (id === 'service.fault-current' && t) {

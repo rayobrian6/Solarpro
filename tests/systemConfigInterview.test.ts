@@ -316,3 +316,20 @@ describe('available fault current — the one number the SCCR chain waits on', (
     expect(answerAvailableFaultCurrent(t, 0).ok).toBe(false);
   });
 });
+
+describe('existing service equipment is connected to, and verified on site — never assumed', () => {
+  it('Ray\'s existing Eaton assembly reads "configuration to verify" until somebody reads it', async () => {
+    const { answerExistingService } = await import('@/lib/electrical/systemConfigAnswers');
+    const rays = buildRaysIntendedJob().topology;
+    const withEx = answerExistingService(rays, { existing: true, manufacturer: 'Eaton' });
+    if (withEx.ok === false) throw new Error(withEx.refused);
+    let iv = buildSystemConfigInterview(base({ topology: withEx.topology }));
+    expect(item(iv, 'service.existing')?.state).toBe('needs-verification');
+    expect(item(iv, 'service.existing')?.answer).toContain('Eaton');
+    const read = answerExistingService(withEx.topology, { existing: true, verified: true });
+    if (read.ok === false) throw new Error(read.refused);
+    iv = buildSystemConfigInterview(base({ topology: read.topology }));
+    expect(item(iv, 'service.existing')?.answer).toContain('read on site');
+    expect(read.topology.service.existingEquipment?.manufacturer).toBe('Eaton');
+  });
+});

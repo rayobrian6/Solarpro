@@ -291,6 +291,24 @@ export function buildSystemConfigInterview(input: InterviewInput): SystemConfigI
       blocks: ['SCCR checks', 'release'],
     });
   }
+  if (t) {
+    const ex = t.service.existingEquipment ?? null;
+    service.push({
+      id: 'service.existing',
+      section: 'service',
+      question: 'Is this existing service equipment, and has it been read on site?',
+      state: ex === null ? 'answered' : ex.verified ? 'answered' : 'needs-verification',
+      answer: ex === null ? 'New service equipment (engineered by SolarPro)'
+        : `Existing${ex.manufacturer ? ` ${ex.manufacturer}` : ''} equipment — `
+          + (ex.verified ? 'read on site' : 'configuration to verify on site'),
+      source: ex?.verified ? 'Installer entered' : ex ? 'Not established' : 'Installer entered',
+      why: ex && !ex.verified
+        ? 'Existing equipment is connected to, never replaced or priced, and its internal breaker '
+          + 'arrangement must be read on site rather than assumed.'
+        : undefined,
+      owner: 'Field verification',
+    });
+  }
   // The split is asked only where a split is physically plausible. A 200 A service is one panel.
   if (rated !== null && rated > SPLITTABLE_ABOVE_A && t) {
     const n = t.branches.length;
