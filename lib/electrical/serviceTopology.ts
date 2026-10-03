@@ -283,6 +283,12 @@ export interface PanelBoard {
   sccrA: number | null;
   /** Is this panel inside the backed-up island, or ahead of it? */
   backedUp: boolean;
+  /**
+   * Who made the panelboard, as read off its label ("Eaton"). Optional and absent on graphs written
+   * before System Config asked for it; nothing engineers from it — it identifies the enclosure on
+   * the sheet and in the field.
+   */
+  manufacturer?: string | null;
 }
 
 /**

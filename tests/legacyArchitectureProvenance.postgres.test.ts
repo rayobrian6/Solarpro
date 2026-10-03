@@ -1801,21 +1801,41 @@ describe('🚨 SERVICE RATING vs PANEL MAIN vs PANEL BUSBAR', () => {
       .toBeLessThan(fromService);
   });
 
-  it('🚨 the control is bound to the panel and the aggregate is read-only beside it', async () => {
+  it('🚨 the panel and the service are separate answers, and the 120% figure is never defaulted', async () => {
+    // MIGRATED, NOT DELETED (System Config gauntlet, 2026-10-03). This guard pinned the old Main
+    // Service Panel block — including `panelBusRatingForDisplay ?? 200` / `panelMainAmpsForDisplay ??
+    // 200`, the strip Ray's mapping pass flagged: with no graph it printed "Max PV: 40A" from two
+    // numbers nobody entered, and `maxPV > 0 ? … : null` hid the figure in exactly the failing case.
+    // The requirement it protected is unchanged and is now asserted through the new owners.
     const { readFileSync } = await import('node:fs');
     const { join } = await import('node:path');
+    const { answerServiceRating, answerPanel } = await import('@/lib/electrical/systemConfigAnswers');
+    await writeRaysLiveRow({ inverterId: null, generationPanels: true });
+    const t = await graph();
+
+    // The SERVICE answer moves the service only — never a panel's main or busbar.
+    const svc = answerServiceRating(t, 320);
+    expect(svc.ok).toBe(true);
+    if (!svc.ok) return;
+    expect(svc.topology.service.ratedAmps).toBe(320);
+    expect(svc.topology.panels.map(pb => pb.mainBreakerA)).toEqual(t.panels.map(pb => pb.mainBreakerA));
+    expect(svc.topology.panels.map(pb => pb.busbarRatingA)).toEqual(t.panels.map(pb => pb.busbarRatingA));
+
+    // A PANEL answer moves that panelboard only — never the service, never the other panel.
+    const pnl = answerPanel(t, t.panels[0].id, { mainBreakerA: 175 });
+    expect(pnl.ok).toBe(true);
+    if (!pnl.ok) return;
+    expect(pnl.topology.panels[0].mainBreakerA).toBe(175);
+    expect(pnl.topology.panels[1].mainBreakerA).toBe(t.panels[1].mainBreakerA);
+    expect(pnl.topology.service.ratedAmps).toBe(t.service.ratedAmps);
+
+    // The page renders the interview, writes through one path, and carries no defaulted 120% strip.
     const page = readFileSync(join(ROOT, 'app/engineering/page.tsx'), 'utf8');
-    // The editable control writes a panelboard main.
-    expect(page).toContain('setPrimaryPanelMainAmps');
-    expect(page).toContain('mainBreakerA: amps');
-    // The 120% calculation reads the panel, never the aggregate.
-    expect(page).toContain('const busRating = panelBusRatingForDisplay ?? 200;');
-    expect(page).toContain('const mainAmps = panelMainAmpsForDisplay ?? 200;');
-    expect(page, 'the busbar rule still reads the aggregate service rating')
-      .not.toContain('const mainAmps = serviceAmpsForDisplay');
-    // And the aggregate is shown as its own, separate fact.
-    expect(page).toContain('Service rating:');
-    expect(page).toContain('edit in Service Topology');
+    expect(page).toContain('<SystemConfigInterview');
+    expect(page).toContain('onWrite={writeInterviewAnswer}');
+    expect(page, 'the defaulted Max PV strip is back').not.toContain('panelBusRatingForDisplay ?? 200');
+    expect(page, 'the defaulted Max PV strip is back').not.toContain('panelMainAmpsForDisplay ?? 200');
+    expect(page).not.toMatch(/Math\.floor\(busRating \* 1\.2 - mainAmps\)/);
   });
 });
 

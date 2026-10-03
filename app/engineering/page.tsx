@@ -114,6 +114,9 @@ import {
 import { resolveSystemPanelCount } from '@/lib/system/panelCountSource';
 import { resolvePvArrayDesign, pvModuleCountSourceLabel, pvModuleSourceLabel } from '@/lib/electrical/pvArrayDesign';
 import { dcStringLimits } from '@/lib/electrical/dcStringLimits';
+import { buildSystemConfigInterview, type InterviewEquipment } from '@/lib/electrical/systemConfigInterview';
+import { evaluateServiceTopology } from '@/lib/electrical/serviceTopology';
+import SystemConfigInterview from '@/components/engineering/systemConfig/SystemConfigInterview';
 // Phase 12 — System-wide validation layer.
 import { validateSystem, type ValidationResult } from '@/lib/system/validationEngine';
 import { ValidationPanel } from '@/components/engineering/ValidationPanel';
@@ -9690,24 +9693,6 @@ function EngineeringPageInner() {
   const [_svcSaving, setSvcSaving] = useState(false);
   const [_svcError, setSvcError] = useState<string | null>(null);
 
-  /** The panelboards on the service graph, in order. Empty when there is no graph. */
-  const _svcPanels = svcTopology?.panels ?? [];
-  /** The panelboard this single-scalar control edits: the first, which is MSP #1. */
-  const _primaryPanel = _svcPanels.length > 0 ? _svcPanels[0] : null;
-
-  /** The AGGREGATE service rating. Display only here — the service topology builder owns editing it. */
-  const canonicalServiceRatedAmps = electrical?.serviceRatedAmps ?? null;
-  /** The PANEL MAIN this control shows and edits. */
-  const panelMainAmpsForDisplay =
-    (_primaryPanel?.mainBreakerA ?? null) ?? config.mainPanelAmps ?? null;
-  /** The PANEL BUSBAR, which is what NEC 705.12(B) is actually about. */
-  const panelBusRatingForDisplay =
-    (_primaryPanel?.busbarRatingA ?? null) ?? config.panelBusRating ?? config.mainPanelAmps ?? null;
-  /** The legacy scalar disagrees with the panel it mirrors — shown, never silently corrected. */
-  const _panelMainDisagrees =
-    _primaryPanel?.mainBreakerA != null
-    && typeof config.mainPanelAmps === 'number'
-    && config.mainPanelAmps !== _primaryPanel.mainBreakerA;
 
   const writeTopology = async (next: NonNullable<typeof svcTopology>, what: string) => {
     if (!currentProjectId) return false;
@@ -9736,28 +9721,10 @@ function EngineeringPageInner() {
     }
   };
 
-  /** Edit THIS PANELBOARD's main breaker. Never the aggregate service. */
-  const setPrimaryPanelMainAmps = async (amps: number) => {
-    if (!svcTopology || !_primaryPanel) { updateConfig({ mainPanelAmps: amps }); return; }
-    const next = {
-      ...svcTopology,
-      // 🚨 `panels` is a TOP-LEVEL list on the topology, not a member of `service`. The panelboards
-      // and the service entrance are siblings precisely because they are different facts.
-      panels: _svcPanels.map((pb, i) => i === 0 ? { ...pb, mainBreakerA: amps } : pb),
-    };
-    const ok = await writeTopology(next, `${_primaryPanel.label} main set to ${amps} A`);
-    // Keep the legacy mirror in step so an autosave cannot write the old value back over the graph.
-    // 🚨 THE AGGREGATE SERVICE IS NOT TOUCHED.
-    if (ok) updateConfig({ mainPanelAmps: amps });
-  };
-
-  /** Edit the AGGREGATE service rating. A separate fact, with its own control. */
-  const setServiceRatedAmps = async (amps: number) => {
-    if (!svcTopology) { updateConfig({ mainPanelAmps: amps }); return; }
-    await writeTopology(
-      { ...svcTopology, service: { ...svcTopology.service, ratedAmps: amps } },
-      `Service rating set to ${amps} A`);
-  };
+  // `setPrimaryPanelMainAmps` / `setServiceRatedAmps` lived here, bound to the old Main Service Panel
+  // block. The interview's Existing Service card replaces both: a panel card edits THAT panelboard's
+  // main and busbar (`answerPanel`), and the service rating edits only `service.ratedAmps`
+  // (`answerServiceRating`) — the same separation, through one write path (`writeInterviewAnswer`).
 
   // 🚨 EITHER AUTHORITY OPENS THE QUESTION, and the SERVER's is the one that counts.
   //
@@ -9773,6 +9740,90 @@ function EngineeringPageInner() {
   const _archUnresolved = _archServerRead === 'loaded' && _archServer
     ? (_archServer.resolutionRequired || !!sldArchRefusal)
     : (!!electrical?.architectureResolutionRequired || !!sldArchRefusal);
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // 🚨 SYSTEM CONFIG AS AN INTERVIEW — WHAT IS ANSWERED, BY WHOM, AND WHAT STILL BLOCKS RELEASE.
+  //
+  // The equipment each question keys on is read from its owner: physical multiplicity from the
+  // service graph where one exists (it owns how many cabinets and gateways are installed), the
+  // equipment selection otherwise, and every CAPABILITY ("publishes PV DC inputs", "can back up
+  // loads", "needs a gateway") from the catalogue row — never from a manufacturer name.
+  // ══════════════════════════════════════════════════════════════════════════
+  const interviewEquipment = useMemo<InterviewEquipment & {
+    gatewayProductId: string | null; storageProductId: string | null;
+  }>(() => {
+    const graphUnits = (svcTopology?.storage ?? []).filter(u => u.role === 'inverter-unit');
+    const storageProductId = graphUnits[0]?.productId ?? (config.batteryId || null);
+    const bat = storageProductId ? getBatteryById(storageProductId) as any : null;
+    const unitCount = graphUnits.length > 0 ? graphUnits.length
+      : (config.batteryId ? Math.max(1, Number(config.batteryCount) || 1) : 0);
+    const graphGateways = (svcTopology?.domains ?? []).map(d => d.gateway);
+    const gatewayProductId = graphGateways[0]?.productId || config.backupInterfaceId || null;
+    const gw = gatewayProductId ? getBackupInterfaceById(gatewayProductId) as any : null;
+    const fleet = config.inverters.filter(inv => !!inv.inverterId);
+    const firstFleet = fleet[0];
+    const invData = firstFleet
+      ? (firstFleet.type === 'micro' ? (getMicroinverterById(firstFleet.inverterId) as any) : (getInvById(firstFleet.inverterId, firstFleet.type) as any))
+      : null;
+    const coupling = electrical?.solarCoupling ?? null;
+    return {
+      pvInverter: {
+        state: _archUnresolved ? 'CONFLICT'
+          : fleet.length > 0 ? 'SELECTED'
+            : (coupling === 'dc-coupled-storage' || coupling === 'storage-only') ? 'NONE'
+              : 'UNDECIDED',
+        label: invData ? `${invData.manufacturer} ${invData.model}` : null,
+        kind: (firstFleet?.type as InterviewEquipment['pvInverter']['kind']) ?? null,
+        count: firstFleet?.type === 'micro' ? undefined : fleet.length,
+      },
+      storage: unitCount > 0 ? {
+        label: graphUnits[0]?.label ?? (bat ? `${bat.manufacturer} ${bat.model}` : null),
+        count: unitCount,
+        pvInput: !!(bat?.pvInput) || graphUnits.some(u => !!u.pvInputLimits),
+        backupCapable: !!bat?.backupCapable,
+        requiresGateway: !!bat?.requiresGateway,
+      } : null,
+      gateway: gatewayProductId ? {
+        label: graphGateways[0]?.label ?? (gw ? `${gw.manufacturer} ${gw.model}` : null),
+        count: graphGateways.length > 0 ? graphGateways.length : 1,
+      } : null,
+      gatewayProductId,
+      storageProductId,
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [svcTopology, config.batteryId, config.batteryCount, config.backupInterfaceId, config.inverters, electrical?.solarCoupling, _archUnresolved]);
+
+  const systemConfigInterview = useMemo(() => buildSystemConfigInterview({
+    pvArray,
+    topology: svcTopology,
+    coupling: electrical?.solarCoupling ?? null,
+    // The browser's own composition cannot see who decided the coupling (that lives on
+    // selected_equipment.provenance); the server's read can, so its answer is the one used.
+    couplingIsDecision: _archServer?.provenanceSource === 'service-topology',
+    architectureConflict: _archUnresolved,
+    equipment: interviewEquipment,
+    evaluation: svcTopology ? evaluateServiceTopology(svcTopology) : null,
+    derivedStrings: computedSystem.isMicro ? null : computedSystem.strings,
+  }), [pvArray, svcTopology, electrical?.solarCoupling, _archServer?.provenanceSource, _archUnresolved,
+      interviewEquipment, computedSystem]);
+
+  /**
+   * Write an interview answer to the graph, and keep the legacy config mirror of the PRIMARY panel in
+   * step so an autosave cannot write a stale scalar back over the answer. The aggregate service rating
+   * is never mirrored into the panel-main scalar.
+   */
+  const writeInterviewAnswer = async (next: NonNullable<typeof svcTopology>, what: string) => {
+    const ok = await writeTopology(next, what);
+    if (ok) {
+      const p0 = next.panels[0];
+      const patch: Partial<ProjectConfig> = {};
+      if (p0?.mainBreakerA != null && p0.mainBreakerA !== config.mainPanelAmps) patch.mainPanelAmps = p0.mainBreakerA;
+      if (p0?.busbarRatingA != null && p0.busbarRatingA !== config.panelBusRating) patch.panelBusRating = p0.busbarRatingA;
+      if (p0?.manufacturer && p0.manufacturer !== config.mainPanelBrand) patch.mainPanelBrand = p0.manufacturer;
+      if (Object.keys(patch).length > 0) updateConfig(patch);
+    }
+    return ok;
+  };
   // 🚨 ASK THE SERVER WHERE THE EQUIPMENT CAME FROM. See `_archDetail`: the browser can see THAT the
   // architecture is unresolved, but only the server can say whether the inverter was ever a decision.
   // 🚨 FETCHED FOR EVERY PROJECT NOW, NOT ONLY WHEN THE BROWSER ALREADY SUSPECTS A CONFLICT.
@@ -11033,6 +11084,36 @@ function EngineeringPageInner() {
                   </div>
                 </div>
 
+                {/* ══ THE INSTALLER'S INTERVIEW ══════════════════════════════
+                    Design facts → existing service → equipment → behavior & connection →
+                    engineering result. The answers are written to the project's service model; the
+                    detailed controls below stay for the equipment selection and manual work. */}
+                <div className="mb-5">
+                  <SystemConfigInterview
+                    interview={systemConfigInterview}
+                    topology={svcTopology}
+                    pvArray={pvArray}
+                    derivedStrings={computedSystem.isMicro ? [] : computedSystem.strings.map(st => st.panelCount)}
+                    equipment={{
+                      gatewayProductId: interviewEquipment.gatewayProductId,
+                      storageProductId: interviewEquipment.storageProductId,
+                      storageLabel: interviewEquipment.storage?.label ?? null,
+                      totalUnits: interviewEquipment.storage?.count ?? 0,
+                    }}
+                    mode={controlMode}
+                    busy={_svcSaving || !!_archResolving}
+                    error={_svcError ?? _archResolveError}
+                    onWrite={writeInterviewAnswer}
+                    onRecordCoupling={async (coupling) => { await resolveElectricalArchitecture(coupling); return true; }}
+                    equipmentSlot={(
+                      <a href="#system-config-equipment" data-testid="interview-goto-equipment"
+                         className="inline-block text-[11px] font-bold text-sky-300 hover:text-sky-200">
+                        Choose or change equipment ↓
+                      </a>
+                    )}
+                  />
+                </div>
+
                 {/* ══ 3-COLUMN RESPONSIVE GRID ═══════════════════════════════ */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-5">
 
@@ -11261,135 +11342,14 @@ function EngineeringPageInner() {
                       ) : null}
                     </div>
 
-                    {/* ── Section 1: Main Service Panel ───────────────────────────── */}
-                    <div className="eng-panel">
-                      <h3 className="text-sm font-extrabold text-slate-100 mb-3 flex items-center gap-2 tracking-tight">
-                        <Shield size={14} className="text-amber-400" /> Main Service Panel
-                        <span className="ml-1 text-[10px] font-normal text-slate-500 normal-case tracking-normal">NEC 705.12(B) load-side interconnection</span>
-                      </h3>
-
-                      {/* MSP summary strip */}
-                      <div className="flex flex-wrap gap-2 mb-3 p-2.5 rounded-lg bg-slate-900/50 border border-slate-700/40">
-                        <div className="flex items-center gap-1.5 text-xs">
-                          <span className="text-slate-500">Main:</span>
-                          <span className="text-amber-400 font-bold">{config.mainPanelAmps}A</span>
-                          <span className="text-slate-500">{config.mainPanelBrand}</span>
-                        </div>
-                        <span className="text-slate-700">·</span>
-                        <div className="flex items-center gap-1.5 text-xs">
-                          <span className="text-slate-500">Bus:</span>
-                          <span className="text-blue-400 font-bold">{config.panelBusRating ?? config.mainPanelAmps}A</span>
-                        </div>
-                        <span className="text-slate-700">·</span>
-                        <div className="flex items-center gap-1.5 text-xs">
-                          <span className="text-slate-500">Method:</span>
-                          <span className="text-emerald-400 font-bold text-[10px]">
-                            {(() => {
-                              const m = config.interconnectionMethod ?? 'UNRESOLVED';
-                              // 🚨 A TOKEN IS NOT A LABEL. Falling through to `return m` would
-                              // print the literal 'UNRESOLVED' at an installer.
-                              if (m === 'UNRESOLVED') return 'Not established';
-                              if (m === 'MANUFACTURER_INTEGRATED') return 'Inside listed assembly';
-                              if (m === 'METER_COLLAR') return 'Meter collar';
-                              if (m === 'LOAD_SIDE') return 'Load-Side Tap';
-                              if (m === 'SUPPLY_SIDE_TAP') return 'Supply-Side Tap';
-                              if (m === 'MAIN_BREAKER_DERATE') return 'Main Derate';
-                              if (m === 'PANEL_UPGRADE') return 'Panel Upgrade';
-                              return m;
-                            })()}
-                          </span>
-                        </div>
-                        {/* 120% rule indicator */}
-                        {(() => {
-                          // 🚨 NEC 705.12(B) IS ABOUT ONE PANELBOARD'S BUSBAR, not the site's
-                          // service. On a 400 A / 2 × 200 A job the aggregate gives
-                          // 400 × 1.2 − 400 = 80 A where MSP #1's real answer is 40 A — a
-                          // permissive result on a safety calculation. Both values come from
-                          // the panelboard instance on the graph.
-                          const busRating = panelBusRatingForDisplay ?? 200;
-                          const mainAmps = panelMainAmpsForDisplay ?? 200;
-                          const maxPV = Math.floor(busRating * 1.2 - mainAmps);
-                          return maxPV > 0 ? (
-                            <>
-                              <span className="text-slate-700">·</span>
-                              <div className="flex items-center gap-1.5 text-xs" title="NEC 705.12(B): Max PV breaker = (bus × 120%) − main">
-                                <span className="text-slate-500">Max PV:</span>
-                                <span className="text-amber-400 font-bold">{maxPV}A</span>
-                                <span className="text-[10px] text-slate-600">(120% rule)</span>
-                              </div>
-                            </>
-                          ) : null;
-                        })()}
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <label className="eng-label">
-                            {_primaryPanel ? `${_primaryPanel.label} main (A)` : 'Main Panel (Amps)'}
-                            {_primaryPanel ? (
-                              <span className="ml-1.5 text-[10px] font-normal text-slate-500">
-                                — this panelboard, not the service
-                              </span>
-                            ) : null}
-                          </label>
-                          <select
-                            data-testid="panel-main-amps"
-                            value={panelMainAmpsForDisplay ?? config.mainPanelAmps}
-                            disabled={_svcSaving}
-                            onChange={e => { void setPrimaryPanelMainAmps(+e.target.value); }}
-                            className="eng-select">
-                            {[100, 150, 200, 225, 320, 400].map(a => <option key={a} value={a}>{a}A</option>)}
-                          </select>
-                          {/* 🚨 THE AGGREGATE SERVICE IS A DIFFERENT FACT AND SAYS SO. On Ray's job
-                              this reads 400 A while the panel main above reads 200 A, which is the
-                              distinction the previous control erased. */}
-                          {canonicalServiceRatedAmps !== null ? (
-                            <div data-testid="service-rated-amps" className="mt-1 text-[10px] text-slate-400">
-                              Service rating: <span className="font-bold text-slate-200">
-                                {canonicalServiceRatedAmps} A
-                              </span>
-                              {_svcPanels.length > 1 ? ` across ${_svcPanels.length} panels` : ''}
-                              <span className="text-slate-500"> — edit in Service Topology</span>
-                            </div>
-                          ) : null}
-                          {_svcSaving ? (
-                            <div className="mt-1 text-[10px] text-slate-400">Updating…</div>
-                          ) : null}
-                          {_svcError ? (
-                            <div className="mt-1 text-[10px] text-rose-300">{_svcError}</div>
-                          ) : null}
-                          {_panelMainDisagrees ? (
-                            <div className="mt-1 text-[10px] text-amber-300">
-                              The saved configuration says {config.mainPanelAmps} A. The service
-                              topology says {_primaryPanel?.mainBreakerA} A for this panel, and that
-                              is what the drawings use.
-                            </div>
-                          ) : null}
-                        </div>
-                        <div>
-                          <label className="eng-label">Panel Brand</label>
-                          <select value={config.mainPanelBrand} onChange={e => updateConfig({ mainPanelBrand: e.target.value })} className="eng-select">
-                            {['Square D', 'Eaton', 'Siemens', 'Leviton', 'GE', 'Cutler-Hammer', 'Murray'].map(b => <option key={b}>{b}</option>)}
-                          </select>
-                        </div>
-                        <div className="col-span-2">
-                          <label className="eng-label flex items-center gap-1">
-                            Bus Rating (Amps)
-                            <span className="text-slate-600 text-[10px] ml-1 font-normal">used for 120% rule</span>
-                          </label>
-                          <select
-                            value={config.panelBusRating ?? config.mainPanelAmps ?? 200}
-                            onChange={e => updateConfig({ panelBusRating: +e.target.value })}
-                            className="eng-select"
-                          >
-                            {[100, 150, 200, 225, 320, 400].map(a => (
-                              <option key={a} value={a}>{a}A bus{a === (config.mainPanelAmps ?? 200) ? ' (same as main)' : ''}</option>
-                            ))}
-                          </select>
-                        </div>
-                      </div>
-                    </div>
-
+                    {/* ── Section 1: Main Service Panel — MOVED INTO THE INTERVIEW ─────
+                        🚨 This block showed `config.mainPanelAmps` (a config scalar) beside the graph's
+                        panel values, and a "Max PV (120% rule)" strip that computed
+                        `bus × 1.2 − main` over `?? 200` defaults — a figure from two numbers nobody
+                        entered, which disappeared (`maxPV > 0 ? … : null`) in exactly the failing case.
+                        The service, its panels and their busbars are now answered in the Existing
+                        Service card above and written to the service model; the 120% verdict is the
+                        engine's own per-panel check, shown in the Engineering Result card. */}
                     {/* ── Section 2: PV AC Output Circuit ──────────────────────────── */}
                     <div className="eng-panel">
                       <h3 className="text-sm font-extrabold text-slate-100 mb-1 flex items-center gap-2 tracking-tight">
@@ -11543,7 +11503,7 @@ function EngineeringPageInner() {
                   {/* ─────────────────────────────────────────────────────────
                       CENTER COLUMN: Ecosystem Picker + Inverter/Strings
                   ──────────────────────────────────────────────────────────── */}
-                  <div className="space-y-5">
+                  <div className="space-y-5" id="system-config-equipment">
 
                     {/* Ecosystem Picker — v58.7: prominent "Change ecosystem" button for discoverability */}
                     {((config as any).ecosystemBrand || (subSystemCounts.isHybrid && (hybridBrands?.uniq.length ?? 0) > 0)) ? (

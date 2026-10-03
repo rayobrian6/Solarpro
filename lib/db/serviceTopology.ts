@@ -239,6 +239,8 @@ function parsePanel(v: unknown): PanelBoard | null {
     mainBreakerA: numOrNull(v.mainBreakerA),
     sccrA: numOrNull(v.sccrA),
     backedUp: v.backedUp === true,
+    ...(typeof v.manufacturer === 'string' && v.manufacturer.trim()
+      ? { manufacturer: v.manufacturer.trim() } : {}),
   };
 }
 

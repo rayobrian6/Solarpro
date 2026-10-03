@@ -1,0 +1,687 @@
+// ═══════════════════════════════════════════════════════════════════════════
+// 🚨 SYSTEM CONFIG IS THE HUMAN INTERFACE TO ENGINEERING — THIS DECIDES WHAT IT ASKS.
+//
+// Ray, the product direction (2026-10-03):
+//
+//   "The installer should not need to understand SolarPro's internal graph model. The installer
+//    should answer real-world questions. SolarPro converts those answers into the internal
+//    engineering model."
+//
+//   "Do not ask a question whose answer is already known. Do not offer an answer the selected
+//    equipment cannot support."
+//
+// The page used to put every control on screen at once, and the one guided flow that existed (the
+// Service Topology wizard) opened defaulted to the hardest job in the product — 400 A, two main
+// panels — and asked "how do these systems connect?" of a house with one panel. This module is the
+// interviewer: given what Design placed, what the service graph records, what equipment is chosen
+// and what the engineering concluded, it returns the five installer sections, which questions are
+// RELEVANT, which are ANSWERED (and where the answer came from), and what still blocks release.
+//
+// What it is NOT:
+//   · A store. Every answer it reports is read from its real owner (the Design layout, the service
+//     graph, the equipment selection, the recorded architecture decision). It writes nothing.
+//   · Engineering. It reports the engines' conclusions; it computes no ampere and no voltage.
+//   · Brand logic. Questions key on CAPABILITY — "the chosen storage publishes PV DC inputs",
+//     "the chosen storage can back up loads" — never on a manufacturer name.
+//
+// Pure and isomorphic, so the page renders from it and a test can drive every branch of it.
+// ═══════════════════════════════════════════════════════════════════════════
+
+import type { PvArrayDesign } from '@/lib/electrical/pvArrayDesign';
+import { pvModuleCountSourceLabel } from '@/lib/electrical/pvArrayDesign';
+import type {
+  ServiceTopology, SolarCoupling, TopologyEvaluation, PoiRelationship,
+} from '@/lib/electrical/serviceTopology';
+import { isOptionalCheck } from '@/lib/electrical/serviceTopology';
+import { buildServiceOverview, REQUIREMENT_OWNERS } from '@/lib/electrical/topologyOverview';
+
+// ── The vocabulary an installer reads ───────────────────────────────────────
+
+/** Where a fact came from, in words a person cares about. Never a store name. */
+export type FactSource =
+  | 'From Design'
+  | 'Installer entered'
+  | 'Installer decision'
+  | 'Selected equipment'
+  | 'Manufacturer specification'
+  | 'SolarPro calculation'
+  | 'Utility / AHJ ruling required'
+  | 'Not established';
+
+export type SectionId = 'design' | 'service' | 'equipment' | 'behavior' | 'engineering';
+
+export type ItemState =
+  /** Answered by its owner. */
+  | 'answered'
+  /** Relevant, and nobody has answered it. */
+  | 'needs-answer'
+  /** Answered, but by a derivation rather than a person — shown for confirmation. */
+  | 'derived'
+  /** A conclusion the engines reached. */
+  | 'calculated'
+  /** Answered as far as SolarPro can; a ruling from outside (utility, AHJ, field) is still owed. */
+  | 'needs-verification'
+  /** The engineering concluded FAIL. */
+  | 'fails';
+
+export interface InterviewOption {
+  value: string;
+  label: string;
+  detail?: string;
+}
+
+export interface InterviewItem {
+  id: string;
+  section: SectionId;
+  /** The question, in the installer's words. */
+  question: string;
+  state: ItemState;
+  /** The current answer, in the installer's words. Absent ⇒ unanswered. */
+  answer?: string;
+  source?: FactSource;
+  /** The choices, already filtered to what the chosen equipment can support. */
+  options?: InterviewOption[];
+  /** The option value currently recorded, when the item has options. */
+  value?: string | null;
+  /** Why it matters — shown beside an unanswered question. */
+  why?: string;
+  /** Who supplies the answer. */
+  owner?: string;
+  /** What it blocks while unanswered. */
+  blocks?: string[];
+}
+
+export type SectionStatus = 'complete' | 'needs-answer' | 'needs-verification' | 'fails';
+
+export interface InterviewSection {
+  id: SectionId;
+  title: string;
+  status: SectionStatus;
+  /** One line, for the collapsed card: "37 modules · 16.28 kW DC". */
+  summary: string;
+  items: InterviewItem[];
+}
+
+export interface ReleaseState {
+  /** Enough is known to draw a diagnostic sheet. */
+  drawable: boolean;
+  /** Nothing fails and nothing required is unanswered. */
+  releaseReady: boolean;
+  /** Why it is not release-ready, one line each. */
+  blockers: string[];
+}
+
+export interface SystemConfigInterview {
+  sections: InterviewSection[];
+  /** Every relevant, unanswered question, in the order an installer should answer them. */
+  openQuestions: InterviewItem[];
+  release: ReleaseState;
+}
+
+// ── What the interviewer is told ────────────────────────────────────────────
+
+/** A piece of equipment's decision state. Distinct states — an empty string is none of them. */
+export type EquipmentDecision = 'UNDECIDED' | 'NONE' | 'SELECTED' | 'CONFLICT';
+
+export interface InterviewEquipment {
+  pvInverter: {
+    state: EquipmentDecision;
+    label?: string | null;
+    kind?: 'micro' | 'string' | 'optimizer' | 'hybrid' | null;
+    count?: number;
+  };
+  /** Null ⇒ no storage on this project (a legitimate answer, not a gap). */
+  storage: {
+    label: string | null;
+    count: number;
+    /** The unit publishes its own PV DC inputs. */
+    pvInput: boolean;
+    /** The unit can island and carry loads. */
+    backupCapable: boolean;
+    /** The manufacturer requires a gateway / controller with it. */
+    requiresGateway: boolean;
+  } | null;
+  gateway: { label: string | null; count: number } | null;
+}
+
+export interface InterviewInput {
+  pvArray: PvArrayDesign;
+  topology: ServiceTopology | null;
+  coupling: SolarCoupling | null;
+  /** The coupling was stated by a person (provenance recorded), not derived. */
+  couplingIsDecision: boolean;
+  /** The stores contradict each other about the architecture. */
+  architectureConflict: boolean;
+  equipment: InterviewEquipment;
+  evaluation?: TopologyEvaluation | null;
+  /** The engine's derived strings for this array, for the landing question. */
+  derivedStrings?: ReadonlyArray<{ panelCount: number }> | null;
+}
+
+// ── Constants an installer would recognise ──────────────────────────────────
+
+/** Services above this are commonly split across more than one main panel, so the split is asked. */
+const SPLITTABLE_ABOVE_A = 225;
+
+const POI_ANSWER: Record<PoiRelationship, string> = {
+  'load-side-busbar': 'Breaker in the panel (load side)',
+  'load-side-feeder-tap': 'Feeder tap, load side',
+  'supply-side': 'Line-side tap ahead of the main (supply side)',
+  'aggregation-to-supply-side': 'Generation panel to a supply-side tap',
+  'manufacturer-integrated': 'Inside the listed gateway / controller',
+  'meter-collar': 'Meter collar adapter',
+  'unresolved': 'Not established',
+};
+
+const STORAGE_LANDING_LABEL: Record<string, string> = {
+  'der-aggregation-panel': 'External generation / combiner panel — one per system',
+  'gateway-panelboard': 'Inside the gateway’s own panelboard',
+  'backed-up-panel-busbar': 'On the backed-up panel’s busbar',
+};
+
+const COUNT_WORD = ['No', 'One', 'Two', 'Three', 'Four', 'Five', 'Six'];
+const countWord = (n: number) => COUNT_WORD[n] ?? String(n);
+
+function phaseLabel(phase: string | undefined | null): string {
+  switch (phase) {
+    case 'split-240': return '120/240 V split phase';
+    case 'wye-208': return '120/208 V 3φ wye';
+    case 'wye-480': return '277/480 V 3φ wye';
+    case 'delta-240': return '240 V 3φ delta';
+    case 'high-leg-delta-240': return '120/240 V high-leg delta';
+    case 'custom': return 'Other / custom electrical system';
+    default: return 'Not established';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// THE INTERVIEW
+// ═══════════════════════════════════════════════════════════════════════════
+
+export function buildSystemConfigInterview(input: InterviewInput): SystemConfigInterview {
+  const { pvArray, topology: t, equipment: eq } = input;
+  const hasPv = (pvArray.moduleCount ?? 0) > 0;
+  const hasStorage = !!eq.storage && eq.storage.count > 0;
+
+  // ── 1 · PROJECT & DESIGN ─────────────────────────────────────────────────
+  const design: InterviewItem[] = [];
+  {
+    const m = pvArray.module;
+    const count = pvArray.moduleCount;
+    const established = count !== null && (count === 0 || (!!m && pvArray.dcStcKw !== null));
+    design.push({
+      id: 'design.pv-array',
+      section: 'design',
+      question: 'What PV array did Design place?',
+      state: established ? 'answered' : 'needs-answer',
+      answer: count === null
+        ? undefined
+        : count === 0
+          ? 'No PV modules'
+          : `${count} modules${m ? ` · ${m.watts} W` : ''}${pvArray.dcStcKw !== null ? ` · ${pvArray.dcStcKw.toFixed(2)} kW DC` : ''}`
+            + (m ? ` · ${m.manufacturer} ${m.model}` : ''),
+      source: count === null ? 'Not established' : (pvModuleCountSourceLabel(pvArray.moduleCountSource) === 'From Design'
+        ? 'From Design' : 'Installer entered'),
+      why: pvArray.missing[0]?.why,
+      owner: pvArray.missing[0]?.owner,
+      blocks: pvArray.missing[0]?.blocks,
+    });
+    if (hasPv && pvArray.assignmentState === 'DIFFERS_FROM_DESIGN') {
+      design.push({
+        id: 'design.assignment-stale',
+        section: 'design',
+        question: 'Does the string assignment still cover the design?',
+        state: 'needs-answer',
+        answer: `The recorded strings cover ${pvArray.assignedModuleCount} modules; Design placed ${count}.`,
+        source: 'SolarPro calculation',
+        why: 'A string assignment that does not represent every placed module exactly once cannot be '
+          + 'drawn or checked. It is re-derived against the real input limits rather than trusted.',
+        owner: 'Engineering (re-derive strings)',
+        blocks: ['string design', 'SLD'],
+      });
+    }
+  }
+
+  // ── 2 · EXISTING ELECTRICAL SERVICE ──────────────────────────────────────
+  const service: InterviewItem[] = [];
+  const rated = t?.service.ratedAmps ?? null;
+  service.push({
+    id: 'service.rating',
+    section: 'service',
+    question: 'What is the existing service rating?',
+    state: rated !== null ? 'answered' : 'needs-answer',
+    answer: rated !== null ? `${rated} A` : undefined,
+    source: rated !== null ? 'Installer entered' : 'Not established',
+    why: 'The service rating bounds everything that connects to it, and the busbar and service '
+      + 'checks cannot run without it.',
+    owner: 'Installer (read the service equipment)',
+    blocks: ['service checks', 'SLD service section', 'permit'],
+  });
+  if (t) {
+    service.push({
+      id: 'service.system',
+      section: 'service',
+      question: 'What is the electrical system?',
+      state: String(t.service.phase) === 'custom' ? 'needs-verification' : 'answered',
+      answer: phaseLabel(t.service.phase),
+      source: 'Installer entered',
+      ...(String(t.service.phase) === 'custom'
+        ? { why: 'SolarPro has no calculation method for this electrical system yet; the checks that '
+            + 'depend on it report NOT EVALUATED rather than running a residential formula.' }
+        : {}),
+    });
+  }
+  // The split is asked only where a split is physically plausible. A 200 A service is one panel.
+  if (rated !== null && rated > SPLITTABLE_ABOVE_A && t) {
+    const n = t.branches.length;
+    service.push({
+      id: 'service.distribution',
+      section: 'service',
+      question: `How is the ${rated} A service distributed?`,
+      state: n > 0 ? 'answered' : 'needs-answer',
+      answer: n === 0 ? undefined
+        : n === 1 ? `One ${t.branches[0].ratedAmps} A main panel`
+          : (() => {
+              const sizes = [...new Set(t.branches.map(b => b.ratedAmps))];
+              return sizes.length === 1
+                ? `${countWord(n)} ${sizes[0]} A main panels`
+                : `${countWord(n)} main panels (${t.branches.map(b => `${b.ratedAmps} A`).join(' + ')})`;
+            })(),
+      source: n > 0 ? 'Installer entered' : 'Not established',
+      options: [
+        { value: 'one-main-panel', label: `One ${rated} A main panel` },
+        { value: 'two-main-panels', label: `Two ${Math.floor(rated / 2)} A main panels` },
+        { value: 'custom', label: 'Other / custom' },
+      ],
+      value: n === 0 ? null : n === 1 ? 'one-main-panel' : n === 2 ? 'two-main-panels' : 'custom',
+      why: 'Each main panel is its own busbar — the 120% rule and every backup decision are per panel.',
+      owner: 'Installer',
+      blocks: ['busbar checks', 'backup', 'SLD'],
+    });
+  }
+  for (const p of t?.panels ?? []) {
+    const ok = p.busbarRatingA !== null && p.mainBreakerA !== null;
+    service.push({
+      id: `service.panel.${p.id}`,
+      section: 'service',
+      question: `${p.label}: main breaker and busbar rating?`,
+      state: ok ? 'answered' : 'needs-answer',
+      answer: `Main ${p.mainBreakerA ?? '—'} A · Bus ${p.busbarRatingA ?? '—'} A`,
+      source: ok ? 'Installer entered' : 'Not established',
+      why: 'NEC 705.12(B) is evaluated on THIS panel’s busbar and main breaker — never the service’s.',
+      owner: 'Installer (panel label)',
+      blocks: ['busbar check'],
+    });
+  }
+
+  // ── 3 · EQUIPMENT ────────────────────────────────────────────────────────
+  const equipment: InterviewItem[] = [];
+  {
+    const inv = eq.pvInverter;
+    const dcDecided = input.coupling === 'dc-coupled-storage' && input.couplingIsDecision;
+    const noPvDecided = input.coupling === 'storage-only';
+    const state: ItemState = inv.state === 'CONFLICT' ? 'fails'
+      : inv.state === 'SELECTED' ? 'answered'
+        : inv.state === 'NONE' || dcDecided || noPvDecided ? 'answered'
+          : hasPv ? 'needs-answer' : 'answered';
+    equipment.push({
+      id: 'equipment.pv-inverter',
+      section: 'equipment',
+      question: 'What PV inverter are we installing?',
+      state,
+      answer: inv.state === 'CONFLICT'
+        ? 'Conflict — the project records an inverter AND an architecture with no inverter'
+        : inv.state === 'SELECTED'
+          ? `${inv.count && inv.count > 1 ? `${inv.count} × ` : ''}${inv.label ?? 'Selected'}`
+          : (inv.state === 'NONE' || dcDecided)
+            ? `None${input.coupling === 'dc-coupled-storage' ? ' — DC coupled to storage' : ''}`
+            : noPvDecided ? 'None — no PV on this project'
+              : hasPv ? undefined : 'None — no PV on this project',
+      source: inv.state === 'SELECTED' ? 'Selected equipment'
+        : (inv.state === 'NONE' || dcDecided) ? 'Installer decision' : undefined,
+      why: hasPv && state === 'needs-answer'
+        ? 'Every PV module lands on something: a PV inverter, or a battery’s own PV inputs. Until that '
+          + 'is chosen, the strings, the AC circuit and the drawing are all undecided.'
+        : undefined,
+      owner: 'Installer (equipment selection)',
+      blocks: state === 'needs-answer' || state === 'fails' ? ['string design', 'SLD', 'BOM'] : undefined,
+    });
+    equipment.push({
+      id: 'equipment.storage',
+      section: 'equipment',
+      question: 'Is storage being installed?',
+      state: 'answered',
+      answer: hasStorage ? `${eq.storage!.count} × ${eq.storage!.label ?? 'battery'}` : 'No storage',
+      source: 'Selected equipment',
+    });
+    if (hasStorage && eq.storage!.requiresGateway) {
+      const gw = eq.gateway;
+      equipment.push({
+        id: 'equipment.gateway',
+        section: 'equipment',
+        question: 'Which backup controller / gateway?',
+        state: gw && gw.count > 0 ? 'answered' : 'needs-answer',
+        answer: gw && gw.count > 0 ? `${gw.count} × ${gw.label ?? 'gateway'}` : undefined,
+        source: gw && gw.count > 0 ? 'Selected equipment' : 'Not established',
+        why: 'The manufacturer requires a gateway / controller with this storage.',
+        owner: 'Installer (equipment selection)',
+        blocks: ['backup', 'SLD', 'BOM'],
+      });
+    }
+  }
+
+  // ── 4 · SYSTEM BEHAVIOR / CONNECTION ─────────────────────────────────────
+  const behavior: InterviewItem[] = [];
+  const storageLabel = eq.storage?.label ?? 'the batteries';
+
+  // 4a — Where does the PV connect? Asked ONLY when the answer is genuinely open: PV exists, the
+  // chosen storage can take PV on DC, and no standalone inverter has been explicitly chosen (an
+  // explicitly chosen microinverter is not secretly DC coupled to anything).
+  const pvQuestionOpen = hasPv && hasStorage && eq.storage!.pvInput && eq.pvInverter.state !== 'SELECTED';
+  if (pvQuestionOpen || (input.coupling && hasPv && hasStorage)) {
+    const options: InterviewOption[] = [];
+    if (eq.storage?.pvInput) {
+      options.push({
+        value: 'dc-coupled-storage',
+        label: `Directly to ${storageLabel} PV inputs`,
+        detail: 'The strings land on the battery’s own DC inputs. No separate PV inverter, no PV '
+          + 'combiner and no PV AC disconnect exist on this job.',
+      });
+    }
+    options.push({
+      value: 'ac-coupled-inverter',
+      label: 'Through an external PV inverter',
+      detail: 'The PV has its own inverter and connects on AC — an ordinary arrangement beside a battery.',
+    });
+    const answered = !!input.coupling && (input.couplingIsDecision || eq.pvInverter.state === 'SELECTED');
+    behavior.push({
+      id: 'behavior.pv-connection',
+      section: 'behavior',
+      question: 'Where does the PV connect?',
+      state: input.architectureConflict ? 'fails'
+        : answered ? 'answered'
+          : input.coupling ? 'derived' : 'needs-answer',
+      answer: input.coupling === 'dc-coupled-storage' ? `Directly to ${storageLabel} PV inputs`
+        : input.coupling === 'ac-coupled-inverter' ? 'Through an external PV inverter'
+          : input.coupling === 'storage-only' ? 'No PV' : undefined,
+      source: answered ? (input.couplingIsDecision ? 'Installer decision' : 'Selected equipment')
+        : input.coupling ? 'SolarPro calculation' : 'Not established',
+      options: pvQuestionOpen ? options : undefined,
+      value: input.coupling,
+      why: 'Where the strings terminate decides which equipment exists, which limits size the strings, '
+        + 'and what the drawing shows. SolarPro does not infer it from what the battery could do.',
+      owner: 'Installer',
+      blocks: ['string design', 'SLD', 'BOM', 'permit'],
+    });
+  }
+
+  // 4b — What is backed up? Only when the storage can back up loads.
+  if (hasStorage && eq.storage!.backupCapable && t) {
+    const domains = t.domains;
+    const backed = t.panels.filter(p => p.backedUp);
+    behavior.push({
+      id: 'behavior.backup',
+      section: 'behavior',
+      question: t.panels.length > 1 ? 'What is backed up, panel by panel?' : 'What is backed up?',
+      state: domains.length > 0 ? 'answered' : 'needs-answer',
+      answer: domains.length === 0 ? undefined
+        : backed.length === t.panels.length
+          ? (t.panels.length > 1 ? `Whole panel — ${backed.map(p => p.label).join(' and ')}` : 'Whole main panel')
+          : backed.length === 0 ? 'No backup'
+            : `${backed.map(p => p.label).join(', ')} backed up`,
+      source: domains.length > 0 ? 'Installer entered' : 'Not established',
+      options: [
+        { value: 'whole', label: t.panels.length > 1 ? 'Every panel — whole home' : 'Whole main panel' },
+        { value: 'none', label: 'No backup' },
+      ],
+      why: 'Backup decides where each gateway sits and which panel is inside the island.',
+      owner: 'Installer',
+      blocks: ['gateway placement', 'SLD', 'BOM'],
+    });
+
+    // 4c — How do the battery AC circuits land / combine? Per system, only where a system has storage.
+    const withStorage = domains.filter(d => d.storageUnitIds.some(id =>
+      t.storage.find(u => u.id === id)?.role === 'inverter-unit'));
+    if (withStorage.length > 0) {
+      const units = (d: typeof withStorage[number]) => d.storageUnitIds
+        .filter(id => t.storage.find(u => u.id === id)?.role === 'inverter-unit').length;
+      const multi = withStorage.some(d => units(d) > 1);
+      const unresolved = withStorage.filter(d => d.storageConnection === 'unresolved');
+      const values = [...new Set(withStorage.map(d => d.storageConnection))];
+      behavior.push({
+        id: 'behavior.storage-landing',
+        section: 'behavior',
+        question: multi ? 'How are the battery AC circuits combined?' : 'Where do the battery AC circuits land?',
+        state: unresolved.length > 0 ? 'needs-answer' : 'answered',
+        answer: unresolved.length > 0 ? undefined
+          : values.length === 1 ? STORAGE_LANDING_LABEL[values[0]] ?? values[0]
+            : withStorage.map(d => `${d.label}: ${STORAGE_LANDING_LABEL[d.storageConnection] ?? d.storageConnection}`).join(' · '),
+        source: unresolved.length > 0 ? 'Not established' : 'Installer entered',
+        options: Object.entries(STORAGE_LANDING_LABEL).map(([value, label]) => ({ value, label })),
+        value: values.length === 1 && values[0] !== 'unresolved' ? values[0] : null,
+        why: 'Each answer selects a different governing check: the generation panel’s own busbar, the '
+          + 'manufacturer’s panelboard limits, or the backed-up panel’s 120% rule.',
+        owner: 'Installer',
+        blocks: ['busbar check', 'SLD', 'BOM'],
+      });
+    }
+
+    // 4d — How do the systems reach the service? ONLY with more than one system.
+    if (domains.length > 1) {
+      const arr = t.interconnection.derArrangement;
+      behavior.push({
+        id: 'behavior.systems',
+        section: 'behavior',
+        question: `How do the ${countWord(domains.length).toLowerCase()} systems connect to the service?`,
+        state: arr ? 'answered' : 'needs-answer',
+        answer: arr === 'independent-branch' ? 'Independently — each system on its own path'
+          : arr === 'common-aggregation' ? 'Combined in one generation panel, one connection'
+            : arr === 'custom' ? 'Custom engineered arrangement' : undefined,
+        source: arr ? 'Installer entered' : 'Not established',
+        options: [
+          { value: 'independent-branch', label: 'Independently — each system on its own path' },
+          { value: 'common-aggregation', label: 'Combined in one generation panel, one connection' },
+          { value: 'custom', label: 'Custom' },
+        ],
+        value: arr,
+        owner: 'Installer',
+        blocks: ['interconnection', 'SLD'],
+      });
+    }
+
+    // 4e — Which battery receives which strings? DC coupled with more than one inverting unit.
+    const inverting = t.storage.filter(u => u.role === 'inverter-unit');
+    if (input.coupling === 'dc-coupled-storage' && hasPv && inverting.length > 1) {
+      const assigned = inverting.filter(u => u.pvDcStcKw !== null && u.pvDcStcKw !== undefined);
+      const total = assigned.reduce((s, u) => s + (u.pvDcStcKw ?? 0), 0);
+      const complete = assigned.length === inverting.length && pvArray.dcStcKw !== null
+        && Math.abs(total - pvArray.dcStcKw) < 0.01;
+      behavior.push({
+        id: 'behavior.pv-landing',
+        section: 'behavior',
+        question: `Which ${storageLabel} receives each PV string?`,
+        state: complete ? 'answered' : 'needs-answer',
+        answer: complete
+          ? inverting.filter(u => (u.pvDcStcKw ?? 0) > 0)
+              .map(u => `${u.label ?? u.productId} ${u.id.replace(/^.*-/, '#')}: ${(u.pvDcStcKw ?? 0).toFixed(2)} kW`)
+              .join(' · ')
+          : undefined,
+        source: complete ? 'Installer entered' : 'Not established',
+        why: `${inverting.length} units each publish their own PV inputs. Which strings land on which unit `
+          + 'is a wiring decision — SolarPro does not split the array evenly to fill this in.',
+        owner: 'Installer',
+        blocks: ['PV input check per unit', 'DC home runs on the SLD'],
+      });
+    }
+  }
+
+  // 4f — Where does the system connect to the service? Asked when there is anything to connect.
+  if ((hasPv || hasStorage) && t) {
+    const pois = t.pointsOfInterconnection;
+    const collar = t.interconnection.meterCollarSelected;
+    const resolved = collar || (pois.length > 0 && pois.every(p => p.relationship !== 'unresolved'));
+    const rels = [...new Set(pois.map(p => p.relationship))];
+    const options: InterviewOption[] = [
+      { value: 'load-side-busbar', label: POI_ANSWER['load-side-busbar'],
+        detail: 'A backfed breaker in a panel. The 120% busbar rule governs.' },
+      { value: 'supply-side', label: POI_ANSWER['supply-side'],
+        detail: 'A tap on the service conductors ahead of the main. The supply-side rules govern.' },
+      { value: 'load-side-feeder-tap', label: POI_ANSWER['load-side-feeder-tap'] },
+    ];
+    if (t.domains.length > 0) {
+      options.push({ value: 'manufacturer-integrated', label: POI_ANSWER['manufacturer-integrated'],
+        detail: 'Governed by the manufacturer’s listing, which SolarPro must hold to evaluate.' });
+    }
+    if (t.interconnection.meterCollarPermitted !== false) {
+      options.push({ value: 'meter-collar', label: POI_ANSWER['meter-collar'] });
+    }
+    behavior.push({
+      id: 'behavior.interconnection',
+      section: 'behavior',
+      question: 'Where does the system connect to the service?',
+      state: resolved ? 'answered' : 'needs-answer',
+      answer: collar ? POI_ANSWER['meter-collar']
+        : resolved ? rels.map(r => POI_ANSWER[r]).join(' · ') : undefined,
+      source: resolved ? 'Installer entered' : 'Not established',
+      options,
+      value: collar ? 'meter-collar' : rels.length === 1 && rels[0] !== 'unresolved' ? rels[0] : null,
+      why: 'The physical connection decides which part of the code applies. SolarPro never assumes a '
+        + 'load-side breaker because a calculator needs a value.',
+      owner: 'Installer',
+      blocks: ['interconnection check', 'SLD', 'permit'],
+    });
+
+    // 4g — Utility isolation. A ruling SolarPro cannot make, asked as a three-state fact.
+    const req = t.interconnection.externalDerIsolationRequired;
+    const isolators = t.devices.filter(d => d.roles.includes('der-isolation-disconnect'));
+    const accepted = t.interconnection.isolationArrangementAccepted ?? null;
+    behavior.push({
+      id: 'behavior.isolation',
+      section: 'behavior',
+      question: 'Does the utility require an external, lockable disconnect?',
+      state: req === null ? 'needs-answer'
+        : req === false ? 'answered'
+          : isolators.length === 0 ? 'needs-answer'
+            : accepted === true ? 'answered' : 'needs-verification',
+      answer: req === null ? undefined
+        : req === false ? 'Not required'
+          : isolators.length === 0 ? 'Required — no switch placed yet'
+            : `${isolators.length} switch${isolators.length === 1 ? '' : 'es'}`
+              + (accepted === true ? ' · accepted by the utility / AHJ' : ' · utility / AHJ acceptance to verify'),
+      source: req === null ? 'Not established'
+        : accepted === true ? 'Installer entered' : 'Utility / AHJ ruling required',
+      options: [
+        { value: 'yes', label: 'Yes — required' },
+        { value: 'no', label: 'No — not required' },
+        { value: 'unknown', label: 'Not established yet' },
+      ],
+      value: req === true ? 'yes' : req === false ? 'no' : 'unknown',
+      why: 'A utility rule, quoted from the utility — never assumed. SolarPro records the arrangement you '
+        + 'intend and never states that the utility accepted it.',
+      owner: 'Utility / AHJ',
+      blocks: ['isolation check', 'permit'],
+    });
+  }
+
+  // ── 5 · ENGINEERING RESULT ───────────────────────────────────────────────
+  const engineering: InterviewItem[] = [];
+  const checks = input.evaluation?.checks ?? [];
+  // The busbar verdicts the graph's engine reached, per panel / per generation panel — read, never
+  // recomputed. (The page's old "Max PV" strip did its own `bus × 1.2 − main` over `?? 200`.)
+  const BUSBAR_CHECKS = new Set(['domain.busbar-705-12', 'aggregation.busbar']);
+  for (const c of checks.filter(x => BUSBAR_CHECKS.has(x.id))) {
+    engineering.push({
+      id: `engineering.${c.id}.${c.scope}`,
+      section: 'engineering',
+      question: c.title,
+      state: c.conclusion === 'PASS' ? 'calculated' : c.conclusion === 'FAIL' ? 'fails' : 'needs-verification',
+      answer: c.conclusion === 'NOT_EVALUATED' ? `NOT EVALUATED — ${c.detail}` : `${c.conclusion} — ${c.detail}`,
+      source: 'SolarPro calculation',
+    });
+  }
+  // 🚨 WHAT THE ENGINEERING STILL NEEDS, AND FROM WHOM. A check that is NOT EVALUATED names the
+  // input it is waiting on; an installer must be told what that is and who owes it, or "release
+  // blocked" is a verdict with no next step. Read from the overview the Service Topology tab already
+  // computed (deduplicated, installer-labelled, owner-classified) — not re-derived here.
+  if (t && input.evaluation) {
+    const overview = buildServiceOverview(t, input.evaluation);
+    for (const r of overview.requiredInputs.filter(x => x.owner !== 'optional-calculation')) {
+      const owner = REQUIREMENT_OWNERS.find(o => o.owner === r.owner);
+      engineering.push({
+        id: `engineering.needs.${r.key}`,
+        section: 'engineering',
+        question: r.label,
+        state: 'needs-verification',
+        answer: 'Needed',
+        source: r.owner === 'utility-must-provide' || r.owner === 'jurisdiction-authority'
+          ? 'Utility / AHJ ruling required'
+          : r.owner === 'manufacturer-authority' ? 'Manufacturer specification' : 'Not established',
+        why: r.because,
+        owner: owner ? `${owner.heading} — ${owner.action}` : undefined,
+      });
+    }
+  }
+  const fails = checks.filter(c => c.conclusion === 'FAIL');
+  const requiredUnknown = checks.filter(c => c.conclusion === 'NOT_EVALUATED' && !isOptionalCheck(c));
+  engineering.push({
+    id: 'engineering.overall',
+    section: 'engineering',
+    question: 'Does the engineered service pass?',
+    state: fails.length > 0 ? 'fails' : requiredUnknown.length > 0 ? 'needs-verification'
+      : checks.length > 0 ? 'calculated' : 'needs-answer',
+    answer: checks.length === 0 ? (t ? 'Not evaluated yet' : 'No service recorded yet')
+      : `${checks.filter(c => c.conclusion === 'PASS').length} pass · ${fails.length} fail · `
+        + `${requiredUnknown.length} not evaluated`,
+    source: 'SolarPro calculation',
+  });
+
+  // ── Assemble ─────────────────────────────────────────────────────────────
+  const sectionOf = (id: SectionId, title: string, items: InterviewItem[], summary: string): InterviewSection => ({
+    id, title, items, summary,
+    status: items.some(i => i.state === 'fails') ? 'fails'
+      : items.some(i => i.state === 'needs-answer') ? 'needs-answer'
+        : items.some(i => i.state === 'needs-verification' || i.state === 'derived') ? 'needs-verification'
+          : 'complete',
+  });
+
+  const sections: InterviewSection[] = [
+    sectionOf('design', 'PV Design', design, design[0].answer ?? 'Not established — place the modules in Design'),
+    sectionOf('service', 'Existing Electrical Service', service, rated === null
+      ? 'Service rating not entered'
+      : `${rated} A${t && t.branches.length > 1
+          ? ` · ${countWord(t.branches.length)} × ${[...new Set(t.branches.map(b => b.ratedAmps))].join('/')} A main panels`
+          : t && t.panels.length === 1 ? ` · one ${t.panels[0].busbarRatingA ?? '—'} A bus main panel` : ''}`
+        + (t ? ` · ${phaseLabel(t.service.phase)}` : '')),
+    sectionOf('equipment', 'Equipment', equipment, [
+      equipment[0].answer ? `PV inverter: ${equipment[0].answer}` : 'PV inverter not chosen',
+      hasStorage ? `${eq.storage!.count} × ${eq.storage!.label ?? 'battery'}` : 'No storage',
+      eq.gateway && eq.gateway.count > 0 ? `${eq.gateway.count} × ${eq.gateway.label ?? 'gateway'}` : null,
+    ].filter(Boolean).join(' · ')),
+    sectionOf('behavior', 'System Behavior & Connection', behavior,
+      behavior.length === 0 ? 'Nothing to connect yet'
+        : behavior.filter(i => i.answer).map(i => i.answer).slice(0, 3).join(' · ') || 'Questions open'),
+    sectionOf('engineering', 'Engineering Result', engineering,
+      engineering[engineering.length - 1].answer ?? ''),
+  ];
+
+  const order: SectionId[] = ['design', 'service', 'equipment', 'behavior', 'engineering'];
+  const openQuestions = sections
+    .sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id))
+    .flatMap(s => s.items.filter(i => i.state === 'needs-answer' && s.id !== 'engineering'));
+
+  // ── Drawable vs release-ready ────────────────────────────────────────────
+  const drawable = !input.architectureConflict
+    && (pvArray.moduleCount === 0 || (hasPv && !!pvArray.module));
+  const blockers: string[] = [];
+  if (input.architectureConflict) blockers.push('The electrical architecture is in conflict and must be resolved.');
+  for (const q of openQuestions) blockers.push(`${q.question} — not answered.`);
+  if (fails.length > 0) blockers.push(`${fails.length} engineering check${fails.length === 1 ? '' : 's'} fail.`);
+  if (requiredUnknown.length > 0) {
+    blockers.push(`${requiredUnknown.length} required check${requiredUnknown.length === 1 ? '' : 's'} not evaluated.`);
+  }
+  return {
+    sections,
+    openQuestions,
+    release: { drawable, releaseReady: drawable && blockers.length === 0, blockers },
+  };
+}
