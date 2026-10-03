@@ -1310,8 +1310,11 @@ const nodeName = topologyNodeLabel;
  * 🚨 IT COMES FROM THE PATH, NOT FROM THE SERVICE. A switch ahead of a 200 A gateway is a 200 A
  * question even on a 400 A service — the same rule that keeps a DER aggregation panel off the
  * service rating, applied to a disconnect.
+ *
+ * Exported so System Config states THIS number as a disconnect's requirement — never the service
+ * rating a newly added device happens to be seeded with.
  */
-function inlineRequirementA(t: ServiceTopology, nodeId: string): number | null {
+export function inlineRequirementA(t: ServiceTopology, nodeId: string): number | null {
   const branch = t.branches.find(b => b.id === nodeId);
   if (branch) return branch.ratedAmps;
   const domain = t.domains.find(d => d.gateway.id === nodeId);

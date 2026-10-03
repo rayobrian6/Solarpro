@@ -29,6 +29,7 @@ import {
   answerIsolationRequired, answerIsolationArrangement, answerIsolationAccepted, answerPvLanding,
   answerAvailableFaultCurrent, answerExistingService, type AnswerResult,
 } from '@/lib/electrical/systemConfigAnswers';
+import { UtilityDisconnectsEditor } from '@/components/engineering/systemConfig/UtilityDisconnectsEditor';
 
 const SERVICE_RATINGS = [100, 125, 150, 200, 225, 320, 400, 600, 800];
 const PANEL_RATINGS = [100, 125, 150, 200, 225, 320, 400];
@@ -232,6 +233,7 @@ function Editor({ item, props, apply, busy }: {
 }) {
   const t = props.topology;
   const id = item.id;
+  if (id.startsWith('behavior.utility.') || id.startsWith('engineering.disconnect.')) return <UtilityDisconnectsEditor item={item} topology={t} apply={apply} busy={busy} />;
 
   if (id === 'service.rating') {
     return (

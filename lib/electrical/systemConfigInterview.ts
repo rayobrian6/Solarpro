@@ -34,6 +34,7 @@ import type {
 } from '@/lib/electrical/serviceTopology';
 import { isOptionalCheck, servicePhaseInfo, type ServicePhase } from '@/lib/electrical/serviceTopology';
 import { buildServiceOverview, REQUIREMENT_OWNERS } from '@/lib/electrical/topologyOverview';
+import { buildUtilityDisconnectsItems, supersededByUtilityDisconnects } from '@/lib/electrical/systemConfigUtilityDisconnects';
 
 // ── The vocabulary an installer reads ───────────────────────────────────────
 
@@ -585,17 +586,26 @@ export function buildSystemConfigInterview(input: InterviewInput): SystemConfigI
       options.push({ value: 'manufacturer-integrated', label: POI_ANSWER['manufacturer-integrated'],
         detail: 'Governed by the manufacturer’s listing, which SolarPro must hold to evaluate.' });
     }
-    if (t.interconnection.meterCollarPermitted !== false) {
-      options.push({ value: 'meter-collar', label: POI_ANSWER['meter-collar'] });
+    // 🚨 A meter collar is the utility's / AHJ's to allow (behavior.utility.meter-collar): never offered
+    // where prohibited, and never 'answered' while that permission is not established.
+    const permitted = t.interconnection.meterCollarPermitted;
+    const collarRuling: ItemState | null = !(collar || rels.includes('meter-collar')) || permitted === true ? null
+      : permitted === false ? 'fails' : 'needs-verification';
+    const collarNote = collarRuling === 'fails' ? ' — NOT PERMITTED on this project'
+      : collarRuling ? ' — utility / AHJ permission not established' : '';
+    if (permitted !== false) {
+      options.push({ value: 'meter-collar', label: POI_ANSWER['meter-collar'], ...(permitted === true ? {} : {
+        detail: 'The utility / AHJ has not said whether a meter collar is permitted here — chosen now, it '
+          + 'reads NEEDS VERIFICATION until that is recorded.' }) });
     }
     behavior.push({
       id: 'behavior.interconnection',
       section: 'behavior',
       question: 'Where does the system connect to the service?',
-      state: resolved ? 'answered' : 'needs-answer',
-      answer: collar ? POI_ANSWER['meter-collar']
-        : resolved ? rels.map(r => POI_ANSWER[r]).join(' · ') : undefined,
-      source: resolved ? 'Installer entered' : 'Not established',
+      state: resolved ? collarRuling ?? 'answered' : 'needs-answer',
+      answer: collar ? POI_ANSWER['meter-collar'] + collarNote
+        : resolved ? rels.map(r => POI_ANSWER[r]).join(' · ') + collarNote : undefined,
+      source: collarRuling ? 'Utility / AHJ ruling required' : resolved ? 'Installer entered' : 'Not established',
       options,
       value: collar ? 'meter-collar' : rels.length === 1 && rels[0] !== 'unresolved' ? rels[0] : null,
       why: 'The physical connection decides which part of the code applies. SolarPro never assumes a '
@@ -687,6 +697,11 @@ export function buildSystemConfigInterview(input: InterviewInput): SystemConfigI
         + `${requiredUnknown.length} not evaluated`,
     source: 'SolarPro calculation',
   });
+
+  // Utility facts & disconnecting means — lib/electrical/systemConfigUtilityDisconnects.ts
+  const udItems = buildUtilityDisconnectsItems(input), udDrop = supersededByUtilityDisconnects(input, udItems);
+  for (let k = engineering.length - 1; k >= 0; k--) if (udDrop.has(engineering[k].id)) engineering.splice(k, 1);
+  for (const i of udItems) { const a = ({ service, equipment, behavior, engineering } as Record<string, InterviewItem[]>)[i.section]; a?.splice(i.section === 'engineering' ? a.length - 1 : a.length, 0, i); }
 
   // ── Assemble ─────────────────────────────────────────────────────────────
   const sectionOf = (id: SectionId, title: string, items: InterviewItem[], summary: string): InterviewSection => ({
