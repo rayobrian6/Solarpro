@@ -15560,7 +15560,8 @@ function EngineeringPageInner() {
                                     backupInterfaceIsATS: _bi?.islandingCapable ?? false,
                                   };
                                 })(),
-                                deviceCount: computedSystem.isMicro ? totalPanels : undefined,
+                                // The engine's device count — a 2-modules-per-device micro is 12 devices on 24 modules, not 24.
+                                deviceCount: computedSystem.isMicro ? computedSystem.microDeviceCount : undefined,
                                 microBranches: computedSystem.isMicro ? computedSystem.microBranches : undefined,
                                 branchWireGauge: computedSystem.isMicro ? csRun('BRANCH_RUN')?.wireGauge : undefined,
                                 branchConduitSize: computedSystem.isMicro ? csRun('BRANCH_RUN')?.conduitSize : undefined,

@@ -32,7 +32,7 @@ import { pvModuleCountSourceLabel } from '@/lib/electrical/pvArrayDesign';
 import type {
   ServiceTopology, SolarCoupling, TopologyEvaluation, PoiRelationship,
 } from '@/lib/electrical/serviceTopology';
-import { isOptionalCheck } from '@/lib/electrical/serviceTopology';
+import { isOptionalCheck, servicePhaseInfo, type ServicePhase } from '@/lib/electrical/serviceTopology';
 import { buildServiceOverview, REQUIREMENT_OWNERS } from '@/lib/electrical/topologyOverview';
 
 // ── The vocabulary an installer reads ───────────────────────────────────────
@@ -194,16 +194,9 @@ const STORAGE_LANDING_LABEL: Record<string, string> = {
 const COUNT_WORD = ['No', 'One', 'Two', 'Three', 'Four', 'Five', 'Six'];
 const countWord = (n: number) => COUNT_WORD[n] ?? String(n);
 
+/** One vocabulary for electrical systems — the descriptor the service model owns. */
 function phaseLabel(phase: string | undefined | null): string {
-  switch (phase) {
-    case 'split-240': return '120/240 V split phase';
-    case 'wye-208': return '120/208 V 3φ wye';
-    case 'wye-480': return '277/480 V 3φ wye';
-    case 'delta-240': return '240 V 3φ delta';
-    case 'high-leg-delta-240': return '120/240 V high-leg delta';
-    case 'custom': return 'Other / custom electrical system';
-    default: return 'Not established';
-  }
+  return phase ? servicePhaseInfo(phase as ServicePhase).label : 'Not established';
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -274,10 +267,10 @@ export function buildSystemConfigInterview(input: InterviewInput): SystemConfigI
       id: 'service.system',
       section: 'service',
       question: 'What is the electrical system?',
-      state: String(t.service.phase) === 'custom' ? 'needs-verification' : 'answered',
+      state: t.service.phase === 'custom' ? 'needs-verification' : 'answered',
       answer: phaseLabel(t.service.phase),
       source: 'Installer entered',
-      ...(String(t.service.phase) === 'custom'
+      ...(t.service.phase === 'custom'
         ? { why: 'SolarPro has no calculation method for this electrical system yet; the checks that '
             + 'depend on it report NOT EVALUATED rather than running a residential formula.' }
         : {}),

@@ -18,6 +18,7 @@
 
 import React, { useMemo, useState } from 'react';
 import type { ServiceTopology, SolarCoupling, BackupDomain } from '@/lib/electrical/serviceTopology';
+import { SERVICE_PHASES, servicePhaseInfo } from '@/lib/electrical/serviceTopology';
 import type { PvArrayDesign } from '@/lib/electrical/pvArrayDesign';
 import type {
   SystemConfigInterview as Interview, InterviewItem, InterviewSection, SectionId,
@@ -31,14 +32,7 @@ import {
 
 const SERVICE_RATINGS = [100, 125, 150, 200, 225, 320, 400, 600, 800];
 const PANEL_RATINGS = [100, 125, 150, 200, 225, 320, 400];
-const SYSTEMS: Array<[string, string]> = [
-  ['split-240', '120/240 V split phase'],
-  ['wye-208', '120/208 V 3φ wye'],
-  ['wye-480', '277/480 V 3φ wye'],
-  ['delta-240', '240 V 3φ delta'],
-  ['high-leg-delta-240', '120/240 V high-leg delta'],
-  ['custom', 'Other / custom'],
-];
+const SYSTEMS: Array<[string, string]> = SERVICE_PHASES.map(ph => [ph, servicePhaseInfo(ph).label]);
 
 export interface SystemConfigInterviewProps {
   interview: Interview;

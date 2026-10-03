@@ -29,6 +29,7 @@ import {
 import type {
   ServiceTopology, ServicePhase, PoiRelationship, DerArrangement, BackupDomain,
 } from '@/lib/electrical/serviceTopology';
+import { isServicePhase, servicePhaseInfo } from '@/lib/electrical/serviceTopology';
 
 export type AnswerResult =
   | { ok: true; topology: ServiceTopology; did: string }
@@ -42,14 +43,7 @@ export const SINGLE_PANEL_MAX_A = 225;
 
 /** The voltage a known electrical system runs at, line to line. Null ⇒ not a system SolarPro models. */
 export function voltageForPhase(phase: string): number | null {
-  switch (phase) {
-    case 'split-240': return 240;
-    case 'wye-208': return 208;
-    case 'wye-480': return 480;
-    case 'delta-240': return 240;
-    case 'high-leg-delta-240': return 240;
-    default: return null;
-  }
+  return isServicePhase(phase) ? servicePhaseInfo(phase).lineToLineV : null;
 }
 
 /** Keep the decisions a graph already records when its distribution is (re)built. */
