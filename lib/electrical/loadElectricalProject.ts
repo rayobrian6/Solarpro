@@ -172,7 +172,10 @@ export async function loadElectricalProject(
            -- NULL (not 0) when the project has no layout row: "no Design" is not "Design placed none".
            CASE WHEN jsonb_typeof(lo.panels) = 'array'
                 THEN jsonb_array_length(lo.panels) END             AS placed_panels,
-           lo.panels -> 0 ->> 'wattage'                           AS placed_watts,
+           -- One wattage on every placed module, or none: a mixed design has no single figure.
+           CASE WHEN jsonb_typeof(lo.panels) = 'array'
+                 AND (SELECT count(DISTINCT e ->> 'wattage') FROM jsonb_array_elements(lo.panels) e) = 1
+                THEN lo.panels -> 0 ->> 'wattage' END             AS placed_watts,
            to_jsonb(lo) -> 'design_electrical' ->> 'panelId'     AS design_panel_id
       FROM projects p
       LEFT JOIN LATERAL (

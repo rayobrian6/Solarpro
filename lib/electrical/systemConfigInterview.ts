@@ -231,6 +231,20 @@ export function buildSystemConfigInterview(input: InterviewInput): SystemConfigI
       owner: pvArray.missing[0]?.owner,
       blocks: pvArray.missing[0]?.blocks,
     });
+    if (pvArray.moduleConflict) {
+      const f = pvArray.missing.find(x => x.why.startsWith(pvArray.moduleConflict!));
+      design.push({
+        id: 'design.module-conflict',
+        section: 'design',
+        question: 'Is the recorded module the one Design placed?',
+        state: 'fails',
+        answer: `No — ${pvArray.moduleConflict}.`,
+        source: 'SolarPro calculation',
+        why: f?.why,
+        owner: f?.owner,
+        blocks: f?.blocks,
+      });
+    }
     if (hasPv && pvArray.assignmentState === 'DIFFERS_FROM_DESIGN') {
       design.push({
         id: 'design.assignment-stale',
@@ -714,6 +728,8 @@ export function buildSystemConfigInterview(input: InterviewInput): SystemConfigI
   const blockers: string[] = [];
   if (input.architectureConflict) blockers.push('The electrical architecture is in conflict and must be resolved.');
   for (const q of openQuestions) blockers.push(`${q.question} — not answered.`);
+  // A contradiction in the physical design is not a question waiting for an answer — it is wrong.
+  for (const d of design.filter(x => x.state === 'fails')) blockers.push(`${d.question} ${d.answer ?? ''}`.trim());
   if (fails.length > 0) blockers.push(`${fails.length} engineering check${fails.length === 1 ? '' : 's'} fail.`);
   if (requiredUnknown.length > 0) {
     blockers.push(`${requiredUnknown.length} required check${requiredUnknown.length === 1 ? '' : 's'} not evaluated.`);

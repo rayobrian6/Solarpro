@@ -14,6 +14,9 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { stripComments } from './support/stripSource';
 import { computeSystem, type ComputedSystemInput } from '@/lib/computed-system';
 import { dcStringLimits } from '@/lib/electrical/dcStringLimits';
 import { buildRaysIntendedJob } from '@/lib/electrical/fixtures/tesla400aTwoGateway';
@@ -62,5 +65,27 @@ describe('the page engine on Ray\'s DC-coupled job', () => {
     const cs = computeSystem(pageInput(null, null));
     const worst = Math.max(...cs.strings.map(s => s.vocCorrected * s.panelCount));
     expect(worst, 'without the storage window the page sized strings past 550 V').toBeGreaterThan(550);
+  });
+});
+
+describe('…and the page hands the engine NOTHING that overrides that derivation (production-build finding)', () => {
+  // On the production build, Ray's job showed "String 1 (20 modules) · String 2 (17 modules)" in System
+  // Config while the sheet drew 9 / 9 / 9 / 8 / 2: the page passed the fleet's stored string lengths
+  // (sized for no device) as `configStringPanelCounts`, which the engine adopts verbatim.
+  const dc = dcStringLimits(topo as never, 'dc-coupled-storage');
+
+  it('control: handed the stale 20 / 17 layout, the engine adopts it — past the Powerwall 3 window', () => {
+    const cs = computeSystem({ ...pageInput(dc, 'dc-coupled-storage'), totalStrings: 2, configStringPanelCounts: [20, 17] });
+    expect(cs.strings.map(x => x.panelCount)).toEqual([20, 17]);
+    expect(Math.max(...cs.strings.map(x => x.vocCorrected * x.panelCount))).toBeGreaterThan(dc!.maxDcVoltage);
+  });
+
+  it('the page passes no fleet layout and no fleet module when the strings land on the storage', () => {
+    const page = stripComments(readFileSync(join(__dirname, '..', 'app', 'engineering', 'page.tsx'), 'utf8'));
+    expect(page).toMatch(/totalStrings: topology !== 'micro' && !dcLim\s*\?/);
+    expect(page).toMatch(/configStringPanelCounts: topology !== 'micro' && !dcLim && fleet\.some/);
+    expect(page).toMatch(/const panelData = dcLim \? \(pvModule \?\? strPanel\) : \(strPanel \?\? pvModule\);/);
+    // …and the SLD request carries no brand to size a phantom inverter from.
+    expect(page).toMatch(/selectedBrand:\s+pvOnStorageDc \? undefined : config\.selectedBrand,/);
   });
 });

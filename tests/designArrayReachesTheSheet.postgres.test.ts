@@ -220,6 +220,45 @@ describe('🚨 Ray\'s resolved DC-coupled job — the array survives the retired
     expect(t).toContain('Total Modules 37');
   });
 
+  it('the body the PRODUCTION PAGE posted (captured in Chromium) draws a DC-coupled sheet, not a micro one', async () => {
+    // Captured from the real page on the production build (SOLARPRO_LOCAL_PG=1) on Ray's job. Its
+    // `selectedBrand: 'enphase'` is a migration default (`subSystems.fence.ecosystemBrand`, source
+    // 'migration') on a job with NO PV inverter; the route's brand sizing then turned
+    // DC_COUPLED_STORAGE into MICROINVERTER and drew "1 STRING — 1 MODULES", "Voc=0.0V", and
+    // PV ARRAY → MICROINVERTERS conduit runs under a title block that said NONE — DC COUPLED.
+    await writeRaysResolvedRow();
+    const r = await postSld(stalePageBody(RAY, {
+      topologyType: 'DC_COUPLED_STORAGE', selectedBrand: 'enphase', selectedInverterId: '', systemType: 'fence',
+      totalModules: 37, totalStrings: 2, inverterModel: 'String Inverter', inverterManufacturer: '',
+      panelId: 'panel-cs2', panelModel: 'Canadian Solar TOPBiHiKu7 620W', panelWatts: 620, panelVoc: 41.5,
+      panelIsc: 18.55, panelVmp: 34.9, panelImp: 17.77, panelTempCoeffVoc: -0.25, tempCoeffVoc: -0.25,
+      mpptChannels: 2, inverterMaxDcV: 600, maxDcVoltage: 600, mpptVoltageMin: 100, mpptVoltageMax: 600,
+      inverterBranchLimit: 16, inverterModulesPerDevice: 1, acOutputKw: 7.6, designTempMin: -23,
+      hasBattery: false, interconnection: 'UNRESOLVED', mainPanelAmps: 200,
+      stringDetails: [
+        { stringIndex: 0, panelCount: 20, ocpdAmps: 30, wireGauge: '#10 AWG', voc: 0, isc: 0 },
+        { stringIndex: 1, panelCount: 17, ocpdAmps: 30, wireGauge: '#10 AWG', voc: 0, isc: 0 },
+      ],
+      runs: [
+        { id: 'DC_STRING_RUN', from: 'PV ARRAY', to: 'DC DISCONNECT' },
+        { id: 'MSP_TO_UTILITY_RUN', from: 'MAIN SERVICE PANEL', to: 'UTILITY METER' },
+      ],
+    }));
+    expect(r.status, JSON.stringify(r.json).slice(0, 400)).toBe(200);
+    const t = textOf(r.svg);
+    expect(t).toContain('37 × 440W');
+    expect(t).toContain('NONE — DC COUPLED TO STORAGE');
+    expect(t, 'a microinverter path was drawn on a job with no PV inverter').not.toMatch(/MICROINVERTERS/);
+    expect(t).not.toContain('1 STRING — 1 MODULES');
+    expect(t).not.toContain('Voc=0.0V');
+    const m = t.match(/Strings\s+(\d+):\s*([\d\s/]+)\s*panels/);
+    expect(m, 'the schedule states the real per-string array').not.toBeNull();
+    const counts = m![2].split('/').map(x => Number(x.trim())).filter(n => n > 0);
+    expect(counts.reduce((a, b) => a + b, 0)).toBe(37);
+    const v = t.match(/Max System Voltage \(690\.7\(A\)\)\s*([\d.]+)\s*V/);
+    expect(Number(v![1])).toBeLessThanOrEqual(550);
+  });
+
   it('a stale module the page still had in memory does not outrank the project\'s recorded module', async () => {
     await writeRaysResolvedRow();
     const r = await postSld(stalePageBody(RAY, {

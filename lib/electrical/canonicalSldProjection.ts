@@ -344,6 +344,20 @@ export async function projectCanonicalArchitecture(
   // are OVERWRITTEN as a set, and what the caller sent is logged rather than silently
   // discarded — a disagreement here means a surface is still deriving architecture.
   // ══════════════════════════════════════════════════════════════
+  // 🚨 AND THE BRAND HINTS ARE ARCHITECTURE TOO. The SVG route sizes from `selectedBrand` /
+  // `selectedInverterId`, and its brand engine then OVERRIDES `topologyType` — so on a job with no PV
+  // inverter, a posted `selectedBrand: 'enphase'` (a migration default the project never chose,
+  // captured from the production page on Ray's job) turned DC_COUPLED_STORAGE back into
+  // MICROINVERTER: "1 STRING — 1 MODULES", "Voc=0.0V" and micro conduit runs under a title block
+  // that said NONE — DC COUPLED. With no PV inverter there is no brand to size the strings from.
+  const dropBrandHints = () => {
+    const posted = [input.selectedBrand, input.selectedInverterId].filter(v => v != null && String(v).trim());
+    if (posted.length > 0) {
+      console.warn(`[${tag}] brand hints ${JSON.stringify(posted)} dropped — this design has no PV inverter.`);
+    }
+    delete input.selectedBrand;
+    delete input.selectedInverterId;
+  };
   if (model.solarCoupling === 'dc-coupled-storage') {
     const postedTopo = String(input.topologyType ?? '');
     const postedInv = String(input.inverterModel ?? '');
@@ -352,6 +366,7 @@ export async function projectCanonicalArchitecture(
     delete input.inverterModel;
     delete input.inverterManufacturer;
     delete input.inverterId;
+    dropBrandHints();
     if (postedTopo && postedTopo !== 'DC_COUPLED_STORAGE') {
       console.warn(`[${tag}] the caller posted an architecture the project does not have:`
         + ` topologyType=${postedTopo}`
@@ -420,6 +435,7 @@ export async function projectCanonicalArchitecture(
     delete input.inverterModel;
     delete input.inverterManufacturer;
     delete input.inverterId;
+    dropBrandHints();
   }
 
   // 🚨 ON A DC-COUPLED JOB THE STRINGS ARE SIZED AGAINST THE CABINETS, NOT A PHANTOM

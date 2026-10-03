@@ -119,6 +119,12 @@ export interface PvArrayDesign {
   /** Modules represented in the active string assignment (0 when there is none). */
   assignedModuleCount: number;
   assignmentState: PvAssignmentState;
+  /**
+   * The recorded module disagrees with what Design physically placed (one wattage on every placed
+   * module, and it is not the recorded module's). Null ⇔ no disagreement is known. SolarPro does not
+   * pick a winner: the record may have been rewritten by an automatic writer, or Design may be stale.
+   */
+  moduleConflict: string | null;
   /** Every fact the array is missing. Empty ⇔ count, identity and DC size are all established. */
   missing: PvArrayMissingFact[];
 }
@@ -276,6 +282,24 @@ export function resolvePvArrayDesign(input: PvArrayDesignInput): PvArrayDesign {
       blocks: ['string design', 'SLD', 'BOM', 'permit'],
     });
   }
+  // 🚨 THE RECORD AND THE PLACED MODULES MUST AGREE. Found in the production build: an automatic
+  // panel swap rewrote `selected_equipment` to a 620 W module under a design of 440 W modules, and
+  // every surface then drew 620 W. `placedModuleWatts` is supplied only when every placed module
+  // carries the same wattage, so a mixed design (roof / fence on different modules) never trips it.
+  const placedW = posInt(input.placedModuleWatts);
+  const moduleConflict = (moduleCount ?? 0) > 0 && mod && placedW !== null && placedW !== mod.watts
+    ? `Design placed ${placedW} W modules, but the project's module record is ${mod.manufacturer} `
+      + `${mod.model} (${mod.watts} W)`
+    : null;
+  if (moduleConflict) {
+    missing.push({
+      fact: 'PV module model',
+      why: `${moduleConflict}. One of them is wrong, and SolarPro does not pick which — confirm the module `
+        + 'in Design (or re-select it) so the record and the placed array agree.',
+      owner: 'Design / equipment selection (confirm the module)',
+      blocks: ['string design', 'NEC 690.7 voltage check', 'SLD', 'BOM', 'permit'],
+    });
+  }
   if ((moduleCount ?? 0) > 0 && !mod) {
     missing.push({
       fact: 'PV module model',
@@ -297,6 +321,7 @@ export function resolvePvArrayDesign(input: PvArrayDesignInput): PvArrayDesign {
     dcSizeSource,
     assignedModuleCount,
     assignmentState,
+    moduleConflict,
     missing,
   };
 }

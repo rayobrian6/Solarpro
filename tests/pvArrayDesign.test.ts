@@ -113,6 +113,25 @@ describe('nothing is invented', () => {
   });
 });
 
+describe('the record and the placed modules must agree (production-build finding)', () => {
+  it('a 620 W record under 37 placed 440 W modules is a conflict naming both — not a silent 620 W array', () => {
+    const pv = resolvePvArrayDesign({ placedModuleCount: 37, placedModuleWatts: 440, selectedPanelId: 'panel-cs2' });
+    expect(pv.moduleConflict).toMatch(/Design placed 440 W modules, but the project's module record is Canadian Solar .*\(620 W\)/);
+    expect(pv.missing.some(f => f.fact === 'PV module model' && f.owner.includes('confirm the module'))).toBe(true);
+  });
+
+  it('control: the matching record (Ray\'s 440 W module) is no conflict', () => {
+    const pv = resolvePvArrayDesign({ placedModuleCount: 37, placedModuleWatts: 440, selectedPanelId: RAYS_MODULE });
+    expect(pv.moduleConflict).toBeNull();
+    expect(pv.missing).toEqual([]);
+  });
+
+  it('a design with no single placed wattage (mixed modules ⇒ the producers pass null) is never flagged', () => {
+    const pv = resolvePvArrayDesign({ placedModuleCount: 37, placedModuleWatts: null, selectedPanelId: 'panel-cs2' });
+    expect(pv.moduleConflict).toBeNull();
+  });
+});
+
 describe('authority order', () => {
   it('Design placed count outranks the layout total, which outranks the string assignment', () => {
     expect(resolvePvArrayDesign({ placedModuleCount: 37, layoutTotalPanels: 36 }).moduleCount).toBe(37);

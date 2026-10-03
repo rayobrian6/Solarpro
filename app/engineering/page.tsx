@@ -113,6 +113,7 @@ import {
 // from inverter.strings[].panelCount (which can be stale).
 import { resolveSystemPanelCount } from '@/lib/system/panelCountSource';
 import { resolvePvArrayDesign, pvModuleCountSourceLabel, pvModuleSourceLabel } from '@/lib/electrical/pvArrayDesign';
+import { gateMayReplaceModule, moduleSwapWithheld } from '@/lib/electrical/moduleAuthority';
 import { dcStringLimits } from '@/lib/electrical/dcStringLimits';
 import { buildSystemConfigInterview, type InterviewEquipment } from '@/lib/electrical/systemConfigInterview';
 import { evaluateServiceTopology } from '@/lib/electrical/serviceTopology';
@@ -3190,7 +3191,12 @@ function EngineeringPageInner() {
       engineeringStrings: config.inverters.flatMap(inv => inv.strings.map(str => ({
         panelId: str.panelId, panelCount: str.panelCount,
       }))),
-      placedModuleWatts: Array.isArray(projectLayout?.panels) ? (projectLayout.panels[0]?.wattage ?? null) : null,
+      // One wattage on every placed module, or none (a mixed design has no single figure).
+      placedModuleWatts: (() => {
+        const ws = new Set((Array.isArray(projectLayout?.panels) ? projectLayout.panels : [])
+          .map((pl: any) => pl?.wattage).filter((w: unknown) => w !== null && w !== undefined));
+        return ws.size === 1 ? Number([...ws][0]) : null;
+      })(),
     });
   }, [projectLayout, canonicalPanelId, config]);
   /** The array's module, as a catalogue-shaped record for the consumers that read panel specs. */
@@ -3301,6 +3307,10 @@ function EngineeringPageInner() {
       ? _archServer.coupling === 'dc-coupled-storage'
       : electrical?.solarCoupling === 'dc-coupled-storage'),
     [_archServerRead, _archServer, electrical]);
+  // The module-authority facts, current on every render, for callbacks memoised with no deps
+  // (`applySizingRecommendation`) — a closure over the first render would read "no recorded module".
+  const moduleAuthorityRef = useRef({ canonicalPanelId, pvOnStorageDc });
+  moduleAuthorityRef.current = { canonicalPanelId, pvOnStorageDc };
 
   // ══════════════════════════════════════════════════════════════════════════
   // 🚨 RESOLVING THE ARCHITECTURE — one click, recorded on the server, re-read from the store.
@@ -3553,11 +3563,16 @@ function EngineeringPageInner() {
     // whose standalone inverter was retired) `firstStr` is absent and this fell to a 400 W / 41.6 V
     // module nobody chose — so every number the Sizing and summary surfaces printed described a
     // different array from the one Design placed.
-    const panelData = (firstStr ? getPanelById(firstStr.panelId) as any : null) ?? pvModule;
     // 🚨 AND THE DC WINDOW IS THE DEVICE THE STRINGS LAND ON. No inverter on a DC-coupled job means
     // the storage's published PV input (the same `dcStringLimits` both SLD routes use), not a
     // phantom 600 V / 100–480 V inverter's defaults. Null for every job with an inverter.
     const dcLim = !invData ? dcStringLimits(svcTopology, electrical?.solarCoupling ?? null) : null;
+    // On that job the strings are one array landing on the cabinets, so the module is the ARRAY's
+    // (Design's record): a module left on stale strings — found in the production build as a 620 W
+    // panel an automatic swap had planted under 37 × 440 W — does not size anything. Hybrid fleets
+    // with an inverter keep their own per-fleet module.
+    const strPanel = firstStr ? getPanelById(firstStr.panelId) as any : null;
+    const panelData = dcLim ? (pvModule ?? strPanel) : (strPanel ?? pvModule);
 
     // v47.360: 'ecoflow' maps to 'string' for ComputedSystemInput — the compliance
     // engine treats EcoFlow PowerOcean as a string-based hybrid inverter.
@@ -3784,13 +3799,16 @@ function EngineeringPageInner() {
       // Only applies to string/optimizer/hybrid topology — micro has no DC strings.
       // An empty fleet carries no assignment: the engine derives one against the real endpoint
       // rather than being handed nothing dressed as a layout.
-      totalStrings: topology !== 'micro'
+      // 🚨 Strings landing on a battery's own PV inputs are DERIVED against its window — exactly as
+      // both SLD routes derive them — never adopted from a fleet layout sized for no device (the
+      // production page drew 20 / 17 on Ray's job while the sheet drew 9 / 9 / 9 / 8 / 2).
+      totalStrings: topology !== 'micro' && !dcLim
         ? fleet.reduce((s, inv) => s + inv.strings.length, 0) || undefined
         : undefined,
       // v61.7: Pass actual per-string panel counts from the fleet's strings so
       // computeSystem() performs NEC 690.7 Voc checks on the REAL string lengths,
       // not on equally-divided totalPanels/totalStrings. Prevents false Voc violations.
-      configStringPanelCounts: topology !== 'micro' && fleet.some(inv => inv.strings.length > 0)
+      configStringPanelCounts: topology !== 'micro' && !dcLim && fleet.some(inv => inv.strings.length > 0)
         ? fleet.flatMap(inv => inv.strings.map(s => s.panelCount))
         : undefined,
       maxACVoltageDropPct: 2,
@@ -4771,8 +4789,10 @@ function EngineeringPageInner() {
       // Brand-agnostic by construction: this simply trusts the gate's
       // verdict. The gate lives in lib/system/panelCompatibilityGate.ts
       // and works for every current and future brand.
-      const gateEffectivePanelId = rec.panelCompatibility?.autoSwitched
-        ? rec.panelCompatibility.effectivePanelId
+      // ...except the module Design placed: a recommendation re-sizes the fleet, it does not
+      // replace the physical module (lib/electrical/moduleAuthority.ts).
+      const gateEffectivePanelId = gateMayReplaceModule(rec.panelCompatibility, moduleAuthorityRef.current)
+        ? rec.panelCompatibility!.effectivePanelId ?? undefined
         : undefined;
       const existingPanelId =
         gateEffectivePanelId
@@ -5831,6 +5851,15 @@ function EngineeringPageInner() {
     if (!compat.autoSwitched) return;               // gate said no swap needed
     const target = compat.effectivePanelId;
     if (!target) return;
+    // 🚨 The module Design placed (the project's recorded module), and any module on a job whose
+    // strings land on a battery's own PV inputs, are not this gate's to replace — see
+    // lib/electrical/moduleAuthority.ts. The verdict is still shown, for an installer to act on.
+    if (!gateMayReplaceModule(compat, { canonicalPanelId, pvOnStorageDc })) {
+      console.warn('[MODULE AUTHORITY] panel-compatibility swap withheld:',
+        moduleSwapWithheld(compat, { canonicalPanelId, pvOnStorageDc }),
+        { recorded: canonicalPanelId, original: compat.originalPanelId, gateWouldChoose: target });
+      return;
+    }
 
     // Wave 3.3 (watcher 6/7): the gate's verdict came from the PRIMARY sub's
     // brand/panel pairing, so at N>1 fleets the heal reads and writes ONLY
@@ -5891,6 +5920,8 @@ function EngineeringPageInner() {
     sizingRecommendation?.panelCompatibility?.effectivePanelId,
     // Re-check when inverter set changes (new strings added etc.)
     config.inverters,
+    canonicalPanelId,
+    pvOnStorageDc,
   ]);
 
   const updateConfig = (patch: Partial<ProjectConfig>) => setConfig(prev => ({ ...prev, ...patch }));
@@ -7479,7 +7510,10 @@ function EngineeringPageInner() {
         : null;
       // 🚨 THE ARRAY'S MODULE, NOT THE FIRST STRING'S. With the fleet retired there is no first string,
       // and this posted no module — which the route then drew as a 400 W panel nobody placed.
-      const panelData = (firstStr ? getPanelById(firstStr.panelId) as any : null) ?? pvModule;
+      // On a DC-coupled job the array's module (Design's record), not a module left on stale strings.
+      const panelData = pvOnStorageDc
+        ? (pvModule ?? (firstStr ? getPanelById(firstStr.panelId) as any : null))
+        : ((firstStr ? getPanelById(firstStr.panelId) as any : null) ?? pvModule);
 
       // Determine V4 topology type
       // v47.358: ecoflow → HYBRID_INVERTER (always has battery capability)
@@ -7727,12 +7761,16 @@ function EngineeringPageInner() {
           })) : undefined,
           // Phase B3 — SLD Truth Alignment: forward sizing-engine inputs so
           // the SLD route can call sizeSystemFromBrand() and use the same
-          // LayoutCandidate that the UI already displays.
-          selectedBrand:      config.selectedBrand,
-          selectedInverterId: firstInv?.inverterId,
+          // LayoutCandidate that the UI already displays. No PV inverter ⇒ no brand to size from
+          // (the route drops both on a DC-coupled job too — canonicalSldProjection).
+          selectedBrand:      pvOnStorageDc ? undefined : config.selectedBrand,
+          selectedInverterId: pvOnStorageDc ? undefined : firstInv?.inverterId,
           // The module the array is made of — the first string's when there is one, else the
-          // Design array's (a retired fleet leaves no string to ask).
-          panelId:            firstStr?.panelId ?? panelData?.panelId ?? panelData?.id,
+          // Design array's (a retired fleet leaves no string to ask). On a DC-coupled job, the
+          // array's module (see `panelData` in buildCsInputFor).
+          panelId:            pvOnStorageDc
+            ? (panelData?.panelId ?? panelData?.id ?? firstStr?.panelId)
+            : (firstStr?.panelId ?? panelData?.panelId ?? panelData?.id),
           systemType:         config.systemType ?? 'roof',
           panelTempCoeffVoc:  panelData?.tempCoeffVoc ?? undefined,
         }),
@@ -11919,9 +11957,15 @@ function EngineeringPageInner() {
                     ) : null}
 
                     {/* Panel Compatibility Banner */}
-                    {sizingRecommendation?.panelCompatibility ? (
+                    {/* On a DC-coupled job there is no PV inverter for the module to be "compatible"
+                        with; and where the swap is withheld from the recorded module, the banner must
+                        not announce a switch that did not happen — it offers the choice instead. */}
+                    {sizingRecommendation?.panelCompatibility
+                      && moduleSwapWithheld(sizingRecommendation.panelCompatibility, { canonicalPanelId, pvOnStorageDc }) !== 'dc-coupled-storage' ? (
                       <PanelCompatibilityBanner
-                        verdict={sizingRecommendation.panelCompatibility}
+                        verdict={moduleSwapWithheld(sizingRecommendation.panelCompatibility, { canonicalPanelId, pvOnStorageDc }) === 'recorded-module'
+                          ? { ...sizingRecommendation.panelCompatibility, autoSwitched: false }
+                          : sizingRecommendation.panelCompatibility}
                         onChangePanel={(newPanelId) => {
                           setConfig(prev => ({
                             ...prev,

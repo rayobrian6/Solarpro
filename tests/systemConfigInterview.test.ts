@@ -240,6 +240,17 @@ describe('honesty', () => {
     expect(iv.release.blockers[0]).toMatch(/conflict/i);
   });
 
+  it('a recorded module that disagrees with the placed modules FAILS and blocks release, naming both', () => {
+    const iv = buildSystemConfigInterview(base({
+      pvArray: resolvePvArrayDesign({ placedModuleCount: 37, placedModuleWatts: 440, selectedPanelId: 'panel-cs2' }),
+    }));
+    expect(item(iv, 'design.module-conflict')?.state).toBe('fails');
+    expect(item(iv, 'design.module-conflict')?.answer).toMatch(/440 W.*620 W/);
+    expect(iv.sections.find(s => s.id === 'design')?.status).toBe('fails');
+    expect(iv.release.releaseReady).toBe(false);
+    expect(iv.release.blockers.join(' ')).toMatch(/Is the recorded module the one Design placed\? No/);
+  });
+
   it('no module identity ⇒ not drawable, with the owner named', () => {
     const iv = buildSystemConfigInterview(base({ pvArray: resolvePvArrayDesign({ placedModuleCount: 20 }) }));
     expect(iv.release.drawable).toBe(false);
