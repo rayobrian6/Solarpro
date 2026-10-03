@@ -389,7 +389,8 @@ export function buildSystemConfigInterview(input: InterviewInput): SystemConfigI
       section: 'equipment',
       question: 'Is storage being installed?',
       state: 'answered',
-      answer: hasStorage ? `${eq.storage!.count} × ${eq.storage!.label ?? 'battery'}` : 'No storage',
+      // No battery in the selection is "none selected" — not a recorded decision that there is none.
+      answer: hasStorage ? `${eq.storage!.count} × ${eq.storage!.label ?? 'battery'}` : 'None selected',
       source: 'Selected equipment',
     });
     if (hasStorage && eq.storage!.requiresGateway) {
@@ -692,7 +693,7 @@ export function buildSystemConfigInterview(input: InterviewInput): SystemConfigI
         + (t ? ` · ${phaseLabel(t.service.phase)}` : '')),
     sectionOf('equipment', 'Equipment', equipment, [
       equipment[0].answer ? `PV inverter: ${equipment[0].answer}` : 'PV inverter not chosen',
-      hasStorage ? `${eq.storage!.count} × ${eq.storage!.label ?? 'battery'}` : 'No storage',
+      hasStorage ? `${eq.storage!.count} × ${eq.storage!.label ?? 'battery'}` : 'No storage selected',
       eq.gateway && eq.gateway.count > 0 ? `${eq.gateway.count} × ${eq.gateway.label ?? 'gateway'}` : null,
     ].filter(Boolean).join(' · ')),
     sectionOf('behavior', 'System Behavior & Connection', behavior,
@@ -737,11 +738,18 @@ export function buildSystemConfigInterview(input: InterviewInput): SystemConfigI
   });
   facts.push({ label: 'PV inverter', value: equipment[0].answer ?? 'Not chosen',
     source: equipment[0].source ?? 'Not established' });
-  if (input.derivedStrings && input.derivedStrings.length > 0 && hasPv) {
+  // 🚨 A STRING IS SIZED AGAINST THE INPUT IT LANDS ON. With no PV inverter chosen and the strings
+  // not landed on a battery's own PV inputs, the engine's partition was sized against nothing the
+  // project contains — stating it as "SolarPro calculation" would present a fabricated design.
+  const stringsHaveALanding = eq.pvInverter.state === 'SELECTED' || input.coupling === 'dc-coupled-storage';
+  if (hasPv && !stringsHaveALanding) {
+    facts.push({ label: 'PV strings', value: 'Not derived — nothing is chosen for the strings to land on',
+      source: 'Not established' });
+  } else if (input.derivedStrings && input.derivedStrings.length > 0 && hasPv) {
     const counts = input.derivedStrings.map(x => x.panelCount);
     facts.push({ label: 'PV strings', value: `${counts.length} (${counts.join(' / ')})`, source: 'SolarPro calculation' });
   }
-  facts.push({ label: 'Storage', value: hasStorage ? `${eq.storage!.count} × ${eq.storage!.label ?? 'battery'}` : 'None',
+  facts.push({ label: 'Storage', value: hasStorage ? `${eq.storage!.count} × ${eq.storage!.label ?? 'battery'}` : 'None selected',
     source: 'Selected equipment' });
   const essA = input.evaluation?.storageSummary.totalContinuousOutputA ?? null;
   if (hasStorage) {

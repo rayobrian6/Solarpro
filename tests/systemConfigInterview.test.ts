@@ -279,6 +279,25 @@ describe('the Engineering Summary states the engineered project precisely (Ray\'
     expect(fact('Distribution')?.value).toBe('2 × 200 A main panels');
   });
 
+  it('strings with nothing chosen to land on are NOT stated as a SolarPro calculation (live browser finding)', () => {
+    // The production page showed "PV STRINGS 2 (20 / 17) · SolarPro calculation" over "PV inverter:
+    // Not chosen" — a partition sized against no input the project contains.
+    const undecided = buildSystemConfigInterview(base({
+      pvArray: pv37, equipment: { pvInverter: { state: 'UNDECIDED' }, storage: null, gateway: null },
+      derivedStrings: [20, 17].map(panelCount => ({ panelCount })),
+    }));
+    const s = undecided.summaryFacts.find(f => f.label === 'PV strings');
+    expect(s?.value).toMatch(/^Not derived/);
+    expect(s?.source).toBe('Not established');
+    expect(undecided.summaryFacts.find(f => f.label === 'Storage')?.value).toBe('None selected');
+    // Control: the same strings ARE stated once the inverter they land on is chosen.
+    const chosen = buildSystemConfigInterview(base({
+      pvArray: pv37, equipment: { pvInverter: { state: 'SELECTED', label: 'SMA Sunny Boy 7.7', kind: 'string' }, storage: null, gateway: null },
+      derivedStrings: [20, 17].map(panelCount => ({ panelCount })),
+    }));
+    expect(chosen.summaryFacts.find(f => f.label === 'PV strings')?.value).toBe('2 (20 / 17)');
+  });
+
   it('the batteries are never named as the PV inverter, and PV size is never the ESS output', () => {
     expect(fact('PV inverter')?.value).not.toMatch(/Powerwall/);
     expect(fact('PV DC size')?.value).not.toBe(fact('ESS max continuous AC output')?.value);
