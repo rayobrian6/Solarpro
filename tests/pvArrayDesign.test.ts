@@ -182,6 +182,21 @@ describe('the page reads the array from Design, not from its fleet (source guard
     expect(body).toMatch(/\?\? pvModule/);
   });
 
+  it('a fleet entry with no catalogue inverter has no AC rating — no 7.6 kW / 295 W fallback outside the frozen permit figure', () => {
+    // Production-build finding on Ray's DC-coupled job: the retired fleet's placeholder entry put
+    // "7.60 kW AC" in the page header of a design with no PV inverter.
+    const at = page.indexOf('const totalInverterKw = config.inverters.reduce(');
+    expect(at).toBeGreaterThan(0);
+    const body = page.slice(at, page.indexOf('}, 0).toFixed(2);', at));
+    expect(body).toMatch(/const invData = inv\.inverterId \? getInvById\(inv\.inverterId, inv\.type\) as any : null;\s*if \(!invData\) return sum;/);
+    expect(body).not.toMatch(/\|\| 7\.6\b/);
+    expect(body).not.toMatch(/\|\| 0\.295\b/);
+    // The header pill and the stat box show nothing for zero; the legacy figure feeds ONLY the permit payloads.
+    expect(page).toMatch(/\{hasInverterAcKw \? \(\s*<span[^>]*>\s*\{totalInverterKw\} kW AC/);
+    const legacyUses = page.match(/legacyPermitAcKw/g) ?? [];
+    expect(legacyUses).toHaveLength(5);   // the definition + totalAcKw and dcAcRatio in each of the two permit payloads
+  });
+
   it('the PDF export no longer names SolarEdge / SE7600H / IQ8+ for an absent inverter', () => {
     const at = page.indexOf("fetch('/api/engineering/sld/pdf'");
     const body = page.slice(at, at + 9000);

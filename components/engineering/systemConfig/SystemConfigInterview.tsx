@@ -166,7 +166,7 @@ function ReleaseBanner({ interview }: { interview: Interview }) {
         <span className="font-black text-slate-100">
           {r.releaseReady && toReview.length === 0 ? 'Engineering complete — eligible for release'
             : r.releaseReady ? `Eligible for release — ${toReview.length} card${toReview.length === 1 ? '' : 's'} to review (${toReview.map(s => s.title).join(', ')})`
-            : open.length > 0 ? `${open.length} question${open.length === 1 ? '' : 's'} need your answer`
+            : open.length > 0 ? `${open.length} ${open.length === 1 ? 'question needs' : 'questions need'} your answer`
               : 'Engineering needs review before release'}
         </span>
         <span className={r.drawable ? 'text-emerald-300' : 'text-amber-300'}>

@@ -3514,8 +3514,12 @@ function EngineeringPageInner() {
   // summary says why beside it.
   const totalWatts = pvArray.dcStcW ?? 0;
   const totalKw = (totalWatts / 1000).toFixed(2);
+  // 🚨 A FLEET ENTRY WITH NO CATALOGUE INVERTER HAS NO AC RATING — not 7.6 kW, not 295 W a device.
+  // Found in the production build on Ray's DC-coupled job: the retired fleet's placeholder entry
+  // (inverterId '') put "7.60 kW AC" in the page header of a design with no PV inverter at all.
   const totalInverterKw = config.inverters.reduce((sum, inv) => {
-    const invData = getInvById(inv.inverterId, inv.type) as any;
+    const invData = inv.inverterId ? getInvById(inv.inverterId, inv.type) as any : null;
+    if (!invData) return sum;
     if (inv.type === 'micro') {
       // For micro: each inverter entry represents deviceCount units
       // deviceCount = ceil(panelCount / modulesPerDevice)
@@ -3523,8 +3527,23 @@ function EngineeringPageInner() {
       const registryMpd: number = (invData as any)?.modulesPerDevice ?? 1;
       const mpd: number = inv.deviceRatioOverride ?? registryMpd;
       const deviceCount = Math.ceil(panelCount / mpd);
-      const perDeviceKw = (invData as any)?.acOutputW / 1000 || (invData as any)?.acOutputKw || 0.295;
+      const perDeviceKw = (invData as any)?.acOutputW / 1000 || (invData as any)?.acOutputKw || 0;
       return sum + deviceCount * perDeviceKw;
+    }
+    return sum + ((invData as any)?.acOutputKw || (invData as any)?.acOutputW / 1000 || 0);
+  }, 0).toFixed(2);
+  const hasInverterAcKw = parseFloat(totalInverterKw) > 0;
+  // 🚨 FROZEN FOR THE PERMIT DIGEST — the figure the permit payloads have always posted (7.6 kW for an
+  // entry with no catalogue inverter, 295 W a device for an unresolved micro). The permit body enters
+  // canonicalDigestBody, so correcting it would move the digest of every regenerated permit; that is
+  // Ray's decision, held with the permit DC-size correction (HANDOFF_SYSTEM_CONFIG_GAUNTLET.md, Pending #0).
+  // Nothing else may read this.
+  const legacyPermitAcKw = config.inverters.reduce((sum, inv) => {
+    const invData = getInvById(inv.inverterId, inv.type) as any;
+    if (inv.type === 'micro') {
+      const panelCount = inv.strings.reduce((s, str) => s + str.panelCount, 0);
+      const mpd: number = inv.deviceRatioOverride ?? ((invData as any)?.modulesPerDevice ?? 1);
+      return sum + Math.ceil(panelCount / mpd) * ((invData as any)?.acOutputW / 1000 || (invData as any)?.acOutputKw || 0.295);
     }
     return sum + ((invData as any)?.acOutputKw || (invData as any)?.acOutputW / 1000 || 7.6);
   }, 0).toFixed(2);
@@ -4587,9 +4606,12 @@ function EngineeringPageInner() {
     const _recInverterAcKw = sizingRecommendation
       ? sizingRecommendation.inverterModels.reduce((s, m) => s + m.acKw * m.qty, 0)
       : 0;
-    const canonicalAcKw = displayMode === 'recommended' && _recInverterAcKw > 0
-      ? _recInverterAcKw
-      : (Number(totalInverterKw) > 0 ? Number(totalInverterKw) : _recInverterAcKw);
+    // On a DC-coupled job there is no PV inverter, so no PV AC output — the recommendation the sizing
+    // engine still computes (for a brand the project never chose) is not a fallback for it.
+    const canonicalAcKw = pvOnStorageDc ? 0
+      : displayMode === 'recommended' && _recInverterAcKw > 0
+        ? _recInverterAcKw
+        : (Number(totalInverterKw) > 0 ? Number(totalInverterKw) : _recInverterAcKw);
 
   // ─── v61.2 SINGLE SOURCE OF TRUTH ──────────────────────────────────────────
   // ALL UI components read from displayConfig — never mix sources.
@@ -4728,7 +4750,7 @@ function EngineeringPageInner() {
     searchParams, controlMode, sizingAutoApply,
     config.userHasEditedInverters, displayMode,
     resolvedPanelCount.source, resolvedPanelCount.mismatchedWithConfig,
-    systemPanelCount, totalKw, totalInverterKw,
+    systemPanelCount, totalKw, totalInverterKw, pvOnStorageDc,
     config.inverters, compliance.overallStatus,
   ]);
   // Clear snapshot on unmount so SolarDog doesn't show stale engineering state
@@ -9492,9 +9514,9 @@ function EngineeringPageInner() {
         },
         system: {
           totalDcKw: parseFloat(projectLayout?.panels?.length > 0 ? (projectLayout.panels.length * (() => { const _pw0 = config.inverters?.[0]?.strings?.[0]; return _pw0 ? ((getPanelById(_pw0.panelId) as any)?.watts ?? 400) / 1000 : 0.4; })()).toFixed(2) : totalKw),
-          totalAcKw: parseFloat(totalInverterKw),
+          totalAcKw: parseFloat(legacyPermitAcKw),
           totalPanels: projectLayout?.panels?.length > 0 ? projectLayout.panels.length : totalPanels,
-          dcAcRatio: calcDcAcRatio(parseFloat(projectLayout?.panels?.length > 0 ? (projectLayout.panels.length * (() => { const _pw0 = config.inverters?.[0]?.strings?.[0]; return _pw0 ? ((getPanelById(_pw0.panelId) as any)?.watts ?? 400) / 1000 : 0.4; })()).toFixed(2) : totalKw), parseFloat(totalInverterKw) || 0),
+          dcAcRatio: calcDcAcRatio(parseFloat(projectLayout?.panels?.length > 0 ? (projectLayout.panels.length * (() => { const _pw0 = config.inverters?.[0]?.strings?.[0]; return _pw0 ? ((getPanelById(_pw0.panelId) as any)?.watts ?? 400) / 1000 : 0.4; })()).toFixed(2) : totalKw), parseFloat(legacyPermitAcKw) || 0),
           topology: topologyType,
           inverters: config.inverters.map(inv => {
             // A micro entry whose id is not a catalogue micro (legacy 'se-7600h')
@@ -10009,7 +10031,7 @@ function EngineeringPageInner() {
       key: 'systemSize',
       label: 'System Size (kW)',
       ok: parseFloat(totalKw) > 0,
-      value: parseFloat(totalKw) > 0 ? `${totalKw} kW DC / ${totalInverterKw} kW AC` : undefined,
+      value: parseFloat(totalKw) > 0 ? `${totalKw} kW DC${hasInverterAcKw ? ` / ${totalInverterKw} kW AC` : ''}` : undefined,
       fix: 'Add panels and inverters in System Config',
       tab: 'config',
     },
@@ -10253,7 +10275,7 @@ function EngineeringPageInner() {
                 <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30 whitespace-nowrap">
                   {totalKw} kW DC
                 </span>
-                {totalInverterKw ? (
+                {hasInverterAcKw ? (
                   <span className="text-xs px-2 py-0.5 rounded-full bg-slate-700/80 text-slate-300 border border-slate-600/50 whitespace-nowrap">
                     {totalInverterKw} kW AC
                   </span>
@@ -10915,7 +10937,7 @@ function EngineeringPageInner() {
                       <div className="text-xs text-slate-500 mt-0.5">kW DC</div>
                     </div>
                     <div className="rounded-xl bg-slate-900/60 border border-slate-700/50 px-4 py-3 text-center">
-                      <div className="text-2xl font-black text-blue-400 tabular-nums">{totalInverterKw || '—'}</div>
+                      <div className="text-2xl font-black text-blue-400 tabular-nums">{hasInverterAcKw ? totalInverterKw : '—'}</div>
                       <div className="text-xs text-slate-500 mt-0.5">kW AC</div>
                     </div>
                     <div className="rounded-xl bg-slate-900/60 border border-slate-700/50 px-4 py-3 text-center">
@@ -17798,9 +17820,9 @@ function EngineeringPageInner() {
                               },
                               system: {
                                 totalDcKw: parseFloat(projectLayout?.panels?.length > 0 ? (projectLayout.panels.length * (() => { const _pw0 = config.inverters?.[0]?.strings?.[0]; return _pw0 ? ((getPanelById(_pw0.panelId) as any)?.watts ?? 400) / 1000 : 0.4; })()).toFixed(2) : totalKw),
-                                totalAcKw: parseFloat(totalInverterKw),
+                                totalAcKw: parseFloat(legacyPermitAcKw),
                                 totalPanels: projectLayout?.panels?.length > 0 ? projectLayout.panels.length : totalPanels,
-                                dcAcRatio: calcDcAcRatio(parseFloat(projectLayout?.panels?.length > 0 ? (projectLayout.panels.length * (() => { const _pw0 = config.inverters?.[0]?.strings?.[0]; return _pw0 ? ((getPanelById(_pw0.panelId) as any)?.watts ?? 400) / 1000 : 0.4; })()).toFixed(2) : totalKw), parseFloat(totalInverterKw) || 0),
+                                dcAcRatio: calcDcAcRatio(parseFloat(projectLayout?.panels?.length > 0 ? (projectLayout.panels.length * (() => { const _pw0 = config.inverters?.[0]?.strings?.[0]; return _pw0 ? ((getPanelById(_pw0.panelId) as any)?.watts ?? 400) / 1000 : 0.4; })()).toFixed(2) : totalKw), parseFloat(legacyPermitAcKw) || 0),
                                 topology: topologyType,
                                 inverters: config.inverters.map(inv => {
                                   // Same stale-micro-id fallback as the downloaded package.
