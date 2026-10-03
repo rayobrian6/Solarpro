@@ -119,6 +119,8 @@ import { dcStringLimits } from '@/lib/electrical/dcStringLimits';
 import { buildSystemConfigInterview, type InterviewEquipment } from '@/lib/electrical/systemConfigInterview';
 import { selectionPairOf, controllersByProduct, storageByProduct } from '@/lib/electrical/systemConfigSystemEquipment';
 import { evaluateServiceTopology } from '@/lib/electrical/serviceTopology';
+// System Config V3 — Inverters & Strings: PV inverter / PV connection / the one PV STRINGS block.
+import { InvertersStringsDecisions } from '@/components/engineering/systemConfig/cards/InvertersStringsCard';
 // System Config V3 — no questionnaire above the grid: each question in its home card, one dialog,
 // one readiness panel at the bottom (lib/electrical/systemConfigPlacement.ts decides where).
 import { findInterviewItem } from '@/lib/electrical/systemConfigPlacement';
@@ -12236,6 +12238,15 @@ function EngineeringPageInner() {
                           }) : null}
                         </div>
                       </div>
+
+                      {/* SYSTEM CONFIG V3 — the PV decisions this card owns (equipment.pv-inverter,
+                          behavior.pv-connection, behavior.pv-landing): "PV inverter: None", the PV
+                          connection select, and on a DC-coupled job ONE "PV STRINGS · … · String
+                          assignment [Review]" block whose dialog recommends, and writes only on Accept. */}
+                      <InvertersStringsDecisions {...interviewEditorContext} interview={systemConfigInterview}
+                                                 coupling={electrical?.solarCoupling ?? null}
+                                                 pvInverterState={interviewEquipment.pvInverter.state}
+                                                 connectionError={_archResolveError} />
 
                       {/* Branch Visualization */}
                       {config.inverters.length > 0 ? (

@@ -44,6 +44,7 @@ import { SystemEquipmentEditor, type SystemEquipmentSelection } from '@/componen
 import { LoadAnalysisEditor } from '@/components/engineering/systemConfig/LoadAnalysisEditor';
 import { ExistingServiceVerifyForm } from '@/components/engineering/systemConfig/cards/ExistingServiceVerifyForm';
 import { EXISTING_SERVICE_NEED_PREFIX, existingNeedField } from '@/lib/electrical/systemConfigServiceCard';
+import { StringAssignmentEditor } from '@/components/engineering/systemConfig/StringAssignmentEditor';
 
 export type { SystemEquipmentSelection };
 
@@ -570,41 +571,15 @@ export function ItemEditor(props: ItemEditorProps) {
   return null;
 }
 
-/** "String i → unit #n": which battery's PV inputs each derived string lands on. One write, on Save. */
+/**
+ * "String i → unit #n": which battery's PV inputs each derived string lands on — the String
+ * assignment editor (recommendation + Accept / Edit, rows, Save) the Inverters & Strings card opens
+ * from [Review]. One write, on Accept or Save.
+ */
 export function PvLandingEditor({ t, pvArray, strings, apply, busy }: {
   t: ServiceTopology; pvArray: PvArrayDesign; strings: number[]; apply: ApplyAnswer; busy: boolean;
 }) {
-  const units = t.storage.filter(u => u.role === 'inverter-unit');
-  const [landing, setLanding] = useState<Record<number, string>>({});
-  const watts = pvArray.module?.watts ?? null;
-  const count = pvArray.moduleCount ?? 0;
-  const perUnit = useMemo(() => {
-    const m: Record<string, number[]> = {};
-    strings.forEach((n, i) => { const u = landing[i]; if (u) (m[u] ??= []).push(n); });
-    return m;
-  }, [landing, strings]);
-  if (strings.length === 0 || !watts) {
-    return <div className="text-[11px] text-amber-300">The strings have not been derived yet, so there is nothing to land.</div>;
-  }
-  return (
-    <div className="space-y-1">
-      {strings.map((n, i) => (
-        <label key={i} className="flex items-center gap-2 text-[11px] text-slate-300">
-          String {i + 1} ({n} modules) →
-          <select data-testid={`answer-pv-landing-${i}`} className={box} disabled={busy} value={landing[i] ?? ''}
-                  onChange={e => setLanding(l => ({ ...l, [i]: e.target.value }))}>
-            <option value="">Choose a unit…</option>
-            {units.map((u, k) => <option key={u.id} value={u.id}>{u.label ?? u.productId} #{k + 1}</option>)}
-          </select>
-        </label>
-      ))}
-      <button type="button" data-testid="answer-pv-landing-save" disabled={busy || Object.keys(landing).length !== strings.length}
-              className="mt-1 rounded bg-sky-600 px-3 py-1 text-xs font-bold text-white disabled:opacity-40"
-              onClick={() => void apply(answerPvLanding(t, perUnit, watts, count))}>
-        Record where each string lands
-      </button>
-    </div>
-  );
+  return <StringAssignmentEditor t={t} pvArray={pvArray} strings={strings} apply={apply} busy={busy} />;
 }
 
 export default ItemEditor;
