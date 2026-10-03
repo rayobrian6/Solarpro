@@ -98,7 +98,8 @@ describe('…and the page hands the engine NOTHING that overrides that derivatio
     expect(page).toMatch(/configStringPanelCounts: dcLim\s*\?\s*\(dcStrings \?\? undefined\)/);
     expect(page).toMatch(/const dcStrings: number\[\] \| null = dcLim && panelData && csPanels > 0\s*\?\s*deriveStorageDcStrings\(/);
     expect(page).toMatch(/const panelData = dcLim \? \(pvModule \?\? strPanel\) : \(strPanel \?\? pvModule\);/);
-    // …and the SLD request carries no brand to size a phantom inverter from.
-    expect(page).toMatch(/selectedBrand:\s+pvOnStorageDc \? undefined : config\.selectedBrand,/);
+    // …and the SLD request carries no brand to size a phantom inverter from — on a DC-coupled job,
+    // and (closure brief §2) on any job with no PV inverter chosen.
+    expect(page).toMatch(/selectedBrand:\s+pvOnStorageDc \|\| !fleetEntryHasEndpoint\(firstInv\) \? undefined : config\.selectedBrand,/);
   });
 });

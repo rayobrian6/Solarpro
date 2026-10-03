@@ -550,6 +550,11 @@ export interface SLDProfessionalInput {
    * them, and for the uniform case where they are exact.
    */
   stringPanelCounts?:      number[];
+  /**
+   * 🚨 NOTHING IS CHOSEN FOR THE STRINGS TO LAND ON (no PV inverter, no micro, no storage PV input).
+   * The array is drawn; its string partition is stated as pending — never derived against defaults.
+   */
+  stringingPending?:       boolean;
   designTempMin?:          number;
   vocCorrected?:           number;
   vmpCorrected?:           number;
@@ -5222,6 +5227,10 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     parts.push(txt(pvCX, pvL0+LBL_PITCH,
       _invUn ? esc(input.inverterModel) : `${md} × ${esc(input.inverterModel)}`,
       {sz:F.tiny, anc:'middle', ...(_invUn ? {fill:'#C62828', bold:true} : {})}));
+  } else if (input.stringingPending) {
+    // 🚨 NO PARTITION WITHOUT AN ENDPOINT: the array box says so instead of "1 STRING × 1 MODULES".
+    parts.push(txt(pvCX, pvL0+LBL_PITCH, 'STRINGING PENDING EQUIPMENT SELECTION', {sz:F.tiny, anc:'middle', bold:true, fill:'#C62828'}));
+    console.log('[SLD STRING SUMMARY] stringing pending equipment selection — no string partition drawn');
   } else {
     const _ns  = input.totalStrings || 1;
     const _pps = input.panelsPerString ?? Math.round(input.totalModules / Math.max(_ns, 1));
@@ -6992,6 +7001,8 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   const _spc = (input.stringPanelCounts ?? []).filter(n => typeof n === 'number' && n > 0);
   const _spcSum = _spc.reduce((a, b) => a + b, 0);
   const _stringsCell: string = (() => {
+    // Nothing chosen for the strings to land on: the assignment is pending, not lost.
+    if (input.stringingPending) return 'PENDING EQUIPMENT SELECTION';
     // No assignment at all, on a design that should have one: say so rather than inventing it.
     if (_spc.length === 0) {
       return input.totalStrings > 0

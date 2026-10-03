@@ -111,10 +111,21 @@ describe('isElectricallyInvalid', () => {
     expect(isElectricallyInvalid(inv)).toBe(true);
   });
 
-  it('returns true for 1×21 with an unknown inverter (CONSERVATIVE threshold=20)', () => {
-    // Unknown inverter falls back to CONSERVATIVE_MAX_PANELS_PER_STRING=20
+  it('returns FALSE for 1×21 with an inverter the catalogue does not hold — nothing to land on, nothing to repair', () => {
+    // 🚨 This pinned the fabricator. An entry with no catalogued inverter has no input window, so it
+    // has no string partition to be wrong: it is the "choose a PV inverter" state. Treating it as a
+    // 1×N violation is what split a fresh 37-module project into 20 / 17 (closure brief §2).
     const inv = makeInv('unknown-inv', 'string', [{ panelCount: 21 }]);
-    expect(isElectricallyInvalid(inv)).toBe(true);
+    expect(isElectricallyInvalid(inv)).toBe(false);
+    expect(isElectricallyInvalid(makeInv('', 'string', [{ panelCount: 37 }]))).toBe(false);
+  });
+
+  it('an inverter-less entry is never re-split into a 20-module "conservative" partition', () => {
+    const fresh = makeInv('', 'string', [{ panelCount: 37 }]);
+    const out = electricallyNormalizeInverterConfig({ inverters: [fresh] });
+    expect(out.rebuiltCount).toBe(0);
+    expect((out.config.inverters as typeof fresh[])[0].strings.map(s => s.panelCount)).toEqual([37]);
+    expect((out.config.inverters as typeof fresh[])[0].strings.map(s => s.panelCount)).not.toEqual([20, 17]);
   });
 
   it('returns false for 1×20 with unknown inverter (exactly at conservative limit)', () => {

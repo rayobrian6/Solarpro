@@ -83,6 +83,7 @@ import { fetchSiteFeatures } from '@/lib/aerial/siteFeatures';
 import { getNearmapSurfacesCached } from '@/lib/aerial/nearmapCache';
 import { OBSTRUCTION_CLEARANCE_M } from '@/lib/aerial/nearmap';
 import { normalizeToPermitInverters, designToPermitInverters } from '@/lib/system/designToEngineering';
+import { STRINGING_PENDING, withoutUnresolvedEntries } from '@/lib/electrical/canonicalStrings';
 import { getMicroinverterById } from '@/lib/equipment-db';
 // The project's RECORDED combiner — the one server reader every artefact route
 // uses, derived with the combiner-selection endpoint's own helpers.
@@ -932,6 +933,19 @@ export async function POST(req: NextRequest) {
     // its inverters, because Tesla storage does not delete Enphase.
     const _coupling = _electrical?.model.solarCoupling ?? null;
     const _noExternalInverter = _coupling === 'dc-coupled-storage' || _coupling === 'storage-only';
+    // 🚨 NO STRING PARTITION WITHOUT A RECEIVING ENDPOINT (closure brief §2/§4).
+    // A posted non-micro entry that names no inverter (no id, manufacturer or model) carries strings
+    // sized against nothing — the fresh project's 20 / 17. It is not consumed.
+    {
+      const posted = (body.system.inverters as any[]) || [];
+      const named = posted.filter(i => i?.type === 'micro'
+        || [i?.inverterId, i?.manufacturer, i?.model].some(v => v != null && String(v).trim() !== ''));
+      if (named.length !== posted.length) {
+        console.warn(`[permit/POST] ${posted.length - named.length} posted inverter entry(ies) name no inverter — `
+          + `${STRINGING_PENDING.toLowerCase()}; their string partition is not consumed.`);
+        body.system.inverters = named as any;
+      }
+    }
     try {
       const invs = (body.system.inverters as any[]) || [];
       const postedStrings = invs.reduce((s, inv) => s + ((inv?.strings?.length) ?? 0), 0);
@@ -948,7 +962,14 @@ export async function POST(req: NextRequest) {
         try {
           const ecRows = await sql`SELECT engineering_config FROM projects WHERE id = ${projectId} LIMIT 1`;
           const ec = ecRows[0]?.engineering_config as any;
-          if (Array.isArray(ec?.inverters)) derived = normalizeToPermitInverters(ec.inverters);
+          // 🚨 A stored entry with no PV inverter (the pre-fix 20 / 17) is not resurrected here.
+          if (Array.isArray(ec?.inverters)) {
+            const { kept, dropped } = withoutUnresolvedEntries(ec.inverters as Array<{ inverterId?: unknown; type?: unknown }>);
+            if (dropped.length > 0) {
+              console.warn(`[permit/POST] ${dropped.length} stored inverter entry(ies) with no PV inverter not backfilled.`);
+            }
+            if (kept.length > 0) derived = normalizeToPermitInverters(kept);
+          }
         } catch (ecErr) {
           console.log('[permit/POST] engineering_config read skipped:', (ecErr as Error)?.message);
         }

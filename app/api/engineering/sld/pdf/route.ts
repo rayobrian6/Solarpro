@@ -190,6 +190,8 @@ export async function POST(req: NextRequest) {
     // ═══════════════════════════════════════════════════════════════════
     let _electricalRevision: string | null = null;
     let _pdfCanonicalApplied = false;
+    let _pdfCoupling: string | null = null;
+    let _pdfDcLimits: unknown = null;
     if (user?.id && isReadableProjectId(buildInput?.projectId)) {
       try {
         const { projectCanonicalArchitecture } =
@@ -199,6 +201,8 @@ export async function POST(req: NextRequest) {
         if (_proj.refusal) return NextResponse.json(_proj.refusal, { status: 409 });
         _electricalRevision = _proj.revision;
         _pdfCanonicalApplied = _proj.applied;
+        _pdfCoupling = _proj.coupling;
+        _pdfDcLimits = _proj.dcLimits ?? null;
       } catch (e) {
         console.warn('[sld/pdf/POST] canonical electrical read skipped (non-fatal):',
           (e as Error)?.message);
@@ -267,7 +271,24 @@ export async function POST(req: NextRequest) {
       const _isMicroForStrings = /MICRO/i.test(_topoRaw);
       const _isOptimizerForStrings = /OPTIMIZER/i.test(_topoRaw);
       const _modules = Number(buildInput.totalModules) || 0;
-      if (!_isMicroForStrings && _modules > 0) {
+      // 🚨 NO STRINGS WITHOUT AN ENDPOINT (closure brief §2) — the same rule as the SVG route: no PV
+      // inverter, no brand, not micro and no storage PV input ⇒ nothing is derived against the
+      // generator's defaults, and a posted layout is not drawn.
+      const _hasInverter = [buildInput.selectedInverterId, buildInput.inverterId, buildInput.selectedBrand]
+        .some(v => v != null && String(v).trim());
+      const _pdfStringsPending = !_isMicroForStrings && !_hasInverter
+        && !(_pdfCoupling === 'dc-coupled-storage' && _pdfDcLimits);
+      if (_pdfStringsPending) {
+        delete buildInput.stringPanelCounts;
+        delete buildInput.stringDetails;
+        buildInput.totalStrings = 0;
+        buildInput.stringingPending = true;
+        // …and a posted inverter NAME with no id behind it is not drawn (INVERTER NOT SELECTED).
+        delete buildInput.inverterModel;
+        delete buildInput.inverterManufacturer;
+        console.warn('[sld/pdf/POST] stringing pending equipment selection — no string partition derived or drawn.');
+      }
+      if (!_isMicroForStrings && !_pdfStringsPending && _modules > 0) {
         try {
           const { generateStringConfig, moduleSpecsFromRegistry, inverterSpecsFromRegistry } =
             await import('@/lib/string-generator');
@@ -473,6 +494,7 @@ export async function POST(req: NextRequest) {
                                  && buildInput.stringPanelCounts.length > 0
                                  ? buildInput.stringPanelCounts.map(Number)
                                  : undefined,
+      ...(buildInput.stringingPending === true ? { stringingPending: true } : {}),
       // No literal module: `pvArrayInputRequired` above refused any request that reached here
       // without these, so a fallback could only ever name a product nobody selected.
       panelModel:              String(buildInput.panelModel ?? (firstPanelSpec ? `${firstPanelSpec.manufacturer} ${firstPanelSpec.model}` : 'PV MODULE — MODEL NOT RECORDED')),

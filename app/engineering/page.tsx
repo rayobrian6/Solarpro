@@ -91,6 +91,22 @@ import { getAllMountingSystems, getMountingSystemsByCategory, getMountingSystems
  * very different nesting depths inside callbacks, and a hook would add ordering and
  * dependency-array risk for no benefit — this is pure and cheap.
  */
+/**
+ * The strings for a fleet entry created for a CHOSEN inverter — `entryStringsFor`, the writer rule in
+ * lib/system/fleetStringWriters.ts (the one string engine for a PV inverter; one carrier for a micro).
+ * Called only with an endpoint in hand; the `[moduleCount]` fallback is the unstrung entry a caller with
+ * no endpoint then drops, never a partition.
+ */
+function canonicalFleetStrings(
+  inverterId: string | null | undefined,
+  inverterType: string | null | undefined,
+  moduleCount: number,
+  panel: WriterPanel | null,
+  designTempMin: number,
+): number[] {
+  return entryStringsFor({ inverterId, inverterType, moduleCount, panel, designTempMin }) ?? [moduleCount];
+}
+
 function resolveDesignTempMinC(autoDetected: unknown, stateCode: string | null | undefined): number {
   const detected = (autoDetected as { designTempMin?: number } | null | undefined)?.designTempMin;
   if (typeof detected === 'number' && Number.isFinite(detected)) return detected;
@@ -169,6 +185,12 @@ import {
   type RebuildStringsOptions as _RebuildStringsOptions,
 } from '@/lib/system/buildInverterConfig';
 import { electricallyNormalizeInverterConfig, isElectricallyInvalid } from '@/lib/system/electricalNormalize';
+// THE one string engine — and its rule that no receiving endpoint means no string partition.
+import {
+  canonicalStringPartition, fleetEntryHasEndpoint, resolveStringEndpoint, withoutUnresolvedEntries,
+  STRINGING_PENDING, NO_ENDPOINT_REASON,
+} from '@/lib/electrical/canonicalStrings';
+import { entryStringsFor, resizeFleetStrings, type WriterPanel } from '@/lib/system/fleetStringWriters';
 // ── Wave 3 (per-subsystem equipment contract, docs/ARCHITECTURE-per-subsystem-equipment.md §3) ──
 // ensureSubSystemShape = THE one legacy-collapse rule (§1.5), applied at every
 // hydration boundary: untagged inverters inherit config.systemType (NEVER a
@@ -501,7 +523,8 @@ function rebuildFleetForCount(
   fleet: InverterConfig[],
   key: SubSystemKey,
   targetCount: number,
-  selectedBrand: string | undefined,
+  /** Unused: a brand never sizes an inverter-less fleet (kept so the call sites stay unchanged). */
+  _selectedBrand: string | undefined,
   /** NEC 690.7(A) cold basis, resolved by the CALLER from the project's own authority.
    *  REQUIRED on purpose: a default would reintroduce the fabricated −10 °C basis this
    *  parameter exists to remove, and making it required is what forces the call site to
@@ -530,32 +553,15 @@ function rebuildFleetForCount(
     } as any)];
   }
 
-  // String / optimizer / hybrid: this sub's own sizing pass.
+  // String / optimizer / hybrid: this sub's own sizing pass — for a CHOSEN inverter only. With none
+  // there is nothing for the strings to land on (no partition; the caller keeps the old fleet), and a
+  // brand never sizes it (lib/system/fleetStringWriters.ts).
   const panel = SOLAR_PANELS.find((pp: any) => pp.id === baseStr?.panelId) as any;
-  let engStrings: Array<{ panelCount: number; inverterIndex?: number }> | null = null;
-  try {
-    const input: Parameters<typeof sizeSystemFromBrand>[0] = {
-      systemType:        key,
-      panelCount:        targetCount,
-      panelWattage:      panel?.watts ?? 400,
-      panelVoc:          panel?.voc ?? 49.6,
-      panelTempCoeffVoc: panel?.tempCoeffVoc ?? -0.27,
-      designTempMin:     designTempMinC,
-      optimizerMaxOutputCurrent: 15.0,
-    };
-    if (inv0.inverterId)     input.selectedInverterId = inv0.inverterId;
-    else if (selectedBrand)  input.selectedBrand      = selectedBrand;
-    const result = sizeSystemFromBrand(input);
-    if (result.strings.length > 0 && result.topology !== 'micro') engStrings = result.strings;
-  } catch { /* fall through to even split */ }
-  if (!engStrings) {
-    const pps = Math.min(targetCount, 14);
-    const sc  = Math.max(1, Math.ceil(targetCount / pps));
-    engStrings = Array.from({ length: sc }, (_, i) => ({
-      panelCount: i === sc - 1 ? targetCount - pps * (sc - 1) : pps,
-      inverterIndex: 0,
-    }));
-  }
+  const engStrings = resizeFleetStrings({
+    inverter: inv0, moduleCount: targetCount, systemType: key, panel,
+    designTempMin: designTempMinC, selectedBrand: _selectedBrand,
+  });
+  if (!engStrings) return null;
   const byInv = new Map<number, Array<{ panelCount: number }>>();
   for (const s of engStrings) {
     const idx = s.inverterIndex ?? 0;
@@ -1727,15 +1733,16 @@ function EngineeringPageInner() {
                 wireLength: engCfg?.wireLength ?? 50,
               }));
             } else {
-              // v47.421: Even split fallback (engine already tried above)
-              const panelsPerString = Math.min(panelCount, 14);
-              const stringCount = Math.ceil(panelCount / panelsPerString);
-              strings = Array.from({ length: stringCount }, (_, i) => ({
+              // 🚨 NOT AN EVEN SPLIT. This was `Math.min(panelCount, 14)` strings — a partition no engine
+              // derived against any input. A chosen PV inverter is strung by the canonical engine against
+              // its own window; with no inverter there is no entry at all (below).
+              const _seedCounts = canonicalFleetStrings(
+                inverterId, invType, panelCount,
+                (getPanelById(panelId) as any) ?? null, resolveDesignTempMinC(compliance.autoDetected, config.state));
+              strings = _seedCounts.map((n, i) => ({
                 id: `str-seed-${i}`,
                 label: `String ${i + 1}`,
-                panelCount: i === stringCount - 1
-                  ? panelCount - panelsPerString * (stringCount - 1)
-                  : panelsPerString,
+                panelCount: n,
                 panelId,
                 tilt,
                 azimuth,
@@ -1748,12 +1755,16 @@ function EngineeringPageInner() {
           }
 
 
-          patches.inverters = [_buildInvCfg({
-            existingId: 'inv-seed-0',
-            inverterId,
-            type:       invType,
-            strings,
-          })];
+          // 🚨 A SEED WITH NO INVERTER IS A PROJECT NOBODY HAS EQUIPPED: no fleet entry, no partition —
+          // the module count is Design's and the strings wait for the equipment they land on.
+          patches.inverters = (panelCount > 0 && fleetEntryHasEndpoint({ inverterId, type: invType }) && strings.length > 0)
+            ? [_buildInvCfg({
+                existingId: 'inv-seed-0',
+                inverterId,
+                type:       invType,
+                strings,
+              })]
+            : [];
 
           // ── Electrical / structural defaults from engCfg ──────────────────
           if (engCfg) {
@@ -1828,6 +1839,22 @@ function EngineeringPageInner() {
                         : p.selectedInverter?.type === 'optimizer' ? 'optimizer'
                         : 'string';
           const _nsPanel = p.selectedPanel as any;
+          const _nsInverterId: string = p.selectedInverter?.id || '';
+          // ══════════════════════════════════════════════════════════════════
+          // 🚨 NO PV INVERTER ⇒ NO FLEET ENTRY, AND NO PARTITION.
+          //
+          // This wrote an inverter-less entry carrying `Math.min(panelCount, 14)` strings — 14 / 14 / 9
+          // for 37 modules, sized against nothing the project contains — and that entry is what the
+          // card printed as "String Inverter · 37 panels · 2 strings (20/17)" once the runtime guard
+          // re-split it. Physical modules known ≠ string architecture known: the count is Design's
+          // (`pvArray`), the PV inverter is UNDECIDED, and the strings are pending its selection.
+          // ══════════════════════════════════════════════════════════════════
+          const _nsEndpoint = resolveStringEndpoint({ inverterId: _nsInverterId, inverterType: invType });
+          if (panelCount <= 0 || _nsEndpoint.kind === 'none') {
+            patches.inverters = [];
+            console.log('[EngineeringPage] no PV inverter on the project — no fleet entry and no string partition'
+              + ` (${panelCount} modules from Design; ${STRINGING_PENDING.toLowerCase()})`);
+          } else {
             const _nsBrand = p.selectedInverter?.brand_id ?? (invType === 'optimizer' ? 'solaredge' : undefined);
             let _nsEngStrings: { panelCount: number }[] | null = null;
             if (invType !== 'micro' && _nsBrand) {
@@ -1838,17 +1865,20 @@ function EngineeringPageInner() {
                   panelVoc: _nsPanel?.voc ?? 49.6,
                   panelTempCoeffVoc: _nsPanel?.tempCoeffVoc ?? -0.27,
                   designTempMin: resolveDesignTempMinC(compliance.autoDetected, config.state), selectedBrand: _nsBrand,
+                  selectedInverterId: _nsInverterId,
                   optimizerMaxOutputCurrent: 15.0,
                 });
-                if (_nsResult.strings.length > 0) _nsEngStrings = _nsResult.strings;
-              } catch { /* fall through to even split */ }
+                if (_nsResult.strings.length > 0 && _nsResult.topology !== 'micro') _nsEngStrings = _nsResult.strings;
+              } catch { /* fall through to the canonical engine */ }
             }
             if (!_nsEngStrings) {
-              const _nsPps = invType === 'micro' ? 1 : Math.min(panelCount, 14);
-              const _nsSc = invType === 'micro' ? panelCount : Math.max(1, Math.ceil(panelCount / _nsPps));
-              _nsEngStrings = Array.from({ length: _nsSc }, (_, i) => ({
-                panelCount: i === _nsSc - 1 ? panelCount - _nsPps * (_nsSc - 1) : _nsPps,
-              }));
+              // A micro carries its modules on ONE entry (devices + AC branches, never DC strings); a chosen
+              // PV inverter is strung by the canonical engine against its own window — never an even split.
+              _nsEngStrings = invType === 'micro'
+                ? [{ panelCount }]
+                : canonicalFleetStrings(_nsInverterId, invType, panelCount,
+                    (getPanelById(_nsPanel?.id ?? '') as any) ?? null,
+                    resolveDesignTempMinC(compliance.autoDetected, config.state)).map(n => ({ panelCount: n }));
             }
             const strings = _nsEngStrings.map((s, i) => ({
               id: `str-auto-${i}`,
@@ -1866,13 +1896,13 @@ function EngineeringPageInner() {
               existingId: 'inv-auto-0',
               // 🚨 NO SUBSTITUTION. "No standalone inverter" is legitimate electrical state — a
               // DC-coupled battery system has none — and this line manufactured an Enphase IQ8 for
-              // every project that had not picked one, which is precisely the job where it is
-              // wrong. The empty id carries through as INVERTER_UNSELECTED, which the renderer,
-              // the SLD adapter and the permit helpers already understand.
-              inverterId: p.selectedInverter?.id || '',
+              // every project that had not picked one. Only a chosen inverter reaches here (no
+              // inverter ⇒ no entry, above).
+              inverterId: _nsInverterId,
               type:       invType,
               strings,
             })];
+          }
           patches.mountingId = p.selectedMounting?.id || patches.mountingId;
           patches.utilityId = p.utilityId || patches.utilityId;
           if (panelCount > 0) {
@@ -2381,6 +2411,18 @@ function EngineeringPageInner() {
             // strings array, even for configs that pre-date the Lock Architecture.
             // v61.6 Electrical Integrity: also detect + repair 1×N electrical violations
             // (e.g. strings:[{panelCount:44}] for a Solis inverter with maxPanelsPerString=13).
+            // 🚨 A STORED PARTITION WITH NOTHING TO LAND ON IS NOT RESURRECTED. Projects saved before
+            // this fix carry the fabricated 20 / 17 on an inverter-less entry; it is dropped here (the
+            // module count is Design's), never re-split and never shown.
+            if (Array.isArray(merged.inverters)) {
+              const _unres = withoutUnresolvedEntries(merged.inverters as InverterConfig[]);
+              if (_unres.dropped.length > 0) {
+                console.warn('[HYDRATION] dropped', _unres.dropped.length, 'stored inverter entr'
+                  + (_unres.dropped.length === 1 ? 'y' : 'ies'), 'with no PV inverter and its string partition',
+                  _unres.dropped.map(d => d.strings.map(st => st.panelCount).join('/')));
+                merged.inverters = _unres.kept;
+              }
+            }
             const _metaNorm = normalizeInverterConfig(merged);
             const _elecNorm = electricallyNormalizeInverterConfig(_metaNorm).config;
             // Wave 3.1 — hydration boundary (savedConfig commit): re-stamp tags +
@@ -2419,7 +2461,12 @@ function EngineeringPageInner() {
                 // v61.4 Hydration Lock: normalise localStorage inverters through the central builder.
                 // v61.6 Electrical Integrity: also repair 1×N violations.
                 setConfig(prev => {
-                  const _metaMerge = normalizeInverterConfig({ ...prev, ...localConfig });
+                  const _localMerged = { ...prev, ...localConfig };
+                  // The same rule as the database restore: no PV inverter ⇒ its stored partition is dropped.
+                  if (Array.isArray(_localMerged.inverters)) {
+                    _localMerged.inverters = withoutUnresolvedEntries(_localMerged.inverters).kept;
+                  }
+                  const _metaMerge = normalizeInverterConfig(_localMerged);
                   const _elecMerge = electricallyNormalizeInverterConfig(_metaMerge).config;
                   // Wave 3.1 — hydration boundary (localStorage restore can
                   // resurrect PRE-migration snapshots): tag + synthesize the map.
@@ -2704,12 +2751,15 @@ function EngineeringPageInner() {
             } catch { /* fall through to even-split fallback */ }
           }
           if (!_rfEngStrings) {
-            // Fallback: even split capped at 14 (datasheet ceiling for 380V × 15A optimizers)
-            const _rfPps = invType === 'micro' ? 1 : Math.min(panelCount, 14);
-            const _rfSc  = invType === 'micro' ? panelCount : Math.max(1, Math.ceil(panelCount / _rfPps));
-            _rfEngStrings = Array.from({ length: _rfSc }, (_, i) => ({
-              panelCount: i === _rfSc - 1 ? panelCount - _rfPps * (_rfSc - 1) : _rfPps,
-            }));
+            // 🚨 NOT AN EVEN SPLIT (this was `Math.min(panelCount, 14)`). A micro carries its modules on
+            // one entry; a chosen PV inverter is strung by the canonical engine against its window; with
+            // no inverter the entry is dropped below and no partition is restored.
+            _rfEngStrings = (invType === 'micro'
+              ? [panelCount]
+              : canonicalFleetStrings(inverterId, invType, panelCount,
+                  (SOLAR_PANELS.find((pp: any) => pp.id === panelId) as any) ?? null,
+                  resolveDesignTempMinC(compliance.autoDetected, config.state)))
+              .filter(n => n > 0).map(n => ({ panelCount: n }));
           }
           strings = _rfEngStrings.map((s, i) => ({
             id:            `str-restored-${i}`,
@@ -2790,6 +2840,8 @@ function EngineeringPageInner() {
         if (Object.keys(patches).length > 0) {
           setConfig(prev => {
             const merged = { ...prev, ...patches };
+            // A restored run with no PV inverter restores no string partition (canonicalStrings).
+            if (Array.isArray(merged.inverters)) merged.inverters = withoutUnresolvedEntries(merged.inverters).kept;
             // Phase 11: reconciliation removed from hydration path.
             // Mismatches are surfaced via SizingRecommendation panel.
             // Wave 3.1 — hydration boundary (reverse hydration from a generated
@@ -3667,6 +3719,10 @@ function EngineeringPageInner() {
     const rawType = firstInv?.type ?? 'string';
     const topology: 'string' | 'optimizer' | 'micro' =
       rawType === 'ecoflow' || rawType === 'hybrid' ? 'string' : rawType;
+    // 🚨 NOTHING FOR THE STRINGS TO LAND ON: no chosen PV inverter, no micro, no storage PV window.
+    // The engine then states no strings and no PV AC circuit, instead of sizing both against the
+    // 600 V / 7.6 kW defaults below (lib/electrical/canonicalStrings.ts).
+    const pvEndpointUnresolved = !dcLim && topology !== 'micro' && !fleet.some(inv => fleetEntryHasEndpoint(inv));
     const registryMpd: number = invData?.modulesPerDevice ?? 1;
     const modulesPerDevice: number = firstInv?.deviceRatioOverride ?? registryMpd;
     const branchLimit: number = invData?.branchLimit ?? 16;
@@ -3690,6 +3746,7 @@ function EngineeringPageInner() {
       // the canonical coupling; this memo — which feeds the Sizing tab, the summary, the BOM payload and
       // the PDF export — did not, so a DC-coupled design was computed as a standalone string inverter.
       solarCoupling: electrical?.solarCoupling ?? null,
+      pvEndpointUnresolved,
       optimizerMaxOutputCurrent,
       // SOURCE OF TRUTH: prefer CAD / SystemDefinition panel count. Falls
       // back to the config-derived totalPanels only when no authoritative
@@ -3888,15 +3945,17 @@ function EngineeringPageInner() {
       // production page drew 20 / 17 on Ray's job while the sheet drew 9 / 9 / 9 / 8 / 2).
       totalStrings: dcLim
         ? dcStrings?.length
-        : topology !== 'micro'
-          ? fleet.reduce((s, inv) => s + inv.strings.length, 0) || undefined
-          : undefined,
+        : pvEndpointUnresolved
+          ? 0
+          : topology !== 'micro'
+            ? fleet.reduce((s, inv) => s + inv.strings.length, 0) || undefined
+            : undefined,
       // v61.7: Pass actual per-string panel counts from the fleet's strings so
       // computeSystem() performs NEC 690.7 Voc checks on the REAL string lengths,
       // not on equally-divided totalPanels/totalStrings. Prevents false Voc violations.
       configStringPanelCounts: dcLim
         ? (dcStrings ?? undefined)
-        : topology !== 'micro' && fleet.some(inv => inv.strings.length > 0)
+        : !pvEndpointUnresolved && topology !== 'micro' && fleet.some(inv => inv.strings.length > 0)
           ? fleet.flatMap(inv => inv.strings.map(s => s.panelCount))
           : undefined,
       maxACVoltageDropPct: 2,
@@ -4535,11 +4594,15 @@ function EngineeringPageInner() {
          }
          return [...agg.values()].map(({ c, mfr }) => enrich(c, mfr));
        }
+       // 🚨 NOTHING IS "AUTO-ADDED" FOR EQUIPMENT NOBODY CHOSE. With no PV inverter (and the PV not on a
+       // battery's inputs) the recommendation is for a brand the project never picked — the fresh
+       // project listed "Enphase microinverter ×37" here, a phantom inverter by another name.
+       if (!pvOnStorageDc && !config.inverters.some(inv => fleetEntryHasEndpoint(inv))) return [];
        const comps = sizingRecommendation?.requiredComponents;
        if (!comps || comps.length === 0) return [];
        return comps.filter(c => c.qty > 0).map(c => enrich(c, sizingRecommendation?.brand?.manufacturer ?? ''));
      // eslint-disable-next-line react-hooks/exhaustive-deps
-     }, [subSystemCounts.isHybrid, hybridSubSizing, sizingRecommendation]);
+     }, [subSystemCounts.isHybrid, hybridSubSizing, sizingRecommendation, pvOnStorageDc, config.inverters]);
 
   // toSystemState: convert ProjectConfig to SystemState for API calls
   const toSystemState = useCallback(() => {
@@ -4659,10 +4722,14 @@ function EngineeringPageInner() {
       : 0;
     // On a DC-coupled job there is no PV inverter, so no PV AC output — the recommendation the sizing
     // engine still computes (for a brand the project never chose) is not a fallback for it.
+    // 🚨 And with NO PV inverter chosen there is no PV AC rating to show: the recommendation's kW (for a
+    // brand the project never chose) is not a fallback for it — the fresh project's flow bar read
+    // "String 10.73 kW" from exactly that.
     const canonicalAcKw = pvOnStorageDc ? 0
       : displayMode === 'recommended' && _recInverterAcKw > 0
         ? _recInverterAcKw
-        : (Number(totalInverterKw) > 0 ? Number(totalInverterKw) : _recInverterAcKw);
+        : (Number(totalInverterKw) > 0 ? Number(totalInverterKw)
+          : config.inverters.some(inv => fleetEntryHasEndpoint(inv)) ? _recInverterAcKw : 0);
 
   // ─── v61.2 SINGLE SOURCE OF TRUTH ──────────────────────────────────────────
   // ALL UI components read from displayConfig — never mix sources.
@@ -4823,6 +4890,16 @@ function EngineeringPageInner() {
   // Only fires when a violation is detected -- no-op on healthy configs.
   useEffect(() => {
     if (!Array.isArray(config.inverters) || config.inverters.length === 0) return;
+    // 🚨 E) AN ENTRY WITH NOTHING FOR ITS STRINGS TO LAND ON IS DROPPED, NEVER SPLIT. This guard is
+    // what turned the fresh project's one 37-module placeholder into 20 / 17 (no brand profile for an
+    // empty id ⇒ the "conservative" 20-module ceiling). No PV inverter ⇒ no fleet entry, no partition.
+    const _unresolved = withoutUnresolvedEntries(config.inverters);
+    if (_unresolved.dropped.length > 0) {
+      console.warn('[RuntimeGuard] dropping', _unresolved.dropped.length, 'inverter entr'
+        + (_unresolved.dropped.length === 1 ? 'y' : 'ies'), 'with no PV inverter — no string partition without an endpoint');
+      setConfig(prev => ({ ...prev, inverters: withoutUnresolvedEntries(prev.inverters).kept }));
+      return;
+    }
     const needsMetaHeal = config.inverters.some((inv: any) =>
       typeof inv.stringsPerInverter !== 'number' ||
       inv.stringsPerInverter !== (inv.strings?.length ?? 0) ||
@@ -5480,6 +5557,14 @@ function EngineeringPageInner() {
     // legacy whole-project sentinel no longer gates — each sub has its OWN
     // once-only gate (defaultsAppliedBySubSystem[key]) and its own sizing
     // pass; the per-sub branch below owns the hybrid path entirely.
+    // 🚨 NEVER ON THE FACTORY FLEET, BEFORE THE PROJECT HAS LOADED. On the production page this fired
+    // with `projectId: null` and `systemPanelCount = 10` — the count of the factory placeholder string
+    // itself (`resolveSystemPanelCount`'s config fallback), not a Design count. It seeded a 10-module
+    // Enphase fleet, stamped `selectedBrand: 'enphase'`, `defaultsApplied` and `isUserControlled`
+    // onto the project that then loaded, and the sync-pipeline's PANEL COUNT FIX, still holding that
+    // fleet, wrote one 37-module string onto the loaded inverter-less entry — which the runtime guard
+    // split into the fresh project's 20 / 17. Defaults are for a LOADED project, from Design's count.
+    if (!isHydrated) return;
     if (config.defaultsApplied && !subSystemCounts.isHybrid) return;
     if (systemPanelCount <= 0) return;
     // Phase 13.1 — USER INTENT LOCK. Belt-and-suspenders: even if the
@@ -5576,6 +5661,10 @@ function EngineeringPageInner() {
       });
       return; // hybrid path complete — never fall through to the whole-project pass
     }
+
+    // 🚨 A LOADED PROJECT WITH NO PV INVERTER IS UNDECIDED, NOT UNINITIALIZED. Hydration states it
+    // as an empty fleet (no entry, no partition); choosing an inverter for it is the installer's call.
+    if (config.inverters.length === 0) return;
 
     const primary = config.inverters[0];
     const panelData = primary?.strings[0]
@@ -5694,7 +5783,7 @@ function EngineeringPageInner() {
       };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [systemPanelCount, config.defaultsApplied, config.userHasEditedInverters, subSystemCounts,
+  }, [isHydrated, systemPanelCount, config.defaultsApplied, config.userHasEditedInverters, subSystemCounts,
       pvOnStorageDc, _archServerRead, _graphHasPvCapableStorage]);
 
   // Auto-apply watcher (opt-in). Fires only when:
@@ -6362,7 +6451,24 @@ function EngineeringPageInner() {
         return { ...prev, inverters: [inv], ...LOCK };
       });
     } else {
-      const inv = newInverter(type);
+      const placeholder = newInverter(type);
+      // 🚨 THE FIRST PV INVERTER ON A PROJECT IS STRUNG BY THE ENGINE, not handed the factory 1 × 10.
+      // Adding it is the installer choosing the endpoint; the strings follow from it and Design's array.
+      const inv = config.inverters.length === 0 && totalPanels > 0
+        ? _buildInvCfg({
+            existingId: placeholder.id,
+            inverterId: placeholder.inverterId,
+            type,
+            strings: canonicalFleetStrings(
+              placeholder.inverterId, type, totalPanels,
+              (pvModule ?? getPanelById(placeholder.strings[0]?.panelId ?? '') ?? null) as any,
+              resolveDesignTempMinC(compliance.autoDetected, config.state),
+            ).map((n, i) => _buildStrCfg({
+              index: i, systemType: config.systemType, panelCount: n,
+              panelId: pvModule?.panelId ?? placeholder.strings[0]?.panelId,
+            })),
+          })
+        : placeholder;
       setConfig(prev => ({ ...prev, inverters: [...prev.inverters, inv], ...LOCK }));
       setExpandedInv(inv.id);
     }
@@ -7683,7 +7789,8 @@ function EngineeringPageInner() {
           dcConduitType:  config.conduitType,
           // Use ComputedSystem OCPD per string
           dcOCPD:         cs.isString ? (cs.strings[0]?.ocpdAmps ?? sc?.ocpdPerString ?? 20) : 20,
-          inverterModel:  invData ? `${invData.manufacturer} ${invData.model}` : 'String Inverter',
+          // No inverter ⇒ no name: the route prints INVERTER NOT SELECTED (never "String Inverter").
+          inverterModel:  invData ? `${invData.manufacturer} ${invData.model}` : undefined,
           inverterManufacturer: invData?.manufacturer || '',
           // 🚨 THE IDENTITY, NOT A DISPLAY STRING. `inverterModel` above is a
           // CONCATENATION — "Enphase IQ8M" — built for a drawing label. The
@@ -7716,12 +7823,14 @@ function EngineeringPageInner() {
           // overrideDeviceIds path. Empty string means auto-resolve.
           combinerId:     config.combinerId || undefined,
           acOutputKw,
-          inverterMaxDcV: invData?.maxDcVoltage || 600,
+          // 🚨 THE WINDOW OF THE CHOSEN INVERTER, OR NONE. `|| 600` / `|| 100` / `|| 2` posted a phantom
+          // inverter's window, and the route strung the array against it.
+          inverterMaxDcV: invData?.maxDcVoltage || undefined,
           // Inverter MPPT specs for string generation (used by SLD API's own string gen)
-          maxDcVoltage:   invData?.maxDcVoltage || 600,
-          mpptVoltageMin: invData?.mpptVoltageMin || 100,
-          mpptVoltageMax: invData?.mpptVoltageMax || 600,
-          mpptChannels:   invData?.mpptChannels || 2,
+          maxDcVoltage:   invData?.maxDcVoltage || undefined,
+          mpptVoltageMin: invData?.mpptVoltageMin || undefined,
+          mpptVoltageMax: invData?.mpptVoltageMax || undefined,
+          mpptChannels:   invData?.mpptChannels || undefined,
           maxInputCurrentPerMppt: invData?.maxInputCurrentPerMppt || invData?.maxInputCurrent,
           // Phase 13.4 — forward parallel-strings cap to the MPPT allocator.
           maxParallelStringsPerMppt: invData?.maxParallelStringsPerMppt,
@@ -7863,7 +7972,8 @@ function EngineeringPageInner() {
           // the SLD route can call sizeSystemFromBrand() and use the same
           // LayoutCandidate that the UI already displays. No PV inverter ⇒ no brand to size from
           // (the route drops both on a DC-coupled job too — canonicalSldProjection).
-          selectedBrand:      pvOnStorageDc ? undefined : config.selectedBrand,
+          // …and a brand is not equipment: with no PV inverter chosen there is nothing to size from.
+          selectedBrand:      pvOnStorageDc || !fleetEntryHasEndpoint(firstInv) ? undefined : config.selectedBrand,
           selectedInverterId: pvOnStorageDc ? undefined : firstInv?.inverterId,
           // The module the array is made of — the first string's when there is one, else the
           // Design array's (a retired fleet leaves no string to ask). On a DC-coupled job, the
@@ -8220,7 +8330,11 @@ function EngineeringPageInner() {
           // per-model estimate (Ray, 2026-09-25: 32 × IQ8+ is 3 branches).
           // Single-system only; hybrid subs size their own trunk plans.
           branchCount:      cs.isMicro && !subSystemCounts.isHybrid ? cs.acBranchCount : undefined,
-          stringCount:      firstInv?.type === 'micro' ? 0 : (sizingRecommendation?.strings?.length ?? config.inverters.reduce((s, inv) => s + inv.strings.length, 0)),
+          // 🚨 THE ENGINE'S STRINGS — the committed design's (`cs`): the canonical partition on a storage
+          // input, the fleet's on a chosen inverter, and NONE (0) while nothing is chosen for them to land
+          // on. This read the sizing RECOMMENDATION — a proposal for a brand the project may never have
+          // chosen — so a fresh project's BOM ordered string hardware for a partition nobody engineered.
+          stringCount:      firstInv?.type === 'micro' ? 0 : cs.stringCount,
           // v58.3 FIX: Compute inverterCount from sizingRecommendation when available.
           // When sizingRecommendation is null (e.g. CAD not yet loaded, systemPanelCount=0),
           // DO NOT fall back to config.inverters.length: for optimizer/string topology
@@ -9212,7 +9326,11 @@ function EngineeringPageInner() {
             // Never create N×1 strings for micro.
             if (_pcInvType === 'micro') {
               // v61.4 Phase 3: use builder — no raw string literals outside factory
-              setConfig(prev => ({
+              // 🚨 DECIDED FROM THE STATE IT WRITES, NOT FROM THIS CALLBACK'S CLOSURE. `config` here is
+              // the render that started the fetch — on a fresh project the pre-load factory fleet. This
+              // branch, chosen from that stale fleet, wrote ONE 37-module string onto the loaded
+              // inverter-less entry; the runtime guard then split it into the fresh project's 20 / 17.
+              setConfig(prev => prev.inverters[0]?.type !== 'micro' ? prev : ({
                 ...prev,
                 inverters: prev.inverters.map((inv, ii) => {
                   if (ii !== 0) return inv;
@@ -9255,6 +9373,8 @@ function EngineeringPageInner() {
               } else {
                 console.log('[CONFIG BUILD] CAD panel count update (user-controlled, no rearrange):', currentTotal, '→', layout.panelCount);
                 setConfig(prev => {
+                  // Only a fleet whose strings land on something has a partition to scale.
+                  if (!prev.inverters.every(inv => fleetEntryHasEndpoint(inv))) return prev;
                   const _oldTotal = prev.inverters.reduce((s, inv) => s + inv.strings.reduce((s2, str) => s2 + str.panelCount, 0), 0);
                   if (_oldTotal <= 0) return prev;
                   const newInverters = prev.inverters.map((inv) => {
@@ -9289,41 +9409,26 @@ function EngineeringPageInner() {
               }
             } else if (!_cadUserLocked) {
               // String / optimizer / hybrid / ecoflow topology.
-              // FIX 2: Use selectedBrand when inverterId is empty (avoids engine returning micro topology).
+              // 🚨 ONLY FOR A CHOSEN INVERTER. "FIX 2" sized an inverter-less fleet from `selectedBrand`
+              // (on a fresh project, the 'enphase' a premature Smart Defaults had stamped) and fell back
+              // to an even split capped at 14 — partitions for equipment nobody chose. No inverter ⇒ no
+              // partition: the module count is Design's and the strings wait for the endpoint.
               // FIX 3: Group resulting strings by inverterIndex → correct multi-inverter layout.
-              let _pcEngStrings: { panelCount: number; inverterIndex?: number }[] | null = null;
-              try {
-                const _pcSizingInput: Parameters<typeof sizeSystemFromBrand>[0] = {
-                  systemType: (config.systemType ?? 'roof') as any,  // honor roof/ground/fence, not hardcoded roof
-                  panelCount: _pcPc,
-                  panelWattage: _pcPanel?.watts ?? 400,
-                  panelVoc: _pcPanel?.voc ?? 49.6,
-                  panelTempCoeffVoc: _pcPanel?.tempCoeffVoc ?? -0.27,
-                  designTempMin: resolveDesignTempMinC(compliance.autoDetected, config.state),
-                  optimizerMaxOutputCurrent: 15.0,
-                };
-                // Prefer inverterId when set; fall back to brand to avoid empty-ID micro misfire
-                if (_pcInverterId) {
-                  _pcSizingInput.selectedInverterId = _pcInverterId;
-                } else if (config.selectedBrand) {
-                  _pcSizingInput.selectedBrand = config.selectedBrand;
-                }
-                const _pcResult = sizeSystemFromBrand(_pcSizingInput);
-                if (_pcResult.strings.length > 0 && _pcResult.topology !== 'micro') {
-                  _pcEngStrings = _pcResult.strings; // includes inverterIndex
-                }
-              } catch { /* fall through to fallback */ }
+              // The writer rule lives in lib/system/fleetStringWriters.ts (`resizeFleetStrings`).
+              const _pcEngStrings = resizeFleetStrings({
+                inverter: _pcInv0,
+                moduleCount: _pcPc,
+                systemType: config.systemType ?? 'roof',  // honor roof/ground/fence, not hardcoded roof
+                panel: _pcPanel,
+                designTempMin: resolveDesignTempMinC(compliance.autoDetected, config.state),
+                selectedBrand: config.selectedBrand,
+              });
 
               if (!_pcEngStrings) {
-                // Fallback: even split capped at 14 (datasheet ceiling for 380V × 15A optimizers)
-                const _pcPps = Math.min(_pcPc, 14);
-                const _pcSc  = Math.max(1, Math.ceil(_pcPc / _pcPps));
-                _pcEngStrings = Array.from({ length: _pcSc }, (_, i) => ({
-                  panelCount: i === _pcSc - 1 ? _pcPc - _pcPps * (_pcSc - 1) : _pcPps,
-                  inverterIndex: 0,
-                }));
-              }
-
+                // No endpoint, or the engine could not size it: write nothing (never an even split).
+                console.log('[EngineeringPage] PANEL COUNT FIX: no string partition written —',
+                  fleetEntryHasEndpoint(_pcInv0) ? 'the engine produced no layout' : STRINGING_PENDING.toLowerCase());
+              } else {
               // FIX 3: Group by inverterIndex — mirror what applySizingRecommendation does
               const _pcByInv = new Map<number, { panelCount: number }[]>();
               for (const s of _pcEngStrings) {
@@ -9334,6 +9439,9 @@ function EngineeringPageInner() {
               const _pcFinalByInv = _pcByInv;
 
               setConfig(prev => {
+                // Sized for the closure's inverter: written only onto that same inverter, never onto a
+                // fleet that has since changed under this callback (or has nothing to land on).
+                if (prev.inverters.length === 0 || prev.inverters[0]?.inverterId !== _pcInverterId) return prev;
                 const invCount = Math.max(prev.inverters.length, _pcFinalByInv.size);
                 // v61.3: route through central builder for all rebuilt inverters
                 const newInverters = Array.from({ length: invCount }, (_, idx) => {
@@ -9371,6 +9479,7 @@ function EngineeringPageInner() {
                 console.log('[EngineeringPage] Auto-recalculating after panel count sync');
                 runCalc();
               }, 400);
+              }
             }
         }
 
@@ -10994,6 +11103,9 @@ function EngineeringPageInner() {
             // strings are the engine's (sized against the storage's PV inputs), not the empty fleet's.
             // No standalone PV inverter ⇒ there is no PV AC rating and no DC/AC ratio to state.
             const _noPvInverter = electrical?.solarCoupling === 'dc-coupled-storage';
+            // Nothing chosen for the strings to land on (not DC coupled, no PV inverter, no micro).
+            const _stringingPending = !_noPvInverter && !subSystemCounts.isHybrid
+              && !config.inverters.some(inv => fleetEntryHasEndpoint(inv));
             const _branchCount = cs.isMicro
               ? cs.acBranchCount
               // On a DC-coupled job the fleet's stored layout is not the design: the strings are the
@@ -11168,6 +11280,15 @@ function EngineeringPageInner() {
                           </div>
                           <div className="text-[10px] text-slate-400">PV DC inputs · no PV inverter</div>
                           <div className="text-[9px] font-bold uppercase tracking-wide text-emerald-400">{_branchCount} strings</div>
+                        </div>
+                      ) : _stringingPending ? (
+                        <div data-testid="flow-node-pv-inverter-pending"
+                          className="flex flex-col items-center gap-1.5 px-3 py-2.5 rounded-xl border border-dashed border-slate-600/60 bg-slate-800/40 text-slate-300 min-w-[90px]"
+                          title={NO_ENDPOINT_REASON}>
+                          <Cpu size={18} className="text-slate-500" />
+                          <div className="text-xs font-bold text-white text-center">PV inverter</div>
+                          <div className="text-[10px] text-slate-400">Not chosen</div>
+                          <div className="text-[9px] font-bold uppercase tracking-wide text-amber-300/80">Strings pending</div>
                         </div>
                       ) : (
                       <div className={`flex flex-col items-center gap-1.5 px-3 py-2.5 rounded-xl border cursor-pointer hover:brightness-110 transition-all min-w-[90px] ${
@@ -11655,7 +11776,10 @@ function EngineeringPageInner() {
                       <div className="flex flex-wrap gap-2 mb-3 p-2.5 rounded-lg bg-slate-900/50 border border-slate-700/40">
                         <div className="flex items-center gap-1.5 text-xs">
                           <span className="text-slate-500">AC:</span>
-                          <span className="text-emerald-400 font-bold">{totalInverterKw} kW</span>
+                          {/* No PV inverter chosen ⇒ no PV AC rating — never "0.00 kW" as if one were rated. */}
+                          {config.inverters.some(inv => fleetEntryHasEndpoint(inv)) || electrical?.solarCoupling === 'dc-coupled-storage'
+                            ? <span className="text-emerald-400 font-bold">{totalInverterKw} kW</span>
+                            : <span className="text-slate-400" data-testid="pv-ac-not-established">Not established — no PV inverter chosen</span>}
                         </div>
                         <span className="text-slate-700">·</span>
                         <div className="flex items-center gap-1.5 text-xs">
@@ -11974,6 +12098,34 @@ function EngineeringPageInner() {
                             });
                             updates.inverters = updatedInverters;
                             }
+                          } else if (totalPanels > 0) {
+                            // ══════════════════════════════════════════════════════════════
+                            // 🚨 NOTHING WAS CHOSEN BEFORE — THIS PICK IS THE ENDPOINT.
+                            //
+                            // A project with no PV inverter carries no fleet entry (and no partition),
+                            // so there is nothing to re-point: the entry is created here, for Design's
+                            // array, and its strings are derived for THIS inverter by the one string
+                            // engine (a micro carries its modules on one entry — devices, not strings).
+                            // ══════════════════════════════════════════════════════════════
+                            const _brandProf = getBrandProfileByInverterId(invId)
+                              ?? (payload.brand ? getBrandProfile(payload.brand) : undefined);
+                            const _newInvId = isOptimizer
+                              ? (_brandProf?.supportedInverterModels?.slice(-1)[0]?.equipmentDbId ?? invId)
+                              : invId;
+                            const _s0 = newString(0, config.systemType);
+                            const _arrayPanelId = pvModule?.panelId ?? canonicalPanelId ?? _s0.panelId;
+                            const _counts = isMicro ? [totalPanels] : canonicalFleetStrings(
+                              _newInvId, invType, totalPanels,
+                              (pvModule ?? getPanelById(_arrayPanelId) ?? null) as any,
+                              resolveDesignTempMinC(compliance.autoDetected, config.state));
+                            updates.inverters = [_buildInvCfg({
+                              inverterId: _newInvId,
+                              type:       invType as InverterConfig['type'],
+                              strings:    _counts.map((n, i) => _buildStrCfg({
+                                index: i, systemType: config.systemType, panelCount: n, panelId: _arrayPanelId,
+                              })),
+                              ...(isOptimizer && _newInvId !== invId ? { optimizerPeripheralId: invId } : {}),
+                            })];
                           }
                         } else if (payload.selections.inverterExplicitlyNone) {
                           // ══════════════════════════════════════════════════════════════════
@@ -12647,6 +12799,22 @@ function EngineeringPageInner() {
                             );
                           }
                           const inv = _rowInv;
+                          // 🚨 NO PHANTOM INVERTER ROW. An entry with no PV inverter is the "choose a PV
+                          // inverter" state: it is not a "String Inverter" with a blank model and a
+                          // panels / kW / strings summary (the fresh project's "2 strings (20/17)").
+                          if (!fleetEntryHasEndpoint(inv)) {
+                            return (
+                              <React.Fragment key={inv.id}>
+                                {_rowSubFirst && _rowSubKey ? renderSubSystemHeader(_rowSubKey) : null}
+                                <div data-testid="inv-fleet-row-pending"
+                                     className="rounded-xl border border-dashed border-slate-700/60 px-4 py-3 text-xs text-slate-400">
+                                  <span className="font-semibold text-slate-300">PV inverter not chosen</span>
+                                  {' · '}{pvArray.moduleCount ?? 0} modules{' · '}
+                                  <span className="text-amber-200">{STRINGING_PENDING}</span>
+                                </div>
+                              </React.Fragment>
+                            );
+                          }
                           const _cardCs = (_rowSubKey ? computedMulti.subSystems[_rowSubKey] : null) ?? cs;
                           const invData = getInvById(inv.inverterId, inv.type) as any;
                           const invList = inv.type === 'micro'
@@ -12847,23 +13015,43 @@ function EngineeringPageInner() {
                                               <div className="text-slate-400">Min/string: <span className="text-white font-bold">{minPPS}</span></div>
                                               <div className="text-slate-400">Rec: <span className="text-amber-400 font-bold">{clampedRec}</span></div>
                                               {(() => {
+                                                // 🚨 THE ENGINE'S PARTITION, NOT A CONVENIENCE SPLIT. This was
+                                                // `round(total / rec)` strings of `ceil(total / n)` — 10/10/10/7 for
+                                                // 37 × 440 W, a 589 V string — computed beside the very bounds
+                                                // that refuse it. The button now applies `canonicalStringPartition`
+                                                // for THIS inverter's published window, or says why it cannot.
                                                 const totalPanelsForInv = inv.strings.reduce((s, str) => s + str.panelCount, 0);
-                                                const autoStrings = Math.max(1, Math.round(totalPanelsForInv / clampedRec));
-                                                const autoPerStr = Math.ceil(totalPanelsForInv / autoStrings);
-                                                const autoLastStr = totalPanelsForInv - (autoStrings - 1) * autoPerStr;
+                                                const _autoRes = canonicalStringPartition({
+                                                  moduleCount: totalPanelsForInv,
+                                                  module: firstStrPanel.vmp && firstStrPanel.isc && firstStrPanel.watts
+                                                    ? { voc: firstStrPanel.voc, vmp: firstStrPanel.vmp, isc: firstStrPanel.isc,
+                                                        imp: firstStrPanel.imp ?? firstStrPanel.isc, watts: firstStrPanel.watts,
+                                                        tempCoeffVoc: firstStrPanel.tempCoeffVoc ?? -0.27, tempCoeffVmp: firstStrPanel.tempCoeffVmp,
+                                                        maxSeriesFuseRating: firstStrPanel.maxSeriesFuseRating }
+                                                    : null,
+                                                  endpoint: resolveStringEndpoint({ inverterId: inv.inverterId, inverterType: inv.type }),
+                                                  designTempMin: designTemp,
+                                                });
+                                                const autoCounts = _autoRes.status === 'ENGINEERED' ? _autoRes.strings : [];
+                                                const autoLabel = autoCounts.length > 0
+                                                  ? `${autoCounts.length} string${autoCounts.length === 1 ? '' : 's'} (${autoCounts.join('/')})`
+                                                  : null;
                                                 return (
                                                   <div className="mt-1.5 pt-1 border-t border-slate-700/30">
-                                                    <div className="text-slate-400 mb-1">
-                                                      Auto: <span className="text-amber-300 font-bold">{autoStrings}×{autoPerStr}</span>
-                                                      {autoLastStr !== autoPerStr && autoStrings > 1 ? <span className="text-slate-500"> (last: {autoLastStr})</span> : null}
+                                                    <div className="text-slate-400 mb-1" data-testid="auto-string-result">
+                                                      Auto: {autoLabel
+                                                        ? <span className="text-amber-300 font-bold">{autoLabel}</span>
+                                                        : <span className="text-rose-300">{'reason' in _autoRes ? _autoRes.reason : 'no layout'}</span>}
                                                     </div>
                                                     <button
+                                                      disabled={autoCounts.length === 0}
                                                       onClick={() => {
+                                                        if (autoCounts.length === 0) return;
                                                         // v61.5: use _buildStrCfg for each new string
-                                                        const newStrings = Array.from({ length: autoStrings }, (_, i) =>
+                                                        const newStrings = autoCounts.map((n, i) =>
                                                           _buildStrCfg({
                                                             index:          i,
-                                                            panelCount:     i === autoStrings - 1 ? autoLastStr : autoPerStr,
+                                                            panelCount:     n,
                                                             panelId:        inv.strings[0]?.panelId ?? defaultPanelForSystemType(config.systemType),
                                                             wireGauge:      inv.strings[0]?.wireGauge,
                                                             wireLength:     inv.strings[0]?.wireLength ?? 50,
@@ -12874,11 +13062,11 @@ function EngineeringPageInner() {
                                                           })
                                                         );
                                                         updateInverter(inv.id, { strings: newStrings } as any);
-                                                        logDecision('Auto-String Applied', `${autoStrings} strings × ${autoPerStr} panels (NEC 690.7 @ ${designTemp}°C)`, 'auto');
+                                                        logDecision('Auto-String Applied', `${autoLabel} — canonical string engine (NEC 690.7 @ ${designTemp}°C)`, 'auto');
                                                       }}
-                                                      className="w-full mt-1 px-2 py-1 bg-green-500/20 border border-green-500/40 rounded text-xs text-green-300 hover:bg-green-500/30 transition-colors font-semibold"
+                                                      className="w-full mt-1 px-2 py-1 bg-green-500/20 border border-green-500/40 rounded text-xs text-green-300 hover:bg-green-500/30 transition-colors font-semibold disabled:opacity-40"
                                                     >
-                                                      ⚡ Auto-Apply: {autoStrings}×{autoPerStr}
+                                                      ⚡ Auto-Apply{autoLabel ? `: ${autoLabel}` : ''}
                                                     </button>
                                                   </div>
                                                 );

@@ -128,10 +128,15 @@ export interface CanonicalSldProjection {
    * the request body, so a caller cannot post one.
    */
   batteryCircuit: { continuousOutputA: number; ocpdA: number } | null;
+  /**
+   * The storage's published PV input window when the PV lands on it (DC coupled), else null — the
+   * receiving endpoint the routes hand the one string engine (lib/electrical/canonicalStrings.ts).
+   */
+  dcLimits?: import('@/lib/electrical/dcStringLimits').DcStringLimits | null;
 }
 
 const NOTHING: CanonicalSldProjection = {
-  refusal: null, applied: false, coupling: null, revision: null, pvArray: null, batteryCircuit: null,
+  refusal: null, applied: false, coupling: null, revision: null, pvArray: null, batteryCircuit: null, dcLimits: null,
 };
 
 /**
@@ -520,5 +525,6 @@ export async function projectCanonicalArchitecture(
     revision: loaded!.revision,
     pvArray,
     batteryCircuit: batteryCircuitOf(model.topology),
+    dcLimits: dcLim,
   };
 }

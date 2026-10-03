@@ -22,7 +22,7 @@ import { renderSLDProfessional, SLDProfessionalInput } from '@/lib/sld-professio
 import { sanitizeClientSourceBranches } from '@/lib/permit/utils/sldAdapter';
 import { microBranchCount } from '@/lib/permit/utils/branching';
 import { getThermalDesignBasis } from '@/lib/permit/utils/designTemps';
-import { unselectedInverterLabel } from '@/lib/permit/utils/helpers';
+import { unselectedInverterLabel, isInverterUnselectedMarker } from '@/lib/permit/utils/helpers';
 import { TOPOLOGY_UNRESOLVED_TOKEN, pvArrayInputRequired } from '@/lib/electrical/canonicalSldProjection';
 // The adopted NEC edition (canonical authority) and the ONE rooftop-adder gate that
 // turns on it. NEC 310.15(B)(3)(c) was deleted for PV by NEC 2017 690.31(A).
@@ -56,6 +56,7 @@ import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 import { parseRunId } from '@/lib/computed-multi-system';
 import { combinerBasisIsDecided } from '@/lib/combinerSelection/service';
 import { readStoredCombinerSelection, effectiveCombinerId, isReadableProjectId } from '@/lib/combinerSelection/storedRead';
+import { STRINGING_PENDING } from '@/lib/electrical/canonicalStrings';
 
 // ── Wave 3.7 → Wave 5A: LEGACY FALLBACK ARMOR ────────────────────────────────
 // Since Wave 5A the primary hybrid path is `body.sources` (validated by
@@ -112,6 +113,8 @@ export async function POST(req: NextRequest) {
     // One battery's AC circuit as the stored graph records it (its commissioned output setting) —
     // read from the store by the projection, never taken from the request.
     let _graphBatteryCircuit: { continuousOutputA: number; ocpdA: number } | null = null;
+    // The storage's PV input window when the PV lands on it — the receiving endpoint, or null.
+    let _canonicalDcLimits: import('@/lib/electrical/dcStringLimits').DcStringLimits | null = null;
     // 🚨 WHAT THE PAGE ACTUALLY SENT, captured BEFORE anything overwrites it. The architecture
     // projection below mutates `body` in place, so reading `body.topologyType` afterwards reports
     // the override rather than the request — which would make the response claim agreement that
@@ -163,6 +166,7 @@ export async function POST(req: NextRequest) {
         if (_proj.refusal) return NextResponse.json(_proj.refusal, { status: 409 });
         _canonicalCoupling = _proj.coupling;
         _graphBatteryCircuit = _proj.batteryCircuit;
+        _canonicalDcLimits = _proj.dcLimits ?? null;
       } catch (e) {
         console.warn('[sld/POST] service topology unreadable; drawing the legacy service tail', e);
       }
@@ -608,6 +612,32 @@ export async function POST(req: NextRequest) {
     // Override acOutputKw when the sizing engine gives a cleaner value
     const acOutputKw: number = layoutTotalAcKw ?? _bodyAcOutputKw;
 
+    // ══════════════════════════════════════════════════════════════════
+    // 🚨 NO STRINGS WITHOUT SOMETHING FOR THEM TO LAND ON (closure brief §2).
+    //
+    // No PV inverter, no microinverter, no brand to size one from, and no storage PV input window:
+    // the generator below strung the array against its 600 V / 100–600 V / 2-MPPT defaults — a
+    // partition for an inverter nobody chose — and drew it. Now the sheet draws the array with its
+    // stringing pending, and the engine states no strings and no PV AC circuit
+    // (lib/electrical/canonicalStrings.ts).
+    // ══════════════════════════════════════════════════════════════════
+    const _sldStringsPending = !isMicro
+      && !(_selectedInvId || (body.inverterId != null && String(body.inverterId).trim()) || _selectedBrand)
+      && !(_canonicalCoupling === 'dc-coupled-storage' && _canonicalDcLimits);
+    if (_sldStringsPending) {
+      // A name with no id behind it is not equipment: the sheet says INVERTER NOT SELECTED, never a
+      // posted "String Inverter".
+      if (inverterModel && !isInverterUnselectedMarker(inverterModel)) {
+        console.warn(`[sld/POST] posted inverterModel '${inverterModel}' names no chosen inverter — not drawn.`);
+      }
+      inverterModel = unselectedInverterLabel();
+      inverterManufacturer = '';
+      console.warn('[sld/POST] ' + STRINGING_PENDING + ' — no PV inverter or DC receiving equipment is '
+        + 'chosen; no string partition is derived or drawn'
+        + (Array.isArray(body.stringPanelCounts) || Array.isArray(body.stringDetails) || Number(body.totalStrings) > 0
+          ? ' (the posted string layout is not consumed).' : '.'));
+    }
+
     let stringResult: ReturnType<typeof generateStringConfig> | null = null;
     let mpptAllocation = '';
     let panelsPerString = 1;
@@ -617,7 +647,7 @@ export async function POST(req: NextRequest) {
     // sheet. The array is carried end to end and the two scalars become its projections.
     let stringPanelCounts: number[] = [];
 
-    if (!isMicro) {
+    if (!isMicro && !_sldStringsPending) {
       const moduleSpecs = moduleSpecsFromRegistry({
         voc: panelVoc, vmp: panelVmp, isc: panelIsc, imp: panelImp,
         watts: panelWatts, tempCoeffVoc, tempCoeffVmp,
@@ -696,7 +726,7 @@ export async function POST(req: NextRequest) {
       : (layoutInverterCount ?? Number(body.deviceCount) ?? 1);
 
     // Resolved total strings: prefer sizing engine string count
-    const resolvedTotalStrings = !isMicro
+    const resolvedTotalStrings = !isMicro && !_sldStringsPending
       ? (layoutStrings ? layoutStrings.length : (stringResult?.totalStrings ?? 1))
       : 0;
 
@@ -843,6 +873,7 @@ export async function POST(req: NextRequest) {
         // happened to know to. `lib/plan-set/permit-system-model.ts` did not, so the sealed package
         // carried the AC conductor of equipment that is not in the design.
         solarCoupling:                 _canonicalCoupling,
+        pvEndpointUnresolved:          _sldStringsPending,
         optimizerMaxOutputCurrent,
         totalPanels:                   totalModules,
         // Pass resolved string count so computeSystem() uses the same
@@ -1166,7 +1197,9 @@ export async function POST(req: NextRequest) {
       branchOcpdAmps:          isMicro ? (Number(body.branchOcpdAmps) || undefined) : undefined,
 
       // String-specific
-      stringDetails:           !isMicro ? (body.stringDetails ?? undefined) : undefined,
+      stringDetails:           !isMicro && !_sldStringsPending ? (body.stringDetails ?? undefined) : undefined,
+      // The array is drawn; its stringing is stated as pending — no partition (closure brief §2).
+      ...(_sldStringsPending ? { stringingPending: true } : {}),
 
       // ComputedSystem.runs — single source of truth for conduit schedule
       runs:                    computedRuns,
@@ -1314,6 +1347,8 @@ export async function POST(req: NextRequest) {
       layoutSource: sizingResult ? (layoutCandidate ? 'layoutCandidate' : 'sizingResult') : 'body',
       sldDegraded,
       topology: input.topologyType,
+      // Nothing chosen for the strings to land on ⇒ no partition was derived or drawn (closure brief §2).
+      stringingPending: _sldStringsPending,
       stringConfig: isMicro ? null : (stringResult ? {
         totalStrings:         resolvedTotalStrings,
         panelsPerString,

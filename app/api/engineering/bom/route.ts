@@ -31,6 +31,7 @@ import { applyDistributorPricing, type DistributorPriceOverride } from '@/lib/bo
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 import { readStoredCombinerSelection, effectiveCombinerId, isReadableProjectId } from '@/lib/combinerSelection/storedRead';
 import { postedBomArray, projectPvArrayOntoBom, type BomPvArrayReport } from '@/lib/electrical/outputPvArrayProjection';
+import { STRINGING_PENDING } from '@/lib/electrical/canonicalStrings';
 
 // ── Helper: Inject structural items into V4 result (preserves manufacturer/model/partNumber) ──
 // This is the MASTER TASK merge: V4 owns electrical, structural profile owns structural.
@@ -471,6 +472,28 @@ export async function POST(req: NextRequest) {
         _arrayWarnings.push(`${f.fact} not established — ${f.why} Owner: ${f.owner}.`);
       }
 
+      // ══════════════════════════════════════════════════════════════════════
+      // 🚨 NO STRINGS WITHOUT SOMETHING FOR THEM TO LAND ON (closure brief §2).
+      //
+      // `Number(body.stringCount) || 2` handed a project with no PV inverter, no microinverter and no
+      // storage PV input TWO strings — string labels, connectors and conductors ordered for a partition
+      // nobody engineered — and a posted stale partition (the fresh project's 20 / 17) was consumed as
+      // is. With no receiving equipment the string count is ZERO and the gap is reported.
+      // ══════════════════════════════════════════════════════════════════════
+      const _bomTopo = String(body.topologyType ?? '').toUpperCase();
+      const _bomStringsPending = !resolvedInverterId
+        && !/MICRO|AC_MODULE/.test(_bomTopo)
+        && _electrical?.model?.solarCoupling !== 'dc-coupled-storage'
+        && _electrical?.model?.solarCoupling !== 'storage-only';
+      if (_bomStringsPending) {
+        if (Number(body.stringCount) > 0) {
+          console.warn(`[bom/POST] posted stringCount=${body.stringCount} not consumed — no PV inverter or DC `
+            + 'receiving equipment is chosen, so there is no string partition.');
+        }
+        _arrayWarnings.push(`${STRINGING_PENDING} — no PV inverter or DC receiving equipment is chosen, so no `
+          + 'string hardware is ordered.');
+      }
+
       const input: BOMGenerationInputV4 = {
         inverterId:         resolvedInverterId,
         optimizerId:        resolvedOptimizerId,
@@ -507,7 +530,7 @@ export async function POST(req: NextRequest) {
       // Micro AC-branch count from the client's computeSystem (the SLD's
       // branches). Absent ⇒ the trunk-cable resolver's per-model estimate.
       branchCount:        Number(body.branchCount) > 0 ? Number(body.branchCount) : undefined,
-      stringCount:       Number(body.stringCount)        || 2,
+      stringCount:       _bomStringsPending ? 0 : (Number(body.stringCount) || 2),
       // FIX v57.4: inverterCount safety guard.
       // For micro topology (stringCount=0), inverterCount is always 1 (system-level).
       // For optimizer topology (STRING_WITH_OPTIMIZER), inverterCount is the number

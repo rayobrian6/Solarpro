@@ -33,6 +33,8 @@ export interface DcStringLimits {
   mpptVoltageMax: number;
   /** Maximum Imp per MPPT, per unit. */
   maxInputCurrentPerMppt: number;
+  /** Maximum Isc per MPPT, per unit (the lowest any unit publishes). */
+  maxIscPerMpptA?: number;
   /** 🚨 CHANNELS DO add up: every cabinet's MPPTs are available to the array. */
   mpptChannels: number;
   /** Aggregate PV the storage will accept, in kW STC. */
@@ -78,6 +80,8 @@ export function dcStringLimits(
     mpptVoltageMin: first.mpptVdc[0],
     mpptVoltageMax: first.mpptVdc[1],
     maxInputCurrentPerMppt: first.maxImpPerMpptA,
+    ...(units.every(u => typeof u.pvInputLimits!.maxIscPerMpptA === 'number')
+      ? { maxIscPerMpptA: Math.min(...units.map(u => u.pvInputLimits!.maxIscPerMpptA)) } : {}),
     mpptChannels: first.mppts * units.length,
     maxStcKw: first.maxStcKw * units.length,
     unitCount: units.length,

@@ -28,6 +28,7 @@
 // ============================================================
 
 import { getBrandProfileByInverterId } from './brandProfiles';
+import { fleetEntryHasEndpoint } from '@/lib/electrical/canonicalStrings';
 import { sizeSystemFromBrand, type SizingInput } from './sizingEngine';
 import {
   buildStringConfig,
@@ -72,6 +73,11 @@ export function getMaxPanelsPerString(inverterId: string): number {
  */
 export function isElectricallyInvalid(inv: InverterConfig): boolean {
   if (MICRO_TYPES.has(inv.type)) return false; // micro: single string is always valid
+  // 🚨 NOTHING TO LAND ON ⇒ NOTHING TO REPAIR. An entry whose inverter the catalogue does not hold
+  // (an empty id on a fresh project) has no input window, so it has no string partition to be wrong —
+  // it is the "choose a PV inverter" state. Treating it as a 1×N violation is what split a fresh
+  // 37-module project into 20 / 17 at CONSERVATIVE_MAX_PANELS_PER_STRING (closure brief §2).
+  if (!fleetEntryHasEndpoint(inv)) return false;
   if (inv.strings.length !== 1) return false;  // only 1×N is the known violation pattern
   const totalPanels = inv.strings[0].panelCount;
   if (totalPanels <= 1) return false;           // trivial / empty — not this bug
@@ -116,8 +122,10 @@ export function repairElectricallyInvalidInverter(
     const result = sizeSystemFromBrand(sizingInput);
 
     if (result.strings.length === 0) {
-      // Engine returned empty strings — fallback: even split at maxPanelsPerString
-      return repairByEvenSplit(inv, totalPanels);
+      // 🚨 NO CONVENIENCE SPLIT. This fell back to an even split at the brand's (or a "conservative"
+      // 20-module) ceiling — a partition no engine derived against the inverter's window. The
+      // violation is left visible instead; the installer re-strings through the engine.
+      return inv;
     }
 
     // Group strings by inverterIndex (the result may span multiple inverters,
@@ -152,46 +160,10 @@ export function repairElectricallyInvalidInverter(
     });
 
   } catch (err) {
-    // Sizing engine threw — use even-split fallback
-    console.warn('[electricalNormalize] sizeSystemFromBrand failed, using even split:', err);
-    return repairByEvenSplit(inv, totalPanels);
+    // The engine threw: keep the inverter as it is — never an invented even split (see above).
+    console.warn('[electricalNormalize] sizeSystemFromBrand failed; the layout is left as it is:', err);
+    return inv;
   }
-}
-
-/**
- * Fallback repair: even split at maxPanelsPerString ceiling.
- */
-function repairByEvenSplit(inv: InverterConfig, totalPanels: number): InverterConfig {
-  const max = Math.min(getMaxPanelsPerString(inv.inverterId), CONSERVATIVE_MAX_PANELS_PER_STRING);
-  const stringCount = Math.ceil(totalPanels / max);
-  const baseStr = inv.strings[0];
-
-  const strings: StringConfig[] = Array.from({ length: stringCount }, (_, i) => {
-    const remaining = totalPanels - max * i;
-    return buildStringConfig({
-      index:          i,
-      existingId:     i === 0 ? baseStr?.id : undefined,
-      panelCount:     Math.min(max, remaining),
-      panelId:        baseStr?.panelId,
-      wireGauge:      baseStr?.wireGauge,
-      wireLength:     baseStr?.wireLength,
-      tilt:           baseStr?.tilt,
-      azimuth:        baseStr?.azimuth,
-      roofType:       baseStr?.roofType as string,
-      mountingSystem: baseStr?.mountingSystem,
-    });
-  });
-
-  return buildInverterConfig({
-    existingId:            inv.id,
-    inverterId:            inv.inverterId,
-    type:                  inv.type,
-    strings,
-    optimizerPeripheralId: inv.optimizerPeripheralId,
-    deviceRatioOverride:   inv.deviceRatioOverride,
-    // Wave 3 (I-2 corollary): repair never strips the subsystem tag.
-    subSystemKey:          (inv as { subSystemKey?: 'roof' | 'ground' | 'fence' }).subSystemKey,
-  });
 }
 
 // ── Config-level normalizer ───────────────────────────────────────────────────

@@ -35,6 +35,7 @@ import type { SolarCoupling } from '@/lib/electrical/serviceTopology';
 import type { EquipmentDecision, SystemConfigInterview } from '@/lib/electrical/systemConfigInterview';
 import { findInterviewItem } from '@/lib/electrical/systemConfigPlacement';
 import { invertingUnits, recommendStringAssignment, unitDisplayLabels } from '@/lib/electrical/storageStringAssignment';
+import { STRINGING_PENDING } from '@/lib/electrical/canonicalStrings';
 import {
   ProvenanceChip, SystemConfigModal, type ApplyAnswer, type ItemEditorContext,
 } from '@/components/engineering/systemConfig/ItemEditor';
@@ -81,6 +82,10 @@ export function InvertersStringsDecisions(props: InvertersStringsDecisionsProps)
   const deferToBanner = pvInverterState === 'CONFLICT' && !!props.conflictResolvedAbove && hasPv;
   // A chosen inverter is stated by the fleet rows below; only an undecided / None / conflicting one here.
   const showInverterLine = !!inverterItem && hasPv && pvInverterState !== 'SELECTED' && !deferToBanner;
+  // 🚨 MODULES KNOWN ≠ STRINGS KNOWN. With nothing chosen for the strings to land on, the card states the
+  // array and that its stringing is pending — never a partition (closure brief §2).
+  const stringingPending = hasPv && !dcCoupledNoInverter && !deferToBanner
+    && pvInverterState !== 'SELECTED' && pvInverterState !== 'CONFLICT';
   const showConnection = !!connectionItem && !deferToBanner;
   // In conflict the coupling on file is one side of the dispute: nothing is pre-selected, either records.
   const connConflict = connectionItem?.state === 'fails';
@@ -121,7 +126,7 @@ export function InvertersStringsDecisions(props: InvertersStringsDecisionsProps)
     return ok;
   };
 
-  if (!showInverterLine && !showConnection && !dcCoupledNoInverter && !deferToBanner) return null;
+  if (!showInverterLine && !showConnection && !dcCoupledNoInverter && !deferToBanner && !stringingPending) return null;
 
   return (
     <div data-testid="inv-decisions" className="mb-4 space-y-2">
@@ -144,6 +149,17 @@ export function InvertersStringsDecisions(props: InvertersStringsDecisionsProps)
           {inverterItem!.state === 'needs-answer' && inverterItem!.why ? (
             <span className="w-full text-[10px] text-slate-500">{inverterItem!.why}</span>
           ) : null}
+        </div>
+      ) : null}
+
+      {stringingPending ? (
+        <div data-testid="inv-stringing-pending" data-state="pending"
+             className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">PV strings</span>
+          <span className="text-slate-200">{pvArray.moduleCount} modules</span>
+          <span className="text-slate-600">·</span>
+          <span className="text-amber-200">{STRINGING_PENDING}</span>
+          <ProvenanceChip source="Not established" compact />
         </div>
       ) : null}
 

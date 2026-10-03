@@ -492,6 +492,15 @@ export interface ComputedSystemInput {
    * authoritative AC wiring by a permit builder that never heard about the suppression.
    */
   solarCoupling?: ComputedSolarCoupling | null;
+  /**
+   * 🚨 NOTHING IS CHOSEN FOR THE PV TO LAND ON (closure brief §2).
+   *
+   * True when the design has modules but no PV inverter, no microinverter and no DC receiving
+   * equipment (`resolveStringEndpoint` → none). Then the engine states no strings, no DC string run,
+   * no inverter AC output and no PV backfeed breaker — the 120% rule is NOT EVALUATED — instead of
+   * sizing them against a phantom 600 V / 7.6 kW inverter. Ignored for micro and DC-coupled inputs.
+   */
+  pvEndpointUnresolved?: boolean;
   totalPanels: number;
   // Optional override: when provided, this explicit string count is used
   // instead of recalculating from physics (NEC 690.7 Voc/maxPanelsPerString).
@@ -1105,6 +1114,8 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
   // a DC-coupled job was labelled STRING_INVERTER by the engine that then built its conductor runs.
   // `DC_COUPLED_BATTERY` was already in the TopologyType union and nothing could reach it.
   const _isDcCoupled = input.solarCoupling === 'dc-coupled-storage';
+  // No PV inverter, no micro, no DC receiving equipment: the PV conversion side does not exist yet.
+  const _pvEndpointUnresolved = input.pvEndpointUnresolved === true && !isMicro && !_isDcCoupled;
   const topology: TopologyType = _isDcCoupled
     ? 'DC_COUPLED_BATTERY'
     : isMicro
@@ -1159,7 +1170,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
 
   // ── Array Summary ──────────────────────────────────────────────────────────
   const totalDcKw = (input.totalPanels * input.panelWatts) / 1000;
-  const totalAcKw = isMicro
+  const totalAcKw = _pvEndpointUnresolved ? 0 : isMicro
     ? (input.totalPanels / input.inverterModulesPerDevice) * input.inverterAcKw
     : input.inverterAcKw;
   const dcAcRatio = calcDcAcRatio(totalDcKw, totalAcKw);
@@ -1253,7 +1264,22 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
   let lastStringPanels = input.totalPanels;
   const strings: StringCalc[] = [];
 
-  if (isString) {
+  if (isString && _pvEndpointUnresolved) {
+    // 🚨 NO STRINGS WITHOUT AN ENDPOINT. The auto-calculation below sized the array against a 600 V
+    // default nobody chose — the fresh project's 20 / 17 reached the Sizing tab this way.
+    stringCount = 0;
+    panelsPerString = 0;
+    lastStringPanels = 0;
+    issues.push({
+      severity: 'warning',
+      code: 'PV_ENDPOINT_UNRESOLVED',
+      message: 'Stringing pending equipment selection — no PV inverter or DC receiving equipment is chosen, '
+        + 'so the strings, the PV AC circuit and the 120% busbar check are not evaluated.',
+      necReference: 'NEC 690.7 / 705.12(B)',
+      autoFixed: false,
+      suggestion: 'Choose a PV inverter, or land the strings on a battery\'s own PV inputs.',
+    });
+  } else if (isString) {
     // v61.7: Honor explicit configStringPanelCounts from config.inverters[].strings.
     // This is the authoritative source — use actual per-string panel counts for NEC 690.7
     // Voc checks instead of deriving from totalPanels / stringCount (equal division).
@@ -1488,14 +1514,15 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
   // C7 fix: AC output is the sum of ALL inverter units, not just the primary.
   // Micro quantity is carried by microDeviceCount; string/optimizer/hybrid by inverterCount.
   const physicalInverterUnits = Math.max(1, input.inverterCount ?? 1);
-  const acOutputCurrentA = isMicro
+  // No PV inverter chosen ⇒ no PV AC output to size: 0, never the caller's placeholder rating.
+  const acOutputCurrentA = _pvEndpointUnresolved ? 0 : isMicro
     ? microDeviceCount * perMicroCurrentA
     : (input.inverterAcKw * physicalInverterUnits * 1000) / systemVoltageAC;
   const acContinuousCurrentA = acOutputCurrentA * 1.25; // NEC 690.8
   // The FEEDER OCPD — one conductor set carrying the whole AC output from the
   // combiner/inverter to the disconnect. Correctly sized on the AGGREGATE
   // current, and deliberately left that way.
-  const acOcpdAmps = nextStandardOCPD(acContinuousCurrentA);
+  const acOcpdAmps = _pvEndpointUnresolved ? 0 : nextStandardOCPD(acContinuousCurrentA);
 
   // ── NEC 705.12(B) total PV backfeed — Σ of the REAL breakers ──────────────
   //
@@ -1528,7 +1555,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
   //     whole-system inverter, so `inverterCount` cannot describe a mixed fleet).
   // N = 1 is numerically identical to the old line, so single-inverter goldens
   // do not move.
-  const perCircuitOutputAmps: number[] =
+  const perCircuitOutputAmps: number[] = _pvEndpointUnresolved ? [] :
     (input.interconnectingCircuitAmps?.length ?? 0) > 0
       ? input.interconnectingCircuitAmps!.filter(a => Number.isFinite(a) && a > 0)
       : isMicro
@@ -1692,12 +1719,18 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
         + 'card in System Config — it decides which article governs.',
     });
   }
-  const interconnectionPass = _interconUnresolved
+  // No PV inverter chosen ⇒ the PV backfeed breaker the 120% rule adds is unknown: NOT EVALUATED.
+  if (_pvEndpointUnresolved && !_interconUnresolved) {
+    _interconnectionRefusal =
+      'NEC 705.12(B) NOT EVALUATED — no PV inverter or DC receiving equipment is chosen, so the PV '
+      + 'backfeed breaker the 120% rule adds is not known. Choose the equipment the strings land on.';
+  }
+  const interconnectionPass = (_interconUnresolved || _pvEndpointUnresolved)
     ? false  // not evaluated; see `interconnectionRefusal` on the result
     : _isSupplySideTap
       ? true  // NEC 705.11: supply-side tap — no busbar loading concern
       : (totalBackfeedA + input.mainPanelAmps) <= (input.panelBusRating * 1.2);
-  if (!interconnectionPass && !_interconUnresolved) {
+  if (!interconnectionPass && !_interconUnresolved && !_pvEndpointUnresolved) {
     // Use correct terminology based on interconnection method
     const _interconLabel = (_interconMethodRaw.includes('BACKFED') || _interconMethodRaw.includes('BREAKER'))
       ? 'backfed breaker'
@@ -2023,7 +2056,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
       true,
       '#10 AWG'
     );
-    runs.push(makeRunSegment('DC_STRING_RUN', 'DC STRING RUN (PV Wire)', 'PV ARRAY', 'DC DISCONNECT', {
+    if (!_pvEndpointUnresolved) runs.push(makeRunSegment('DC_STRING_RUN', 'DC STRING RUN (PV Wire)', 'PV ARRAY', 'DC DISCONNECT', {
       sourceTerminal: 'OUT',          // PV string output
       destTerminal:   'LINE',         // DC Disconnect LINE (PV array) side
       conductorCount: stringCount * 2,  // stringCount × DC+ + stringCount × DC-
@@ -2083,7 +2116,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
         // to connect; the strings land on the storage's own PV inputs, which `DC_STRING_RUN` above
         // already carries. Previously this was constructed and then deleted by the SLD renderer's
         // exclusion list — which `lib/plan-set/permit-system-model.ts` never consulted.
-        if (!_isDcCoupled) runs.push(makeRunSegment('DC_DISCO_TO_INV_RUN', 'DC DISCO TO INVERTER', 'DC DISCONNECT', 'STRING INVERTER', {
+        if (!_isDcCoupled && !_pvEndpointUnresolved) runs.push(makeRunSegment('DC_DISCO_TO_INV_RUN', 'DC DISCO TO INVERTER', 'DC DISCONNECT', 'STRING INVERTER', {
           sourceTerminal: 'DISCO_LOAD',   // DC Disconnect LOAD (inverter) side
           destTerminal:   'DC_IN',        // String inverter DC input
           conductorCount: stringCount * 2,  // same bundle as DC_STRING_RUN
@@ -2131,7 +2164,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     // system model reads `INV_TO_DISCO_RUN` as the package's AC wiring
     // (lib/plan-set/permit-system-model.ts), so a sealed drawing carried the conductor of an
     // inverter that is not in the design.
-    if (!_isDcCoupled) runs.push(makeRunSegment('INV_TO_DISCO_RUN', 'INVERTER TO AC DISCO', 'STRING INVERTER', 'AC DISCONNECT', {
+    if (!_isDcCoupled && !_pvEndpointUnresolved) runs.push(makeRunSegment('INV_TO_DISCO_RUN', 'INVERTER TO AC DISCO', 'STRING INVERTER', 'AC DISCONNECT', {
       sourceTerminal: 'AC_OUT',       // String inverter AC output lug (right side)
       destTerminal:   'DISCO_LOAD',   // AC Disconnect LOAD terminals (PV/inverter side)
       conductorCount: 3, // L1 + L2 + N — 120/240V split-phase; neutral required per NEC 200.3
@@ -2188,7 +2221,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
   // 🚨 NOT BUILT ON A DC-COUPLED JOB. This is the standalone inverter's AC disconnect feeding the
   // service point. On a DC-coupled design the storage reaches the premises through its gateway, and
   // that path is authored in the service topology — not derived here from an inverter.
-  if (!_isDcCoupled) runs.push(makeRunSegment('DISCO_TO_METER_RUN',
+  if (!_isDcCoupled && !_pvEndpointUnresolved) runs.push(makeRunSegment('DISCO_TO_METER_RUN',
     _isSupplySideTap ? 'AC DISCO TO SUPPLY-SIDE TAP' : 'AC DISCO TO MSP',
     'AC DISCONNECT',
     _isSupplySideTap ? 'SUPPLY-SIDE TAP POINT' : 'MAIN SERVICE PANEL', {
@@ -2947,7 +2980,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
       { tag: 'METER-1', description: 'Production Meter', manufacturer: 'Utility', model: 'Revenue Grade Meter', qty: 1, rating: '240V AC', necReference: 'NEC 705.12' },
       { tag: 'MSP-1', description: 'Main Service Panel', manufacturer: input.mainPanelBrand, model: `${input.mainPanelAmps}A Panel`, qty: 1, rating: `${input.mainPanelAmps}A / 120/240V`, necReference: 'NEC 705.12(B)' },
     );
-  } else if (_isDcCoupled) {
+  } else if (_isDcCoupled || _pvEndpointUnresolved) {
     // ═════════════════════════════════════════════════════════════
     // 🚨 DC-COUPLED: THE INVERTER ROWS ARE NOT EMITTED AND THEN HIDDEN — THEY ARE NOT EMITTED.
     //
@@ -3124,13 +3157,13 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     // 🚨 A DC-COUPLED JOB HAS NO DC DISCONNECT AND NO STRING OCPD — the strings terminate on the
     // storage's own PV inputs, whose protection is internal to the listed equipment. Quoting one
     // orders hardware the installer will not fit.
-    dcDisconnect: (isMicro || _isDcCoupled) ? 0 : 1,
-    dcOcpd: (isMicro || _isDcCoupled) ? 0 : stringCount,
+    dcDisconnect: (isMicro || _isDcCoupled || _pvEndpointUnresolved) ? 0 : 1,
+    dcOcpd: (isMicro || _isDcCoupled || _pvEndpointUnresolved) ? 0 : stringCount,
     // Common
     // 🚨 AND NO AC DISCONNECT OR PRODUCTION METER FOR AN INVERTER THAT IS NOT IN THE DESIGN. These
     // two were unconditional — `acDisconnect: 1` on every system SolarPro has ever quoted.
-    acDisconnect: _isDcCoupled ? 0 : 1,
-    productionMeter: _isDcCoupled ? 0 : 1,
+    acDisconnect: (_isDcCoupled || _pvEndpointUnresolved) ? 0 : 1,
+    productionMeter: (_isDcCoupled || _pvEndpointUnresolved) ? 0 : 1,
     // Conduit — derived from segmentSchedule (canonical, 1.15 slack factor)
     conduitEMT: Math.round(segBOM.conduitByType['EMT'] ?? conduitQtyByType('EMT')),
     conduitPVC: Math.round((segBOM.conduitByType['PVC Sch 40'] ?? 0) + (segBOM.conduitByType['PVC Sch 80'] ?? 0) || conduitQtyByType('PVC Sch 40') + conduitQtyByType('PVC Sch 80')),

@@ -14,8 +14,8 @@
 // question and the drawing state the same strings.
 // ═══════════════════════════════════════════════════════════════════════════
 
-import { generateStringConfig, moduleSpecsFromRegistry, inverterSpecsFromRegistry } from '@/lib/string-generator';
 import type { DcStringLimits } from '@/lib/electrical/dcStringLimits';
+import { canonicalStringPartition, resolveStringEndpoint } from '@/lib/electrical/canonicalStrings';
 
 export interface StorageDcStringModule {
   voc: number; vmp: number; isc: number; imp: number; watts: number;
@@ -24,7 +24,11 @@ export interface StorageDcStringModule {
 
 /**
  * Panel counts per string, in the route's order, or null when nothing can be derived (no modules, or
- * the generator produced no strings). Never pads, never equal-divides.
+ * no layout fits the storage's published inputs). Never pads, never equal-divides.
+ *
+ * 🚨 A VIEW OF THE ONE STRING ENGINE (`canonicalStringPartition`, lib/electrical/canonicalStrings.ts):
+ * the same `generateStringConfig` run against the storage's window, now also checked string by string
+ * against it — a layout holding a string the inputs cannot take is never returned.
  */
 export function deriveStorageDcStrings(args: {
   moduleCount: number;
@@ -34,24 +38,11 @@ export function deriveStorageDcStrings(args: {
 }): number[] | null {
   const { moduleCount, module: m, limits, designTempMin } = args;
   if (!(moduleCount > 0)) return null;
-  const result = generateStringConfig({
-    totalModules: moduleCount,
-    moduleSpecs: moduleSpecsFromRegistry({
-      voc: m.voc, vmp: m.vmp, isc: m.isc, imp: m.imp, watts: m.watts,
-      tempCoeffVoc: m.tempCoeffVoc, maxSeriesFuseRating: m.maxSeriesFuseRating,
-    }),
-    inverterSpecs: inverterSpecsFromRegistry({
-      maxDcVoltage: limits.maxDcVoltage,
-      mpptVoltageMin: limits.mpptVoltageMin,
-      mpptVoltageMax: limits.mpptVoltageMax,
-      mpptChannels: limits.mpptChannels,
-      maxInputCurrent: limits.maxInputCurrentPerMppt,
-    }),
+  const r = canonicalStringPartition({
+    moduleCount,
+    module: m,
+    endpoint: resolveStringEndpoint({ coupling: 'dc-coupled-storage', storageLimits: limits }),
     designTempMin,
-    topology: 'string',
   });
-  const counts = result.strings
-    .map(s => s.panelsInString)
-    .filter((n): n is number => typeof n === 'number' && n > 0);
-  return counts.length > 0 ? counts : null;
+  return r.status === 'ENGINEERED' ? r.strings : null;
 }
