@@ -131,8 +131,10 @@ import { GuidedStrip, revealHomeCard } from '@/components/engineering/systemConf
 import { ExistingElectricalServiceCard } from '@/components/engineering/systemConfig/cards/ExistingElectricalServiceCard';
 import { EngineeringSummaryFacts } from '@/components/engineering/systemConfig/EngineeringSummaryFacts';
 // System Config V3 — the Battery Storage card's body, and the selection mirrored from the graph.
-import { BatteryStorageCard } from '@/components/engineering/systemConfig/cards/BatteryStorageCard';
-import { batteryConfigMirror } from '@/lib/electrical/systemConfigBatteryCard';
+import { BatteryStorageCard, BatteryOffNote } from '@/components/engineering/systemConfig/cards/BatteryStorageCard';
+import {
+  batteryConfigMirror, batteryOffPatch, selectionControllerOf, storageTotalKwh,
+} from '@/lib/electrical/systemConfigBatteryCard';
 // Phase 12 — System-wide validation layer.
 import { validateSystem, type ValidationResult } from '@/lib/system/validationEngine';
 import { ValidationPanel } from '@/components/engineering/ValidationPanel';
@@ -9865,7 +9867,13 @@ function EngineeringPageInner() {
     const unitCount = graphUnits.length > 0 ? graphUnits.length
       : (config.batteryId ? Math.max(1, Number(config.batteryCount) || 1) : 0);
     const graphGateways = (svcTopology?.domains ?? []).map(d => d.gateway);
-    const gatewayProductId = pair.gateway?.productId || config.backupInterfaceId || null;
+    // Before the graph has systems: the controller chosen with the battery in the Battery card — read
+    // through the catalogue, so one another writer left beside a battery it does not fit is not
+    // "selected" (equipment.gateway asks again; no new system is built from it).
+    const gatewayProductId = pair.gateway?.productId || selectionControllerOf({
+      batteryId: storageProductId ?? '', backupControllerId: config.backupControllerId,
+      backupInterfaceId: config.backupInterfaceId,
+    }).id || null;
     const gw = gatewayProductId ? getBackupInterfaceById(gatewayProductId) as any : null;
     const fleet = config.inverters.filter(inv => !!inv.inverterId);
     const firstFleet = fleet[0];
@@ -9904,7 +9912,7 @@ function EngineeringPageInner() {
       storageProductId,
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [svcTopology, config.batteryId, config.batteryCount, config.backupInterfaceId, config.inverters, electrical?.solarCoupling, _archUnresolved, hasInverterAcKw, totalInverterKw]);
+  }, [svcTopology, config.batteryId, config.batteryCount, config.backupInterfaceId, config.backupControllerId, config.inverters, electrical?.solarCoupling, _archUnresolved, hasInverterAcKw, totalInverterKw]);
 
   const systemConfigInterview = useMemo(() => buildSystemConfigInterview({
     pvArray,
@@ -9935,8 +9943,9 @@ function EngineeringPageInner() {
       if (p0?.manufacturer && p0.manufacturer !== config.mainPanelBrand) patch.mainPanelBrand = p0.manufacturer;
       // 🚨 Once the graph has backup systems it IS the battery record: the selection follows it
       // (count, battery, controller), so the Battery card, the summary and the legacy consumers
-      // can never read two different battery counts.
-      Object.assign(patch, batteryConfigMirror(next, config));
+      // can never read two different battery counts — while Battery Storage is ON. OFF cleared the
+      // selection; mirroring the graph's units back into it is the v63 phantom battery.
+      Object.assign(patch, batteryConfigMirror(next, config, { batteryEnabled }));
       if (Object.keys(patch).length > 0) updateConfig(patch);
     }
     return ok;
@@ -10939,7 +10948,9 @@ function EngineeringPageInner() {
             const _genData    = config.generatorId ? getGeneratorById(config.generatorId) : null;
             const _atsData    = config.atsId ? getATSById(config.atsId) : null;
             const _batData    = config.batteryId ? getBatteryById(config.batteryId) : null;
-            const _batTotalKwh = config.batteryCount * config.batteryKwh;
+            // The same storage figure the Battery card states: the graph's (batteries AND expansion
+            // packs) once it has backup systems, the selection's count × per-unit kWh before.
+            const _batTotalKwh = storageTotalKwh(svcTopology, config);
             /* Backup % estimate: battery kWh / (system kW * 4h avg load) — UI only */
             const _backupPct  = _batTotalKwh > 0 && _totalKwNum > 0
               ? Math.min(100, Math.round((_batTotalKwh / Math.max(1, _totalKwNum * 0.3)) * 100))
@@ -13164,7 +13175,9 @@ function EngineeringPageInner() {
                               // design and the permit/SLD/BOM still render it (phantom 15 kWh)
                               // even though the toggle reads OFF. Clearing keeps engineering and
                               // the planset in agreement.
-                              if (!on) updateConfig({ batteryId: '', batteryCount: 0, batteryKwh: 0, batteryBrand: '', batteryModel: '' });
+                              // The controller goes with the battery (batteryOffPatch), and so does the
+                              // legacy BUI field — no BUI feeder, BUI-1 row or BOM line without a battery.
+                              if (!on) updateConfig(batteryOffPatch());
                             }}
                             className="sr-only peer" data-testid="battery-enabled-toggle" />
                           <div className="w-11 h-6 bg-slate-700 rounded-full peer peer-checked:bg-emerald-500 transition-colors after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-5"></div>
@@ -13172,10 +13185,14 @@ function EngineeringPageInner() {
                       </div>
 
                         {!batteryEnabled ? (
-                          /* OFF state — single compact row, no dead space */
-                          <div className="flex items-center gap-2 py-0.5">
-                            <Battery size={11} className="text-slate-700 shrink-0" />
-                            <span className="text-xs text-slate-600">No battery · toggle above to add</span>
+                          /* OFF state — single compact row, no dead space; and, when the service record
+                             still holds batteries, where they are removed (OFF does not edit it). */
+                          <div className="space-y-2">
+                            <div className="flex items-center gap-2 py-0.5">
+                              <Battery size={11} className="text-slate-700 shrink-0" />
+                              <span className="text-xs text-slate-600">No battery · toggle above to add</span>
+                            </div>
+                            <BatteryOffNote topology={svcTopology} />
                           </div>
                         ) : (
                         /* ON state — the card's body (System Config V3): battery model, quantity, expansion
@@ -13185,7 +13202,8 @@ function EngineeringPageInner() {
                            components/engineering/systemConfig/cards/BatteryStorageCard.tsx */
                         <BatteryStorageCard {...interviewEditorContext} interview={systemConfigInterview}
                                             controlMode={controlMode} selection={config}
-                                            onSelectionChange={updateConfig} pvKw={_totalKwNum} />
+                                            onSelectionChange={updateConfig} pvKw={_totalKwNum}
+                                            error={_svcError} />
                       )}
 
                       {/* Generator & ATS — v57.5: collapsed to chip when no generator selected */}

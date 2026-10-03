@@ -73,6 +73,14 @@ export interface ProjectConfig {
   trenchRunLengthFt?: number;   // ft — ground/fence array → service trench distance
   atsId: string;
   backupInterfaceId: string;    // equipment-db backup interface ID (Enphase IQ SC3, Tesla Gateway, …)
+  /** The backup controller / gateway chosen WITH the battery in System Config's Battery card, before
+   *  the service graph has backup systems (equipment-db backup interface ID). Read ONLY by the System
+   *  Config interview and the graph builder (the controller a new backed-up system is built from) —
+   *  never by the legacy BUI consumers that read `backupInterfaceId` (computeSystem's BUI → MSP
+   *  feeder and BUI-1 row, the BOM's backup-interface line, the SLD request): a battery that needs a
+   *  gateway already names it there, and the graph's gateways reach the BOM from the graph.
+   *  See lib/electrical/systemConfigBatteryCard.ts. */
+  backupControllerId?: string;
   /** Operator override for the integrated AC combiner (integratedBos id, e.g.
    *  `enphase-iq-combiner-5c`). Empty ⇒ auto-resolve from the inverter's
    *  equipment-db `compatibleWith` pairing. When set it wins everywhere the

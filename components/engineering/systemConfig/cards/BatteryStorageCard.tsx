@@ -9,40 +9,43 @@
 //   · Battery model · Quantity · Expansion packs · Backup controller × how many.
 //   · AC aggregation [▼] — `behavior.storage-landing`, ONE answer for every system.
 //   · With more than one backup system: "Battery grouping · N systems", one line per system, and
-//     per-system editing (controller, batteries, expansions, where its AC circuits land) only behind
-//     [Configure systems differently] — inline in Manual mode.
+//     per-system editing — its controller, its battery count, its expansion packs and where its AC
+//     circuits land, NEVER its battery model — only behind [Configure systems differently] (inline
+//     in Manual mode). The battery model is asked once for every system: the project selection can
+//     name one battery, so a job with a different battery per system is flagged, not offered.
 //
 // Which store is edited:
 //   · No backup system in the service graph yet ⇒ the project selection (`config.batteryId /
-//     batteryCount / batteryKwh / backupInterfaceId`) through `onSelectionChange`, as before.
+//     batteryCount / batteryKwh / backupControllerId`) through `onSelectionChange`, as before.
 //   · The graph has backup systems ⇒ the GRAPH is the battery record. Totals are read from it and
 //     every edit is an answer (`answerSystemEquipment`, `answerEverySystemEquipment`,
 //     `answerStorageLanding`, `answerSystemLanding`) through `apply` — the page's one write path,
 //     which mirrors the selection from the graph after the write (`batteryConfigMirror`).
 //
 // Only what the catalogue lists together is offered (`controllersFor`, `backupBatteries`,
-// `expansionsFor`); a writer's refusal is shown here and never written. Batteries are never split:
-// with more than one system the quantity is the systems' sum, and a count is changed per system.
+// `expansionsFor`); a writer's refusal is shown here and never written, and so is a write the page
+// could not save. Batteries are never split: with more than one system the quantity is the systems'
+// sum, and a count is changed per system. An edit that would leave every system with no battery is
+// refused — the graph cannot hold "no battery" as a count (an empty system is a question still open).
 // ═══════════════════════════════════════════════════════════════════════════
 
 import React, { useState } from 'react';
 import { BATTERIES, getBatteryById, getBackupInterfaceById } from '@/lib/equipment-db';
 import type { ControlMode } from '@/types';
-import type { BackupDomain } from '@/lib/electrical/serviceTopology';
+import type { BackupDomain, ServiceTopology } from '@/lib/electrical/serviceTopology';
 import type { InterviewItem, SystemConfigInterview } from '@/lib/electrical/systemConfigInterview';
 import { answerStorageLanding } from '@/lib/electrical/systemConfigAnswers';
 import {
   answerSystemEquipment, answerSystemLanding, backupBatteries, controllersFor, expansionsFor,
-  systemEquipmentItemId, systemLandingItemId,
+  storageByProduct, systemEquipmentFacts, systemEquipmentItemId, systemLandingItemId,
 } from '@/lib/electrical/systemConfigSystemEquipment';
 import {
-  answerEverySystemEquipment, batteryGroupingOf, batteryNeedsController, controllerAfterBatteryChange,
-  type BatteryGrouping, type BatterySelection,
+  answerEverySystemEquipment, batteriesInWords, batteryGroupingOf, batteryNeedsController, graphHoldsBatteries,
+  selectionAfterBatteryChange, selectionControllerOf, storageTotalKwh,
+  type BatteryGrouping, type BatterySelection, type BatterySystemSummary,
 } from '@/lib/electrical/systemConfigBatteryCard';
 import { findInterviewItem } from '@/lib/electrical/systemConfigPlacement';
-import {
-  ItemEditor, ProvenanceChip, type ApplyAnswer, type ItemEditorContext,
-} from '@/components/engineering/systemConfig/ItemEditor';
+import { ProvenanceChip, type ApplyAnswer, type ItemEditorContext } from '@/components/engineering/systemConfig/ItemEditor';
 
 export interface BatteryStorageCardProps extends ItemEditorContext {
   interview: Pick<SystemConfigInterview, 'sections'>;
@@ -52,6 +55,8 @@ export interface BatteryStorageCardProps extends ItemEditorContext {
   onSelectionChange: (patch: Partial<BatterySelection>) => void;
   /** PV kW DC, for the backup / runtime estimate (an estimate shown in the card only). */
   pvKw: number;
+  /** The page's write error (the service record's PUT failed) — shown when THIS card's write failed. */
+  error?: string | null;
 }
 
 type Landing = Exclude<BackupDomain['storageConnection'], 'unresolved'>;
@@ -66,6 +71,12 @@ const batteryName = (id: string) => {
 };
 const OWED = new Set<InterviewItem['state']>(['needs-answer', 'needs-verification', 'fails']);
 
+/** The refusal for an edit that would leave every backed-up system with no battery. */
+export const EMPTIES_EVERY_SYSTEM = 'That leaves no battery in any backed-up system. The service record cannot hold '
+  + '"no battery" as a count — an empty system is a question still open, and the project would keep its '
+  + 'battery selection. To install no battery, set Backup to none in System Configuration, then turn '
+  + 'Battery Storage off.';
+
 function Owed({ item, testid }: { item: InterviewItem | null; testid: string }) {
   if (!item || !OWED.has(item.state)) return null;
   return (
@@ -73,6 +84,17 @@ function Owed({ item, testid }: { item: InterviewItem | null; testid: string }) 
           className="ml-1 rounded-full border border-sky-400/50 px-1.5 text-[9px] font-black uppercase tracking-wide text-sky-300">
       {item.state === 'needs-verification' ? 'Verify' : item.state === 'fails' ? 'Fails' : 'Needs answer'}
     </span>
+  );
+}
+
+function Note({ testid, children, tone = 'amber' }: { testid: string; children: React.ReactNode; tone?: 'amber' | 'slate' }) {
+  return (
+    <div data-testid={testid}
+         className={tone === 'amber'
+           ? 'rounded-lg border border-amber-500/40 bg-amber-500/10 p-2 text-[11px] text-amber-200'
+           : 'rounded-lg border border-slate-700/60 bg-slate-900/40 p-2 text-[11px] text-slate-300'}>
+      {children}
+    </div>
   );
 }
 
@@ -101,15 +123,42 @@ function KwhStrip({ kwh, pvKw }: { kwh: number; pvKw: number }) {
 
 // ── Before the graph has a backup system: the project selection ─────────────
 
+/** The Battery Model picker over the selection — before the graph, and while no system holds a battery. */
+function SelectionBatteryModel({ selection, onSelectionChange, options, label, disabled }: {
+  selection: BatterySelection;
+  onSelectionChange: (patch: Partial<BatterySelection>) => void;
+  options: Array<{ value: string; label: string }>;
+  label: React.ReactNode;
+  disabled?: boolean;
+}) {
+  return (
+    <>
+      <label className="eng-label" htmlFor="bat-model">{label}</label>
+      <select id="bat-model" data-testid="bat-model" value={selection.batteryId} className="eng-select" disabled={disabled}
+              onChange={e => onSelectionChange(selectionAfterBatteryChange(e.target.value, selection))}>
+        <option value="">None</option>
+        {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+    </>
+  );
+}
+
+const SELECTION_BATTERIES = BATTERIES.map(b => ({
+  value: b.id,
+  label: `${b.isNew ? '🆕 ' : ''}${b.manufacturer} ${b.model} (${b.usableCapacityKwh} kWh)${b.subcategory === 'ac_coupled' ? ' · AC' : ' · DC'}`,
+}));
+
 function SelectionControls({ selection, onSelectionChange, gatewayItem, busy }: {
   selection: BatterySelection;
   onSelectionChange: (patch: Partial<BatterySelection>) => void;
   gatewayItem: InterviewItem | null;
   busy: boolean;
 }) {
-  const recorded = selection.backupInterfaceId ?? '';
+  // The controller lives in `backupControllerId` — never the legacy BUI field (see the lib header).
+  const recorded = selection.backupControllerId ?? '';
   const ctl = controllersFor(selection.batteryId || null);
   const listed = ctl.options.some(o => o.value === recorded);
+  const { unlisted } = selectionControllerOf({ batteryId: selection.batteryId, backupControllerId: recorded });
   const showController = batteryNeedsController(selection.batteryId) || ctl.options.length > 0 || !!recorded;
   const exps = expansionsFor(selection.batteryId || null);
   const bat = selection.batteryId ? getBatteryById(selection.batteryId) : undefined;
@@ -118,31 +167,8 @@ function SelectionControls({ selection, onSelectionChange, gatewayItem, busy }: 
     <>
       <div className="grid grid-cols-2 gap-3">
         <div className="col-span-2">
-          <label className="eng-label" htmlFor="bat-model">Battery Model</label>
-          <select id="bat-model" data-testid="bat-model" value={selection.batteryId} className="eng-select" onChange={e => {
-            const id = e.target.value;
-            const row = getBatteryById(id);
-            const picked = !!id;
-            const keep = controllerAfterBatteryChange(id, recorded);
-            onSelectionChange({
-              batteryId: id,
-              batteryBrand: row?.manufacturer ?? '',
-              batteryModel: row?.model ?? '',
-              batteryKwh: row?.usableCapacityKwh ?? 0,
-              // Seed a unit count so the battery is "user-owned" and the sizing apply path preserves
-              // it instead of reverting to the engine's default of 1. Picking "None" clears the count.
-              // (Fixes the "battery units snaps back to 1" bug — the preserve guard in
-              // applySizingRecommendation requires a non-zero count.)
-              batteryCount: picked ? (selection.batteryCount && selection.batteryCount > 0 ? selection.batteryCount : 1) : 0,
-              // A controller the catalogue does not list with the new battery is not kept.
-              ...(keep !== recorded ? { backupInterfaceId: keep } : {}),
-            });
-          }}>
-            <option value="">None</option>
-            {BATTERIES.map(b => (
-              <option key={b.id} value={b.id}>{b.isNew ? '🆕 ' : ''}{b.manufacturer} {b.model} ({b.usableCapacityKwh} kWh){b.subcategory === 'ac_coupled' ? ` · AC` : ` · DC`}</option>
-            ))}
-          </select>
+          <SelectionBatteryModel selection={selection} onSelectionChange={onSelectionChange} options={SELECTION_BATTERIES}
+                                 label="Battery Model" />
         </div>
         <div>
           <label className="eng-label" htmlFor="bat-qty">Quantity</label>
@@ -161,7 +187,7 @@ function SelectionControls({ selection, onSelectionChange, gatewayItem, busy }: 
             </label>
             <div className="flex items-center gap-2">
               <select id="bat-controller" data-testid="bat-controller" className="eng-select" disabled={busy} value={recorded}
-                      onChange={e => onSelectionChange({ backupInterfaceId: e.target.value })}>
+                      onChange={e => onSelectionChange({ backupControllerId: e.target.value })}>
                 <option value="">{ctl.evaluated ? 'Choose…' : 'None listed'}</option>
                 {recorded && !listed ? (
                   <option value={recorded} disabled>{controllerName(recorded)} — not listed as fitting</option>
@@ -171,9 +197,17 @@ function SelectionControls({ selection, onSelectionChange, gatewayItem, busy }: 
               <span className="shrink-0 text-xs text-slate-400">×</span>
               <output data-testid="bat-controller-qty" title="One per backed-up system"
                       className="w-8 shrink-0 text-center text-xs font-bold tabular-nums text-slate-200">
-                {recorded ? 1 : '—'}
+                {recorded && !unlisted ? 1 : '—'}
               </output>
             </div>
+            {unlisted ? (
+              // Another writer (the ecosystem picker, the sizing adoption) changed the battery and left
+              // the controller: it is not counted as chosen, and the installer is told why.
+              <div data-testid="bat-controller-unlisted" className="mt-1 text-[10px] font-bold text-amber-300">
+                The catalogue does not list {controllerName(unlisted)} with {batteryName(selection.batteryId)} — choose a
+                listed controller.
+              </div>
+            ) : null}
             {ctl.evaluated ? null : (
               <div data-testid="bat-controller-note" className="mt-1 text-[10px] font-bold text-amber-300">{ctl.note}</div>
             )}
@@ -197,6 +231,8 @@ function SelectionControls({ selection, onSelectionChange, gatewayItem, busy }: 
 
 interface Draft { ess?: string; gw?: string; nEss?: number; exp?: string; nExp?: number }
 
+const count = (s: string) => Math.max(0, Math.floor(Number(s) || 0));
+
 function GraphControls({ ctx, grouping, apply, gatewayItem }: {
   ctx: BatteryStorageCardProps;
   grouping: BatteryGrouping;
@@ -207,6 +243,10 @@ function GraphControls({ ctx, grouping, apply, gatewayItem }: {
   const [draft, setDraft] = useState<Draft>({});
   const n = grouping.systems.length;
   const single = n === 1 ? grouping.systems[0] : null;
+  // More than one system and none holds a battery yet: the battery model is the project selection's
+  // (the per-system counts are asked per system, from it) — there is no graph battery to re-equip.
+  const awaiting = grouping.batteries === 0;
+  const modelIsSelection = !single && awaiting;
   const cur = {
     ess: grouping.commonStorageProductId ?? '',
     gw: grouping.commonGatewayProductId ?? '',
@@ -215,17 +255,18 @@ function GraphControls({ ctx, grouping, apply, gatewayItem }: {
     nExp: grouping.expansions,
   };
   const v = { ...cur, ...draft };
-  const ctl = controllersFor(v.ess || null);
+  const essForFit = modelIsSelection ? (ctx.selection.batteryId || '') : v.ess;
+  const ctl = controllersFor(essForFit || null);
   const exps = expansionsFor(v.ess || null);
   // With exactly one expansion the catalogue lists for this battery, that is the one a count records.
   const expProduct = v.exp || (exps.options.length === 1 ? exps.options[0].value : '');
   const showExpansions = exps.evaluated || cur.nExp > 0;
   const changed = (Object.keys(cur) as Array<keyof typeof cur>).some(k => v[k] !== cur[k]);
-  const count = (s: string) => Math.max(0, Math.floor(Number(s) || 0));
   const batteries = backupBatteries();
   const essListed = batteries.some(o => o.value === v.ess);
   const gwListed = ctl.options.some(o => o.value === v.gw);
   const ownItem = single ? findInterviewItem(ctx.interview, systemEquipmentItemId(single.domainId)) : null;
+  const mixed = grouping.batteries > 0 && grouping.commonStorageProductId === null;
 
   const save = async () => {
     const r = single
@@ -239,25 +280,35 @@ function GraphControls({ ctx, grouping, apply, gatewayItem }: {
       : answerEverySystemEquipment(t, {
         ...(v.gw !== cur.gw && v.gw ? { gatewayProductId: v.gw } : {}),
         ...(v.ess !== cur.ess && v.ess ? { storageProductId: v.ess } : {}),
+        // No system holds a battery yet: the controller is checked against the selection's battery.
+        ...(modelIsSelection && v.gw !== cur.gw && essForFit ? { storageProductId: essForFit } : {}),
       });
     // A refused answer or a failed write keeps what the installer chose.
     if (await apply(r)) setDraft({});
   };
 
+  const every = n > 1 ? <span className="ml-1 normal-case text-slate-500">· every system</span> : null;
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-2 gap-3">
         <div className="col-span-2">
-          <label className="eng-label" htmlFor="bat-model">
-            Battery Model{n > 1 ? <span className="ml-1 normal-case text-slate-500">· every system</span> : null}
-            <Owed item={ownItem} testid="bat-model-owed" />
-          </label>
-          <select id="bat-model" data-testid="bat-model" className="eng-select" disabled={ctx.busy} value={v.ess}
-                  onChange={e => setDraft(s => ({ ...s, ess: e.target.value }))}>
-            <option value="" disabled>{n > 1 && grouping.batteries > 0 ? 'Differs per system' : '— choose —'}</option>
-            {v.ess && !essListed ? <option value={v.ess} disabled>{batteryName(v.ess)} — not listed for backup</option> : null}
-            {batteries.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
+          {modelIsSelection ? (
+            <SelectionBatteryModel selection={ctx.selection} onSelectionChange={ctx.onSelectionChange} options={batteries}
+                                   disabled={ctx.busy} label={<>Battery Model{every}</>} />
+          ) : (
+            <>
+              <label className="eng-label" htmlFor="bat-model">
+                Battery Model{every}
+                <Owed item={ownItem} testid="bat-model-owed" />
+              </label>
+              <select id="bat-model" data-testid="bat-model" className="eng-select" disabled={ctx.busy} value={v.ess}
+                      onChange={e => setDraft(s => ({ ...s, ess: e.target.value }))}>
+                <option value="" disabled>{n > 1 && grouping.batteries > 0 ? 'Differs per system' : '— choose —'}</option>
+                {v.ess && !essListed ? <option value={v.ess} disabled>{batteryName(v.ess)} — not listed for backup</option> : null}
+                {batteries.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </>
+          )}
         </div>
         <div>
           <label className="eng-label" htmlFor="bat-qty">Quantity</label>
@@ -296,7 +347,7 @@ function GraphControls({ ctx, grouping, apply, gatewayItem }: {
         ) : null}
         <div className="col-span-2">
           <label className="eng-label" htmlFor="bat-controller">
-            Backup controller{n > 1 ? <span className="ml-1 normal-case text-slate-500">· every system</span> : null}
+            Backup controller{every}
             <Owed item={gatewayItem} testid="bat-controller-owed" />
           </label>
           <div className="flex items-center gap-2">
@@ -321,6 +372,23 @@ function GraphControls({ ctx, grouping, apply, gatewayItem }: {
           )}
         </div>
       </div>
+      {mixed ? (
+        <Note testid="bat-mixed">
+          The systems hold different batteries — {storageByProduct(t).map(p => `${p.count} × ${batteryName(p.productId)}`).join(', ')}.
+          The project&apos;s battery selection names one battery
+          ({batteriesInWords(ctx.selection.batteryCount)} · {ctx.selection.batteryId ? batteryName(ctx.selection.batteryId) : 'none'}),
+          so the drawings and the BOM that read it cannot state this job. Choose one Battery Model for every system.
+        </Note>
+      ) : null}
+      {awaiting ? (
+        <Note testid="bat-awaiting">
+          No system holds a battery yet
+          {ctx.selection.batteryId && ctx.selection.batteryCount > 0
+            ? ` — the selection is ${ctx.selection.batteryCount} × ${batteryName(ctx.selection.batteryId)}`
+            : ''}. {single ? 'Enter its quantity and Record.'
+            : 'How many each system holds is asked for that system, never shared out — Configure systems differently.'}
+        </Note>
+      ) : null}
       {changed ? (
         <div className="flex items-center gap-2">
           <button type="button" data-testid="bat-record" disabled={ctx.busy}
@@ -357,6 +425,99 @@ function Aggregation({ item, systems, onPick, busy }: {
   );
 }
 
+// ── One system's own controller, battery count and expansion packs ──────────
+
+interface SystemDraft { gw?: string; nEss?: number; exp?: string; nExp?: number }
+
+/**
+ * What [Configure systems differently] edits for ONE system: its controller, how many batteries and
+ * how many expansion packs it holds — through `answerSystemEquipment`, so every refusal the writer
+ * has (an unlisted pairing, an expansion the battery does not take, a shared generation panel) is
+ * shown and never written. The battery MODEL is not here: it is asked once, for every system. A
+ * system holding no battery yet takes the battery every other system holds (or the selection's).
+ */
+function SystemRow({ t, s, battery, apply, busy }: {
+  t: ServiceTopology; s: BatterySystemSummary; battery: string | null; apply: ApplyAnswer; busy: boolean;
+}) {
+  const [draft, setDraft] = useState<SystemDraft>({});
+  const d = t.domains.find(x => x.id === s.domainId);
+  if (!d) return null;
+  const f = systemEquipmentFacts(t, d);
+  if (f.mixed) {
+    return (
+      <div data-testid={`bat-system-mixed-${s.domainId}`} className="text-[11px] text-amber-300">
+        More than one battery model is recorded in {d.label} — choose the Battery Model for every system above.
+      </div>
+    );
+  }
+  const ess = f.storageProductId ?? battery;
+  const cur = { gw: d.gateway.productId, nEss: f.inverting.length, exp: f.expansionProductId ?? '', nExp: f.expansions.length };
+  const v = { ...cur, ...draft };
+  const ctl = controllersFor(ess);
+  const exps = expansionsFor(ess);
+  const expProduct = v.exp || (exps.options.length === 1 ? exps.options[0].value : '');
+  const showExpansions = exps.evaluated || cur.nExp > 0;
+  const gwListed = ctl.options.some(o => o.value === v.gw);
+  const changed = (Object.keys(cur) as Array<keyof typeof cur>).some(k => v[k] !== cur[k]);
+  const id = s.domainId;
+
+  const save = async () => {
+    const r = answerSystemEquipment(t, d.id, {
+      ...(v.gw !== cur.gw ? { gatewayProductId: v.gw } : {}),
+      // A system's first battery is the one every system holds — never a model chosen per system.
+      ...(!f.storageProductId && ess && v.nEss > 0 ? { storageProductId: ess } : {}),
+      ...(v.nEss !== cur.nEss ? { storageUnits: v.nEss } : {}),
+      ...(expProduct !== cur.exp && (v.nExp > 0 || cur.nExp > 0) ? { expansionProductId: expProduct || null } : {}),
+      ...(v.nExp !== cur.nExp ? { expansionUnits: v.nExp } : {}),
+    });
+    if (await apply(r)) setDraft({});
+  };
+
+  return (
+    <div className="space-y-1.5">
+      <div className="grid grid-cols-3 gap-2">
+        <label className="text-[11px] text-slate-400">Backup controller
+          <select data-testid={`bat-system-controller-${id}`} className="eng-select mt-0.5" disabled={busy} value={v.gw}
+                  onChange={e => setDraft(x => ({ ...x, gw: e.target.value }))}>
+            {v.gw && !gwListed ? (
+              <option value={v.gw} disabled>
+                {controllerName(v.gw)} — {ctl.evaluated ? 'not listed as fitting' : 'compatibility not evaluated'}
+              </option>
+            ) : null}
+            {ctl.options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </label>
+        <label className="text-[11px] text-slate-400">Batteries{ess ? ` · ${getBatteryById(ess)?.model ?? ess}` : ''}
+          <input type="number" min={0} step={1} data-testid={`bat-system-qty-${id}`} className="eng-input mt-0.5"
+                 disabled={busy || !ess} value={v.nEss} title={ess ? undefined : 'Choose the Battery Model above first'}
+                 onChange={e => setDraft(x => ({ ...x, nEss: count(e.target.value) }))} />
+        </label>
+        {showExpansions ? (
+          <label className="text-[11px] text-slate-400">Expansion packs
+            <input type="number" min={0} max={v.nEss} step={1} data-testid={`bat-system-expansions-${id}`}
+                   className="eng-input mt-0.5" disabled={busy} value={v.nExp}
+                   onChange={e => setDraft(x => ({ ...x, nExp: count(e.target.value) }))} />
+            {exps.options.length > 1 ? (
+              <select data-testid={`bat-system-expansions-model-${id}`} className="eng-select mt-0.5" disabled={busy}
+                      value={v.exp} onChange={e => setDraft(x => ({ ...x, exp: e.target.value }))}>
+                <option value="">— choose —</option>
+                {exps.options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            ) : null}
+          </label>
+        ) : null}
+      </div>
+      {changed ? (
+        <button type="button" data-testid={`bat-system-record-${id}`} disabled={busy}
+                className="rounded bg-sky-600 px-3 py-1 text-xs font-bold text-white disabled:opacity-40"
+                onClick={() => void save()}>
+          Record {d.label}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 // ── Battery grouping · N systems ────────────────────────────────────────────
 
 function Grouping({ ctx, grouping, apply }: {
@@ -366,6 +527,8 @@ function Grouping({ ctx, grouping, apply }: {
   const inline = ctx.controlMode === 'manual';
   const expanded = inline || open;
   const t = ctx.topology!;
+  // The battery a system holding none yet takes: the one every other system holds, else the selection's.
+  const battery = grouping.commonStorageProductId ?? ctx.equipment.storageProductId ?? (ctx.selection.batteryId || null);
   return (
     <div data-testid="bat-grouping" data-expanded={expanded ? 'true' : 'false'}
          className="rounded-lg border border-slate-700/60 bg-slate-900/40 p-2 space-y-1">
@@ -393,13 +556,12 @@ function Grouping({ ctx, grouping, apply }: {
       {expanded ? (
         <div className="space-y-2 pt-1">
           {grouping.systems.map(s => {
-            const equip = findInterviewItem(ctx.interview, systemEquipmentItemId(s.domainId));
             const landing = findInterviewItem(ctx.interview, systemLandingItemId(s.domainId));
             return (
               <div key={s.domainId} data-testid={`bat-system-edit-${s.domainId}`}
                    className="rounded border border-slate-700/60 p-2 space-y-2">
                 <div className="text-[11px] font-bold text-slate-100">{s.label}</div>
-                {equip ? <ItemEditor {...ctx} item={equip} apply={apply} /> : null}
+                <SystemRow t={t} s={s} battery={battery} apply={apply} busy={ctx.busy} />
                 {landing ? (
                   <label className="block text-[11px] text-slate-400">Its battery AC circuits
                     <select data-testid={`bat-system-landing-${s.domainId}`} className="eng-select mt-0.5"
@@ -421,26 +583,52 @@ function Grouping({ ctx, grouping, apply }: {
   );
 }
 
+// ── Battery Storage OFF while the service record still holds batteries ─────
+
+/**
+ * OFF clears the project selection; it does not edit the service record. When the record still
+ * holds batteries the installer is told so, and where they are removed — the toggle never claims
+ * a drawing without them.
+ */
+export function BatteryOffNote({ topology }: { topology: ServiceTopology | null | undefined }) {
+  const g = batteryGroupingOf(topology);
+  if (!g || !graphHoldsBatteries(topology)) return null;
+  return (
+    <Note testid="bat-off-graph-note">
+      The service record still holds {batteriesInWords(g.batteries)} in {g.systems.length} backup
+      system{g.systems.length === 1 ? '' : 's'}, and what is drawn from it keeps them. Set Backup to none in System
+      Configuration to remove them.
+    </Note>
+  );
+}
+
 // ── The card body ───────────────────────────────────────────────────────────
 
 export function BatteryStorageCard(props: BatteryStorageCardProps) {
   const { topology: t, interview, selection, onSelectionChange, busy, pvKw } = props;
   const [refusal, setRefusal] = useState<string | null>(null);
-  // The writers' refusals are shown in this card and never written; an accepted answer goes to the
-  // page's one write path.
+  const [failed, setFailed] = useState(false);
+  // The writers' refusals are shown in this card and never written, and so is an edit that would
+  // leave every system with no battery; an accepted answer goes to the page's one write path, and a
+  // write it could not save is said here, where it was made.
   const apply: ApplyAnswer = async r => {
     if (r.ok === false) { setRefusal(r.refused); return false; }
+    if (graphHoldsBatteries(t) && r.topology.domains.length > 0 && !graphHoldsBatteries(r.topology)) {
+      setRefusal(EMPTIES_EVERY_SYSTEM);
+      return false;
+    }
     setRefusal(null);
-    return props.apply(r);
+    const ok = await props.apply(r);
+    setFailed(!ok);
+    return ok;
   };
   const grouping = batteryGroupingOf(t);
   const landing = findInterviewItem(interview, 'behavior.storage-landing');
   const gatewayItem = findInterviewItem(interview, 'equipment.gateway');
-  const kwh = grouping ? (grouping.usableKwh ?? 0) : selection.batteryCount * selection.batteryKwh;
 
   return (
     <div className="space-y-3" data-testid="bat-card" data-record={grouping ? 'service-graph' : 'selection'}>
-      <KwhStrip kwh={kwh} pvKw={pvKw} />
+      <KwhStrip kwh={storageTotalKwh(t, selection)} pvKw={pvKw} />
       {grouping && t ? (
         <GraphControls ctx={props} grouping={grouping} apply={apply} gatewayItem={gatewayItem} />
       ) : (
@@ -454,6 +642,11 @@ export function BatteryStorageCard(props: BatteryStorageCardProps) {
       {refusal ? (
         <div data-testid="bat-refusal" className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-200">
           {refusal}
+        </div>
+      ) : null}
+      {failed ? (
+        <div data-testid="bat-error" className="rounded-lg border border-rose-500/40 bg-rose-500/10 p-2 text-xs text-rose-200">
+          {props.error || 'The change was not saved — the service record did not accept it.'}
         </div>
       ) : null}
     </div>
