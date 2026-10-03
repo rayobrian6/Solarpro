@@ -109,6 +109,13 @@ test.describe('System Config V3 — the existing cards, real browser, real route
     await expect(page.locator('text=/\\d+\\.\\d\\d kW AC/'), 'a PV AC rating is shown on a design with no PV inverter').toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Recommended', exact: true })).toHaveCount(0);
 
+    // The first screen states the system: the flow bar reads the storage and the recorded service.
+    await expect(page.getByTestId('flow-node-storage')).toContainText('4 × Tesla Powerwall 3');
+    await expect(page.getByTestId('flow-node-service')).toContainText('400 A');
+    // Battery Storage shows the batteries the service model holds — never "No battery".
+    await expect(page.locator('#sc-card-battery')).toContainText('Powerwall 3');
+    await expect(page.locator('#sc-card-battery')).not.toContainText('No battery');
+
     // Inverters & Strings: one compact line, and [Review] opens the assignment dialog.
     await expect(page.getByTestId('inv-strings-summary')).toContainText('37');
     await page.getByTestId('inv-string-review').click();

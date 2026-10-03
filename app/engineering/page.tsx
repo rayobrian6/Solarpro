@@ -1244,6 +1244,8 @@ function EngineeringPageInner() {
   // than being patched into React state. A local patch would make the badge agree with the server by
   // coincidence; a re-read makes it agree because it is the same bytes.
   const [_svcTopologyReloadKey, setSvcTopologyReloadKey] = useState(0);
+  // The project whose recorded batteries have already opened the Battery card this load (see below).
+  const _batteryShownForProjectRef = useRef<string | null>(null);
   useEffect(() => {
     if (!currentProjectId) {
       setSvcTopology(null); setElectrical(null); setSvcTopologyRead('absent'); return;
@@ -1280,6 +1282,15 @@ function EngineeringPageInner() {
         }
         setSvcTopology(data.topology as ServiceTopologyForPage);
         setSvcTopologyRead('loaded');
+        // 🚨 THE SERVICE MODEL HOLDS THE BATTERIES ⇒ THE BATTERY CARD OPENS ON. `batteryEnabled` is
+        // not persisted and was inferred only from config.batteryId/batteryCount, so a project whose
+        // batteries live in the service model (Ray's four Powerwall 3) opened reading "No battery".
+        // Once per project load: an OFF the installer chooses in this session is not overridden.
+        if (((data.topology as ServiceTopologyForPage)?.storage ?? []).some((u: { role?: string }) => u.role === 'inverter-unit')
+            && _batteryShownForProjectRef.current !== currentProjectId) {
+          _batteryShownForProjectRef.current = currentProjectId;
+          setBatteryEnabled(true);
+        }
       } catch (e) {
         if (!cancelled) {
           setSvcTopology(null); setSvcTopologyRead('failed');
