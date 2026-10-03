@@ -276,6 +276,21 @@ export function buildSystemConfigInterview(input: InterviewInput): SystemConfigI
         : {}),
     });
   }
+  if (t) {
+    const afc = t.service.availableFaultCurrentA;
+    service.push({
+      id: 'service.fault-current',
+      section: 'service',
+      question: 'Available fault current at the service?',
+      state: afc !== null ? 'answered' : 'needs-verification',
+      answer: afc !== null ? `${(afc / 1000).toFixed(afc % 1000 === 0 ? 0 : 1)} kA` : 'Not provided',
+      source: afc !== null ? 'Installer entered' : 'Utility / AHJ ruling required',
+      why: 'Every interrupting-rating (SCCR) check compares a device against this number. Until the '
+        + 'utility provides it, those checks report NOT EVALUATED — they are never assumed adequate.',
+      owner: 'Utility (request it)',
+      blocks: ['SCCR checks', 'release'],
+    });
+  }
   // The split is asked only where a split is physically plausible. A 200 A service is one panel.
   if (rated !== null && rated > SPLITTABLE_ABOVE_A && t) {
     const n = t.branches.length;

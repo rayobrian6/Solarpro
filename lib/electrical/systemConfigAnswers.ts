@@ -129,6 +129,18 @@ export function answerDistribution(
   return done(carryDecisions(t, built.topology), built.created.join('; '));
 }
 
+/**
+ * "Available fault current at the service" — the utility's number, in amperes. It is the one input
+ * the whole SCCR chain waits on; null is "not provided", never zero and never assumed.
+ */
+export function answerAvailableFaultCurrent(t: ServiceTopology, amps: number | null): AnswerResult {
+  if (amps !== null && (!Number.isFinite(amps) || amps <= 0)) {
+    return refuse('Available fault current must be a positive number of amperes, or left blank.');
+  }
+  return done({ ...t, service: { ...t.service, availableFaultCurrentA: amps } },
+    amps === null ? 'Available fault current cleared' : `Available fault current ${amps} A`);
+}
+
 /** A panel card: main breaker, busbar, manufacturer. Never the service rating. */
 export function answerPanel(
   t: ServiceTopology, panelId: string,

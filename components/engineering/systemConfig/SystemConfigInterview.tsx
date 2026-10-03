@@ -27,7 +27,7 @@ import {
   answerServiceRating, answerElectricalSystem, answerDistribution, answerPanel, answerBackup,
   answerSystemBatteries, answerStorageLanding, answerSystemsArrangement, answerInterconnection,
   answerIsolationRequired, answerIsolationArrangement, answerIsolationAccepted, answerPvLanding,
-  type AnswerResult,
+  answerAvailableFaultCurrent, type AnswerResult,
 } from '@/lib/electrical/systemConfigAnswers';
 
 const SERVICE_RATINGS = [100, 125, 150, 200, 225, 320, 400, 600, 800];
@@ -238,6 +238,21 @@ function Editor({ item, props, apply, busy }: {
               onChange={e => void apply(answerElectricalSystem(t, e.target.value))}>
         {SYSTEMS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
       </select>
+    );
+  }
+  if (id === 'service.fault-current' && t) {
+    return (
+      <label className="flex items-center gap-2 text-[11px] text-slate-400">
+        <input type="number" min={0} step={0.5} data-testid="answer-fault-current" className={`w-24 ${box}`}
+               disabled={busy} placeholder="kA"
+               defaultValue={t.service.availableFaultCurrentA !== null ? t.service.availableFaultCurrentA / 1000 : ''}
+               onBlur={e => {
+                 const ka = e.target.value === '' ? null : Number(e.target.value);
+                 const amps = ka === null ? null : Math.round(ka * 1000);
+                 if (amps !== t.service.availableFaultCurrentA) void apply(answerAvailableFaultCurrent(t, amps));
+               }} />
+        kA — from the utility
+      </label>
     );
   }
   if (id === 'service.distribution' && t && item.options) {

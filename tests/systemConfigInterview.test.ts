@@ -293,3 +293,26 @@ describe('the Engineering Summary states the engineered project precisely (Ray\'
     expect(iv3.summaryFacts.find(f => f.label === 'ESS max continuous AC output')?.value).toBe('192 A');
   });
 });
+
+describe('available fault current — the one number the SCCR chain waits on', () => {
+  it('is asked of every recorded service, owned by the utility, and never assumed', () => {
+    const t = (answerServiceRating(null, 200) as { topology: ServiceTopology }).topology;
+    const iv = buildSystemConfigInterview(base({ topology: t }));
+    const q = item(iv, 'service.fault-current');
+    expect(q?.state).toBe('needs-verification');
+    expect(q?.answer).toBe('Not provided');
+    expect(q?.owner).toMatch(/Utility/);
+  });
+
+  it('recording 10 kA answers it and is what the SCCR checks read', async () => {
+    const { answerAvailableFaultCurrent } = await import('@/lib/electrical/systemConfigAnswers');
+    const t = (answerServiceRating(null, 200) as { topology: ServiceTopology }).topology;
+    const r = answerAvailableFaultCurrent(t, 10000);
+    expect(r.ok).toBe(true);
+    if (r.ok === false) return;
+    expect(r.topology.service.availableFaultCurrentA).toBe(10000);
+    const iv = buildSystemConfigInterview(base({ topology: r.topology }));
+    expect(item(iv, 'service.fault-current')?.answer).toBe('10 kA');
+    expect(answerAvailableFaultCurrent(t, 0).ok).toBe(false);
+  });
+});
