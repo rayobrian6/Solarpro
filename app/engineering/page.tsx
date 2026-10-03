@@ -125,6 +125,7 @@ import { InvertersStringsDecisions } from '@/components/engineering/systemConfig
 // one readiness panel at the bottom (lib/electrical/systemConfigPlacement.ts decides where).
 import { findInterviewItem } from '@/lib/electrical/systemConfigPlacement';
 import { QuestionDialog, applyVia } from '@/components/engineering/systemConfig/ItemEditor';
+import { MeterCollarControl, SystemArchitectureControls } from '@/components/engineering/systemConfig/cards/SystemConfigurationControls';
 import { EngineeringReadinessPanel } from '@/components/engineering/systemConfig/EngineeringReadinessPanel';
 import { GuidedStrip, revealHomeCard } from '@/components/engineering/systemConfig/GuidedStrip';
 import { ExistingElectricalServiceCard } from '@/components/engineering/systemConfig/cards/ExistingElectricalServiceCard';
@@ -13309,6 +13310,12 @@ function EngineeringPageInner() {
                             {['Bidirectional Net Meter', 'Smart Meter', 'Net Meter', 'Analog Meter', 'Production Meter'].map(m => <option key={m}>{m}</option>)}
                           </select>
                         </div>
+                        {/* Meter collar permitted? — the utility / AHJ ruling (behavior.utility.meter-collar),
+                            beside the utility meter and only while it matters. */}
+                        <MeterCollarControl {...interviewEditorContext} interview={systemConfigInterview}
+                                            className="col-span-2"
+                                            legacyInterconnectionMethod={config.interconnectionMethod}
+                                            onLegacyInterconnection={m => updateConfig({ interconnectionMethod: m })} />
                         <div className="col-span-2">
                           <label className="eng-label">
                             Mounting System{subSystemCounts.isHybrid ? ' — project default (set per sub-system below)' : ''}
@@ -13317,57 +13324,22 @@ function EngineeringPageInner() {
                             {ALL_MOUNTING_SYSTEMS.map(m => <option key={m.id} value={m.id}>{m.manufacturer} {m.model}</option>)}
                           </select>
                         </div>
+                          {/* ARCHITECTURE (System Config V3) — PV architecture (stated; asked on Inverters &
+                              Strings), backup, how the systems connect, the ONE interconnection control over the
+                              service graph, and utility isolation. The old four-button "Interconnection Method"
+                              grid is gone: MAIN_BREAKER_DERATE / PANEL_UPGRADE are 120% remedies on the Existing
+                              Electrical Service card, not connection types. The graph answer is mirrored onto
+                              config.interconnectionMethod for the legacy consumers (compliance, CT location, SLD /
+                              BOM requests) — lib/electrical/systemConfigLegacyInterconnection.ts. */}
                           <div className="col-span-2">
-                            <label className="eng-label flex items-center gap-1.5">
-                              Interconnection Method
-                              {(() => {
-                                const _busbarFail = (compliance as any)?.electrical?.errors?.some((e: any) => e.code === 'E-BUSBAR-120');
-                                return _busbarFail && config.interconnectionMethod === 'LOAD_SIDE'
-                                  ? <span className="text-[9px] font-bold text-red-400 bg-red-500/15 border border-red-500/30 rounded px-1 py-0.5 leading-none">120% VIOLATION</span>
-                                  : null;
-                              })()}
-                            </label>
-                            {(() => {
-                              const _busbarFail = (compliance as any)?.electrical?.errors?.some((e: any) => e.code === 'E-BUSBAR-120');
-                              const _icOptions: Array<{ value: 'LOAD_SIDE' | 'SUPPLY_SIDE_TAP' | 'MAIN_BREAKER_DERATE' | 'PANEL_UPGRADE'; label: string; nec: string; desc: string; recommended?: boolean }> = [
-                                { value: 'LOAD_SIDE',          label: 'Load-Side Backfeed', nec: 'NEC 705.12(B)', desc: '120% rule applies — backfeed breaker on bus' },
-                                { value: 'SUPPLY_SIDE_TAP',    label: 'Supply-Side Tap',    nec: 'NEC 705.11',    desc: 'Line-side tap — bypasses 120% bus limit', recommended: !!(  _busbarFail && config.interconnectionMethod === 'LOAD_SIDE') },
-                                { value: 'MAIN_BREAKER_DERATE',label: 'Main Breaker Derate',nec: 'NEC 705.12(B)', desc: 'Derate main to satisfy 120% rule' },
-                                { value: 'PANEL_UPGRADE',      label: 'Panel Upgrade',      nec: 'NEC 705.12(B)', desc: 'Upgrade panel to larger busbar rating' },
-                              ];
-                              return (
-                                <div className="grid grid-cols-2 gap-1 mt-0.5">
-                                  {_icOptions.map(opt => {
-                                    const isActive = config.interconnectionMethod === opt.value;
-                                    const isRecommended = opt.recommended;
-                                    return (
-                                      <button
-                                        key={opt.value}
-                                        onClick={() => updateConfig({ interconnectionMethod: opt.value })}
-                                        title={`${opt.desc} (${opt.nec})`}
-                                        className={[
-                                          'flex flex-col items-start text-left px-2 py-1.5 rounded-lg border transition-all',
-                                          isActive
-                                            ? 'border-amber-500/60 bg-amber-500/15 text-amber-300'
-                                            : isRecommended
-                                              ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-300 ring-1 ring-emerald-500/40 animate-pulse'
-                                              : 'border-slate-700/50 bg-slate-800/50 text-slate-400 hover:border-slate-600 hover:text-slate-200',
-                                        ].join(' ')}
-                                      >
-                                        <span className="flex items-center gap-1 w-full">
-                                          <span className={`text-[11px] font-bold leading-tight truncate ${isActive ? 'text-amber-200' : isRecommended ? 'text-emerald-200' : ''}`}>
-                                            {opt.label}
-                                          </span>
-                                          {isRecommended ? <span className="ml-auto text-[8px] font-bold text-emerald-400 bg-emerald-500/20 border border-emerald-500/30 rounded px-1 shrink-0">FIX</span> : null}
-                                          {isActive && !isRecommended ? <span className="ml-auto w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" /> : null}
-                                        </span>
-                                        <span className={`text-[9px] font-mono mt-0.5 ${isActive ? 'text-amber-400/80' : isRecommended ? 'text-emerald-400/80' : 'text-slate-600'}`}>{opt.nec}</span>
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              );
-                            })()}
+                            <SystemArchitectureControls {...interviewEditorContext} interview={systemConfigInterview}
+                                                        error={_svcError ?? _archResolveError}
+                                                        expanded={controlMode === 'manual'}
+                                                        legacyInterconnectionMethod={config.interconnectionMethod}
+                                                        onLegacyInterconnection={m => updateConfig({ interconnectionMethod: m })}
+                                                        legacyBusbarFails={(compliance as any)?.electrical?.errors?.some((e: any) => e.code === 'E-BUSBAR-120')
+                                                          && pvConnectionSide(config.interconnectionMethod) === 'load-side'}
+                                                        onGoToCard={itemId => { revealHomeCard(itemId); }} />
                           </div>
                           {/* Consumption CTs — where they clamp. Defaults from the
                               interconnection above (Enphase's documented placement);
